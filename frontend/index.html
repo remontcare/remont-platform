@@ -1,0 +1,4029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Remont India — AI-Powered Home Services, Construction & Corporate Marketplace</title>
+<meta name="description" content="Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation. Corporate portal & AMC plans available." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --cream:    #F5F0E8;
+    --ivory:    #FDFAF5;
+    --charcoal: #1A1A1A;
+    --graphite: #2D2D2D;
+    --sienna:   #C4601A;
+    --amber:    #E8A650;
+    --sage:     #6B7C5E;
+    --mist:     #E8E3DA;
+    --white:    #FFFFFF;
+    --txt-muted:#6E6860;
+    --success:  #5B8C5A;
+    --whatsapp: #25D366;
+    --radius:   12px;
+    --radius-lg:20px;
+    --shadow:   0 6px 28px rgba(26,26,26,0.08);
+    --shadow-lg:0 16px 60px rgba(26,26,26,0.14);
+    --ff-display:"Cormorant Garamond", Georgia, serif;
+    --ff-body:  "DM Sans", sans-serif;
+    --ff-accent:"Bebas Neue", sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--ff-body);
+    background: var(--ivory);
+    color: var(--charcoal);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { text-decoration: none; color: inherit; }
+  img { display: block; max-width: 100%; }
+  button { cursor: pointer; font-family: var(--ff-body); border: none; outline: none; background: none; }
+
+  /* ─── TOP UTILITY STRIP ─── */
+  .top-strip {
+    background: var(--charcoal);
+    color: rgba(255,255,255,0.75);
+    font-size: 12px;
+    padding: 8px 48px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .top-strip .left { display: flex; gap: 24px; align-items: center; }
+  .top-strip .left span { display: flex; align-items: center; gap: 6px; }
+  .top-strip .right { display: flex; gap: 4px; align-items: center; }
+  .strip-btn {
+    color: rgba(255,255,255,0.85);
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 12px; font-weight: 500;
+    transition: background 0.2s, color 0.2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .strip-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .strip-btn.highlight { background: var(--sienna); color: #fff; }
+  .strip-btn.highlight:hover { background: #a84f14; }
+  .strip-btn.whatsapp { background: var(--whatsapp); color: #fff; }
+  .strip-btn.whatsapp:hover { background: #1da851; }
+  .strip-divider { width: 1px; height: 14px; background: rgba(255,255,255,0.15); margin: 0 8px; }
+  .lang-toggle {
+    display: flex; align-items: center; gap: 4px;
+    color: rgba(255,255,255,0.85);
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  .lang-toggle:hover { background: rgba(255,255,255,0.08); }
+
+  /* ─── MAIN HEADER ─── */
+  header {
+    position: sticky; top: 0; z-index: 900;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px;
+    height: 76px;
+    background: rgba(253,250,245,0.95);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(196,96,26,0.10);
+    transition: box-shadow 0.3s;
+  }
+  header.scrolled { box-shadow: 0 4px 30px rgba(0,0,0,0.06); }
+
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-mark {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--sienna) 0%, #a84f14 100%);
+    border-radius: 10px;
+    position: relative; overflow: hidden;
+    display: grid; place-items: center;
+  }
+  .logo-mark::before {
+    content: 'R';
+    font-family: var(--ff-display);
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    font-style: italic;
+  }
+  .logo-mark::after {
+    content: '';
+    position: absolute;
+    width: 8px; height: 8px;
+    background: var(--amber);
+    border-radius: 50%;
+    bottom: 4px; right: 4px;
+    box-shadow: 0 0 0 2px rgba(232,166,80,0.3);
+  }
+  .logo-text-wrap { display: flex; flex-direction: column; line-height: 1; }
+  .logo-text {
+    font-family: var(--ff-accent);
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--charcoal);
+  }
+  .logo-sub {
+    font-size: 9px; font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--sienna);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* Header Search */
+  .header-search {
+    flex: 1; max-width: 560px;
+    margin: 0 32px;
+    display: flex; align-items: center;
+    background: var(--cream);
+    border: 1.5px solid transparent;
+    border-radius: 100px;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .header-search:focus-within {
+    border-color: var(--sienna);
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(196,96,26,0.12);
+  }
+  .header-search .cat-select {
+    display: flex; align-items: center; gap: 6px;
+    padding: 11px 14px 11px 20px;
+    font-size: 13px; font-weight: 500;
+    color: var(--graphite);
+    border-right: 1px solid var(--mist);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .header-search input {
+    flex: 1;
+    border: none; background: transparent;
+    padding: 11px 16px;
+    font-family: var(--ff-body);
+    font-size: 14px;
+    outline: none;
+  }
+  .header-search input::placeholder { color: #999; }
+  .ai-mic-btn {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: rgba(196,96,26,0.10);
+    color: var(--sienna);
+    margin-right: 4px;
+    display: grid; place-items: center;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .ai-mic-btn:hover { background: var(--sienna); color: #fff; }
+  .ai-mic-btn::before {
+    content: 'AI';
+    position: absolute;
+    top: -4px; right: -4px;
+    background: var(--amber);
+    color: var(--charcoal);
+    font-size: 8px; font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+  }
+  .header-search .search-btn-icon {
+    background: var(--sienna);
+    color: #fff;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    margin-right: 4px;
+    transition: background 0.2s;
+  }
+  .header-search .search-btn-icon:hover { background: #a84f14; }
+
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .icon-btn {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center;
+    color: var(--graphite);
+    padding: 6px 10px;
+    transition: color 0.2s;
+  }
+  .icon-btn:hover { color: var(--sienna); }
+  .icon-btn .label { font-size: 10px; font-weight: 600; letter-spacing: 0.4px; margin-top: 2px; text-transform: uppercase; }
+  .icon-btn .badge {
+    position: absolute;
+    top: 0; right: 4px;
+    background: var(--sienna);
+    color: #fff;
+    font-size: 9px; font-weight: 700;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    border: 2px solid var(--ivory);
+  }
+  .icon-btn.city-selector {
+    flex-direction: row;
+    gap: 4px;
+    background: rgba(196,96,26,0.06);
+    padding: 6px 12px;
+    border-radius: 100px;
+    border: 1px solid rgba(196,96,26,0.15);
+    color: var(--sienna);
+    font-weight: 600;
+  }
+  .icon-btn.city-selector:hover { background: rgba(196,96,26,0.12); }
+  .icon-btn.city-selector .label { font-size: 12px; margin-top: 0; text-transform: none; }
+  .icon-btn.city-selector .city-arrow { font-size: 8px; opacity: 0.6; }
+  .menu-icon { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 8px; }
+  .menu-icon span { display: block; width: 22px; height: 2px; background: var(--charcoal); border-radius: 2px; }
+
+  /* ─── CITY SELECTOR MODAL ─── */
+  .city-modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 950;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .city-modal-backdrop.open { opacity: 1; pointer-events: auto; }
+  .city-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.95);
+    z-index: 951;
+    background: #fff;
+    border-radius: var(--radius-lg);
+    width: 90%; max-width: 560px;
+    max-height: 80vh;
+    opacity: 0; pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .city-modal.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  .cm-head {
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--mist);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .cm-head h3 {
+    font-family: var(--ff-display);
+    font-size: 22px; font-weight: 500;
+    color: var(--charcoal);
+  }
+  .cm-head p { font-size: 12px; color: var(--txt-muted); margin-top: 2px; }
+  .cm-close {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--cream);
+    border: 0; cursor: pointer;
+    font-size: 18px;
+    color: var(--graphite);
+    display: grid; place-items: center;
+  }
+  .cm-search {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--mist);
+  }
+  .cm-search input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--cream);
+    border: 1px solid var(--mist);
+    border-radius: 10px;
+    font-family: var(--ff-body);
+    font-size: 13px;
+    outline: none;
+  }
+  .cm-search input:focus { border-color: var(--sienna); }
+  .cm-cities {
+    padding: 16px 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .cm-section-label {
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--txt-muted);
+    margin-bottom: 10px;
+  }
+  .cm-city-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .cm-city {
+    padding: 14px 10px;
+    background: var(--cream);
+    border: 1.5px solid transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .cm-city:hover, .cm-city.selected {
+    border-color: var(--sienna);
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(196,96,26,0.10);
+  }
+  .cm-city .ic { font-size: 22px; display: block; margin-bottom: 4px; }
+  .cm-city .nm { font-size: 13px; font-weight: 600; color: var(--charcoal); }
+  .cm-city .ct { font-size: 10px; color: var(--txt-muted); margin-top: 2px; }
+  .cm-city.coming-soon { opacity: 0.5; cursor: not-allowed; }
+  .cm-city.coming-soon::after {
+    content: 'Coming soon';
+    position: absolute;
+    top: 6px; right: 6px;
+    font-size: 8px;
+    background: var(--graphite);
+    color: #fff;
+    padding: 2px 5px;
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+  }
+  .cm-city.selected .nm { color: var(--sienna); }
+
+  /* ─── CITY AVAILABILITY BADGE on service items ─── */
+  .city-availability {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(91,140,90,0.12);
+    color: var(--success);
+    font-size: 11px; font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    margin-left: 8px;
+  }
+  .city-availability::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .svc-item.unavailable {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .svc-item.unavailable::after {
+    content: 'Not in your city';
+    position: absolute;
+    right: 12px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--txt-muted);
+    background: rgba(0,0,0,0.04);
+    padding: 3px 8px;
+    border-radius: 100px;
+  }
+  .svc-item.unavailable .svc-arrow { display: none; }
+
+  /* ─── CATEGORY NAV BAR ─── */
+  .cat-nav {
+    background: var(--white);
+    border-bottom: 1px solid var(--mist);
+    padding: 0 48px;
+    position: sticky; top: 76px; z-index: 850;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .cat-nav::-webkit-scrollbar { display: none; }
+  .cat-nav-inner {
+    display: flex; gap: 4px; align-items: center;
+    max-width: 1400px; margin: 0 auto;
+    padding: 8px 0;
+  }
+  .cat-link {
+    padding: 8px 14px;
+    font-size: 13px; font-weight: 500;
+    color: var(--graphite);
+    border-radius: 100px;
+    white-space: nowrap;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cat-link:hover { background: var(--cream); color: var(--sienna); }
+  .cat-link.active { background: var(--sienna); color: #fff; }
+  .cat-link .ic { font-size: 14px; }
+  .cat-link.amc { border: 1px dashed var(--sage); color: var(--sage); }
+  .cat-link.amc:hover { background: var(--sage); color: #fff; border-color: var(--sage); }
+  .cat-link.premium-link {
+    background: linear-gradient(95deg, var(--charcoal) 0%, var(--graphite) 100%);
+    color: #fff;
+    font-weight: 600;
+    position: relative;
+    padding-right: 20px;
+  }
+  .cat-link.premium-link::after {
+    content: '★';
+    position: absolute;
+    top: -6px; right: 6px;
+    color: var(--amber);
+    font-size: 10px;
+  }
+  .cat-link.premium-link:hover { background: linear-gradient(95deg, var(--sienna), #a84f14); color: #fff; }
+
+  /* ─── HERO SLIDER + AI CHAT WIDGET ─── */
+  .hero {
+    position: relative;
+    height: 520px;
+    overflow: hidden;
+    background: var(--charcoal);
+  }
+  .slides { display: flex; width: 300%; height: 100%; transition: transform 0.8s cubic-bezier(0.77,0,0.18,1); }
+  .slide {
+    flex: 0 0 33.333%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+  .slide-bg {
+    position: absolute; inset: 0;
+    background-size: cover;
+    background-position: center;
+    transform: scale(1.06);
+    transition: transform 7s ease;
+  }
+  .slide.active .slide-bg { transform: scale(1); }
+  .slide:nth-child(1) .slide-bg {
+    background-image:
+      linear-gradient(100deg, rgba(26,26,26,0.82) 0%, rgba(26,26,26,0.4) 50%, rgba(196,96,26,0.25) 100%),
+      url("https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&q=85");
+  }
+  .slide:nth-child(2) .slide-bg {
+    background-image:
+      linear-gradient(100deg, rgba(26,26,26,0.78) 0%, rgba(26,26,26,0.4) 50%, rgba(107,124,94,0.30) 100%),
+      url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=1600&q=85");
+  }
+  .slide:nth-child(3) .slide-bg {
+    background-image:
+      linear-gradient(100deg, rgba(26,26,26,0.82) 0%, rgba(26,26,26,0.4) 50%, rgba(232,166,80,0.25) 100%),
+      url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=1600&q=85");
+  }
+
+  .hero-grid {
+    position: relative; z-index: 2;
+    display: grid;
+    grid-template-columns: 1.3fr 380px;
+    align-items: center;
+    gap: 40px;
+    height: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 48px;
+  }
+
+  .slide-content {
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .slide-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 600; letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 14px;
+  }
+  .slide-tag::before { content: ''; width: 28px; height: 1.5px; background: var(--amber); }
+  .slide-h1 {
+    font-family: var(--ff-display);
+    font-size: clamp(36px, 5vw, 60px);
+    font-weight: 300;
+    line-height: 1.05;
+    color: #fff;
+    margin-bottom: 18px;
+  }
+  .slide-h1 em { font-style: italic; color: var(--amber); }
+  .slide-p {
+    font-size: 15px; line-height: 1.6;
+    color: rgba(255,255,255,0.78);
+    max-width: 480px;
+    margin-bottom: 24px;
+  }
+  .slide-actions {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .slide-trust {
+    display: flex; gap: 24px; margin-top: 28px;
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+  }
+  .slide-trust div { display: flex; align-items: center; gap: 6px; }
+  .slide-trust strong { color: #fff; font-weight: 600; }
+
+  .btn-hero {
+    padding: 13px 28px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 14px; font-weight: 600;
+    transition: all 0.2s;
+    box-shadow: 0 4px 18px rgba(196,96,26,0.4);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-hero:hover { background: #a84f14; transform: translateY(-2px); }
+  .btn-ghost {
+    padding: 13px 26px;
+    border: 1.5px solid rgba(255,255,255,0.4);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 14px; font-weight: 500;
+    transition: all 0.2s;
+  }
+  .btn-ghost:hover { border-color: #fff; background: rgba(255,255,255,0.08); }
+
+  /* AI Chat widget on hero */
+  .ai-chat-widget {
+    background: rgba(255,255,255,0.97);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid rgba(255,255,255,0.4);
+  }
+  .ai-chat-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px;
+  }
+  .ai-avatar {
+    width: 38px; height: 38px;
+    background: linear-gradient(135deg, var(--sienna), var(--amber));
+    border-radius: 50%;
+    display: grid; place-items: center;
+    color: #fff;
+    font-size: 16px;
+    position: relative;
+  }
+  .ai-avatar::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--success);
+    border: 2px solid #fff;
+  }
+  .ai-chat-info { flex: 1; }
+  .ai-chat-name { font-size: 13px; font-weight: 700; color: var(--charcoal); display: flex; align-items: center; gap: 6px; }
+  .ai-chat-name::after {
+    content: 'AI';
+    font-size: 8px; font-weight: 700;
+    background: var(--amber); color: var(--charcoal);
+    padding: 1px 5px; border-radius: 4px; letter-spacing: 0.5px;
+  }
+  .ai-chat-status { font-size: 11px; color: var(--success); margin-top: 1px; }
+  .ai-msg {
+    background: var(--cream);
+    border-radius: 12px 12px 12px 4px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--charcoal);
+    margin-bottom: 10px;
+    line-height: 1.4;
+    animation: aiFadeIn 0.5s ease;
+  }
+  @keyframes aiFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .ai-msg .lang { font-size: 11px; color: var(--txt-muted); font-style: italic; }
+  .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .ai-sugg {
+    padding: 6px 12px;
+    background: #fff;
+    border: 1px solid var(--mist);
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--graphite);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .ai-sugg:hover { border-color: var(--sienna); color: var(--sienna); background: rgba(196,96,26,0.05); }
+  .ai-input-row {
+    display: flex; gap: 6px;
+    background: var(--cream);
+    border-radius: 100px;
+    padding: 4px 4px 4px 16px;
+    align-items: center;
+  }
+  .ai-input-row input {
+    flex: 1;
+    border: none; background: transparent;
+    font-family: var(--ff-body);
+    font-size: 13px;
+    outline: none;
+    padding: 6px 0;
+  }
+  .ai-send {
+    background: var(--sienna);
+    color: #fff;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+  }
+  .ai-send:hover { background: #a84f14; }
+  .ai-chat-foot {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--mist);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px;
+    color: var(--txt-muted);
+  }
+  .ai-chat-foot strong { color: var(--sienna); }
+
+  .slider-nav {
+    position: absolute; bottom: 24px; left: 48px;
+    display: flex; align-items: center; gap: 12px;
+    z-index: 5;
+  }
+  .nav-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    display: grid; place-items: center;
+    transition: all 0.2s;
+    font-size: 16px;
+  }
+  .nav-btn:hover { background: var(--sienna); border-color: var(--sienna); }
+  .dots { display: flex; gap: 6px; margin-left: 8px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.35); transition: all 0.3s; cursor: pointer; }
+  .dot.active { width: 22px; border-radius: 3px; background: var(--amber); }
+
+  /* ─── BOOKING CHANNELS BANNER ─── */
+  .booking-channels {
+    background: linear-gradient(95deg, var(--charcoal) 0%, var(--graphite) 100%);
+    padding: 22px 48px;
+    color: #fff;
+    border-top: 1px solid rgba(196,96,26,0.15);
+  }
+  .bc-inner {
+    max-width: 1400px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+  }
+  .bc-title {
+    font-size: 13px; font-weight: 600;
+    color: var(--amber);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .bc-channels { display: flex; gap: 10px; flex-wrap: wrap; }
+  .bc-channel {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+    transition: all 0.2s;
+  }
+  .bc-channel:hover { background: rgba(196,96,26,0.18); border-color: var(--sienna); color: #fff; }
+  .bc-channel .icn { font-size: 14px; }
+  .bc-channel.whatsapp:hover { background: rgba(37,211,102,0.15); border-color: var(--whatsapp); }
+
+  /* ─── SHOP SECTION: SERVICES + PRODUCTS SPLIT ─── */
+  .shop-section {
+    padding: 56px 32px;
+    background: var(--ivory);
+  }
+  .shop-inner { max-width: 1400px; margin: 0 auto; }
+  .shop-header {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 28px;
+  }
+  .shop-header h2 {
+    font-family: var(--ff-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 400;
+    color: var(--charcoal);
+    line-height: 1.1;
+  }
+  .shop-header h2 strong { font-weight: 600; }
+  .shop-header .section-label {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--sienna);
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .shop-header .section-label::before { content: ''; width: 22px; height: 1.5px; background: var(--sienna); }
+
+  .shop-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+    background: #fff;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--mist);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .svc-panel {
+    background: var(--cream);
+    border-right: 1px solid var(--mist);
+    padding: 20px 0;
+    max-height: 720px;
+    overflow-y: auto;
+  }
+  .svc-panel::-webkit-scrollbar { width: 4px; }
+  .svc-panel::-webkit-scrollbar-thumb { background: var(--sienna); border-radius: 2px; }
+  .svc-panel-title {
+    padding: 0 20px 12px;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--txt-muted);
+    border-bottom: 1px solid var(--mist);
+    margin-bottom: 8px;
+  }
+  .svc-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .svc-item:hover { background: rgba(196,96,26,0.06); }
+  .svc-item.active { background: #fff; border-left-color: var(--sienna); box-shadow: inset 0 0 0 1px var(--mist); }
+  .svc-icon-box {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: rgba(196,96,26,0.10);
+    display: grid; place-items: center;
+    font-size: 20px;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .svc-item.active .svc-icon-box { background: var(--sienna); }
+  .svc-item.active .svc-icon-box span { filter: brightness(0) invert(1); }
+  .svc-text { flex: 1; min-width: 0; }
+  .svc-text h4 { font-size: 13.5px; font-weight: 600; color: var(--charcoal); margin-bottom: 2px; }
+  .svc-text p { font-size: 11px; color: var(--txt-muted); line-height: 1.3; }
+  .svc-arrow {
+    color: var(--sienna);
+    opacity: 0; transform: translateX(-4px);
+    transition: all 0.2s;
+  }
+  .svc-item.active .svc-arrow, .svc-item:hover .svc-arrow { opacity: 1; transform: translateX(0); }
+
+  .display-panel {
+    padding: 24px;
+    max-height: 720px;
+    overflow-y: auto;
+  }
+  .display-panel::-webkit-scrollbar { width: 4px; }
+  .display-panel::-webkit-scrollbar-thumb { background: var(--mist); border-radius: 2px; }
+
+  .panel-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--mist);
+  }
+  .panel-head h3 {
+    font-family: var(--ff-display);
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--charcoal);
+  }
+  .panel-head p { font-size: 12.5px; color: var(--txt-muted); margin-top: 2px; }
+  .panel-head-right { display: flex; gap: 6px; align-items: center; }
+  .panel-pill {
+    font-size: 10px; font-weight: 600;
+    padding: 5px 10px;
+    background: rgba(196,96,26,0.10);
+    color: var(--sienna);
+    border-radius: 100px;
+    letter-spacing: 0.5px;
+  }
+  .panel-pill.green { background: rgba(91,140,90,0.12); color: var(--success); }
+
+  .sub-row-title {
+    font-size: 13px; font-weight: 600;
+    color: var(--charcoal);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sub-row-title::before { content: ''; width: 4px; height: 14px; background: var(--sienna); border-radius: 2px; }
+  .sub-row-title span { color: var(--txt-muted); font-weight: 400; font-size: 11px; margin-left: auto; }
+
+  .sub-svc-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .sub-svc-card {
+    background: var(--cream);
+    border-radius: var(--radius);
+    padding: 14px 12px;
+    text-align: center;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .sub-svc-card:hover {
+    border-color: var(--sienna);
+    background: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(196,96,26,0.10);
+  }
+  .sub-svc-card .icn { font-size: 24px; margin-bottom: 8px; display: block; }
+  .sub-svc-card .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); margin-bottom: 4px; line-height: 1.2; }
+  .sub-svc-card .pr { font-size: 11px; color: var(--sienna); font-weight: 600; }
+  .sub-svc-card .pr small { color: var(--txt-muted); font-weight: 400; text-decoration: line-through; margin-right: 4px; }
+  .sub-svc-card .three-click {
+    display: inline-block;
+    font-size: 9px;
+    background: var(--sage);
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  .product-row-title {
+    font-size: 13px; font-weight: 600;
+    color: var(--charcoal);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .product-row-title::before { content: ''; width: 4px; height: 14px; background: var(--sage); border-radius: 2px; }
+  .product-row-title .pill {
+    font-size: 10px; font-weight: 700;
+    padding: 3px 10px;
+    background: var(--sage); color: #fff;
+    border-radius: 100px;
+    letter-spacing: 1px;
+  }
+  .product-row-title .view-all {
+    margin-left: auto;
+    font-size: 12px; font-weight: 600;
+    color: var(--sienna);
+    display: flex; align-items: center; gap: 4px;
+    cursor: pointer;
+  }
+  .product-row-title .view-all:hover { gap: 8px; transition: gap 0.2s; }
+
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .product-card {
+    background: #fff;
+    border: 1px solid var(--mist);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .product-card:hover {
+    border-color: var(--sienna);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.08);
+  }
+  .product-img {
+    width: 100%; height: 130px;
+    background: var(--cream);
+    background-size: cover; background-position: center;
+    position: relative;
+  }
+  .product-badge {
+    position: absolute;
+    top: 8px; left: 8px;
+    background: var(--sienna);
+    color: #fff;
+    font-size: 9px; font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 100px;
+    letter-spacing: 0.8px;
+  }
+  .product-badge.green { background: var(--sage); }
+  .product-fav {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: #fff;
+    display: grid; place-items: center;
+    font-size: 14px;
+    color: var(--txt-muted);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  .product-fav:hover { color: var(--sienna); }
+  .product-body { padding: 10px 12px 12px; }
+  .product-name {
+    font-size: 12.5px; font-weight: 600;
+    color: var(--charcoal);
+    margin-bottom: 4px;
+    line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    min-height: 32px;
+  }
+  .product-brand { font-size: 10px; color: var(--txt-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .product-rating {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--sage); color: #fff;
+    font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .product-rating-count { font-size: 10px; color: var(--txt-muted); margin-left: 6px; }
+  .product-price {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .product-price .now { font-size: 15px; font-weight: 700; color: var(--charcoal); }
+  .product-price .was { font-size: 11px; color: var(--txt-muted); text-decoration: line-through; }
+  .product-price .off { font-size: 11px; color: var(--sage); font-weight: 600; }
+  .product-cta {
+    width: 100%;
+    padding: 7px;
+    border: 1px solid var(--sienna);
+    color: var(--sienna);
+    background: transparent;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+    margin-top: 4px;
+  }
+  .product-cta:hover { background: var(--sienna); color: #fff; }
+
+  .panel-promo {
+    background: linear-gradient(95deg, #2D2D2D 0%, #1A1A1A 100%);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin: 20px 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel-promo::before {
+    content: ''; position: absolute;
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    background: rgba(196,96,26,0.15);
+    top: -60px; right: -40px;
+  }
+  .panel-promo .pp-text { position: relative; z-index: 1; }
+  .panel-promo .pp-tag {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 4px;
+  }
+  .panel-promo .pp-title {
+    font-family: var(--ff-display);
+    font-size: 20px;
+    color: #fff;
+    line-height: 1.2;
+  }
+  .panel-promo .pp-sub { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 4px; }
+  .panel-promo .pp-btn {
+    padding: 8px 18px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 12px; font-weight: 600;
+    flex-shrink: 0;
+    position: relative; z-index: 1;
+  }
+  .panel-promo .pp-btn:hover { background: #a84f14; }
+
+  /* ─── COMMON SECTION ─── */
+  section.std { padding: 72px 48px; }
+  .section-label {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--sienna);
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .section-label::before { content: ''; width: 22px; height: 1.5px; background: var(--sienna); }
+  .section-title {
+    font-family: var(--ff-display);
+    font-size: clamp(32px, 4vw, 52px);
+    font-weight: 300;
+    line-height: 1.1;
+    color: var(--charcoal);
+  }
+  .section-title strong { font-weight: 600; }
+  .section-sub {
+    font-size: 15px; color: var(--txt-muted);
+    line-height: 1.6; max-width: 520px;
+    margin-top: 12px;
+  }
+  .inner { max-width: 1400px; margin: 0 auto; }
+  .std-header {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 36px;
+  }
+  .btn-outline {
+    padding: 10px 22px;
+    border: 1.5px solid var(--charcoal);
+    border-radius: 100px;
+    font-size: 13px; font-weight: 600;
+    color: var(--charcoal);
+    background: transparent;
+    transition: all 0.2s;
+  }
+  .btn-outline:hover { background: var(--charcoal); color: #fff; }
+  .btn-primary {
+    padding: 10px 22px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 13px; font-weight: 600;
+    transition: all 0.2s;
+  }
+  .btn-primary:hover { background: #a84f14; }
+
+  /* ─── PREMIUM SHOWCASE (Interior · Renovation · Construction) ─── */
+  #premium {
+    background: linear-gradient(165deg, #1a1410 0%, #1A1A1A 60%, #2a1f15 100%);
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  #premium::before {
+    content: '';
+    position: absolute;
+    width: 700px; height: 700px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(232,166,80,0.10), transparent 70%);
+    top: -180px; right: -200px;
+    pointer-events: none;
+  }
+  #premium .section-label { color: var(--amber); justify-content: center; }
+  #premium .section-label::before { background: var(--amber); }
+  #premium .section-title { color: #fff; }
+  #premium .section-sub { color: rgba(255,255,255,0.6); }
+  .premium-head { text-align: center; max-width: 720px; margin: 0 auto 48px; position: relative; }
+  .premium-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 18px;
+    background: rgba(232,166,80,0.12);
+    border: 1px solid rgba(232,166,80,0.35);
+    border-radius: 100px;
+    font-size: 12px; font-weight: 600;
+    color: var(--amber);
+    margin-bottom: 18px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .premium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+    margin-top: 40px;
+    position: relative;
+  }
+  .premium-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: all 0.35s;
+    cursor: pointer;
+    position: relative;
+  }
+  .premium-card:hover {
+    transform: translateY(-6px);
+    border-color: rgba(232,166,80,0.4);
+    background: rgba(232,166,80,0.04);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+  }
+  .premium-card-img {
+    width: 100%; height: 220px;
+    background-size: cover; background-position: center;
+    position: relative;
+  }
+  .premium-card-img::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(26,26,26,0.85) 0%, transparent 50%);
+  }
+  .premium-card.interior .premium-card-img {
+    background-image: url("https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=800&q=85");
+  }
+  .premium-card.renovation .premium-card-img {
+    background-image: url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=85");
+  }
+  .premium-card.construction .premium-card-img {
+    background-image: url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800&q=85");
+  }
+  .premium-card-tag {
+    position: absolute;
+    top: 16px; left: 16px;
+    background: var(--amber);
+    color: var(--charcoal);
+    font-size: 10px; font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 100px;
+    letter-spacing: 1.5px;
+    z-index: 1;
+  }
+  .premium-card-body {
+    padding: 24px;
+  }
+  .premium-card h3 {
+    font-family: var(--ff-display);
+    font-size: 26px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 8px;
+    line-height: 1.15;
+  }
+  .premium-card p {
+    font-size: 13px;
+    color: rgba(255,255,255,0.62);
+    line-height: 1.6;
+    margin-bottom: 18px;
+  }
+  .premium-features {
+    list-style: none;
+    margin-bottom: 22px;
+  }
+  .premium-features li {
+    font-size: 12.5px;
+    color: rgba(255,255,255,0.75);
+    padding: 5px 0 5px 20px;
+    position: relative;
+  }
+  .premium-features li::before {
+    content: '◆';
+    position: absolute;
+    left: 0;
+    color: var(--amber);
+    font-size: 10px;
+    top: 8px;
+  }
+  .premium-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  .premium-price {
+    font-family: var(--ff-display);
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--amber);
+  }
+  .premium-price small {
+    font-family: var(--ff-body);
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 400;
+    margin-left: 4px;
+  }
+  .premium-cta {
+    padding: 9px 18px;
+    background: var(--amber);
+    color: var(--charcoal);
+    border: 0;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .premium-cta:hover { background: #fff; }
+  .premium-card .premium-availability {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: rgba(255,255,255,0.12);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    display: flex; align-items: center; gap: 5px;
+    z-index: 1;
+  }
+  .premium-card .premium-availability::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+
+  /* Premium consultation strip */
+  .premium-strip {
+    background: linear-gradient(95deg, var(--amber) 0%, #d9954a 100%);
+    color: var(--charcoal);
+    border-radius: var(--radius-lg);
+    padding: 22px 28px;
+    margin-top: 36px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .premium-strip h4 {
+    font-family: var(--ff-display);
+    font-size: 22px; font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .premium-strip p {
+    font-size: 13px;
+    color: rgba(26,26,26,0.7);
+  }
+  .premium-strip .ps-btn {
+    background: var(--charcoal);
+    color: #fff;
+    padding: 12px 26px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .premium-strip .ps-btn:hover { background: #000; }
+
+  /* ─── 3-CLICK BOOKING ─── */
+  #three-click { background: var(--cream); }
+  .three-click-wrap {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr) auto;
+    gap: 16px;
+    margin-top: 40px;
+    align-items: stretch;
+  }
+  .tc-step {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    border: 1px solid var(--mist);
+    position: relative;
+    transition: all 0.3s;
+  }
+  .tc-step:hover { transform: translateY(-4px); box-shadow: var(--shadow); border-color: var(--sienna); }
+  .tc-step-num {
+    width: 36px; height: 36px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: var(--ff-accent);
+    font-size: 16px;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+  .tc-step h4 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .tc-step p { font-size: 13px; color: var(--txt-muted); line-height: 1.5; }
+  .tc-step .demo {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--cream);
+    border-radius: 8px;
+    font-size: 11px;
+    color: var(--txt-muted);
+    border-left: 3px solid var(--sienna);
+  }
+  .tc-step .demo strong { color: var(--charcoal); display: block; margin-bottom: 2px; }
+  .tc-step.cta-step {
+    background: linear-gradient(135deg, var(--sienna) 0%, #a84f14 100%);
+    color: #fff;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center;
+    min-width: 200px;
+  }
+  .tc-step.cta-step .tc-step-num { background: rgba(255,255,255,0.2); }
+  .tc-step.cta-step h4 { font-family: var(--ff-display); font-size: 22px; font-weight: 500; }
+  .tc-step.cta-step button {
+    margin-top: 14px;
+    background: #fff;
+    color: var(--sienna);
+    padding: 10px 22px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  /* ─── SMART DISPATCH / LIVE TRACKING ─── */
+  #dispatch {
+    background: var(--charcoal);
+    color: #fff;
+    overflow: hidden;
+    position: relative;
+  }
+  #dispatch::before {
+    content: '';
+    position: absolute;
+    width: 600px; height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(196,96,26,0.10), transparent 70%);
+    top: -120px; right: -120px;
+  }
+  #dispatch .section-label { color: var(--amber); }
+  #dispatch .section-label::before { background: var(--amber); }
+  #dispatch .section-title { color: #fff; }
+  #dispatch .section-sub { color: rgba(255,255,255,0.6); }
+  .dispatch-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: center;
+    margin-top: 40px;
+  }
+  .dispatch-features { display: flex; flex-direction: column; gap: 16px; }
+  .df-item {
+    display: flex; gap: 16px;
+    padding: 18px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius);
+    transition: all 0.3s;
+  }
+  .df-item:hover { background: rgba(196,96,26,0.08); border-color: rgba(196,96,26,0.3); }
+  .df-icon {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    background: rgba(196,96,26,0.18);
+    display: grid; place-items: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .df-text h4 { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .df-text p { font-size: 12.5px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+  /* Live tracking visual */
+  .live-track-card {
+    background: var(--ivory);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    color: var(--charcoal);
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    overflow: hidden;
+  }
+  .lt-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .lt-head h4 { font-size: 15px; font-weight: 700; }
+  .lt-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    background: rgba(91,140,90,0.15);
+    color: var(--success);
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .lt-status::before {
+    content: ''; width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: pulse-dot 1.5s infinite;
+  }
+  @keyframes pulse-dot {
+    0%,100% { box-shadow: 0 0 0 0 rgba(91,140,90,0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(91,140,90,0); }
+  }
+  .lt-map {
+    height: 180px;
+    background:
+      linear-gradient(rgba(245,240,232,0.85), rgba(245,240,232,0.6)),
+      url("https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600&q=80");
+    background-size: cover;
+    background-position: center;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--mist);
+  }
+  .lt-route {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lt-route svg { width: 80%; height: 60%; }
+  .lt-pin {
+    position: absolute;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--sienna);
+    border: 3px solid #fff;
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  .lt-pin.vendor { top: 30%; left: 30%; }
+  .lt-pin.home { bottom: 25%; right: 25%; background: var(--charcoal); }
+  .lt-vendor {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px;
+    background: var(--cream);
+    border-radius: var(--radius);
+  }
+  .lt-av {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background-image: url("https://i.pravatar.cc/100?img=12");
+    background-size: cover;
+    border: 2px solid var(--sienna);
+  }
+  .lt-vendor-info { flex: 1; }
+  .lt-vendor-name { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .lt-vendor-name .verify { font-size: 10px; color: var(--success); }
+  .lt-vendor-role { font-size: 11px; color: var(--txt-muted); margin-top: 2px; }
+  .lt-vendor-rating { font-size: 11px; color: var(--charcoal); display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+  .lt-vendor-rating .stars { color: var(--amber); }
+  .lt-actions { display: flex; gap: 6px; }
+  .lt-action {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid var(--mist);
+    display: grid; place-items: center;
+    color: var(--sienna);
+    transition: all 0.2s;
+  }
+  .lt-action:hover { background: var(--sienna); color: #fff; border-color: var(--sienna); }
+  .lt-eta {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--charcoal);
+    color: #fff;
+    border-radius: var(--radius);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px;
+  }
+  .lt-eta strong { color: var(--amber); font-family: var(--ff-accent); font-size: 16px; letter-spacing: 1px; }
+
+  /* ─── BUDGET ESTIMATOR ─── */
+  #estimator { background: var(--ivory); }
+  .estimator-card {
+    background: linear-gradient(135deg, var(--cream) 0%, #fff 100%);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--mist);
+    padding: 36px;
+    margin-top: 32px;
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 36px;
+    align-items: center;
+    box-shadow: var(--shadow);
+  }
+  .est-left .est-tag {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--sienna);
+    margin-bottom: 8px;
+  }
+  .est-left h3 {
+    font-family: var(--ff-display);
+    font-size: 32px;
+    font-weight: 500;
+    color: var(--charcoal);
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .est-left p { font-size: 14px; color: var(--txt-muted); line-height: 1.6; margin-bottom: 18px; }
+  .est-features { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+  .est-feat { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--graphite); }
+  .est-feat::before { content: '✓'; color: var(--sienna); font-weight: 700; }
+
+  .est-right {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 24px;
+    border: 1px solid var(--mist);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+  }
+  .est-form-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .est-field { display: flex; flex-direction: column; gap: 6px; }
+  .est-field label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--txt-muted); }
+  .est-field select, .est-field input {
+    padding: 10px 14px;
+    border: 1px solid var(--mist);
+    border-radius: 8px;
+    font-family: var(--ff-body);
+    font-size: 13px;
+    color: var(--charcoal);
+    background: #fff;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .est-field select:focus, .est-field input:focus { border-color: var(--sienna); }
+  .est-result {
+    margin-top: 16px;
+    padding: 18px;
+    background: linear-gradient(135deg, var(--charcoal) 0%, var(--graphite) 100%);
+    border-radius: var(--radius);
+    color: #fff;
+    text-align: center;
+  }
+  .est-result-label { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
+  .est-result-value {
+    font-family: var(--ff-display);
+    font-size: 36px;
+    font-weight: 500;
+    color: var(--amber);
+    line-height: 1;
+  }
+  .est-result-note { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px; font-style: italic; }
+  .est-btn {
+    width: 100%; margin-top: 12px;
+    padding: 12px;
+    background: var(--sienna); color: #fff;
+    border-radius: 100px;
+    font-size: 13px; font-weight: 600;
+    transition: background 0.2s;
+  }
+  .est-btn:hover { background: #a84f14; }
+
+  /* ─── HOT DEALS ─── */
+  #deals { background: var(--cream); }
+  .deals-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 16px;
+  }
+  .deal-feature {
+    background: linear-gradient(135deg, #C4601A 0%, #a84f14 100%);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    color: #fff;
+    position: relative; overflow: hidden;
+    grid-row: span 2;
+    display: flex; flex-direction: column; justify-content: space-between;
+    min-height: 380px;
+  }
+  .deal-feature::before {
+    content: '';
+    position: absolute;
+    width: 280px; height: 280px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    bottom: -100px; right: -80px;
+  }
+  .deal-feature .df-tag {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .deal-feature h3 {
+    font-family: var(--ff-display);
+    font-size: 36px;
+    font-weight: 400;
+    line-height: 1.1;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .deal-feature p { font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.5; position: relative; }
+  .deal-feature .df-cta {
+    padding: 10px 22px;
+    background: #fff;
+    color: var(--sienna);
+    border-radius: 100px;
+    font-size: 13px; font-weight: 700;
+    align-self: flex-start;
+    position: relative;
+  }
+  .deal-card {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--mist);
+    transition: all 0.25s;
+    cursor: pointer;
+  }
+  .deal-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--sienna); }
+  .deal-card-img {
+    width: 100%; height: 130px;
+    background-size: cover; background-position: center;
+    background-color: var(--cream);
+  }
+  .deal-card-body { padding: 12px 14px 14px; }
+  .deal-card-cat { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--sienna); margin-bottom: 4px; }
+  .deal-card-name { font-size: 13px; font-weight: 600; color: var(--charcoal); margin-bottom: 8px; line-height: 1.3; min-height: 34px; }
+  .deal-card-price { display: flex; align-items: baseline; gap: 6px; }
+  .deal-card-price .now { font-size: 16px; font-weight: 700; color: var(--charcoal); }
+  .deal-card-price .was { font-size: 11px; color: var(--txt-muted); text-decoration: line-through; }
+  .deal-card-price .off { font-size: 11px; color: var(--sage); font-weight: 700; }
+
+  /* ─── PROMO TICKER ─── */
+  .promo-strip {
+    background: var(--sienna);
+    overflow: hidden;
+  }
+  .promo-ticker {
+    display: flex; align-items: center;
+    padding: 12px 0;
+    white-space: nowrap;
+    animation: ticker 35s linear infinite;
+  }
+  @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .promo-item {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 0 32px;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: rgba(255,255,255,0.92);
+  }
+  .promo-item .badge { background: rgba(255,255,255,0.18); padding: 2px 8px; border-radius: 100px; font-size: 10px; }
+  .promo-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+
+  /* ─── AMC PLANS ─── */
+  #amc { background: var(--ivory); }
+  .amc-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 40px;
+  }
+  .amc-card {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    padding: 32px 28px;
+    border: 1px solid var(--mist);
+    position: relative;
+    transition: all 0.3s;
+  }
+  .amc-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); border-color: var(--sienna); }
+  .amc-card.featured { background: linear-gradient(135deg, var(--charcoal) 0%, var(--graphite) 100%); color: #fff; }
+  .amc-card.featured .amc-name, .amc-card.featured .amc-period { color: #fff; }
+  .amc-card.featured .amc-desc { color: rgba(255,255,255,0.6); }
+  .amc-card.featured .amc-features li { color: rgba(255,255,255,0.78); }
+  .amc-card.featured .amc-features li::before { color: var(--amber); }
+  .amc-card.featured .amc-price-old { color: rgba(255,255,255,0.4); }
+  .amc-card.featured .amc-price-now { color: var(--amber); }
+  .featured-tag {
+    position: absolute;
+    top: -10px; right: 20px;
+    background: var(--amber);
+    color: var(--charcoal);
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 100px;
+  }
+  .amc-icon {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    background: rgba(196,96,26,0.12);
+    color: var(--sienna);
+    display: grid; place-items: center;
+    font-size: 26px;
+    margin-bottom: 18px;
+  }
+  .amc-card.featured .amc-icon { background: rgba(232,166,80,0.15); color: var(--amber); }
+  .amc-name { font-size: 18px; font-weight: 700; color: var(--charcoal); margin-bottom: 4px; }
+  .amc-period { font-size: 12px; color: var(--txt-muted); margin-bottom: 16px; }
+  .amc-desc { font-size: 13px; color: var(--txt-muted); line-height: 1.6; margin-bottom: 18px; }
+  .amc-features { list-style: none; margin-bottom: 22px; }
+  .amc-features li {
+    font-size: 13px;
+    color: var(--graphite);
+    padding: 6px 0 6px 22px;
+    position: relative;
+    line-height: 1.4;
+  }
+  .amc-features li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--sienna);
+    font-weight: 700;
+  }
+  .amc-price { display: flex; align-items: baseline; gap: 8px; margin-bottom: 16px; }
+  .amc-price-now { font-family: var(--ff-display); font-size: 36px; font-weight: 600; color: var(--charcoal); line-height: 1; }
+  .amc-price-old { font-size: 14px; color: var(--txt-muted); text-decoration: line-through; }
+  .amc-price small { font-size: 12px; color: var(--txt-muted); }
+  .amc-btn {
+    width: 100%;
+    padding: 12px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 13px; font-weight: 600;
+    transition: background 0.2s;
+  }
+  .amc-card.featured .amc-btn { background: var(--amber); color: var(--charcoal); }
+  .amc-btn:hover { background: #a84f14; }
+  .amc-card.featured .amc-btn:hover { background: #d9954a; }
+
+  /* ─── CORPORATE PORTAL ─── */
+  #corporate {
+    background: var(--charcoal);
+    color: #fff;
+    overflow: hidden;
+    position: relative;
+  }
+  #corporate::before {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(232,166,80,0.10), transparent 70%);
+    bottom: -120px; left: -120px;
+  }
+  #corporate .section-label { color: var(--amber); }
+  #corporate .section-label::before { background: var(--amber); }
+  #corporate .section-title { color: #fff; }
+  #corporate .section-sub { color: rgba(255,255,255,0.6); }
+  .corp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: center;
+    margin-top: 40px;
+  }
+  .corp-features { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .corp-feat {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius);
+    padding: 16px;
+    transition: all 0.3s;
+  }
+  .corp-feat:hover { background: rgba(196,96,26,0.08); border-color: rgba(196,96,26,0.3); }
+  .corp-feat .ic { font-size: 22px; margin-bottom: 8px; display: block; }
+  .corp-feat h4 { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .corp-feat p { font-size: 11.5px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+  /* Corporate dashboard mockup */
+  .corp-dash {
+    background: var(--ivory);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-lg);
+    color: var(--charcoal);
+    position: relative;
+  }
+  .corp-dash-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--mist);
+  }
+  .corp-dash-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .corp-dash-title::before {
+    content: '🏢';
+    width: 28px; height: 28px;
+    background: rgba(196,96,26,0.10);
+    border-radius: 6px;
+    display: grid; place-items: center;
+    font-size: 14px;
+  }
+  .corp-id { font-size: 10px; color: var(--txt-muted); font-family: monospace; background: var(--cream); padding: 2px 8px; border-radius: 4px; }
+  .corp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .corp-stat {
+    background: var(--cream);
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+  }
+  .corp-stat-val { font-family: var(--ff-accent); font-size: 22px; color: var(--sienna); line-height: 1; }
+  .corp-stat-lbl { font-size: 10px; color: var(--txt-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .corp-order-list { display: flex; flex-direction: column; gap: 6px; }
+  .corp-order {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid var(--mist);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .co-icon { width: 28px; height: 28px; border-radius: 6px; background: rgba(196,96,26,0.10); display: grid; place-items: center; font-size: 14px; flex-shrink: 0; }
+  .co-text { flex: 1; }
+  .co-title { font-weight: 600; color: var(--charcoal); }
+  .co-meta { font-size: 10px; color: var(--txt-muted); margin-top: 1px; }
+  .co-status {
+    font-size: 10px; font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 100px;
+    letter-spacing: 0.5px;
+  }
+  .co-status.approved { background: rgba(91,140,90,0.15); color: var(--success); }
+  .co-status.pending { background: rgba(232,166,80,0.15); color: #a87a3a; }
+  .co-status.active { background: rgba(196,96,26,0.15); color: var(--sienna); }
+
+  /* ─── INVOICE SYSTEM (3-PART) ─── */
+  #invoice { background: var(--cream); }
+  .invoice-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 56px;
+    align-items: center;
+    margin-top: 40px;
+  }
+  .inv-feature-list { display: flex; flex-direction: column; gap: 14px; }
+  .inv-feature {
+    display: flex; gap: 16px;
+    padding: 16px 18px;
+    background: #fff;
+    border: 1px solid var(--mist);
+    border-radius: var(--radius);
+    transition: all 0.2s;
+  }
+  .inv-feature:hover { border-color: var(--sienna); box-shadow: var(--shadow); }
+  .inv-feature .num {
+    width: 32px; height: 32px;
+    background: var(--sienna);
+    color: #fff;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: var(--ff-accent);
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .inv-feature h4 { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .inv-feature p { font-size: 12.5px; color: var(--txt-muted); line-height: 1.5; }
+
+  /* Invoice mockup */
+  .invoice-mockup-stack {
+    position: relative;
+    height: 460px;
+  }
+  .inv-page {
+    position: absolute;
+    width: 80%;
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 22px 20px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--mist);
+    font-size: 11px;
+    transition: transform 0.4s;
+  }
+  .inv-page-1 { top: 0; left: 0; z-index: 3; }
+  .inv-page-2 { top: 40px; left: 8%; z-index: 2; opacity: 0.96; }
+  .inv-page-3 { top: 80px; left: 16%; z-index: 1; opacity: 0.92; }
+  .invoice-mockup-stack:hover .inv-page-1 { transform: translate(-10px, -10px); }
+  .invoice-mockup-stack:hover .inv-page-2 { transform: translate(0, -5px); }
+  .invoice-mockup-stack:hover .inv-page-3 { transform: translate(10px, 0); }
+  .inv-head { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 2px solid var(--sienna); margin-bottom: 14px; }
+  .inv-brand { font-family: var(--ff-accent); font-size: 18px; letter-spacing: 2px; color: var(--charcoal); }
+  .inv-brand-sub { font-size: 9px; color: var(--sienna); letter-spacing: 1.5px; }
+  .inv-meta { text-align: right; font-size: 10px; color: var(--txt-muted); }
+  .inv-meta strong { color: var(--charcoal); display: block; font-size: 11px; }
+  .inv-title { font-size: 12px; font-weight: 700; margin-bottom: 10px; color: var(--sienna); text-transform: uppercase; letter-spacing: 1px; }
+  .inv-page-2 .inv-title { color: var(--sage); }
+  .inv-page-3 .inv-title { color: var(--amber); }
+  .inv-page-2 .inv-head { border-bottom-color: var(--sage); }
+  .inv-page-3 .inv-head { border-bottom-color: var(--amber); }
+  .inv-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .inv-row { display: flex; justify-content: space-between; font-size: 10.5px; }
+  .inv-row.bold { font-weight: 700; padding-top: 8px; border-top: 1px dashed var(--mist); color: var(--charcoal); }
+  .inv-row span:last-child { font-family: monospace; }
+  .inv-stamp {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    padding: 4px 8px;
+    border: 1.5px solid var(--success);
+    color: var(--success);
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 4px;
+    letter-spacing: 1px;
+    transform: rotate(-8deg);
+  }
+  .inv-page-label {
+    position: absolute;
+    top: -8px; right: -8px;
+    background: var(--sienna);
+    color: #fff;
+    font-size: 9px; font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 100px;
+    letter-spacing: 0.8px;
+  }
+  .inv-page-2 .inv-page-label { background: var(--sage); }
+  .inv-page-3 .inv-page-label { background: var(--amber); color: var(--charcoal); }
+
+  /* ─── VENDOR (BECOME A PARTNER) ─── */
+  #vendor { background: var(--ivory); }
+  .vendor-card-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 24px;
+    margin-top: 40px;
+  }
+  .vendor-card {
+    background: linear-gradient(135deg, var(--sienna) 0%, #a84f14 100%);
+    color: #fff;
+    border-radius: var(--radius-lg);
+    padding: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .vendor-card::before {
+    content: '';
+    position: absolute;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    top: -80px; right: -80px;
+  }
+  .vendor-card .vc-tag { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--amber); margin-bottom: 10px; }
+  .vendor-card h3 { font-family: var(--ff-display); font-size: 36px; font-weight: 500; line-height: 1.1; margin-bottom: 14px; }
+  .vendor-card p { font-size: 14px; color: rgba(255,255,255,0.78); line-height: 1.6; margin-bottom: 20px; max-width: 440px; }
+  .vendor-features {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; margin-bottom: 24px;
+    position: relative;
+  }
+  .vf-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.85);
+  }
+  .vf-item::before {
+    content: '✓';
+    width: 18px; height: 18px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 50%;
+    color: var(--amber);
+    display: grid; place-items: center;
+    font-size: 10px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .vendor-card .btn-hero { background: #fff; color: var(--sienna); box-shadow: 0 4px 14px rgba(0,0,0,0.15); position: relative; }
+  .vendor-card .btn-hero:hover { background: var(--charcoal); color: #fff; }
+
+  .expert-card {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    border: 1px solid var(--mist);
+  }
+  .expert-tag { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--sage); margin-bottom: 10px; }
+  .expert-card h3 { font-family: var(--ff-display); font-size: 24px; font-weight: 500; margin-bottom: 10px; line-height: 1.2; }
+  .expert-card p { font-size: 13px; color: var(--txt-muted); line-height: 1.6; margin-bottom: 20px; }
+  .expert-flow { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  .ef-step { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--graphite); }
+  .ef-step .n {
+    width: 22px; height: 22px;
+    background: rgba(91,140,90,0.15);
+    color: var(--sage);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-weight: 700;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .expert-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    background: rgba(232,166,80,0.15);
+    color: #a87a3a;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* ─── CITIES ─── */
+  #cities { background: var(--cream); }
+  .cities-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px;
+    margin-top: 32px;
+  }
+  .city-card {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    border: 1px solid var(--mist);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .city-card:hover { border-color: var(--sienna); transform: translateY(-3px); box-shadow: var(--shadow); }
+  .city-flag { font-size: 32px; margin-bottom: 10px; }
+  .city-name { font-size: 14px; font-weight: 600; color: var(--charcoal); }
+  .city-count { font-size: 11px; color: var(--txt-muted); margin-top: 2px; }
+
+  /* ─── FAQ ─── */
+  #faq { background: var(--ivory); }
+  .faq-list { max-width: 800px; margin: 40px auto 0; }
+  .faq-item { border-bottom: 1px solid var(--mist); }
+  .faq-q {
+    width: 100%; text-align: left;
+    padding: 20px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 15px; font-weight: 500;
+    color: var(--charcoal);
+    transition: color 0.2s;
+  }
+  .faq-q:hover { color: var(--sienna); }
+  .faq-arrow {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid var(--mist);
+    display: grid; place-items: center;
+    font-size: 14px;
+    color: var(--sienna);
+    flex-shrink: 0;
+    transition: all 0.3s;
+  }
+  .faq-item.open .faq-arrow { background: var(--sienna); color: #fff; transform: rotate(45deg); }
+  .faq-a {
+    max-height: 0; overflow: hidden;
+    font-size: 14px; color: var(--txt-muted);
+    line-height: 1.7;
+    transition: max-height 0.4s ease, padding 0.3s;
+  }
+  .faq-item.open .faq-a { max-height: 240px; padding-bottom: 18px; }
+
+  /* ─── APP CTA ─── */
+  #app-cta {
+    background: var(--charcoal);
+    position: relative; overflow: hidden;
+  }
+  #app-cta::before {
+    content: ''; position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(196,96,26,0.12), transparent 70%);
+    top: -80px; right: -80px;
+  }
+  .app-cta-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 56px; align-items: center; max-width: 1400px; margin: 0 auto; }
+  .app-cta-text .section-label { color: var(--amber); }
+  .app-cta-text .section-label::before { background: var(--amber); }
+  .app-cta-text .section-title { color: #fff; }
+  .app-cta-text .section-sub { color: rgba(255,255,255,0.55); }
+  .app-features-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 24px 0; }
+  .app-feat-item { display: flex; align-items: center; gap: 10px; font-size: 13px; color: rgba(255,255,255,0.7); }
+  .app-feat-item::before {
+    content: '✓';
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: rgba(196,96,26,0.25);
+    color: var(--amber);
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .app-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .app-store-btn {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: var(--radius);
+    color: #fff;
+    transition: background 0.2s;
+  }
+  .app-store-btn:hover { background: rgba(255,255,255,0.14); }
+  .app-store-btn .store-icon { font-size: 22px; }
+  .app-store-lbl { font-size: 10px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1px; }
+  .app-store-name { font-size: 14px; font-weight: 600; }
+
+  .app-phones { position: relative; height: 440px; display: flex; justify-content: center; align-items: center; }
+  .phone {
+    width: 210px; height: 410px;
+    background: linear-gradient(135deg, #2a2a2a 0%, #111 100%);
+    border: 5px solid #333;
+    border-radius: 32px;
+    overflow: hidden;
+    box-shadow: 0 30px 70px rgba(0,0,0,0.55);
+    position: relative;
+  }
+  .phone-screen { width: 100%; height: 100%; background: var(--cream); display: flex; flex-direction: column; }
+  .phone-status { height: 28px; background: var(--sienna); display: flex; justify-content: center; align-items: center; }
+  .phone-notch { width: 60px; height: 14px; background: #111; border-radius: 0 0 8px 8px; }
+  .phone-greet { padding: 12px 14px 4px; font-size: 9px; color: var(--txt-muted); }
+  .phone-h1 { padding: 0 14px 8px; font-size: 13px; font-weight: 700; color: var(--charcoal); }
+  .phone-ai-box {
+    margin: 0 14px;
+    background: linear-gradient(135deg, var(--sienna), var(--amber));
+    border-radius: 12px;
+    padding: 12px;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+  .phone-ai-tag { font-size: 8px; font-weight: 700; letter-spacing: 1px; opacity: 0.8; margin-bottom: 3px; }
+  .phone-ai-text { font-size: 10px; font-weight: 600; line-height: 1.3; }
+  .phone-cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 0 14px; margin-bottom: 10px; }
+  .phone-cat-card { background: #fff; border-radius: 8px; padding: 8px 4px; text-align: center; font-size: 8px; font-weight: 600; color: var(--charcoal); }
+  .phone-cat-card .icn { font-size: 16px; margin-bottom: 3px; display: block; }
+  .phone-sec-title { padding: 4px 14px; font-size: 10px; font-weight: 700; color: var(--charcoal); display: flex; justify-content: space-between; }
+  .phone-sec-title span { font-size: 8px; color: var(--sienna); }
+  .phone-prods { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 14px; }
+  .phone-prod { background: #fff; border-radius: 8px; padding: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+  .phone-prod-img { width: 100%; height: 36px; background: var(--mist); border-radius: 4px; background-size: cover; background-position: center; margin-bottom: 4px; }
+  .phone-prod-name { font-size: 8px; font-weight: 600; color: var(--charcoal); }
+  .phone-prod-price { font-size: 9px; font-weight: 700; color: var(--sienna); margin-top: 2px; }
+
+  .phone-2 {
+    position: absolute;
+    right: 0; bottom: 0;
+    width: 170px; height: 340px;
+    transform: rotate(8deg);
+    opacity: 0.88;
+    box-shadow: 0 22px 50px rgba(0,0,0,0.4);
+    border-radius: 26px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #2a2a2a 0%, #111 100%);
+    border: 4px solid #333;
+  }
+  .phone-2 .phone-screen { background: var(--charcoal); }
+  .phone-2 .p2-img { height: 50%; background: url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80") center/cover; }
+  .phone-2 .p2-body { padding: 12px; color: #fff; }
+  .phone-2 .p2-body p { font-size: 8px; color: var(--amber); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .phone-2 .p2-body h4 { font-family: var(--ff-display); font-size: 14px; font-weight: 500; }
+  .phone-2 .p2-track {
+    margin: 8px 12px 0;
+    background: rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 8px;
+    color: #fff;
+    display: flex; justify-content: space-between;
+  }
+  .phone-2 .p2-track span:last-child { color: var(--amber); font-weight: 700; }
+
+  /* ─── FLOATING WHATSAPP / AI CHAT BUTTONS ─── */
+  .floating-actions {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    z-index: 800;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .fab {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    color: #fff;
+    font-size: 24px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    transition: all 0.2s;
+    cursor: pointer;
+    position: relative;
+  }
+  .fab:hover { transform: translateY(-3px) scale(1.05); }
+  .fab.whatsapp { background: var(--whatsapp); }
+  .fab.ai-chat { background: linear-gradient(135deg, var(--sienna), var(--amber)); }
+  .fab .fab-pulse {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    animation: pulse-ring 2s infinite;
+  }
+  .fab.whatsapp .fab-pulse { background: var(--whatsapp); }
+  .fab.ai-chat .fab-pulse { background: var(--sienna); }
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .fab-label {
+    position: absolute;
+    right: 68px;
+    background: var(--charcoal);
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateX(8px);
+    transition: all 0.25s;
+    pointer-events: none;
+  }
+  .fab:hover .fab-label { opacity: 1; transform: translateX(0); }
+
+  /* ─── FOOTER ─── */
+  footer { background: #111; color: rgba(255,255,255,0.6); padding: 64px 48px 32px; }
+  .footer-grid {
+    max-width: 1400px; margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr;
+    gap: 36px;
+    padding-bottom: 48px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .footer-brand .logo-text { color: #fff; }
+  .footer-desc { font-size: 13px; line-height: 1.7; margin-top: 14px; max-width: 290px; }
+  .footer-trust-row {
+    display: flex; gap: 12px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+  }
+  .trust-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+  }
+  .footer-social { display: flex; gap: 8px; margin-top: 20px; }
+  .social-btn {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    display: grid; place-items: center;
+    font-size: 13px;
+    transition: background 0.2s;
+    color: rgba(255,255,255,0.6);
+  }
+  .social-btn:hover { background: var(--sienna); color: #fff; border-color: var(--sienna); }
+  .footer-col h4 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
+  .footer-links { display: flex; flex-direction: column; gap: 9px; }
+  .footer-links a { font-size: 13px; transition: color 0.2s; }
+  .footer-links a:hover { color: var(--sienna); }
+  .footer-bottom {
+    max-width: 1400px; margin: 24px auto 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12.5px;
+    flex-wrap: wrap; gap: 12px;
+  }
+  .footer-bottom > div { display: flex; gap: 20px; }
+
+  /* ─── SCROLL REVEAL ─── */
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .reveal-d1 { transition-delay: 0.08s; }
+  .reveal-d2 { transition-delay: 0.16s; }
+  .reveal-d3 { transition-delay: 0.24s; }
+  .reveal-d4 { transition-delay: 0.32s; }
+
+  /* ─── MOBILE NAV ─── */
+  .mobile-nav {
+    position: fixed; inset: 0; z-index: 950;
+    background: var(--ivory);
+    padding: 80px 24px 30px;
+    transform: translateX(100%);
+    transition: transform 0.4s cubic-bezier(0.77,0,0.18,1);
+    overflow-y: auto;
+  }
+  .mobile-nav.open { transform: translateX(0); }
+  .mobile-nav .grp { padding: 16px 0; border-bottom: 1px solid var(--mist); }
+  .mobile-nav .grp-title { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--txt-muted); margin-bottom: 12px; }
+  .mobile-nav .grp a { display: block; padding: 8px 0; font-size: 16px; font-weight: 500; color: var(--charcoal); }
+
+  /* ─── RESPONSIVE ─── */
+  @media (max-width: 1100px) {
+    .top-strip { padding: 8px 24px; font-size: 11px; flex-wrap: wrap; }
+    .top-strip .left span:nth-child(n+2) { display: none; }
+    header { padding: 0 24px; }
+    .header-search { max-width: 280px; }
+    .header-search .cat-select { display: none; }
+    .icon-btn .label { display: none; }
+    .cat-nav { padding: 0 24px; }
+    .hero { height: auto; padding: 80px 0; }
+    .hero-grid { grid-template-columns: 1fr; padding: 0 24px; }
+    .ai-chat-widget { max-width: 480px; }
+    .booking-channels { padding: 18px 24px; }
+    .shop-grid { grid-template-columns: 220px 1fr; }
+    .sub-svc-grid { grid-template-columns: repeat(3, 1fr); }
+    .product-grid { grid-template-columns: repeat(3, 1fr); }
+    .deals-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .deal-feature { grid-row: span 1; grid-column: span 3; min-height: 240px; }
+    .three-click-wrap { grid-template-columns: 1fr 1fr; }
+    .tc-step.cta-step { grid-column: span 2; }
+    .dispatch-grid, .corp-grid, .invoice-grid, .app-cta-grid { grid-template-columns: 1fr; gap: 40px; }
+    .estimator-card { grid-template-columns: 1fr; gap: 24px; padding: 28px; }
+    .amc-grid { grid-template-columns: 1fr 1fr; }
+    .amc-card.featured { grid-column: span 2; }
+    .vendor-card-grid { grid-template-columns: 1fr; }
+    .cities-grid { grid-template-columns: repeat(4, 1fr); }
+    section.std, .shop-section, footer, #app-cta { padding-left: 24px; padding-right: 24px; }
+    .footer-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .invoice-mockup-stack { height: 380px; }
+  }
+  @media (max-width: 768px) {
+    .menu-icon { display: flex; }
+    .header-search { display: none; }
+    .icon-btn:not(.cart-btn):not(.profile-btn) { display: none; }
+    .top-strip { display: none; }
+    .booking-channels { padding: 14px 16px; }
+    .bc-inner { gap: 8px; }
+    .bc-title { font-size: 11px; }
+    .bc-channel { font-size: 11px; padding: 6px 12px; }
+    .hero { padding: 60px 0; }
+    .shop-grid { grid-template-columns: 1fr; }
+    .svc-panel {
+      max-height: none;
+      display: flex; overflow-x: auto; padding: 12px;
+      border-right: none; border-bottom: 1px solid var(--mist);
+    }
+    .svc-panel-title { display: none; }
+    .svc-item {
+      flex-direction: column;
+      min-width: 100px;
+      padding: 12px 10px;
+      border-left: none; border-bottom: 3px solid transparent;
+      text-align: center;
+    }
+    .svc-item.active { border-left: none; border-bottom-color: var(--sienna); box-shadow: none; }
+    .svc-text p { display: none; }
+    .svc-text h4 { font-size: 11px; }
+    .svc-arrow { display: none; }
+    .display-panel { max-height: none; padding: 16px; }
+    .sub-svc-grid, .product-grid { grid-template-columns: repeat(2, 1fr); }
+    .deals-grid { grid-template-columns: 1fr 1fr; }
+    .deal-feature { grid-column: span 2; }
+    .three-click-wrap { grid-template-columns: 1fr; }
+    .tc-step.cta-step { grid-column: span 1; }
+    .amc-grid { grid-template-columns: 1fr; }
+    .amc-card.featured { grid-column: span 1; }
+    .corp-features { grid-template-columns: 1fr; }
+    .vendor-features { grid-template-columns: 1fr; }
+    .cities-grid { grid-template-columns: repeat(3, 1fr); }
+    .footer-grid { grid-template-columns: 1fr 1fr; }
+    .steps-wrap { grid-template-columns: 1fr; }
+    .footer-bottom { flex-direction: column; gap: 12px; text-align: center; }
+    .panel-promo { flex-direction: column; align-items: flex-start; }
+    .floating-actions { bottom: 16px; right: 16px; }
+    .fab { width: 50px; height: 50px; font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile Nav -->
+<div class="mobile-nav" id="mobileNav">
+  <div class="grp">
+    <div class="grp-title">Services</div>
+    <a href="#shop">All Services</a>
+    <a href="#shop">Handyman & Repair</a>
+    <a href="#shop">Interior & Renovation</a>
+    <a href="#shop">Construction</a>
+    <a href="#amc">AMC Plans</a>
+  </div>
+  <div class="grp">
+    <div class="grp-title">Booking</div>
+    <a href="#"><span>🤖</span> AI Chat Booking</a>
+    <a href="#"><span>💬</span> WhatsApp Booking</a>
+    <a href="tel:+919876543210"><span>📞</span> Call to Book</a>
+  </div>
+  <div class="grp">
+    <div class="grp-title">For Business</div>
+    <a href="#corporate">Corporate Portal Login</a>
+    <a href="#vendor">Become a Service Partner</a>
+    <a href="#">Facility Management</a>
+  </div>
+  <div class="grp">
+    <div class="grp-title">Account</div>
+    <a href="#">Sign In with OTP</a>
+    <a href="#">Track Orders</a>
+    <a href="#">My Wallet</a>
+  </div>
+  <div style="margin-top: 24px;">
+    <button class="btn-primary" style="width:100%; padding:14px;">Book a Service in 3 Clicks</button>
+  </div>
+</div>
+
+<!-- ═══ TOP UTILITY STRIP ═══ -->
+<div class="top-strip">
+  <div class="left">
+    <span>📞 +91 98765 43210</span>
+    <span>✉️ hello@remontindia.com</span>
+    <span>🕐 24/7 AI Chat Support</span>
+  </div>
+  <div class="right">
+    <span class="lang-toggle">🌐 EN / हिं</span>
+    <span class="strip-divider"></span>
+    <a href="#vendor" class="strip-btn">🛠️ Become a Partner</a>
+    <span class="strip-divider"></span>
+    <a href="#corporate" class="strip-btn">🏢 Corporate Login</a>
+    <span class="strip-divider"></span>
+    <a href="#" class="strip-btn whatsapp">💬 WhatsApp Book</a>
+    <a href="#" class="strip-btn highlight">📱 Download App</a>
+  </div>
+</div>
+
+<!-- ═══ MAIN HEADER ═══ -->
+<header id="header">
+  <div class="logo">
+    <div class="logo-mark"></div>
+    <div class="logo-text-wrap">
+      <span class="logo-text">REMONT</span>
+      <span class="logo-sub">INDIA</span>
+    </div>
+  </div>
+
+  <div class="header-search">
+    <div class="cat-select" onclick="toggleSearchScope(this)" title="Switch between services and products">
+      <span id="searchScope">All Services</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <input type="text" id="headerSearchInput" placeholder='Try "AC not cooling" or browse "modular kitchen"...' />
+    <button class="ai-mic-btn" aria-label="Voice search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+    </button>
+    <button class="search-btn-icon" aria-label="Search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </button>
+  </div>
+
+  <div class="header-right">
+    <button class="icon-btn city-selector" onclick="openCityModal()" title="Change your city">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      <span class="label" id="currentCity">Mumbai</span>
+      <span class="city-arrow">▼</span>
+    </button>
+    <button class="icon-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span class="label">My Orders</span>
+      <span class="badge">2</span>
+    </button>
+    <button class="icon-btn cart-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+      <span class="label">Cart</span>
+      <span class="badge">3</span>
+    </button>
+    <button class="icon-btn profile-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="label">Account</span>
+    </button>
+    <button class="menu-icon" onclick="toggleMenu()" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<!-- ═══ CATEGORY NAV ═══ -->
+<div class="cat-nav">
+  <div class="cat-nav-inner">
+    <a href="#shop" class="cat-link active"><span class="ic">⚡</span> Quick Repair</a>
+    <a href="#shop" class="cat-link"><span class="ic">❄️</span> AC Service</a>
+    <a href="#shop" class="cat-link"><span class="ic">🔧</span> Plumbing</a>
+    <a href="#shop" class="cat-link"><span class="ic">💡</span> Electrical</a>
+    <a href="#shop" class="cat-link"><span class="ic">📺</span> Appliance Repair</a>
+    <a href="#shop" class="cat-link"><span class="ic">🧹</span> Cleaning</a>
+    <a href="#premium" class="cat-link premium-link"><span class="ic">✨</span> Interior · Renovation · Construction</a>
+    <a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>
+    <a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>
+    <a href="#corporate" class="cat-link"><span class="ic">🏢</span> For Business</a>
+  </div>
+</div>
+
+<!-- ═══ HERO + AI CHAT ═══ -->
+<section class="hero" aria-label="Hero">
+  <div class="slides" id="slides">
+    <div class="slide active" id="slide-0"><div class="slide-bg"></div></div>
+    <div class="slide" id="slide-1"><div class="slide-bg"></div></div>
+    <div class="slide" id="slide-2"><div class="slide-bg"></div></div>
+  </div>
+
+  <div class="hero-grid">
+    <div class="slide-content">
+      <div class="slide-tag">AI-Powered Marketplace</div>
+      <h1 class="slide-h1">India's Smartest <em>Home Service</em><br>Platform — Book in 3 Clicks</h1>
+      <p class="slide-p">Tell our AI what's wrong — in Hindi, English, or Hinglish. We auto-match the best verified vendor near you. Live tracking, transparent GST invoices, secure payments.</p>
+      <div class="slide-actions">
+        <button class="btn-hero">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          Try AI Chat Booking
+        </button>
+        <button class="btn-ghost">Browse Services →</button>
+      </div>
+      <div class="slide-trust">
+        <div>⭐ <strong>4.8/5</strong> · 50K+ reviews</div>
+        <div>🛡️ <strong>Verified</strong> vendors</div>
+        <div>📍 <strong>32+</strong> cities</div>
+      </div>
+    </div>
+
+    <!-- AI Chat Booking Widget -->
+    <div class="ai-chat-widget">
+      <div class="ai-chat-head">
+        <div class="ai-avatar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        </div>
+        <div class="ai-chat-info">
+          <div class="ai-chat-name">Remi</div>
+          <div class="ai-chat-status">● Online · Speaks Hindi, English, Hinglish</div>
+        </div>
+      </div>
+      <div class="ai-msg">
+        Namaste! 👋 Apki kya help kar sakti hun? Bata dijiye kya problem hai — main best vendor turant book kar dungi.
+        <div class="lang">EN: Tell me your problem — I'll book the right vendor instantly.</div>
+      </div>
+      <div class="ai-suggestions">
+        <span class="ai-sugg">AC not cooling 🥵</span>
+        <span class="ai-sugg">Tap leaking 💧</span>
+        <span class="ai-sugg">Need painter 🎨</span>
+        <span class="ai-sugg">Book deep clean 🧹</span>
+      </div>
+      <div class="ai-input-row">
+        <input type="text" placeholder="Type your problem..." />
+        <button class="ai-send" aria-label="Send">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+      <div class="ai-chat-foot">
+        <span>Powered by Remont AI</span>
+        <span>Average booking time: <strong>47 seconds</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="slider-nav">
+    <button class="nav-btn" onclick="prevSlide()" aria-label="Previous">←</button>
+    <button class="nav-btn" onclick="nextSlide()" aria-label="Next">→</button>
+    <div class="dots">
+      <div class="dot active" onclick="goSlide(0)"></div>
+      <div class="dot" onclick="goSlide(1)"></div>
+      <div class="dot" onclick="goSlide(2)"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ BOOKING CHANNELS BANNER ═══ -->
+<div class="booking-channels">
+  <div class="bc-inner">
+    <div class="bc-title">📡 Book via Any Channel</div>
+    <div class="bc-channels">
+      <a href="#" class="bc-channel"><span class="icn">🌐</span> Website</a>
+      <a href="#" class="bc-channel"><span class="icn">📱</span> Mobile App</a>
+      <a href="#" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
+      <a href="#" class="bc-channel"><span class="icn">🤖</span> AI Chat</a>
+      <a href="tel:+919876543210" class="bc-channel"><span class="icn">📞</span> Call Us</a>
+      <a href="#" class="bc-channel"><span class="icn">🎙️</span> Voice (Alexa)</a>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SERVICES + PRODUCTS SPLIT ═══ -->
+<section class="shop-section" id="shop">
+  <div class="shop-inner">
+    <div class="shop-header reveal">
+      <div>
+        <div class="section-label">Services + Products</div>
+        <h2>Pick a Service, <strong>Shop Related Products</strong></h2>
+      </div>
+      <a href="#" class="btn-outline">Browse All →</a>
+    </div>
+
+    <div class="shop-grid reveal">
+      <div class="svc-panel">
+        <div class="svc-panel-title">Select a Service</div>
+        <div class="svc-item active" data-svc="ac" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>❄️</span></div>
+          <div class="svc-text">
+            <h4>AC Service & Repair</h4>
+            <p>Installation, gas refill, deep clean</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="plumbing" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>🚿</span></div>
+          <div class="svc-text">
+            <h4>Plumbing</h4>
+            <p>Leaks, fittings, bathroom</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="electrical" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>💡</span></div>
+          <div class="svc-text">
+            <h4>Electrical Work</h4>
+            <p>Wiring, fittings, smart home</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="appliance" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>📺</span></div>
+          <div class="svc-text">
+            <h4>Appliance Repair</h4>
+            <p>TV, fridge, washing machine</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="interior" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>🛋️</span></div>
+          <div class="svc-text">
+            <h4>Interior Design</h4>
+            <p>Full home, room makeovers</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="renovation" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>🔨</span></div>
+          <div class="svc-text">
+            <h4>Renovation</h4>
+            <p>Kitchen, bathroom, full home</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="construction" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>🏗️</span></div>
+          <div class="svc-text">
+            <h4>Construction</h4>
+            <p>Site visits, full project mgmt</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+        <div class="svc-item" data-svc="cleaning" onclick="switchService(this)">
+          <div class="svc-icon-box"><span>🧹</span></div>
+          <div class="svc-text">
+            <h4>Home Cleaning</h4>
+            <p>Deep clean, sofa, pest control</p>
+          </div>
+          <span class="svc-arrow">→</span>
+        </div>
+      </div>
+
+      <div class="display-panel" id="displayPanel"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PREMIUM SHOWCASE (Interior · Renovation · Construction) ═══ -->
+<section id="premium" class="std">
+  <div class="inner">
+    <div class="premium-head reveal">
+      <div class="premium-badge">✨ Premium Services</div>
+      <h2 class="section-title">When You Want<br><strong>Something Extraordinary</strong></h2>
+      <p class="section-sub" style="margin: 14px auto 0;">From bespoke interiors to ground-up construction — premium projects delivered by hand-picked designers, architects, and master craftsmen.</p>
+    </div>
+
+    <div class="premium-grid">
+      <div class="premium-card interior reveal">
+        <div class="premium-card-img">
+          <span class="premium-card-tag">Interior</span>
+          <span class="premium-availability">Available in your city</span>
+        </div>
+        <div class="premium-card-body">
+          <h3>Interior Design<br>& Makeover</h3>
+          <p>Full-home interior design with 3D visualization, modular furniture, and turnkey execution.</p>
+          <ul class="premium-features">
+            <li>Free 3D design consultation</li>
+            <li>Dedicated interior designer</li>
+            <li>Premium materials & finishes</li>
+            <li>10-year structural warranty</li>
+          </ul>
+          <div class="premium-meta">
+            <div class="premium-price">₹2L<small> onwards</small></div>
+            <button class="premium-cta">Book Consultation →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="premium-card renovation reveal reveal-d2">
+        <div class="premium-card-img">
+          <span class="premium-card-tag">Renovation</span>
+          <span class="premium-availability">Available in your city</span>
+        </div>
+        <div class="premium-card-body">
+          <h3>Kitchen & Bath<br>Renovation</h3>
+          <p>Premium modular kitchens, luxury bathrooms, and full-home renovations done by master craftsmen.</p>
+          <ul class="premium-features">
+            <li>Modular kitchen specialists</li>
+            <li>Italian marble & premium tiles</li>
+            <li>Project manager assigned</li>
+            <li>On-time delivery guarantee</li>
+          </ul>
+          <div class="premium-meta">
+            <div class="premium-price">₹1.2L<small> onwards</small></div>
+            <button class="premium-cta">Get Free Quote →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="premium-card construction reveal reveal-d3">
+        <div class="premium-card-img">
+          <span class="premium-card-tag">Construction</span>
+          <span class="premium-availability">Available in your city</span>
+        </div>
+        <div class="premium-card-body">
+          <h3>New Build<br>Construction</h3>
+          <p>Ground-up construction with architects, structural engineers, and complete project management.</p>
+          <ul class="premium-features">
+            <li>Architect-led design</li>
+            <li>Vastu-compliant planning</li>
+            <li>BBMP/local approvals support</li>
+            <li>Milestone-based payments</li>
+          </ul>
+          <div class="premium-meta">
+            <div class="premium-price">₹1500<small>/sqft onwards</small></div>
+            <button class="premium-cta">Schedule Site Visit →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="premium-strip reveal reveal-d4">
+      <div>
+        <h4>Not sure where to start?</h4>
+        <p>Talk to our senior project consultant — 30-minute free consultation, no obligation.</p>
+      </div>
+      <a href="#" class="ps-btn">Book Free Consultation →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 3-CLICK BOOKING ═══ -->
+<section id="three-click" class="std">
+  <div class="inner">
+    <div style="text-align:center;max-width:600px;margin:0 auto;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Our Promise</div>
+      <h2 class="section-title">Book Any Service in <strong>3 Clicks</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;">No long forms. No back-and-forth. From problem to vendor on doorstep — faster than ordering food.</p>
+    </div>
+    <div class="three-click-wrap">
+      <div class="tc-step reveal reveal-d1">
+        <div class="tc-step-num">01</div>
+        <h4>Tell Us the Problem</h4>
+        <p>Chat, voice, type, or WhatsApp — describe your problem in any language.</p>
+        <div class="demo"><strong>Example:</strong>"AC se thandi hawa nahi aa rahi"</div>
+      </div>
+      <div class="tc-step reveal reveal-d2">
+        <div class="tc-step-num">02</div>
+        <h4>Confirm Slot & Address</h4>
+        <p>Auto-detected address. Pick a time slot. Optional photo upload for accuracy.</p>
+        <div class="demo"><strong>Auto-picked:</strong>Today, 3-5 PM · Andheri W</div>
+      </div>
+      <div class="tc-step reveal reveal-d3">
+        <div class="tc-step-num">03</div>
+        <h4>Vendor Auto-Assigned</h4>
+        <p>Nearest, best-rated, skill-matched vendor accepts. Live GPS tracking starts.</p>
+        <div class="demo"><strong>Assigned:</strong>Rajesh K · ⭐4.9 · 12 min away</div>
+      </div>
+      <div class="tc-step cta-step reveal reveal-d4">
+        <div class="tc-step-num">✓</div>
+        <h4>That's It!</h4>
+        <button>Try It Now →</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PROMO TICKER ═══ -->
+<div class="promo-strip">
+  <div class="promo-ticker">
+    <span class="promo-item">🤖 AI Chat Booking — Free <span class="badge">New</span></span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">📍 Live GPS Tracking on Every Order</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">💯 Transparent 3-Part GST Invoice</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">⚡ 60-Second Booking via WhatsApp</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">🏢 Corporate Portal Now Live</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">🎁 Refer & Earn ₹500 in Wallet</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">🤖 AI Chat Booking — Free <span class="badge">New</span></span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">📍 Live GPS Tracking on Every Order</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">💯 Transparent 3-Part GST Invoice</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">⚡ 60-Second Booking via WhatsApp</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">🏢 Corporate Portal Now Live</span>
+    <span class="promo-dot"></span>
+    <span class="promo-item">🎁 Refer & Earn ₹500 in Wallet</span>
+    <span class="promo-dot"></span>
+  </div>
+</div>
+
+<!-- ═══ SMART DISPATCH + LIVE TRACKING ═══ -->
+<section id="dispatch" class="std">
+  <div class="inner">
+    <div style="text-align:center;max-width:680px;margin:0 auto;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Ola-Style Smart Dispatch</div>
+      <h2 class="section-title">Vendors Auto-Matched.<br><strong>Live GPS Tracking.</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;">Our dispatch engine matches the best vendor on every job — based on location, skill, rating, and availability.</p>
+    </div>
+    <div class="dispatch-grid">
+      <div class="dispatch-features">
+        <div class="df-item reveal">
+          <div class="df-icon">📍</div>
+          <div class="df-text">
+            <h4>Best Vendor Auto-Matched</h4>
+            <p>We instantly find the nearest, highest-rated, skill-matched professional for your specific job — no manual searching.</p>
+          </div>
+        </div>
+        <div class="df-item reveal reveal-d1">
+          <div class="df-icon">🛰️</div>
+          <div class="df-text">
+            <h4>Live GPS Tracking</h4>
+            <p>Watch your professional en route on a real-time map — just like Ola or Uber. Always know the exact ETA.</p>
+          </div>
+        </div>
+        <div class="df-item reveal reveal-d2">
+          <div class="df-icon">🔐</div>
+          <div class="df-text">
+            <h4>Secure Service Start</h4>
+            <p>A unique OTP confirms the right professional has arrived at your doorstep before the work begins.</p>
+          </div>
+        </div>
+        <div class="df-item reveal reveal-d3">
+          <div class="df-icon">📸</div>
+          <div class="df-text">
+            <h4>Before & After Photos</h4>
+            <p>Get visual proof of the job — your professional uploads before and after photos directly to your order.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="live-track-card reveal reveal-d2">
+        <div class="lt-head">
+          <h4>Live Order #REM-9847</h4>
+          <span class="lt-status">Vendor en route</span>
+        </div>
+        <div class="lt-map">
+          <div class="lt-pin vendor">🛠️</div>
+          <div class="lt-pin home">🏠</div>
+        </div>
+        <div class="lt-vendor">
+          <div class="lt-av"></div>
+          <div class="lt-vendor-info">
+            <div class="lt-vendor-name">Rajesh Kumar <span class="verify">✓ Verified Pro</span></div>
+            <div class="lt-vendor-role">AC Expert · 5 years exp</div>
+            <div class="lt-vendor-rating"><span class="stars">★★★★★</span> 4.9 (847 jobs)</div>
+          </div>
+          <div class="lt-actions">
+            <button class="lt-action" aria-label="Call">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 11.82 19 19.45 19.45 0 0 1 4 11.18 19.79 19.79 0 0 1 1.08 4.18 2 2 0 0 1 3.05 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 17z"/></svg>
+            </button>
+            <button class="lt-action" aria-label="Chat">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="lt-eta">
+          <span>Arriving in</span>
+          <strong>12 MIN</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ BUDGET ESTIMATOR ═══ -->
+<section id="estimator" class="std">
+  <div class="inner">
+    <div style="max-width:600px;" class="reveal">
+      <div class="section-label">Plan Before You Book</div>
+      <h2 class="section-title">Free Material <strong>Budget Estimator</strong></h2>
+      <p class="section-sub">Planning a renovation or installation? Get an instant rough estimate of material costs before you commit.</p>
+    </div>
+
+    <div class="estimator-card reveal">
+      <div class="est-left">
+        <div class="est-tag">⚡ Instant · No Sign-up</div>
+        <h3>Know your material costs in <em>under 30 seconds</em></h3>
+        <p>Pick a service category, enter rough specs, and get a transparent budget estimate. Final quotes come from real vendors after they assess your site.</p>
+        <div class="est-features">
+          <div class="est-feat">Category-wise material rates (tiles, pipes, paints, fittings)</div>
+          <div class="est-feat">Auto-updated by admin — always reflects market prices</div>
+          <div class="est-feat">Free to use — no email or signup required</div>
+          <div class="est-feat">Saves your selections for direct booking after</div>
+        </div>
+      </div>
+
+      <div class="est-right">
+        <div class="est-form-row">
+          <div class="est-field">
+            <label>Service Category</label>
+            <select>
+              <option>Bathroom Renovation</option>
+              <option>Kitchen Renovation</option>
+              <option>Full Home Painting</option>
+              <option>AC Installation</option>
+              <option>Tile Flooring</option>
+              <option>Electrical Rewiring</option>
+            </select>
+          </div>
+          <div class="est-field">
+            <label>City</label>
+            <select>
+              <option>Mumbai</option>
+              <option>Delhi NCR</option>
+              <option>Bangalore</option>
+              <option>Pune</option>
+              <option>Hyderabad</option>
+            </select>
+          </div>
+        </div>
+        <div class="est-form-row">
+          <div class="est-field">
+            <label>Area (sq ft)</label>
+            <input type="number" value="120" />
+          </div>
+          <div class="est-field">
+            <label>Quality Tier</label>
+            <select>
+              <option>Standard</option>
+              <option>Premium</option>
+              <option>Luxury</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="est-result">
+          <div class="est-result-label">Estimated Budget Range</div>
+          <div class="est-result-value">₹85,000 – ₹1,20,000</div>
+          <div class="est-result-note">* Indicative range. Final quote provided by assigned vendor after site visit.</div>
+        </div>
+        <button class="est-btn">Book Free Site Visit →</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ HOT DEALS ═══ -->
+<section id="deals" class="std">
+  <div class="inner">
+    <div class="std-header reveal">
+      <div>
+        <div class="section-label">Trending Now</div>
+        <h2 class="section-title">Hot Deals on <strong>Home Essentials</strong></h2>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <span style="font-size:13px;color:var(--txt-muted)">Ends in: <strong style="color:var(--sienna)">23h 14m</strong></span>
+        <a href="#" class="btn-primary">Shop All Deals</a>
+      </div>
+    </div>
+    <div class="deals-grid reveal">
+      <div class="deal-feature">
+        <div>
+          <div class="df-tag">Best Seller</div>
+          <h3>Split AC<br>1.5 Ton Inverter</h3>
+          <p>Daikin 5-star energy rating with free installation by certified Remont vendors.</p>
+        </div>
+        <button class="df-cta">Shop Now – ₹34,990 →</button>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1620626011761-996317b8d101?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Bathroom</div>
+          <div class="deal-card-name">Premium Single-Lever Mixer Tap</div>
+          <div class="deal-card-price">
+            <span class="now">₹2,499</span>
+            <span class="was">₹3,999</span>
+            <span class="off">37% off</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Kitchen</div>
+          <div class="deal-card-name">Auto-Clean Kitchen Chimney 90cm</div>
+          <div class="deal-card-price">
+            <span class="now">₹14,999</span>
+            <span class="was">₹22,000</span>
+            <span class="off">32% off</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Furniture</div>
+          <div class="deal-card-name">Premium Modular Wardrobe — 4 Door</div>
+          <div class="deal-card-price">
+            <span class="now">₹38,990</span>
+            <span class="was">₹54,000</span>
+            <span class="off">28% off</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Tiles</div>
+          <div class="deal-card-name">Italian Marble-Finish Tiles (per sqft)</div>
+          <div class="deal-card-price">
+            <span class="now">₹89</span>
+            <span class="was">₹140</span>
+            <span class="off">36% off</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Lighting</div>
+          <div class="deal-card-name">Modern LED Pendant Light Set of 3</div>
+          <div class="deal-card-price">
+            <span class="now">₹4,799</span>
+            <span class="was">₹6,999</span>
+            <span class="off">31% off</span>
+          </div>
+        </div>
+      </div>
+      <div class="deal-card">
+        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1562259929-b4e1fd3aef09?w=400&q=80');"></div>
+        <div class="deal-card-body">
+          <div class="deal-card-cat">Paint</div>
+          <div class="deal-card-name">Asian Paints Royale Aspira (4L)</div>
+          <div class="deal-card-price">
+            <span class="now">₹1,899</span>
+            <span class="was">₹2,650</span>
+            <span class="off">28% off</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ AMC PLANS ═══ -->
+<section id="amc" class="std">
+  <div class="inner">
+    <div style="text-align:center;max-width:600px;margin:0 auto;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Annual Maintenance</div>
+      <h2 class="section-title">Set It and <strong>Forget It</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;">Subscribe once. Auto-scheduled services all year. Available for homes and offices.</p>
+    </div>
+    <div class="amc-grid">
+      <div class="amc-card reveal">
+        <div class="amc-icon">🏠</div>
+        <div class="amc-name">Home Essentials</div>
+        <div class="amc-period">Annual Plan · 1 home</div>
+        <div class="amc-desc">Perfect for small homes with basic maintenance needs.</div>
+        <ul class="amc-features">
+          <li>2 × AC servicing per year</li>
+          <li>4 × plumbing visits</li>
+          <li>4 × electrical inspections</li>
+          <li>Priority booking on emergencies</li>
+          <li>15% off any extra services</li>
+        </ul>
+        <div class="amc-price">
+          <span class="amc-price-now">₹4,999</span>
+          <span class="amc-price-old">₹7,999</span>
+          <small>/year</small>
+        </div>
+        <button class="amc-btn">Subscribe Now</button>
+      </div>
+
+      <div class="amc-card featured reveal reveal-d2">
+        <span class="featured-tag">Most Popular</span>
+        <div class="amc-icon">🏡</div>
+        <div class="amc-name">Home Complete</div>
+        <div class="amc-period">Annual Plan · Unlimited visits</div>
+        <div class="amc-desc">Full coverage for homes that want zero hassle.</div>
+        <ul class="amc-features">
+          <li>Unlimited AC, plumbing, electrical visits</li>
+          <li>2 × deep cleaning per year</li>
+          <li>Appliance repair included</li>
+          <li>24/7 emergency support</li>
+          <li>30% off renovation services</li>
+          <li>Dedicated relationship manager</li>
+        </ul>
+        <div class="amc-price">
+          <span class="amc-price-now">₹12,999</span>
+          <span class="amc-price-old">₹19,999</span>
+          <small>/year</small>
+        </div>
+        <button class="amc-btn">Subscribe Now</button>
+      </div>
+
+      <div class="amc-card reveal reveal-d3">
+        <div class="amc-icon">🏢</div>
+        <div class="amc-name">Corporate / Office</div>
+        <div class="amc-period">Annual · Custom-priced per office</div>
+        <div class="amc-desc">Designed for offices, retail spaces, and facility management.</div>
+        <ul class="amc-features">
+          <li>SLA-backed response times</li>
+          <li>Dedicated B2B account manager</li>
+          <li>Monthly preventive maintenance</li>
+          <li>GST-compliant invoicing</li>
+          <li>30-day credit terms available</li>
+          <li>Multi-location coverage</li>
+        </ul>
+        <div class="amc-price">
+          <span class="amc-price-now">Custom</span>
+          <small>quote</small>
+        </div>
+        <button class="amc-btn">Talk to Sales</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CORPORATE PORTAL ═══ -->
+<section id="corporate" class="std">
+  <div class="inner">
+    <div style="max-width:600px;" class="reveal">
+      <div class="section-label">B2B Portal</div>
+      <h2 class="section-title">Dedicated Portal for <strong>Corporate Clients</strong></h2>
+      <p class="section-sub">Login with your Company ID. Manage all bookings, approvals, billing, and team members from a single dashboard.</p>
+    </div>
+
+    <div class="corp-grid">
+      <div class="reveal">
+        <div class="corp-features">
+          <div class="corp-feat">
+            <span class="ic">🆔</span>
+            <h4>Company ID Login</h4>
+            <p>Secure SSO with company-issued credentials. No personal accounts needed.</p>
+          </div>
+          <div class="corp-feat">
+            <span class="ic">✅</span>
+            <h4>Approval Workflows</h4>
+            <p>Manager approval required before high-value orders are confirmed.</p>
+          </div>
+          <div class="corp-feat">
+            <span class="ic">📊</span>
+            <h4>Order Dashboard</h4>
+            <p>Real-time view of all open, active, and completed orders across teams.</p>
+          </div>
+          <div class="corp-feat">
+            <span class="ic">💰</span>
+            <h4>Centralized Billing</h4>
+            <p>Single GST invoice across all departments. 30-day credit terms available.</p>
+          </div>
+          <div class="corp-feat">
+            <span class="ic">👥</span>
+            <h4>Team Management</h4>
+            <p>Add/remove members, set permission levels, assign departments and budgets.</p>
+          </div>
+          <div class="corp-feat">
+            <span class="ic">📅</span>
+            <h4>AMC Plan Management</h4>
+            <p>View, renew, and track scheduled facility services from one place.</p>
+          </div>
+        </div>
+        <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+          <button class="btn-hero">Login to Corporate Portal →</button>
+          <button class="btn-ghost">Request a Demo</button>
+        </div>
+      </div>
+
+      <div class="corp-dash reveal reveal-d2">
+        <div class="corp-dash-head">
+          <div class="corp-dash-title">Acme Corp Dashboard</div>
+          <span class="corp-id">ID: CORP-2847</span>
+        </div>
+        <div class="corp-stats">
+          <div class="corp-stat">
+            <div class="corp-stat-val">47</div>
+            <div class="corp-stat-lbl">Active Orders</div>
+          </div>
+          <div class="corp-stat">
+            <div class="corp-stat-val">12</div>
+            <div class="corp-stat-lbl">Pending Approval</div>
+          </div>
+          <div class="corp-stat">
+            <div class="corp-stat-val">₹2.4L</div>
+            <div class="corp-stat-lbl">MTD Spend</div>
+          </div>
+        </div>
+        <div style="font-size: 11px; font-weight: 700; color: var(--txt-muted); margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase;">Recent Orders</div>
+        <div class="corp-order-list">
+          <div class="corp-order">
+            <div class="co-icon">❄️</div>
+            <div class="co-text">
+              <div class="co-title">AC Servicing — Floor 3</div>
+              <div class="co-meta">Submitted by Priya · 2 hrs ago</div>
+            </div>
+            <span class="co-status active">Active</span>
+          </div>
+          <div class="corp-order">
+            <div class="co-icon">🛋️</div>
+            <div class="co-text">
+              <div class="co-title">Reception Renovation</div>
+              <div class="co-meta">Awaiting Manager Approval</div>
+            </div>
+            <span class="co-status pending">Pending</span>
+          </div>
+          <div class="corp-order">
+            <div class="co-icon">🧹</div>
+            <div class="co-text">
+              <div class="co-title">Daily Deep Clean — AMC</div>
+              <div class="co-meta">Auto-scheduled · Recurring</div>
+            </div>
+            <span class="co-status approved">Approved</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ TRANSPARENCY & TRUST (Customer-facing benefits) ═══ -->
+<section id="trust" class="std" style="background: var(--cream);">
+  <div class="inner">
+    <div style="text-align:center; max-width:680px; margin:0 auto;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Why Customers Trust Us</div>
+      <h2 class="section-title">Transparent Pricing.<br><strong>Zero Surprises.</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;">Every order comes with a GST-compliant invoice, upfront pricing, and no hidden charges. What you see is what you pay.</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 48px;">
+      <div class="reveal" style="background:#fff; border-radius: var(--radius-lg); padding: 28px 22px; text-align:center; border:1px solid var(--mist);">
+        <div style="width:56px; height:56px; border-radius:14px; background:rgba(196,96,26,0.10); color:var(--sienna); display:grid; place-items:center; font-size:26px; margin:0 auto 16px;">💯</div>
+        <h4 style="font-size:15px; font-weight:700; margin-bottom:6px;">Upfront Pricing</h4>
+        <p style="font-size:12.5px; color:var(--txt-muted); line-height:1.5;">See exact prices before booking. No hidden fees, no surprise charges at the end.</p>
+      </div>
+      <div class="reveal reveal-d1" style="background:#fff; border-radius: var(--radius-lg); padding: 28px 22px; text-align:center; border:1px solid var(--mist);">
+        <div style="width:56px; height:56px; border-radius:14px; background:rgba(91,140,90,0.12); color:var(--success); display:grid; place-items:center; font-size:26px; margin:0 auto 16px;">📜</div>
+        <h4 style="font-size:15px; font-weight:700; margin-bottom:6px;">GST Invoice</h4>
+        <p style="font-size:12.5px; color:var(--txt-muted); line-height:1.5;">Every order gets a proper GST-compliant invoice — perfect for individual or corporate billing.</p>
+      </div>
+      <div class="reveal reveal-d2" style="background:#fff; border-radius: var(--radius-lg); padding: 28px 22px; text-align:center; border:1px solid var(--mist);">
+        <div style="width:56px; height:56px; border-radius:14px; background:rgba(232,166,80,0.15); color:#a87a3a; display:grid; place-items:center; font-size:26px; margin:0 auto 16px;">🛡️</div>
+        <h4 style="font-size:15px; font-weight:700; margin-bottom:6px;">Service Warranty</h4>
+        <p style="font-size:12.5px; color:var(--txt-muted); line-height:1.5;">30-day workmanship warranty on every service. Not satisfied? We'll redo it free.</p>
+      </div>
+      <div class="reveal reveal-d3" style="background:#fff; border-radius: var(--radius-lg); padding: 28px 22px; text-align:center; border:1px solid var(--mist);">
+        <div style="width:56px; height:56px; border-radius:14px; background:rgba(45,45,45,0.08); color:var(--charcoal); display:grid; place-items:center; font-size:26px; margin:0 auto 16px;">↩️</div>
+        <h4 style="font-size:15px; font-weight:700; margin-bottom:6px;">Easy Refunds</h4>
+        <p style="font-size:12.5px; color:var(--txt-muted); line-height:1.5;">Job not done? Cancelled by vendor? Full refund to wallet within 24 hours.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ VENDOR / EXPERT SUPPORT ═══ -->
+<section id="vendor" class="std">
+  <div class="inner">
+    <div style="max-width:600px;" class="reveal">
+      <div class="section-label">For Service Professionals</div>
+      <h2 class="section-title">Earn With <strong>Remont India</strong></h2>
+      <p class="section-sub">Join 8,000+ verified service partners earning steady income with guaranteed leads, transparent payouts, and full app support.</p>
+    </div>
+
+    <div class="vendor-card-grid">
+      <div class="vendor-card reveal">
+        <div class="vc-tag">Become a Service Partner</div>
+        <h3>Steady Income.<br>Verified Leads.<br>Zero Marketing Effort.</h3>
+        <p>Sign up in 5 minutes. We send you nearby, skill-matched jobs. You accept what you want. Payouts hit your wallet in 24 hours.</p>
+        <div class="vendor-features">
+          <div class="vf-item">Auto-assigned nearby jobs</div>
+          <div class="vf-item">Free skill training program</div>
+          <div class="vf-item">In-app wallet & earnings dashboard</div>
+          <div class="vf-item">VIP queue for top-rated pros</div>
+          <div class="vf-item">Onboarding & uniform support</div>
+          <div class="vf-item">Avg earnings ₹35K+/month</div>
+        </div>
+        <button class="btn-hero">Apply as Partner →</button>
+      </div>
+
+      <div class="expert-card reveal reveal-d2">
+        <div class="expert-tag">Unique Feature</div>
+        <h3>Expert Help During Any Job</h3>
+        <p>Stuck on a complex problem? Request an Expert via voice/video right from the partner app. Earn extra when you help others.</p>
+        <div class="expert-flow">
+          <div class="ef-step"><div class="n">1</div>Request expert support from inside the app</div>
+          <div class="ef-step"><div class="n">2</div>Expert joins via voice or video call</div>
+          <div class="ef-step"><div class="n">3</div>AI assists with image/video analysis</div>
+          <div class="ef-step"><div class="n">4</div>Expert earns a fixed fee on resolution</div>
+        </div>
+        <span class="expert-badge">🏆 Top experts earn ₹500+ per assist</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ CITIES ═══ -->
+<section id="cities" class="std">
+  <div class="inner">
+    <div style="text-align:center;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Now Serving</div>
+      <h2 class="section-title">Available in <strong>32+ Cities</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;">Multi-city, multi-language. Expanding globally soon.</p>
+    </div>
+    <div class="cities-grid">
+      <div class="city-card reveal"><div class="city-flag">🏙️</div><div class="city-name">Mumbai</div><div class="city-count">680+ pros</div></div>
+      <div class="city-card reveal reveal-d1"><div class="city-flag">🌆</div><div class="city-name">Delhi NCR</div><div class="city-count">820+ pros</div></div>
+      <div class="city-card reveal reveal-d2"><div class="city-flag">🏞️</div><div class="city-name">Bangalore</div><div class="city-count">540+ pros</div></div>
+      <div class="city-card reveal reveal-d3"><div class="city-flag">🏛️</div><div class="city-name">Hyderabad</div><div class="city-count">380+ pros</div></div>
+      <div class="city-card reveal reveal-d4"><div class="city-flag">🌅</div><div class="city-name">Pune</div><div class="city-count">320+ pros</div></div>
+      <div class="city-card reveal reveal-d4"><div class="city-flag">🏰</div><div class="city-name">Chennai</div><div class="city-count">290+ pros</div></div>
+      <div class="city-card reveal"><div class="city-flag">🌉</div><div class="city-name">Kolkata</div><div class="city-count">240+ pros</div></div>
+      <div class="city-card reveal reveal-d1"><div class="city-flag">🏞️</div><div class="city-name">Ahmedabad</div><div class="city-count">190+ pros</div></div>
+      <div class="city-card reveal reveal-d2"><div class="city-flag">🌃</div><div class="city-name">Jaipur</div><div class="city-count">160+ pros</div></div>
+      <div class="city-card reveal reveal-d3"><div class="city-flag">🏟️</div><div class="city-name">Lucknow</div><div class="city-count">130+ pros</div></div>
+      <div class="city-card reveal reveal-d4"><div class="city-flag">🌄</div><div class="city-name">Indore</div><div class="city-count">110+ pros</div></div>
+      <div class="city-card reveal reveal-d4"><div class="city-flag">➕</div><div class="city-name">22 More</div><div class="city-count">View all →</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FAQ ═══ -->
+<section id="faq" class="std">
+  <div class="inner">
+    <div style="text-align:center;" class="reveal">
+      <div class="section-label" style="justify-content:center;">Got Questions?</div>
+      <h2 class="section-title">Frequently Asked <strong>Questions</strong></h2>
+    </div>
+    <div class="faq-list">
+      <div class="faq-item open">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          How does AI chat booking actually work?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Just describe your problem in Hindi, English, or Hinglish — like "AC se thandi hawa nahi aati" or "tap leaking in bathroom". Our AI understands the problem, maps it to the right service, asks 2-3 quick questions (slot, address), and confirms booking — typically in under 60 seconds.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          How is the right professional selected for my job?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">We instantly find the nearest verified professional with the right skills and best rating for your specific job. Multiple top professionals are alerted at the same time, and the most qualified one available accepts within minutes.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Will I get a proper invoice?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Yes — every order gets a complete GST-compliant invoice with clear pricing. The exact amount you pay is shown upfront before booking, so there are zero surprises at the end. Perfect for personal records or corporate reimbursement.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Can I book a service via WhatsApp?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Yes! Just message us on WhatsApp Business — our team can book the entire service for you over chat. Same goes for phone calls — call us and we'll handle the booking on your behalf. Use any channel that's most comfortable for you.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Do you provide corporate or office services?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Yes — corporate clients get a dedicated B2B portal that includes a centralized order dashboard, manager approval flows, AMC management, consolidated GST billing, team access controls, and a dedicated account manager for facility maintenance contracts.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          How do I become a service partner / vendor?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Sign up online or via our Partner App. After background verification and a quick skill assessment, you'll go through free training. Then you'll start receiving nearby jobs with a full earnings dashboard, wallet, and access to our Expert Support feature.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Is my payment and data secure?
+          <span class="faq-arrow">+</span>
+        </button>
+        <div class="faq-a">Absolutely. We use secure OTP-based login, encrypted payments through trusted gateways (Razorpay), verified professionals, photo/video proof of work, and bank-grade data protection. Your information is never shared with third parties.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ APP CTA ═══ -->
+<section id="app-cta" class="std">
+  <div class="app-cta-grid">
+    <div class="app-cta-text reveal">
+      <div class="section-label">Mobile App · Android & iOS</div>
+      <h2 class="section-title">Book + Track + Pay<br><strong>From Your Pocket</strong></h2>
+      <p class="section-sub">Lightning-fast Flutter app with AI chat, live tracking, instant booking, and exclusive app prices.</p>
+      <div class="app-features-row">
+        <div class="app-feat-item">3-click booking flow</div>
+        <div class="app-feat-item">AI chat in any language</div>
+        <div class="app-feat-item">Live vendor GPS tracking</div>
+        <div class="app-feat-item">Wallet & cashbacks</div>
+        <div class="app-feat-item">Exclusive app prices</div>
+        <div class="app-feat-item">Push notifications</div>
+      </div>
+      <div class="app-btns">
+        <a href="#" class="app-store-btn">
+          <span class="store-icon">🍎</span>
+          <div>
+            <div class="app-store-lbl">Download on</div>
+            <div class="app-store-name">App Store</div>
+          </div>
+        </a>
+        <a href="#" class="app-store-btn">
+          <span class="store-icon">▶️</span>
+          <div>
+            <div class="app-store-lbl">Get it on</div>
+            <div class="app-store-name">Google Play</div>
+          </div>
+        </a>
+      </div>
+    </div>
+    <div class="app-phones reveal reveal-d2">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-status">
+            <div class="phone-notch"></div>
+          </div>
+          <div class="phone-greet">Good Morning, Priya 👋</div>
+          <div class="phone-h1">What's the issue today?</div>
+          <div class="phone-ai-box">
+            <div class="phone-ai-tag">🤖 ASK REMI AI</div>
+            <div class="phone-ai-text">"AC se thandi hawa nahi aati..."</div>
+          </div>
+          <div class="phone-cats">
+            <div class="phone-cat-card"><span class="icn">❄️</span>AC</div>
+            <div class="phone-cat-card"><span class="icn">🚿</span>Plumb</div>
+            <div class="phone-cat-card"><span class="icn">💡</span>Elec</div>
+            <div class="phone-cat-card"><span class="icn">🎨</span>Paint</div>
+          </div>
+          <div class="phone-sec-title">Hot Deals <span>See all</span></div>
+          <div class="phone-prods">
+            <div class="phone-prod">
+              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1620626011761-996317b8d101?w=200&q=80');"></div>
+              <div class="phone-prod-name">Mixer Tap</div>
+              <div class="phone-prod-price">₹2,499</div>
+            </div>
+            <div class="phone-prod">
+              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&q=80');"></div>
+              <div class="phone-prod-name">LED Light</div>
+              <div class="phone-prod-price">₹1,799</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="phone-2">
+        <div class="phone-screen">
+          <div class="p2-img"></div>
+          <div class="p2-body">
+            <p>● LIVE</p>
+            <h4>Rajesh is on the way</h4>
+            <div class="p2-track">
+              <span>Distance</span>
+              <span>2.4 km</span>
+            </div>
+            <div class="p2-track">
+              <span>ETA</span>
+              <span>12 min</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <div class="logo">
+        <div class="logo-mark"></div>
+        <div class="logo-text-wrap">
+          <span class="logo-text">REMONT</span>
+          <span class="logo-sub" style="color: var(--amber);">INDIA</span>
+        </div>
+      </div>
+      <p class="footer-desc">India's AI-powered multi-service marketplace. Handyman, interior, construction, AMC — booked via app, web, WhatsApp, AI chat, or call.</p>
+      <div class="footer-trust-row">
+        <div class="trust-badge">🛡️ Verified Pros</div>
+        <div class="trust-badge">🔒 Secure Payments</div>
+        <div class="trust-badge">📜 GST Compliant</div>
+      </div>
+      <div class="footer-social">
+        <a href="#" class="social-btn">in</a>
+        <a href="#" class="social-btn">ig</a>
+        <a href="#" class="social-btn">𝕏</a>
+        <a href="#" class="social-btn">▶</a>
+        <a href="#" class="social-btn">f</a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>Services</h4>
+      <div class="footer-links">
+        <a href="#">Handyman</a>
+        <a href="#">AC Service</a>
+        <a href="#">Plumbing</a>
+        <a href="#">Electrical</a>
+        <a href="#">Renovation</a>
+        <a href="#">Construction</a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>For Business</h4>
+      <div class="footer-links">
+        <a href="#corporate">Corporate Portal</a>
+        <a href="#">Facility Management</a>
+        <a href="#">B2B AMC Plans</a>
+        <a href="#vendor">Become a Partner</a>
+        <a href="#">Bulk Orders</a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>Booking</h4>
+      <div class="footer-links">
+        <a href="#">AI Chat Booking</a>
+        <a href="#">WhatsApp Bot</a>
+        <a href="tel:+919876543210">Call Center</a>
+        <a href="#">Mobile App</a>
+        <a href="#">Voice (Alexa)</a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>Company</h4>
+      <div class="footer-links">
+        <a href="#">About Us</a>
+        <a href="#">Contact</a>
+        <a href="#">Careers</a>
+        <a href="#">Blog</a>
+        <a href="#">Press</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Remont India Technologies Pvt. Ltd. · GSTIN: 27AABCT1234L1Z5</span>
+    <div>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+      <a href="#">Sitemap</a>
+      <a href="#">Refund Policy</a>
+    </div>
+  </div>
+</footer>
+
+<!-- ═══ CITY SELECTOR MODAL ═══ -->
+<div class="city-modal-backdrop" id="cityBackdrop" onclick="closeCityModal()"></div>
+<div class="city-modal" id="cityModal" role="dialog" aria-label="Select your city">
+  <div class="cm-head">
+    <div>
+      <h3>Select Your City</h3>
+      <p>Services and prices vary by location</p>
+    </div>
+    <button class="cm-close" onclick="closeCityModal()" aria-label="Close">×</button>
+  </div>
+  <div class="cm-search">
+    <input type="text" placeholder="Search for your city..." oninput="filterCities(this.value)" />
+  </div>
+  <div class="cm-cities" id="cmCities">
+    <div class="cm-section-label">Popular Cities</div>
+    <div class="cm-city-grid">
+      <div class="cm-city selected" data-city="Mumbai" onclick="selectCity('Mumbai', this)">
+        <span class="ic">🏙️</span>
+        <div class="nm">Mumbai</div>
+        <div class="ct">680+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Delhi NCR" onclick="selectCity('Delhi NCR', this)">
+        <span class="ic">🌆</span>
+        <div class="nm">Delhi NCR</div>
+        <div class="ct">820+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Bangalore" onclick="selectCity('Bangalore', this)">
+        <span class="ic">🏞️</span>
+        <div class="nm">Bangalore</div>
+        <div class="ct">540+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Hyderabad" onclick="selectCity('Hyderabad', this)">
+        <span class="ic">🏛️</span>
+        <div class="nm">Hyderabad</div>
+        <div class="ct">380+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Pune" onclick="selectCity('Pune', this)">
+        <span class="ic">🌅</span>
+        <div class="nm">Pune</div>
+        <div class="ct">320+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Chennai" onclick="selectCity('Chennai', this)">
+        <span class="ic">🏰</span>
+        <div class="nm">Chennai</div>
+        <div class="ct">290+ pros</div>
+      </div>
+    </div>
+    <div class="cm-section-label">Other Cities</div>
+    <div class="cm-city-grid">
+      <div class="cm-city" data-city="Kolkata" onclick="selectCity('Kolkata', this)">
+        <span class="ic">🌉</span>
+        <div class="nm">Kolkata</div>
+        <div class="ct">240+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Ahmedabad" onclick="selectCity('Ahmedabad', this)">
+        <span class="ic">🏞️</span>
+        <div class="nm">Ahmedabad</div>
+        <div class="ct">190+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Jaipur" onclick="selectCity('Jaipur', this)">
+        <span class="ic">🌃</span>
+        <div class="nm">Jaipur</div>
+        <div class="ct">160+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Lucknow" onclick="selectCity('Lucknow', this)">
+        <span class="ic">🏟️</span>
+        <div class="nm">Lucknow</div>
+        <div class="ct">130+ pros</div>
+      </div>
+      <div class="cm-city" data-city="Indore" onclick="selectCity('Indore', this)">
+        <span class="ic">🌄</span>
+        <div class="nm">Indore</div>
+        <div class="ct">110+ pros</div>
+      </div>
+      <div class="cm-city coming-soon" data-city="Chandigarh">
+        <span class="ic">🌇</span>
+        <div class="nm">Chandigarh</div>
+        <div class="ct">Launching soon</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ FLOATING AI + WHATSAPP BUTTONS ═══ -->
+<div class="floating-actions">
+  <button class="fab ai-chat" aria-label="AI Chat">
+    <div class="fab-pulse"></div>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:relative;z-index:1;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span class="fab-label">Chat with Remi AI</span>
+  </button>
+  <button class="fab whatsapp" aria-label="WhatsApp">
+    <div class="fab-pulse"></div>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="position:relative;z-index:1;"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+    <span class="fab-label">WhatsApp Booking</span>
+  </button>
+</div>
+
+<script>
+  // ═══ Service + Product Data ═══
+  const serviceData = {
+    ac: {
+      title: "AC Service & Repair",
+      subtitle: "Expert technicians, doorstep service",
+      subServices: [
+        { ic: "🧊", n: "AC Installation", p: "₹999", o: "₹1,499" },
+        { ic: "💨", n: "Gas Refill", p: "₹2,199", o: "₹2,999" },
+        { ic: "🧼", n: "Deep Cleaning", p: "₹599", o: "₹899" },
+        { ic: "🔧", n: "AC Repair", p: "₹399", o: "₹599" }
+      ],
+      productTitle: "Related Products",
+      productPillText: "Up to 40% off",
+      products: [
+        { img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "Daikin", name: "1.5 Ton 5-Star Split AC Inverter", rating: "4.5", count: "2,341", price: "34,990", was: "44,990", off: "22%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "V-Guard", name: "AC Voltage Stabilizer 4kVA", rating: "4.6", count: "1,890", price: "2,799", was: "3,999", off: "30%" },
+        { img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "Honeywell", name: "Smart WiFi AC Remote Control", rating: "4.3", count: "540", price: "1,499", was: "2,499", off: "40%" },
+        { img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "LG", name: "AC Air Filter Pack of 2", rating: "4.4", count: "1,120", price: "899", was: "1,299", off: "31%", badge: "New", badgeGreen: true }
+      ]
+    },
+    plumbing: {
+      title: "Plumbing Services",
+      subtitle: "Leak repair, fittings, full bathroom",
+      subServices: [
+        { ic: "🚿", n: "Tap/Leak Fix", p: "₹199", o: "₹399" },
+        { ic: "🚽", n: "Toilet Install", p: "₹1,499", o: "₹1,999" },
+        { ic: "🔧", n: "Pipe Replacement", p: "₹499", o: "₹799" },
+        { ic: "🛁", n: "Full Bathroom Reno", p: "₹65K+", o: "₹85K" }
+      ],
+      productTitle: "Related Plumbing Products",
+      productPillText: "Brand offers",
+      products: [
+        { img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Jaquar", name: "Premium Single-Lever Mixer Tap", rating: "4.7", count: "3,210", price: "2,499", was: "3,999", off: "37%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&q=80", brand: "Kohler", name: "Wall-Mounted Toilet Seat — White", rating: "4.6", count: "1,540", price: "8,999", was: "12,500", off: "28%" },
+        { img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Kajaria", name: "Marble-Finish Floor Tile (sqft)", rating: "4.5", count: "890", price: "89", was: "140", off: "36%" },
+        { img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Hindware", name: "Bathroom Accessories Set (5 pcs)", rating: "4.4", count: "720", price: "1,899", was: "2,999", off: "37%", badge: "Combo", badgeGreen: true }
+      ]
+    },
+    electrical: {
+      title: "Electrical Services",
+      subtitle: "Wiring, fittings, smart home",
+      subServices: [
+        { ic: "⚡", n: "Switch/Socket Fix", p: "₹199", o: "₹299" },
+        { ic: "💡", n: "Light Installation", p: "₹299", o: "₹399" },
+        { ic: "🔌", n: "Wiring & Conduit", p: "₹45/pt", o: "₹65" },
+        { ic: "🏠", n: "Smart Home Setup", p: "₹4,999+", o: "₹6,999" }
+      ],
+      productTitle: "Related Electrical Products",
+      productPillText: "Best price",
+      products: [
+        { img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Philips", name: "Smart LED Ceiling Light 18W", rating: "4.6", count: "3,820", price: "1,299", was: "1,899", off: "32%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Anchor", name: "Modular Switch & Socket Set", rating: "4.5", count: "2,140", price: "899", was: "1,499", off: "40%" },
+        { img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Wipro", name: "Smart WiFi Ceiling Fan with Light", rating: "4.4", count: "1,540", price: "5,499", was: "7,999", off: "31%" },
+        { img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Havells", name: "MCB Distribution Box 8-way", rating: "4.5", count: "890", price: "1,499", was: "2,299", off: "35%", badge: "New", badgeGreen: true }
+      ]
+    },
+    appliance: {
+      title: "Appliance Repair",
+      subtitle: "TV, fridge, washing machine, microwave",
+      subServices: [
+        { ic: "📺", n: "TV Repair", p: "₹399", o: "₹599" },
+        { ic: "🧊", n: "Fridge Repair", p: "₹499", o: "₹799" },
+        { ic: "🌀", n: "Washing Machine", p: "₹399", o: "₹599" },
+        { ic: "♨️", n: "Microwave/Oven", p: "₹399", o: "₹599" }
+      ],
+      productTitle: "Related Appliances",
+      productPillText: "EMI available",
+      products: [
+        { img: "https://images.unsplash.com/photo-1610792516775-01de03eae630?w=300&q=80", brand: "Samsung", name: "55\" 4K Smart UHD TV", rating: "4.6", count: "4,310", price: "44,990", was: "62,990", off: "29%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=300&q=80", brand: "LG", name: "260L Double Door Refrigerator", rating: "4.5", count: "2,140", price: "26,990", was: "34,990", off: "23%" },
+        { img: "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?w=300&q=80", brand: "Bosch", name: "7kg Front Load Washing Machine", rating: "4.7", count: "1,820", price: "32,499", was: "42,999", off: "24%" },
+        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "IFB", name: "25L Convection Microwave Oven", rating: "4.4", count: "1,540", price: "12,499", was: "16,999", off: "26%", badge: "New", badgeGreen: true }
+      ]
+    },
+    interior: {
+      title: "Interior Design",
+      subtitle: "Full home & room makeovers",
+      subServices: [
+        { ic: "🛋️", n: "Full Home Design", p: "₹2L+", o: "₹3L" },
+        { ic: "🛏️", n: "Bedroom Makeover", p: "₹85K+", o: "₹1.2L" },
+        { ic: "🪑", n: "Living Room", p: "₹95K+", o: "₹1.3L" },
+        { ic: "📐", n: "3D Visualization", p: "Free", o: "₹5K" }
+      ],
+      productTitle: "Related Interior Products",
+      productPillText: "Premium quality",
+      products: [
+        { img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Remont", name: "Premium Modular Wardrobe — 4 Door", rating: "4.7", count: "1,820", price: "38,990", was: "54,000", off: "28%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=300&q=80", brand: "Wakefit", name: "Queen Bed with Hydraulic Storage", rating: "4.6", count: "2,140", price: "24,999", was: "34,999", off: "29%" },
+        { img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Urban Ladder", name: "Engineered Wood TV Console", rating: "4.5", count: "1,540", price: "18,499", was: "26,999", off: "31%" },
+        { img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&q=80", brand: "Pepperfry", name: "Recliner Lounge Chair Leatherette", rating: "4.4", count: "890", price: "21,499", was: "29,999", off: "28%", badge: "New", badgeGreen: true }
+      ]
+    },
+    renovation: {
+      title: "Renovation",
+      subtitle: "Kitchen, bathroom, full home",
+      subServices: [
+        { ic: "🍳", n: "Modular Kitchen", p: "₹1.2L+", o: "₹1.5L" },
+        { ic: "🛁", n: "Bathroom Reno", p: "₹65K+", o: "₹85K" },
+        { ic: "🏠", n: "Full Home Reno", p: "₹4L+", o: "₹6L" },
+        { ic: "🎨", n: "Wall Paneling", p: "₹250/sqft", o: "₹350" }
+      ],
+      productTitle: "Related Renovation Products",
+      productPillText: "Save big",
+      products: [
+        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Faber", name: "Auto-Clean Kitchen Chimney 90cm", rating: "4.6", count: "2,890", price: "14,999", was: "22,000", off: "32%", badge: "Bestseller" },
+        { img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Carysil", name: "Stainless Steel Kitchen Sink", rating: "4.5", count: "1,210", price: "6,499", was: "9,999", off: "35%" },
+        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Glen", name: "4-Burner Glass Hob Auto Ignition", rating: "4.4", count: "1,540", price: "9,499", was: "13,990", off: "32%" },
+        { img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Sleek", name: "Soft-Close Modular Cabinet Set", rating: "4.7", count: "890", price: "32,990", was: "48,000", off: "31%", badge: "New", badgeGreen: true }
+      ]
+    },
+    construction: {
+      title: "Construction Services",
+      subtitle: "Full project flow, site visits, milestones",
+      subServices: [
+        { ic: "🏗️", n: "New Build (per sqft)", p: "₹1,500+", o: "₹2,000" },
+        { ic: "🧱", n: "Structural Work", p: "Custom", o: "—" },
+        { ic: "📋", n: "Site Visit/Quote", p: "Free", o: "₹2,000" },
+        { ic: "👷", n: "Project Mgmt", p: "5% of cost", o: "—" }
+      ],
+      productTitle: "Construction Materials",
+      productPillText: "Bulk rates",
+      products: [
+        { img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "UltraTech", name: "PPC Cement 50kg Bag", rating: "4.7", count: "3,400", price: "385", was: "450", off: "14%", badge: "Bulk" },
+        { img: "https://images.unsplash.com/photo-1581094488379-6c2d96a45e1d?w=300&q=80", brand: "TATA TISCON", name: "TMT Steel Bar Fe-500 (per tonne)", rating: "4.6", count: "1,890", price: "62,990", was: "68,000", off: "7%" },
+        { img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "JK Lakshmi", name: "Wall Putty 40kg Bag", rating: "4.5", count: "1,240", price: "1,099", was: "1,350", off: "19%" },
+        { img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Asian Paints", name: "Primer 20L Bucket", rating: "4.4", count: "890", price: "3,499", was: "4,500", off: "22%", badge: "New", badgeGreen: true }
+      ]
+    },
+    cleaning: {
+      title: "Home Cleaning",
+      subtitle: "Deep clean, sofa, pest control",
+      subServices: [
+        { ic: "🧽", n: "Deep Home Cleaning", p: "₹1,499", o: "₹2,499" },
+        { ic: "🛋️", n: "Sofa Shampooing", p: "₹599", o: "₹899" },
+        { ic: "🐛", n: "Pest Control", p: "₹799", o: "₹1,299" },
+        { ic: "🪟", n: "Glass & Facade", p: "₹999", o: "₹1,599" }
+      ],
+      productTitle: "Related Cleaning Products",
+      productPillText: "Stock up",
+      products: [
+        { img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Dyson", name: "V11 Cordless Stick Vacuum Cleaner", rating: "4.8", count: "1,290", price: "44,999", was: "54,990", off: "18%", badge: "Premium" },
+        { img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Eureka Forbes", name: "Robotic Floor Cleaner Smart", rating: "4.5", count: "890", price: "18,499", was: "24,999", off: "26%" },
+        { img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Lifebuoy", name: "Surface Cleaner Disinfectant 1.5L", rating: "4.4", count: "3,210", price: "299", was: "450", off: "33%" },
+        { img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Scotch-Brite", name: "Premium Microfiber Mop Bucket Set", rating: "4.5", count: "2,140", price: "1,499", was: "2,299", off: "35%", badge: "Combo", badgeGreen: true }
+      ]
+    }
+  };
+
+  function renderService(key) {
+    const d = serviceData[key];
+    if (!d) return;
+    const html = `
+      <div class="panel-head">
+        <div>
+          <h3>${d.title}</h3>
+          <p>${d.subtitle}</p>
+        </div>
+        <div class="panel-head-right">
+          <span class="panel-pill">⭐ 4.8 / 5.0</span>
+          <span class="panel-pill green">3-Click Book</span>
+        </div>
+      </div>
+      <div class="sub-row-title">Choose a sub-service <span>Starting prices · Final via vendor</span></div>
+      <div class="sub-svc-grid">
+        ${d.subServices.map(s => `
+          <div class="sub-svc-card">
+            <span class="icn">${s.ic}</span>
+            <div class="nm">${s.n}</div>
+            <div class="pr">${s.o !== '—' ? `<small>${s.o}</small>` : ''}${s.p}</div>
+            <span class="three-click">⚡ 3-Click</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="panel-promo">
+        <div class="pp-text">
+          <div class="pp-tag">Bundle Offer</div>
+          <div class="pp-title">Book Service + Buy Product</div>
+          <div class="pp-sub">Save extra 10% when you book this service with any related product below.</div>
+        </div>
+        <button class="pp-btn">Claim Bundle →</button>
+      </div>
+      <div class="product-row-title">
+        ${d.productTitle}
+        <span class="pill">${d.productPillText}</span>
+        <span class="view-all">View All <span>→</span></span>
+      </div>
+      <div class="product-grid">
+        ${d.products.map(p => `
+          <div class="product-card">
+            <div class="product-img" style="background-image:url('${p.img}')">
+              ${p.badge ? `<div class="product-badge${p.badgeGreen ? ' green' : ''}">${p.badge}</div>` : ''}
+              <div class="product-fav">♡</div>
+            </div>
+            <div class="product-body">
+              <div class="product-brand">${p.brand}</div>
+              <div class="product-name">${p.name}</div>
+              <div>
+                <span class="product-rating">${p.rating} ★</span>
+                <span class="product-rating-count">(${p.count})</span>
+              </div>
+              <div class="product-price">
+                <span class="now">₹${p.price}</span>
+                <span class="was">₹${p.was}</span>
+                <span class="off">${p.off} off</span>
+              </div>
+              <button class="product-cta">Add to Cart</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    document.getElementById('displayPanel').innerHTML = html;
+  }
+
+  function switchService(el) {
+    document.querySelectorAll('.svc-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    renderService(el.dataset.svc);
+    if (window.innerWidth < 768) {
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }
+
+  renderService('ac');
+
+  // ═══ Slider ═══
+  let current = 0, total = 3, timer;
+  const slidesEl = document.getElementById('slides');
+  const dots = document.querySelectorAll('.dot');
+  function goSlide(n) {
+    document.getElementById('slide-' + current).classList.remove('active');
+    current = (n + total) % total;
+    document.getElementById('slide-' + current).classList.add('active');
+    slidesEl.style.transform = `translateX(-${current * 33.333}%)`;
+    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    clearInterval(timer); timer = setInterval(() => goSlide(current + 1), 6500);
+  }
+  function nextSlide() { goSlide(current + 1); }
+  function prevSlide() { goSlide(current - 1); }
+  timer = setInterval(() => goSlide(current + 1), 6500);
+
+  window.addEventListener('scroll', () => {
+    document.getElementById('header').classList.toggle('scrolled', window.scrollY > 30);
+  });
+
+  function toggleMenu() { document.getElementById('mobileNav').classList.toggle('open'); }
+
+  function toggleFaq(btn) {
+    const item = btn.closest('.faq-item');
+    const wasOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+    if (!wasOpen) item.classList.add('open');
+  }
+
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CITY SELECTOR + CITY-WISE SERVICE AVAILABILITY
+  // ─────────────────────────────────────────────────────────────────
+  // Each city has its own list of active services. In production this
+  // data comes from the backend API (/api/cities/:name/services).
+  // For now: hard-coded map. UI uses this to grey-out unavailable
+  // services + show "Available in your city" badges on Premium cards.
+  // ═══════════════════════════════════════════════════════════════════
+  const CITY_SERVICES = {
+    'Mumbai':    ['ac','plumbing','electrical','appliance','interior','renovation','construction','cleaning'],
+    'Delhi NCR': ['ac','plumbing','electrical','appliance','interior','renovation','construction','cleaning'],
+    'Bangalore': ['ac','plumbing','electrical','appliance','interior','renovation','construction','cleaning'],
+    'Hyderabad': ['ac','plumbing','electrical','appliance','interior','renovation','cleaning'],          // no construction
+    'Pune':      ['ac','plumbing','electrical','appliance','interior','renovation','cleaning'],          // no construction
+    'Chennai':   ['ac','plumbing','electrical','appliance','interior','cleaning'],                       // no renovation/construction
+    'Kolkata':   ['ac','plumbing','electrical','appliance','cleaning'],
+    'Ahmedabad': ['ac','plumbing','electrical','appliance','renovation','cleaning'],
+    'Jaipur':    ['ac','plumbing','electrical','appliance','cleaning'],
+    'Lucknow':   ['ac','plumbing','electrical','cleaning'],
+    'Indore':    ['ac','plumbing','electrical','cleaning'],
+  };
+
+  let currentCity = localStorage.getItem('remont_city') || 'Mumbai';
+
+  function openCityModal() {
+    document.getElementById('cityBackdrop').classList.add('open');
+    document.getElementById('cityModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeCityModal() {
+    document.getElementById('cityBackdrop').classList.remove('open');
+    document.getElementById('cityModal').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function selectCity(cityName, el) {
+    // Update UI
+    document.querySelectorAll('.cm-city').forEach(c => c.classList.remove('selected'));
+    if (el) el.classList.add('selected');
+    document.getElementById('currentCity').textContent = cityName;
+    currentCity = cityName;
+    localStorage.setItem('remont_city', cityName);
+
+    // Apply city-wise availability across the page
+    applyCityFilter();
+    closeCityModal();
+  }
+  function filterCities(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('.cm-city').forEach(c => {
+      const name = (c.dataset.city || '').toLowerCase();
+      c.style.display = !q || name.includes(q) ? '' : 'none';
+    });
+  }
+
+  /**
+   * Apply city-wise service availability:
+   *   - Grey-out services not available in current city
+   *   - Update premium cards' availability badges
+   *   - Update category nav (cosmetic only — services panel is the source of truth)
+   */
+  function applyCityFilter() {
+    const available = CITY_SERVICES[currentCity] || [];
+
+    // Update services panel
+    document.querySelectorAll('.svc-item[data-svc]').forEach(item => {
+      const svc = item.dataset.svc;
+      const isAvailable = available.includes(svc);
+      item.classList.toggle('unavailable', !isAvailable);
+    });
+
+    // Update premium card availability badges
+    const premiumMap = { interior: 'interior', renovation: 'renovation', construction: 'construction' };
+    document.querySelectorAll('.premium-card').forEach(card => {
+      const type = Object.keys(premiumMap).find(k => card.classList.contains(k));
+      if (!type) return;
+      const badge = card.querySelector('.premium-availability');
+      if (!badge) return;
+      if (available.includes(premiumMap[type])) {
+        badge.style.background = 'rgba(91,140,90,0.25)';
+        badge.style.color = '#a8d4a7';
+        badge.innerHTML = '';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:#5B8C5A;display:inline-block;margin-right:5px;';
+        badge.appendChild(dot);
+        badge.appendChild(document.createTextNode('Available in ' + currentCity));
+      } else {
+        badge.style.background = 'rgba(255,255,255,0.08)';
+        badge.style.color = 'rgba(255,255,255,0.6)';
+        badge.innerHTML = '';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:#888;display:inline-block;margin-right:5px;';
+        badge.appendChild(dot);
+        badge.appendChild(document.createTextNode('Not in ' + currentCity + ' yet'));
+      }
+    });
+
+    // If currently displayed service is not available, switch to first available
+    const activeSvc = document.querySelector('.svc-item.active');
+    if (activeSvc && !available.includes(activeSvc.dataset.svc)) {
+      const firstAvail = available.find(s => document.querySelector(`.svc-item[data-svc="${s}"]`));
+      if (firstAvail) {
+        const target = document.querySelector(`.svc-item[data-svc="${firstAvail}"]`);
+        if (target) switchService(target);
+      }
+    }
+  }
+
+  // Mark the currently saved city as selected on load
+  document.querySelectorAll('.cm-city').forEach(c => {
+    if (c.dataset.city === currentCity) c.classList.add('selected');
+    else c.classList.remove('selected');
+  });
+  document.getElementById('currentCity').textContent = currentCity;
+  applyCityFilter();
+
+  // ═══════════════════════════════════════════════════════════════════
+  // HEADER SEARCH SCOPE TOGGLE: Services ↔ Products
+  // Lets customer browse directly for products from the header search.
+  // ═══════════════════════════════════════════════════════════════════
+  function toggleSearchScope(el) {
+    const scope = document.getElementById('searchScope');
+    const input = document.getElementById('headerSearchInput');
+    if (scope.textContent === 'All Services') {
+      scope.textContent = 'All Products';
+      input.placeholder = 'Search products — "Daikin AC", "modular kitchen"...';
+    } else {
+      scope.textContent = 'All Services';
+      input.placeholder = 'Try "AC not cooling" or "tap leaking"...';
+    }
+  }
+</script>
+</body>
+</html>

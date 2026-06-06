@@ -1,0 +1,999 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// REMONT INDIA — DATABASE SCHEMA
+// 30+ models covering: Identity, Catalog, Vendors, Orders, CRM, AMC,
+// AI Sessions, Invoices, Payments, Corporate, Notifications.
+// ═══════════════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ─────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  CUSTOMER
+  SERVICE_VENDOR
+  PRODUCT_VENDOR
+  DELIVERY_PARTNER
+  CORPORATE_USER
+  CRM_AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum Language {
+  EN
+  HI
+  MIXED
+  TA
+  TE
+  KN
+  ML
+  MR
+  BN
+  GU
+}
+
+enum OrderType {
+  SERVICE
+  PRODUCT
+  BUNDLE
+  AMC_SUBSCRIPTION
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  VENDOR_ASSIGNED
+  VENDOR_EN_ROUTE
+  STARTED
+  IN_PROGRESS
+  EXTRA_WORK_ADDED
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIAL
+  FAILED
+  REFUNDED
+}
+
+enum BookingChannel {
+  WEBSITE
+  MOBILE_APP
+  AI_CHAT
+  WHATSAPP
+  PHONE_CALL
+  CRM_AGENT
+}
+
+enum VendorStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+enum DeliveryPartnerType {
+  COURIER
+  TECHNICIAN
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+}
+
+enum MembershipTier {
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+enum CouponType {
+  PERCENT
+  FLAT
+  FREE_DELIVERY
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum TransactionReason {
+  ORDER_PAYMENT
+  REFUND
+  CASHBACK
+  REFERRAL_BONUS
+  WALLET_TOPUP
+  WITHDRAWAL
+}
+
+enum WhatsappMessageType {
+  OTP
+  ORDER_ASSIGNED
+  ORDER_UPDATE
+  PAYMENT_RECEIVED
+  EXTRA_WORK_APPROVAL
+  EARNINGS_NUDGE
+  REVIEW_REQUEST
+  CUSTOM
+}
+
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+enum CorporateRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+// ─── CRM ENUMS ───
+enum LeadSource {
+  WEBSITE
+  AI_CHAT
+  WHATSAPP
+  PHONE_CALL
+  REFERRAL
+  ADS
+  ORGANIC
+  CRM_OUTBOUND
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL_SENT
+  NEGOTIATION
+  CONVERTED
+  LOST
+  ON_HOLD
+}
+
+// ─── AMC ENUMS ───
+enum AmcPlanType {
+  HOME_ESSENTIALS
+  HOME_COMPLETE
+  CORPORATE
+  CUSTOM
+}
+
+enum AmcStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  CANCELLED
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IDENTITY & ACCESS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model User {
+  id              String    @id @default(cuid())
+  phone           String    @unique
+  email           String?   @unique
+  name            String
+  avatarUrl       String?
+  role            UserRole  @default(CUSTOMER)
+  language        Language  @default(EN)
+  isVerified      Boolean   @default(false)
+  isBlocked       Boolean   @default(false)
+  otpCode         String?
+  otpExpiresAt    DateTime?
+  walletBalance   Decimal   @default(0) @db.Decimal(10, 2)
+  referralCode    String?   @unique
+  referredById    String?
+  cityId          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+
+  addresses           Address[]
+  membership          UserMembership?
+  orders              Order[]
+  walletTransactions  WalletTransaction[]
+  reviews             Review[]
+  notifications       Notification[]
+  serviceVendor       ServiceVendor?
+  productVendor       ProductVendor?
+  deliveryPartner     DeliveryPartner?
+  corporateMembership CorporateMember?
+  aiSessions          AiSession[]
+  city                City?              @relation(fields: [cityId], references: [id])
+  leadsAssigned       Lead[]             @relation("LeadAgent")
+  leadsCreated        Lead[]             @relation("LeadCustomer")
+  crmActivities       CrmActivity[]
+  amcSubscriptions    AmcSubscription[]
+
+  @@index([phone])
+  @@index([role])
+  @@index([cityId])
+}
+
+model Address {
+  id           String   @id @default(cuid())
+  userId       String
+  label        String
+  fullAddress  String
+  city         String
+  state        String
+  pincode      String
+  latitude     Float
+  longitude    Float
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CITY (master) — drives city-wise availability & pricing
+// ═══════════════════════════════════════════════════════════════════════════
+
+model City {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  state         String
+  latitude      Float
+  longitude     Float
+  pincodes      String[]
+  isActive      Boolean  @default(true)
+  activeVendors Int      @default(0)
+  launchDate    DateTime?
+
+  // Which service categories are active in this city
+  activeServiceKeys String[]
+
+  // City-wise multiplier on base prices (0.8 = 20% cheaper, 1.2 = 20% costlier)
+  priceMultiplier   Decimal @default(1.0) @db.Decimal(4, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users    User[]
+  services CityService[]
+  products CityProduct[]
+}
+
+// City-wise service pricing & availability override
+model CityService {
+  id               String  @id @default(cuid())
+  cityId           String
+  serviceId        String
+  isActive         Boolean @default(true)
+  customPrice      Decimal? @db.Decimal(10, 2)
+  customDiscountPct Int    @default(0)
+
+  city    City    @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, serviceId])
+  @@index([cityId, isActive])
+}
+
+// City-wise product availability
+model CityProduct {
+  id        String  @id @default(cuid())
+  cityId    String
+  productId String
+  isActive  Boolean @default(true)
+  stock     Int     @default(0)
+  customPrice Decimal? @db.Decimal(10, 2)
+
+  city    City    @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cityId, productId])
+  @@index([cityId, isActive])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICE CATALOG
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ServiceCategory {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  name        String
+  icon        String
+  description String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+  isPremium   Boolean @default(false)
+
+  services Service[]
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  categoryId      String
+  name            String
+  slug            String   @unique
+  description     String?
+  basePrice       Decimal  @db.Decimal(10, 2)
+  originalPrice   Decimal? @db.Decimal(10, 2)
+  durationMinutes Int      @default(60)
+  requiredSkills  String[]
+  imageUrl        String?
+  isActive        Boolean  @default(true)
+  isPopular       Boolean  @default(false)
+  isPremium       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category     ServiceCategory @relation(fields: [categoryId], references: [id])
+  orders       Order[]
+  cityServices CityService[]
+  reviews      Review[]
+
+  @@index([categoryId])
+  @@index([isActive, isPopular])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRODUCT CATALOG
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ProductCategory {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  name        String
+  icon        String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+
+  products Product[]
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  vendorId        String
+  categoryId      String
+  name            String
+  slug            String   @unique
+  sku             String   @unique
+  brand           String?
+  description     String?
+  aiGeneratedDesc String?
+  price           Decimal  @db.Decimal(10, 2)
+  mrp             Decimal? @db.Decimal(10, 2)
+  stock           Int      @default(0)
+  images          String[]
+  aiEnhancedImgs  String[]
+  specifications  Json?
+  isActive        Boolean  @default(true)
+  views           Int      @default(0)
+  rating          Float    @default(0)
+  reviewCount     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  vendor       ProductVendor    @relation(fields: [vendorId], references: [id])
+  category     ProductCategory  @relation(fields: [categoryId], references: [id])
+  orderItems   OrderItem[]
+  cityProducts CityProduct[]
+  reviews      Review[]
+  inventory    IssuedInventory[]
+
+  @@index([vendorId])
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VENDORS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ServiceVendor {
+  id                  String       @id @default(cuid())
+  userId              String       @unique
+  fullName            String
+  businessName        String?
+  skills              String[]
+  serviceRadius       Int          @default(10)
+  baseCity            String
+  status              VendorStatus @default(PENDING_VERIFICATION)
+  isOnline            Boolean      @default(false)
+  isVipPro            Boolean      @default(false)
+  preferredLanguage   Language     @default(EN)
+  currentLatitude     Float?
+  currentLongitude    Float?
+  lastLocationUpdate  DateTime?
+  rating              Float        @default(0)
+  completedJobs       Int          @default(0)
+  totalEarnings       Decimal      @default(0) @db.Decimal(12, 2)
+  pendingPayout       Decimal      @default(0) @db.Decimal(12, 2)
+  createdAt           DateTime     @default(now())
+
+  user             User              @relation(fields: [userId], references: [id])
+  documents        VendorDocument[]
+  orders           Order[]
+  issuedInventory  IssuedInventory[]
+  reviews          Review[]
+  extraWorks       ExtraWorkItem[]
+
+  @@index([status, isOnline])
+  @@index([baseCity])
+}
+
+model VendorDocument {
+  id         String   @id @default(cuid())
+  vendorId   String
+  type       String
+  url        String
+  verified   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+}
+
+model ProductVendor {
+  id           String       @id @default(cuid())
+  userId       String       @unique
+  businessName String
+  gstNumber    String?
+  status       VendorStatus @default(PENDING_VERIFICATION)
+  rating       Float        @default(0)
+  createdAt    DateTime     @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  products Product[]
+}
+
+model IssuedInventory {
+  id           String    @id @default(cuid())
+  vendorId     String
+  productId    String
+  quantity     Int
+  issuedAt     DateTime  @default(now())
+  returnedAt   DateTime?
+
+  vendor  ServiceVendor @relation(fields: [vendorId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DELIVERY
+// ═══════════════════════════════════════════════════════════════════════════
+
+model DeliveryPartner {
+  id                  String              @id @default(cuid())
+  userId              String              @unique
+  type                DeliveryPartnerType
+  vehicleType         String?
+  vehicleNumber       String?
+  baseCity            String
+  isAvailable         Boolean             @default(true)
+  status              VendorStatus        @default(PENDING_VERIFICATION)
+  currentLatitude     Float?
+  currentLongitude    Float?
+  lastLocationUpdate  DateTime?
+  totalDeliveries     Int                 @default(0)
+  rating              Float                @default(0)
+
+  user       User       @relation(fields: [userId], references: [id])
+  deliveries Delivery[]
+}
+
+model Delivery {
+  id              String         @id @default(cuid())
+  partnerId       String
+  pickupAddress   String
+  pickupLat       Float
+  pickupLng       Float
+  dropAddress     String
+  dropLat         Float
+  dropLng         Float
+  status          DeliveryStatus
+  trackingNumber  String         @unique
+  receiverOtp     String?
+  proofPhotoUrl   String?
+  earningAmount   Decimal        @db.Decimal(10, 2)
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime       @default(now())
+
+  partner DeliveryPartner @relation(fields: [partnerId], references: [id])
+  orders  Order[]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ORDERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Order {
+  id                  String         @id @default(cuid())
+  orderNumber         String         @unique
+  customerId          String
+  vendorId            String?
+  serviceId           String?
+  addressId           String?
+  deliveryId          String?
+  amcSubscriptionId   String?
+  type                OrderType
+  channel             BookingChannel @default(WEBSITE)
+  status              OrderStatus    @default(PENDING_PAYMENT)
+  paymentStatus       PaymentStatus  @default(PENDING)
+  paymentId           String?
+
+  // Pricing breakdown
+  serviceAmount       Decimal  @default(0) @db.Decimal(10, 2)
+  productsAmount      Decimal  @default(0) @db.Decimal(10, 2)
+  extraWorkAmount     Decimal  @default(0) @db.Decimal(10, 2)
+  subtotal            Decimal  @default(0) @db.Decimal(10, 2)
+  couponCode          String?
+  couponDiscount      Decimal  @default(0) @db.Decimal(10, 2)
+  membershipDiscount  Decimal  @default(0) @db.Decimal(10, 2)
+  walletUsed          Decimal  @default(0) @db.Decimal(10, 2)
+  gstAmount           Decimal  @default(0) @db.Decimal(10, 2)
+  totalAmount         Decimal  @default(0) @db.Decimal(10, 2)
+  remontCommission    Decimal  @default(0) @db.Decimal(10, 2)
+  vendorPayout        Decimal  @default(0) @db.Decimal(10, 2)
+
+  // Job lifecycle
+  slotStart           DateTime?
+  slotEnd             DateTime?
+  startOtp            String?
+  startOtpVerified    Boolean  @default(false)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+  cancelReason        String?
+
+  // Proof artifacts
+  photosBefore        String[]
+  photosAfter         String[]
+  videoUrl            String?
+
+  // CRM/AI tracking
+  aiSessionId         String?
+  leadId              String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  customer        User             @relation(fields: [customerId], references: [id])
+  vendor          ServiceVendor?   @relation(fields: [vendorId], references: [id])
+  service         Service?         @relation(fields: [serviceId], references: [id])
+  address         Address?         @relation(fields: [addressId], references: [id])
+  delivery        Delivery?        @relation(fields: [deliveryId], references: [id])
+  amcSubscription AmcSubscription? @relation(fields: [amcSubscriptionId], references: [id])
+  items           OrderItem[]
+  extraWorkItems  ExtraWorkItem[]
+  invoice         Invoice?
+  reviews         Review[]
+  lead            Lead?            @relation(fields: [leadId], references: [id])
+
+  @@index([customerId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(10, 2)
+  totalPrice Decimal @db.Decimal(10, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model ExtraWorkItem {
+  id                String   @id @default(cuid())
+  orderId           String
+  description       String
+  amount            Decimal  @db.Decimal(10, 2)
+  addedBy           String
+  customerApproved  Boolean  @default(false)
+  approvedAt        DateTime?
+  createdAt         DateTime @default(now())
+
+  order  Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendor ServiceVendor @relation(fields: [addedBy], references: [id])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVOICES & PAYMENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Invoice {
+  id                  String   @id @default(cuid())
+  invoiceNumber       String   @unique
+  orderId             String   @unique
+
+  // Page 1 (Customer)
+  customerSubtotal    Decimal  @db.Decimal(10, 2)
+  customerCgst        Decimal  @db.Decimal(10, 2)
+  customerSgst        Decimal  @db.Decimal(10, 2)
+  customerTotal       Decimal  @db.Decimal(10, 2)
+
+  // Page 2 (Vendor)
+  vendorLabor         Decimal  @db.Decimal(10, 2)
+  vendorMaterial      Decimal  @db.Decimal(10, 2)
+  vendorCgst          Decimal  @db.Decimal(10, 2)
+  vendorSgst          Decimal  @db.Decimal(10, 2)
+  vendorTotal         Decimal  @db.Decimal(10, 2)
+
+  // Page 3 (Remont)
+  platformCommission  Decimal  @db.Decimal(10, 2)
+  bookingFee          Decimal  @db.Decimal(10, 2)
+  remontCgst          Decimal  @db.Decimal(10, 2)
+  remontSgst          Decimal  @db.Decimal(10, 2)
+  remontTotal         Decimal  @db.Decimal(10, 2)
+
+  pdfUrlPage1         String?
+  pdfUrlPage2         String?
+  pdfUrlPage3         String?
+  pdfUrlCombined      String?
+  generatedAt         DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+model PaymentTransaction {
+  id                String        @id @default(cuid())
+  orderId           String?
+  amcSubscriptionId String?
+  userId            String
+  amount            Decimal       @db.Decimal(10, 2)
+  status            PaymentStatus
+  gateway           String        @default("RAZORPAY")
+  gatewayPaymentId  String?
+  gatewayOrderId    String?
+  gatewaySignature  String?
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+
+  @@index([userId])
+  @@index([orderId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WALLET, COUPONS, MEMBERSHIPS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WalletTransaction {
+  id           String            @id @default(cuid())
+  userId       String
+  type         TransactionType
+  reason       TransactionReason
+  amount       Decimal           @db.Decimal(10, 2)
+  balanceAfter Decimal           @db.Decimal(10, 2)
+  orderId      String?
+  notes        String?
+  createdAt    DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model MembershipPlan {
+  id                String         @id @default(cuid())
+  tier              MembershipTier @unique
+  name              String
+  description       String?
+  priceMonthly      Decimal        @db.Decimal(10, 2)
+  priceYearly       Decimal        @db.Decimal(10, 2)
+  discountPercent   Int            @default(0)
+  freeServicesCount Int            @default(0)
+  prioritySupport   Boolean        @default(false)
+  freeDelivery      Boolean        @default(false)
+  exclusiveDeals    Boolean        @default(false)
+  benefitsJson      Json?
+  isActive          Boolean        @default(true)
+
+  memberships UserMembership[]
+}
+
+model UserMembership {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  planId            String
+  startDate         DateTime @default(now())
+  endDate           DateTime
+  isActive          Boolean  @default(true)
+  freeServicesUsed  Int      @default(0)
+  amountPaid        Decimal  @db.Decimal(10, 2)
+  paymentId         String?
+
+  user User           @relation(fields: [userId], references: [id])
+  plan MembershipPlan @relation(fields: [planId], references: [id])
+}
+
+model Coupon {
+  id                 String     @id @default(cuid())
+  code               String     @unique
+  type               CouponType
+  discountPercent    Int?
+  discountAmount     Decimal?   @db.Decimal(10, 2)
+  maxDiscount        Decimal?   @db.Decimal(10, 2)
+  minOrderAmount     Decimal?   @db.Decimal(10, 2)
+  validFrom          DateTime   @default(now())
+  validTill          DateTime
+  totalUsageLimit    Int?
+  perUserLimit       Int        @default(1)
+  usedCount          Int        @default(0)
+  applicableServices String[]
+  applicableCities   String[]
+  source             String?
+  isActive           Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+
+  usages CouponUsage[]
+}
+
+model CouponUsage {
+  id              String   @id @default(cuid())
+  couponId        String
+  userId          String
+  orderId         String
+  discountApplied Decimal  @db.Decimal(10, 2)
+  usedAt          DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+
+  @@index([couponId, userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CORPORATE B2B
+// ═══════════════════════════════════════════════════════════════════════════
+
+model CorporateAccount {
+  id            String   @id @default(cuid())
+  companyCode   String   @unique
+  companyName   String
+  gstNumber     String?
+  billingEmail  String
+  creditLimit   Decimal  @default(0) @db.Decimal(12, 2)
+  creditUsed    Decimal  @default(0) @db.Decimal(12, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  members CorporateMember[]
+}
+
+model CorporateMember {
+  id          String        @id @default(cuid())
+  accountId   String
+  userId      String        @unique
+  role        CorporateRole @default(EMPLOYEE)
+  department  String?
+  createdAt   DateTime      @default(now())
+
+  account CorporateAccount @relation(fields: [accountId], references: [id])
+  user    User             @relation(fields: [userId], references: [id])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEWS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Review {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String
+  vendorId  String?
+  serviceId String?
+  productId String?
+  rating    Int
+  comment   String?
+  photos    String[]
+  createdAt DateTime @default(now())
+
+  order   Order          @relation(fields: [orderId], references: [id])
+  user    User           @relation(fields: [userId], references: [id])
+  vendor  ServiceVendor? @relation(fields: [vendorId], references: [id])
+  service Service?       @relation(fields: [serviceId], references: [id])
+  product Product?       @relation(fields: [productId], references: [id])
+
+  @@index([vendorId])
+  @@index([productId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI AGENT SESSIONS (Inbuilt — ready for LLM swap)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AiSession {
+  id                  String   @id @default(cuid())
+  userId              String?
+  channel             BookingChannel
+  messages            Json     @default("[]")
+  resolvedIntent      String?
+  languageDetected    Language?
+  convertedToBooking  Boolean  @default(false)
+  resultOrderId       String?
+  resultLeadId        String?
+  createdAt           DateTime @default(now())
+  endedAt             DateTime?
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM MODULE — Leads, Funnel, Activities
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Lead {
+  id                  String     @id @default(cuid())
+  // Customer details (may not be a registered user yet)
+  customerName        String
+  customerPhone       String
+  customerEmail       String?
+  customerUserId      String?    // linked once converted to registered user
+  cityName            String?
+
+  // Lead source & status
+  source              LeadSource
+  status              LeadStatus @default(NEW)
+  serviceInterested   String?
+  estimatedValue      Decimal?   @db.Decimal(10, 2)
+
+  // Tracking
+  assignedAgentId     String?
+  notes               String?
+  lastContactedAt     DateTime?
+  nextFollowUpAt      DateTime?
+  convertedAt         DateTime?
+  convertedOrderId    String?
+  lostReason          String?
+
+  // Source tracking
+  aiSessionId         String?
+  utmSource           String?
+  utmCampaign         String?
+  utmMedium           String?
+
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  customer    User?         @relation("LeadCustomer", fields: [customerUserId], references: [id])
+  agent       User?         @relation("LeadAgent", fields: [assignedAgentId], references: [id])
+  activities  CrmActivity[]
+  orders      Order[]
+
+  @@index([status])
+  @@index([assignedAgentId])
+  @@index([customerPhone])
+  @@index([createdAt])
+}
+
+model CrmActivity {
+  id          String   @id @default(cuid())
+  leadId      String
+  agentId     String
+  type        String   // CALL, WHATSAPP, EMAIL, MEETING, NOTE
+  notes       String
+  outcome     String?
+  nextAction  String?
+  scheduledAt DateTime?
+  createdAt   DateTime @default(now())
+
+  lead  Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  agent User @relation(fields: [agentId], references: [id])
+
+  @@index([leadId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AMC MODULE — Annual Maintenance Contracts
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AmcPlan {
+  id                 String      @id @default(cuid())
+  type               AmcPlanType
+  name               String
+  description        String?
+  durationMonths     Int         @default(12)
+  priceYearly        Decimal     @db.Decimal(10, 2)
+  priceMonthly       Decimal?    @db.Decimal(10, 2)
+  includedServices   String[]
+  freeServicesCount  Int         @default(0)
+  discountPercent    Int         @default(0)
+  prioritySupport    Boolean     @default(false)
+  benefitsJson       Json?
+  isActive           Boolean     @default(true)
+  isPopular          Boolean     @default(false)
+  applicableCities   String[]
+  createdAt          DateTime    @default(now())
+
+  subscriptions AmcSubscription[]
+}
+
+model AmcSubscription {
+  id                  String    @id @default(cuid())
+  subscriptionNumber  String    @unique
+  userId              String
+  planId              String
+  startDate           DateTime  @default(now())
+  endDate             DateTime
+  status              AmcStatus @default(ACTIVE)
+  amountPaid          Decimal   @db.Decimal(10, 2)
+  paymentId           String?
+  servicesUsed        Int       @default(0)
+  servicesRemaining   Int       @default(0)
+  autoRenew           Boolean   @default(false)
+  renewedFromId       String?
+  cancelledAt         DateTime?
+  cancelReason        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id])
+  plan   AmcPlan @relation(fields: [planId], references: [id])
+  orders Order[]
+
+  @@index([userId])
+  @@index([status, endDate])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMUNICATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WhatsappLog {
+  id           String              @id @default(cuid())
+  toPhone      String
+  messageType  WhatsappMessageType
+  messageBody  String
+  templateUsed String?
+  vendorId     String?
+  orderId      String?
+  leadId       String?
+  status       String              @default("SENT")
+  createdAt    DateTime            @default(now())
+
+  @@index([toPhone, createdAt])
+}
+
+model Notification {
+  id         String                @id @default(cuid())
+  userId     String
+  title      String
+  body       String
+  channels   NotificationChannel[]
+  iconUrl    String?
+  imageUrl   String?
+  actionUrl  String?
+  orderId    String?
+  isRead     Boolean               @default(false)
+  readAt     DateTime?
+  createdAt  DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+}

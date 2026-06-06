@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\" -Depth 2)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(cd \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\"; $proc = Start-Process -FilePath \"node\" -ArgumentList \"dist/main\" -WorkingDirectory \".\" -RedirectStandardOutput \"startup_out.txt\" -RedirectStandardError \"startup_err.txt\" -PassThru; Start-Sleep -Seconds 8; $proc.Kill\\(\\) 2>$null; Get-Content startup_out.txt 2>$null; Get-Content startup_err.txt 2>$null; Remove-Item startup_out.txt, startup_err.txt -ErrorAction SilentlyContinue)",
+      "PowerShell(cd \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\"; $proc = Start-Process -FilePath \"node\" -ArgumentList \"dist/main\" -WorkingDirectory \".\" -RedirectStandardOutput \"startup_out.txt\" -RedirectStandardError \"startup_err.txt\" -PassThru -NoNewWindow; Start-Sleep -Seconds 10; if \\(-not $proc.HasExited\\) { $proc.Kill\\(\\) }; Get-Content startup_out.txt 2>$null; Write-Host \"---STDERR---\"; Get-Content startup_err.txt 2>$null; Remove-Item startup_out.txt, startup_err.txt -ErrorAction SilentlyContinue)",
+      "PowerShell(docker --version 2>&1)",
+      "PowerShell(docker info 2>&1)",
+      "PowerShell(winget --version 2>&1)",
+      "PowerShell(winget install PostgreSQL.PostgreSQL.16 --accept-package-agreements --accept-source-agreements --silent 2>&1)",
+      "PowerShell(choco --version 2>&1)",
+      "PowerShell(scoop --version 2>&1)",
+      "PowerShell(Copy-Item \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\\\\prisma\\\\schema.prisma\" \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\\\\prisma\\\\schema.postgres.prisma.bak\")",
+      "PowerShell(Copy-Item \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\\\\prisma\\\\schema.postgres.prisma.bak\" \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\\\\prisma\\\\schema.prisma\" -Force)",
+      "PowerShell(cd \"d:\\\\Files RMT\\\\Web and Marketing\\\\New Cloud web\\\\Remont Code\\\\remont-platform-complete\\\\remont-platform\\\\backend\"; Start-Process -FilePath \"node\" -ArgumentList \"dist/main\" -WorkingDirectory \".\" -RedirectStandardOutput \"server_out.txt\" -RedirectStandardError \"server_err.txt\" -PassThru -NoNewWindow; Write-Host \"Backend started \\(PID $\\($_.Id\\)\\)\")"
+    ]
+  }
+}
