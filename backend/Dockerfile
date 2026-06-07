@@ -2,8 +2,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
+COPY .npmrc ./
 COPY prisma ./prisma/
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY . .
 RUN npx prisma generate
