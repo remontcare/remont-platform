@@ -4,9 +4,10 @@
   "description": "Remont India — AI-powered home services platform backend",
   "scripts": {
     "build": "nest build",
-    "start": "nest start",
+    "start": "node dist/main.js",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/main.js",
+    "postinstall": "prisma generate",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
