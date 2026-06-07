@@ -56,12 +56,13 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
   }
 
-  const port = process.env.PORT || 3001;
-  await app.listen(port);
+  const port = Number(process.env.PORT) || 3001;
+  const host = process.env.HOST || '0.0.0.0';
+  await app.listen(port, host);
 
   const logger = new Logger('Bootstrap');
-  logger.log(`🚀 Remont India API on http://localhost:${port}`);
-  logger.log(`📖 Docs at http://localhost:${port}/api/docs`);
+  logger.log(`🚀 Remont India API listening on http://${host}:${port}`);
+  logger.log(`📖 Docs at http://${host}:${port}/api/docs`);
 }
 
 bootstrap();

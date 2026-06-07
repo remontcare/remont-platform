@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Remont India — AI-powered home services platform backend",
   "scripts": {
-    "build": "nest build",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && npm run build",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
