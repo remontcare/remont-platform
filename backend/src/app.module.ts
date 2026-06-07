@@ -25,6 +25,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { AmcModule } from './modules/amc/amc.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AdminModule } from './modules/admin/admin.module';
     AiAgentModule,  // Inbuilt AI chat (ready for LLM swap)
 
     AdminModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
