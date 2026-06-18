@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>Dashboard</h1>
+      <p>Platform overview</p>
+    </div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div id="stats-container" class="loading">Loading stats…</div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('dashboard');
+if (!requireAuth()) {}
+
+api('GET', '/admin/stats').then(function(s) {
+  document.getElementById('stats-container').innerHTML =
+    '<div class="stats-grid">' +
+      stat('👥', 'Total Users', s.users.total, s.users.customers + ' customers') +
+      stat('🏪', 'Service Vendors', s.vendors.service, s.vendors.onlineNow + ' online now') +
+      stat('🛍', 'Product Vendors', s.vendors.product, s.vendors.pendingApprovals + ' pending approval') +
+      stat('📦', "Today's Orders", s.orders.today.count, fmtCur(s.orders.today.gmv) + ' GMV') +
+      stat('📊', 'This Month Orders', s.orders.thisMonth.count, fmtCur(s.orders.thisMonth.gmv) + ' GMV') +
+      stat('🔄', 'AMC Active', s.amc.active, 'Annual maintenance contracts') +
+      stat('🎯', 'Total Leads', s.crm.totalLeads, s.crm.conversions + ' converted · ' + s.crm.conversionRate) +
+      stat('🏙', 'Active Cities', s.cities.active, 'Serviceable locations') +
+    '</div>' +
+    '<div class="two-cols">' +
+      '<div class="card">' +
+        '<div class="card-header"><span class="card-title">Quick Actions</span></div>' +
+        '<div class="card-body" style="display:flex;flex-direction:column;gap:10px">' +
+          '<a href="/admin/vendors.html" class="btn btn-outline" style="justify-content:center">⚠️ Review ' + s.vendors.pendingApprovals + ' Pending Vendor' + (s.vendors.pendingApprovals===1?'':'s') + '</a>' +
+          '<a href="/admin/orders.html" class="btn btn-outline" style="justify-content:center">📦 Manage Orders</a>' +
+          '<a href="/admin/users.html" class="btn btn-outline" style="justify-content:center">👥 Manage Users</a>' +
+          '<a href="/admin/services.html" class="btn btn-outline" style="justify-content:center">🔧 Manage Services</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="card-header"><span class="card-title">CRM Summary</span></div>' +
+        '<div class="card-body">' +
+          '<table><tbody>' +
+            '<tr><td>Total Leads</td><td><strong>' + s.crm.totalLeads + '</strong></td></tr>' +
+            '<tr><td>Conversions</td><td><strong>' + s.crm.conversions + '</strong></td></tr>' +
+            '<tr><td>Conversion Rate</td><td><span class="badge badge-green">' + s.crm.conversionRate + '</span></td></tr>' +
+            '<tr><td>Active AMC Plans</td><td><strong>' + s.amc.active + '</strong></td></tr>' +
+          '</tbody></table>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}).catch(function(e) {
+  document.getElementById('stats-container').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Failed to load stats</h3><p>' + escape(e.message) + '</p></div>';
+});
+
+function stat(icon, label, value, sub) {
+  return '<div class="stat-card"><div class="stat-icon">' + icon + '</div><div class="stat-label">' + label + '</div><div class="stat-value">' + value + '</div><div class="stat-sub">' + sub + '</div></div>';
+}
+</script>
+</body>
+</html>

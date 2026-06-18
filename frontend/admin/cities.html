@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Cities</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Cities</h1><p>Manage serviceable cities</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">All Cities</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('cities');
+if (!requireAuth()) {}
+
+function load() {
+  api('GET', '/admin/cities').then(function(cities) {
+    if (!cities || !cities.length) {
+      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏙</div><h3>No cities configured</h3></div>';
+      return;
+    }
+    var rows = cities.map(function(c) {
+      return '<tr>' +
+        '<td><strong>' + escape(c.name) + '</strong></td>' +
+        '<td>' + escape(c.state) + '</td>' +
+        '<td>' + (c.pincodes||[]).length + ' pincodes</td>' +
+        '<td>' + (c.activeServiceKeys||[]).map(function(k){ return '<span class="badge badge-blue" style="margin:1px;font-size:10px">' + escape(k) + '</span>'; }).join('') + '</td>' +
+        '<td>' + c.priceMultiplier + 'x</td>' +
+        '<td>' + c.activeVendors + '</td>' +
+        '<td><span class="badge ' + (c.isActive?'badge-green':'badge-gray') + '">' + (c.isActive?'Active':'Inactive') + '</span></td>' +
+        '<td>' +
+          '<button class="btn btn-xs ' + (c.isActive?'btn-warning':'btn-success') + '" onclick="toggle(\'' + c.name + '\',' + !c.isActive + ',this)">' + (c.isActive?'Disable':'Enable') + '</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML =
+      '<table><thead><tr><th>City</th><th>State</th><th>Pincodes</th><th>Active Services</th><th>Price Multiplier</th><th>Vendors</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
+  });
+}
+
+function toggle(name, active, btn) {
+  btn.disabled = true;
+  api('PATCH', '/admin/cities/' + encodeURIComponent(name) + '/toggle', { isActive: active }).then(function(){
+    toast(active ? name + ' enabled' : name + ' disabled', active ? 'success' : 'warning'); load();
+  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+load();
+</script>
+</body>
+</html>

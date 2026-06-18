@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Products</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Products</h1><p>View and manage vendor products</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">All Products</span></div>
+      <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
+        <div class="filter-bar">
+          <input id="q" class="search-input" placeholder="Search name / SKU / brand…" oninput="debounce(load)">
+          <button class="btn btn-outline btn-sm" onclick="load()">🔄 Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit product modal -->
+<div id="edit-overlay" class="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Edit Product</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <input type="hidden" id="edit-id">
+    <p style="font-size:13px;color:#64748b;margin-bottom:14px">Product: <strong id="edit-product-name"></strong></p>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Price (₹)</label>
+        <input id="edit-price" class="form-control" type="number">
+      </div>
+      <div class="form-group">
+        <label class="form-label">MRP (₹)</label>
+        <input id="edit-mrp" class="form-control" type="number">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Stock</label>
+      <input id="edit-stock" class="form-control" type="number" min="0">
+    </div>
+    <div class="form-group">
+      <label class="form-check">
+        <input type="checkbox" id="edit-active">
+        Active (visible to customers)
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveProduct()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('products');
+if (!requireAuth()) {}
+
+var timer;
+function debounce(fn) { clearTimeout(timer); timer = setTimeout(fn, 400); }
+
+function load() {
+  var q = document.getElementById('q').value.trim();
+  var path = '/admin/products?limit=100' + (q ? '&q=' + encodeURIComponent(q) : '');
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', path).then(renderTable).catch(function(e){
+    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
+  });
+}
+
+function renderTable(products) {
+  if (!products || !products.length) {
+    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🛍</div><h3>No products found</h3><p>Products are listed by vendors. Approve vendors first.</p></div>';
+    return;
+  }
+  var rows = products.map(function(p) {
+    return '<tr>' +
+      '<td>' + (p.images&&p.images[0] ? '<img src="'+escape(p.images[0])+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px" onerror="this.style.display=\'none\'">' : '🛍') + '</td>' +
+      '<td><strong>' + escape(p.name) + '</strong><br><span class="text-muted">' + escape(p.sku) + (p.brand?' · '+escape(p.brand):'') + '</span></td>' +
+      '<td>' + escape(p.category.name) + '</td>' +
+      '<td>' + escape(p.vendor.businessName) + '</td>' +
+      '<td>' + fmtCur(p.price) + (p.mrp?'<br><span class="text-muted" style="text-decoration:line-through">'+fmtCur(p.mrp)+'</span>':'') + '</td>' +
+      '<td>' + p.stock + '</td>' +
+      '<td>' + p.views + '</td>' +
+      '<td><span class="badge ' + (p.isActive?'badge-green':'badge-gray') + '">' + (p.isActive?'Active':'Inactive') + '</span></td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn btn-xs btn-outline" onclick="openEdit(' + JSON.stringify(p).replace(/"/g,'&quot;') + ')">Edit</button> ' +
+        '<button class="btn btn-xs ' + (p.isActive?'btn-warning':'btn-success') + '" onclick="toggleActive(\'' + p.id + '\',' + !p.isActive + ',this)">' + (p.isActive?'Disable':'Enable') + '</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('tbl').innerHTML =
+    '<table><thead><tr><th></th><th>Name / SKU</th><th>Category</th><th>Vendor</th><th>Price</th><th>Stock</th><th>Views</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function openEdit(p) {
+  document.getElementById('edit-id').value = p.id;
+  document.getElementById('edit-product-name').textContent = p.name;
+  document.getElementById('edit-price').value = p.price;
+  document.getElementById('edit-mrp').value = p.mrp||'';
+  document.getElementById('edit-stock').value = p.stock;
+  document.getElementById('edit-active').checked = p.isActive;
+  document.getElementById('edit-overlay').classList.add('open');
+}
+
+function saveProduct() {
+  var id = document.getElementById('edit-id').value;
+  var price = parseFloat(document.getElementById('edit-price').value);
+  var mrp = parseFloat(document.getElementById('edit-mrp').value);
+  var data = {
+    price: isNaN(price) ? undefined : price,
+    mrp: isNaN(mrp) ? undefined : mrp,
+    stock: parseInt(document.getElementById('edit-stock').value)||0,
+    isActive: document.getElementById('edit-active').checked,
+  };
+  api('PATCH', '/admin/products/'+id, data).then(function(){
+    toast('Product updated','success'); closeModal('edit-overlay'); load();
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleActive(id, active, btn) {
+  btn.disabled = true;
+  api('PATCH', '/admin/products/'+id, { isActive: active }).then(function(){
+    toast(active?'Product enabled':'Product disabled', active?'success':'warning'); load();
+  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+load();
+</script>
+</body>
+</html>

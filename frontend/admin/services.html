@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Services</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Services</h1><p>Manage service categories and individual services</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <!-- Tabs -->
+    <div style="display:flex;gap:4px;margin-bottom:20px;background:#f1f5f9;padding:4px;border-radius:10px;width:fit-content">
+      <button id="tab-cat" class="btn btn-primary btn-sm" onclick="showTab('categories')">Categories</button>
+      <button id="tab-svc" class="btn btn-outline btn-sm" onclick="showTab('services')">Services</button>
+    </div>
+
+    <!-- Categories tab -->
+    <div id="tab-categories">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Service Categories</span>
+          <button class="btn btn-primary btn-sm" onclick="openCatModal()">+ Add Category</button>
+        </div>
+        <div class="table-wrap"><div id="cat-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- Services tab -->
+    <div id="tab-services" style="display:none">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Services</span>
+          <button class="btn btn-primary btn-sm" onclick="openSvcModal()">+ Add Service</button>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
+          <div class="filter-bar">
+            <select id="filter-cat" class="form-control" style="width:200px" onchange="loadServices()">
+              <option value="">All Categories</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="svc-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Category modal -->
+<div id="cat-overlay" class="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="cat-modal-title">Add Category</span>
+      <button class="modal-close" onclick="closeModal('cat-overlay')">×</button>
+    </div>
+    <input type="hidden" id="cat-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Key <span class="req">*</span></label>
+        <input id="cat-key" class="form-control" placeholder="AC_SERVICE" style="text-transform:uppercase">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon / Emoji <span class="req">*</span></label>
+        <input id="cat-icon" class="form-control" placeholder="❄️">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name <span class="req">*</span></label>
+      <input id="cat-name" class="form-control" placeholder="AC Servicing">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea id="cat-desc" class="form-control" placeholder="Short description…"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Sort Order</label>
+        <input id="cat-sort" class="form-control" type="number" value="0">
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:2px">
+        <label class="form-check">
+          <input type="checkbox" id="cat-premium">
+          Premium category
+        </label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-check">
+        <input type="checkbox" id="cat-active" checked>
+        Active (visible to customers)
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('cat-overlay')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategory()">Save Category</button>
+    </div>
+  </div>
+</div>
+
+<!-- Service modal -->
+<div id="svc-overlay" class="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="svc-modal-title">Add Service</span>
+      <button class="modal-close" onclick="closeModal('svc-overlay')">×</button>
+    </div>
+    <input type="hidden" id="svc-id">
+    <div class="form-group">
+      <label class="form-label">Category <span class="req">*</span></label>
+      <select id="svc-cat" class="form-control"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Service Name <span class="req">*</span></label>
+      <input id="svc-name" class="form-control" placeholder="1.5 Ton Split AC Service">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea id="svc-desc" class="form-control" placeholder="What's included in this service…"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Base Price (₹) <span class="req">*</span></label>
+        <input id="svc-price" class="form-control" type="number" placeholder="499">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Original Price (₹)</label>
+        <input id="svc-original-price" class="form-control" type="number" placeholder="699">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Duration (minutes)</label>
+        <input id="svc-duration" class="form-control" type="number" value="60">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Image URL</label>
+        <input id="svc-img" class="form-control" placeholder="https://…">
+      </div>
+    </div>
+    <div style="display:flex;gap:20px;margin-bottom:16px">
+      <label class="form-check"><input type="checkbox" id="svc-active" checked> Active</label>
+      <label class="form-check"><input type="checkbox" id="svc-popular"> Popular</label>
+      <label class="form-check"><input type="checkbox" id="svc-premium"> Premium</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('svc-overlay')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveService()">Save Service</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('services');
+if (!requireAuth()) {}
+
+var categories = [];
+
+function showTab(tab) {
+  document.getElementById('tab-categories').style.display = tab==='categories' ? '' : 'none';
+  document.getElementById('tab-services').style.display = tab==='services' ? '' : 'none';
+  document.getElementById('tab-cat').className = 'btn btn-sm ' + (tab==='categories'?'btn-primary':'btn-outline');
+  document.getElementById('tab-svc').className = 'btn btn-sm ' + (tab==='services'?'btn-primary':'btn-outline');
+}
+
+function loadCategories() {
+  api('GET', '/admin/services/categories').then(function(cats) {
+    categories = cats || [];
+    populateCatSelects();
+    if (!cats || !cats.length) {
+      document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No categories yet</h3><p>Click "+ Add Category" to create the first one.</p></div>';
+      return;
+    }
+    var rows = cats.map(function(c) {
+      return '<tr>' +
+        '<td>' + escape(c.icon) + '</td>' +
+        '<td><strong>' + escape(c.name) + '</strong></td>' +
+        '<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">' + escape(c.key) + '</code></td>' +
+        '<td>' + c.services.length + ' services</td>' +
+        '<td>' + c.sortOrder + '</td>' +
+        '<td><span class="badge ' + (c.isActive?'badge-green':'badge-gray') + '">' + (c.isActive?'Active':'Inactive') + '</span>' +
+          (c.isPremium ? ' <span class="badge badge-purple">Premium</span>' : '') + '</td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="btn btn-xs btn-outline" onclick="editCategory(' + JSON.stringify(c).replace(/"/g,'&quot;') + ')">Edit</button> ' +
+          '<button class="btn btn-xs ' + (c.isActive?'btn-warning':'btn-success') + '" onclick="toggleCat(\'' + c.id + '\',' + !c.isActive + ',this)">' + (c.isActive?'Disable':'Enable') + '</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('cat-tbl').innerHTML =
+      '<table><thead><tr><th>Icon</th><th>Name</th><th>Key</th><th>Services</th><th>Sort</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
+  });
+}
+
+function loadServices() {
+  var catId = document.getElementById('filter-cat').value;
+  var path = '/admin/services' + (catId ? '?categoryId=' + catId : '');
+  document.getElementById('svc-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', path).then(function(svcs) {
+    if (!svcs || !svcs.length) {
+      document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No services found</h3></div>';
+      return;
+    }
+    var rows = svcs.map(function(s) {
+      return '<tr>' +
+        '<td><strong>' + escape(s.name) + '</strong></td>' +
+        '<td>' + escape(s.category.name) + '</td>' +
+        '<td>' + fmtCur(s.basePrice) + (s.originalPrice ? ' <span class="text-muted" style="text-decoration:line-through">' + fmtCur(s.originalPrice) + '</span>' : '') + '</td>' +
+        '<td>' + s.durationMinutes + ' min</td>' +
+        '<td><span class="badge ' + (s.isActive?'badge-green':'badge-gray') + '">' + (s.isActive?'Active':'Inactive') + '</span>' +
+          (s.isPopular ? ' <span class="badge badge-blue">Popular</span>' : '') +
+          (s.isPremium ? ' <span class="badge badge-purple">Premium</span>' : '') + '</td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="btn btn-xs btn-outline" onclick="editService(' + JSON.stringify(s).replace(/"/g,'&quot;') + ')">Edit</button> ' +
+          '<button class="btn btn-xs ' + (s.isActive?'btn-warning':'btn-success') + '" onclick="toggleSvc(\'' + s.id + '\',' + !s.isActive + ',this)">' + (s.isActive?'Disable':'Enable') + '</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('svc-tbl').innerHTML =
+      '<table><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
+  });
+}
+
+function populateCatSelects() {
+  var opts = categories.map(function(c){ return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
+  document.getElementById('svc-cat').innerHTML = '<option value="">Select category…</option>' + opts;
+  document.getElementById('filter-cat').innerHTML = '<option value="">All Categories</option>' + opts;
+}
+
+// Category CRUD
+function openCatModal(cat) {
+  document.getElementById('cat-modal-title').textContent = cat ? 'Edit Category' : 'Add Category';
+  document.getElementById('cat-id').value = cat ? cat.id : '';
+  document.getElementById('cat-key').value = cat ? cat.key : '';
+  document.getElementById('cat-icon').value = cat ? cat.icon : '';
+  document.getElementById('cat-name').value = cat ? cat.name : '';
+  document.getElementById('cat-desc').value = cat ? (cat.description||'') : '';
+  document.getElementById('cat-sort').value = cat ? cat.sortOrder : 0;
+  document.getElementById('cat-premium').checked = cat ? cat.isPremium : false;
+  document.getElementById('cat-active').checked = cat ? cat.isActive : true;
+  document.getElementById('cat-overlay').classList.add('open');
+}
+function editCategory(cat) { openCatModal(cat); }
+
+function saveCategory() {
+  var id = document.getElementById('cat-id').value;
+  var data = {
+    key: document.getElementById('cat-key').value.trim().toUpperCase(),
+    icon: document.getElementById('cat-icon').value.trim(),
+    name: document.getElementById('cat-name').value.trim(),
+    description: document.getElementById('cat-desc').value.trim()||undefined,
+    sortOrder: parseInt(document.getElementById('cat-sort').value)||0,
+    isPremium: document.getElementById('cat-premium').checked,
+    isActive: document.getElementById('cat-active').checked,
+  };
+  if (!data.key||!data.icon||!data.name) { toast('Key, icon, and name are required', 'error'); return; }
+  var p = id ? api('PATCH', '/admin/services/categories/'+id, data) : api('POST', '/admin/services/categories', data);
+  p.then(function(){ toast(id?'Category updated':'Category created','success'); closeModal('cat-overlay'); loadCategories(); })
+   .catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleCat(id, active, btn) {
+  btn.disabled = true;
+  api('PATCH', '/admin/services/categories/'+id, { isActive: active }).then(function(){
+    toast(active?'Category enabled':'Category disabled', active?'success':'warning'); loadCategories();
+  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+// Service CRUD
+function openSvcModal(svc) {
+  document.getElementById('svc-modal-title').textContent = svc ? 'Edit Service' : 'Add Service';
+  document.getElementById('svc-id').value = svc ? svc.id : '';
+  document.getElementById('svc-cat').value = svc ? svc.categoryId : '';
+  document.getElementById('svc-name').value = svc ? svc.name : '';
+  document.getElementById('svc-desc').value = svc ? (svc.description||'') : '';
+  document.getElementById('svc-price').value = svc ? svc.basePrice : '';
+  document.getElementById('svc-original-price').value = svc ? (svc.originalPrice||'') : '';
+  document.getElementById('svc-duration').value = svc ? svc.durationMinutes : 60;
+  document.getElementById('svc-img').value = svc ? (svc.imageUrl||'') : '';
+  document.getElementById('svc-active').checked = svc ? svc.isActive : true;
+  document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
+  document.getElementById('svc-premium').checked = svc ? svc.isPremium : false;
+  document.getElementById('svc-overlay').classList.add('open');
+}
+function editService(svc) { openSvcModal(svc); }
+
+function saveService() {
+  var id = document.getElementById('svc-id').value;
+  var price = parseFloat(document.getElementById('svc-price').value);
+  var origPrice = parseFloat(document.getElementById('svc-original-price').value);
+  var data = {
+    categoryId: document.getElementById('svc-cat').value,
+    name: document.getElementById('svc-name').value.trim(),
+    description: document.getElementById('svc-desc').value.trim()||undefined,
+    basePrice: price,
+    originalPrice: origPrice||undefined,
+    durationMinutes: parseInt(document.getElementById('svc-duration').value)||60,
+    imageUrl: document.getElementById('svc-img').value.trim()||undefined,
+    isActive: document.getElementById('svc-active').checked,
+    isPopular: document.getElementById('svc-popular').checked,
+    isPremium: document.getElementById('svc-premium').checked,
+  };
+  if (!data.categoryId) { toast('Select a category', 'error'); return; }
+  if (!data.name) { toast('Enter service name', 'error'); return; }
+  if (isNaN(price) || price <= 0) { toast('Enter a valid price', 'error'); return; }
+  var p = id ? api('PATCH', '/admin/services/'+id, data) : api('POST', '/admin/services', data);
+  p.then(function(){ toast(id?'Service updated':'Service created','success'); closeModal('svc-overlay'); loadServices(); })
+   .catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleSvc(id, active, btn) {
+  btn.disabled = true;
+  api('PATCH', '/admin/services/'+id, { isActive: active }).then(function(){
+    toast(active?'Service enabled':'Service disabled', active?'success':'warning'); loadServices();
+  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+loadCategories();
+loadServices();
+</script>
+</body>
+</html>
