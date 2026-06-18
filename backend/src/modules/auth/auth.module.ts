@@ -119,6 +119,24 @@ export class AuthService {
     };
   }
 
+  async adminPinLogin(phone: string, pin: string) {
+    const adminPin = process.env.ADMIN_PIN;
+    if (!adminPin) throw new BadRequestException('ADMIN_PIN env var not set on server');
+    if (pin !== adminPin) throw new UnauthorizedException('Invalid admin PIN');
+
+    const user = await this.prisma.user.upsert({
+      where: { phone },
+      update: { role: UserRole.ADMIN, isVerified: true, lastLoginAt: new Date() },
+      create: { phone, name: 'Admin', role: UserRole.ADMIN, isVerified: true, lastLoginAt: new Date() },
+    });
+
+    const tokens = await this.issueTokens(user.id, user.phone, user.role);
+    return {
+      user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+      ...tokens,
+    };
+  }
+
   async refresh(refreshToken: string) {
     try {
       const payload = await this.jwt.verifyAsync(refreshToken, {
@@ -157,6 +175,11 @@ export class AuthController {
 
   @Public() @Post('refresh')
   refresh(@Body() dto: RefreshTokenDto) { return this.auth.refresh(dto.refreshToken); }
+
+  @Public() @Post('admin/login')
+  adminLogin(@Body() body: { phone: string; pin: string }) {
+    return this.auth.adminPinLogin(body.phone, body.pin);
+  }
 
   @UseGuards(JwtAuthGuard) @ApiBearerAuth() @Get('me')
   me(@CurrentUser() user: JwtPayload) { return user; }
