@@ -1,0 +1,7 @@
+{
+  "name": "remont-platform",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo 'Static frontend in ./frontend — no build step required'"
+  }
+}
