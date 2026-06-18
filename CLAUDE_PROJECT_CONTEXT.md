@@ -1,4 +1,4 @@
-# Claude Project Context — Remont India
+﻿# Claude Project Context — Remont India
 
 > **INSTRUCTION FOR CLAUDE:**
 > Never scan the entire repository unless explicitly requested.
@@ -254,10 +254,11 @@ PATCH /admin/cities/:name/toggle
 {
   "version": 2,
   "outputDirectory": "frontend",
-  "rewrites": [{ "source": "/api/:path*", "destination": "https://REPLACE_WITH_RAILWAY_URL/api/:path*" }]
+  "rewrites": [{ "source": "/api/:path*", "destination": "https://remont-platform-production.up.railway.app/api/:path*" }]
 }
 ```
-**Action required:** Replace `REPLACE_WITH_RAILWAY_URL` with actual Railway domain after backend deploys.
+Railway URL: `remont-platform-production.up.railway.app`  
+Vercel URL: `https://remont-platform-five.vercel.app`
 
 ### Railway (backend)
 - Root directory: `backend/`
