@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "npx http-server . -p 3000 --cors -c-1 -o",
-    "start": "npx http-server . -p 3000 --cors -c-1"
+    "start": "npx http-server . -p 3000 --cors -c-1",
+    "build": "echo 'Static site — no build step required'"
   }
 }

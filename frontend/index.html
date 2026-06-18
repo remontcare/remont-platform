@@ -4025,5 +4025,104 @@
     }
   }
 </script>
+
+<script>
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BACKEND API CONNECTION
+  // Dev:  window.location.hostname === 'localhost' → calls http://localhost:3001
+  // Prod: empty API_BASE → relative URL, Vercel rewrite proxies /api/* to Railway
+  // Verified routes from backend/src/modules/ai-agent/ai-agent.module.ts
+  // ═══════════════════════════════════════════════════════════════════════════
+  var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+
+  function apiPost(path, body) {
+    var token = localStorage.getItem('remont_token');
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(API_BASE + path, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    }).then(function(res) {
+      if (!res.ok) throw new Error(res.status);
+      return res.json();
+    });
+  }
+
+  function apiGet(path) {
+    var token = localStorage.getItem('remont_token');
+    var headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(API_BASE + path, { headers: headers }).then(function(res) {
+      if (!res.ok) throw new Error(res.status);
+      return res.json();
+    });
+  }
+
+  // ── AI Chat Widget ──────────────────────────────────────────────────────────
+  // Route: POST /api/v1/ai/chat  (Public — no auth required)
+  // Controller: AiAgentController @Controller('ai') in ai-agent.module.ts
+  var chatMsgEl   = document.querySelector('.ai-msg');
+  var chatInput   = document.querySelector('.ai-input-row input');
+  var chatSendBtn = document.querySelector('.ai-send');
+  var chatSuggs   = document.querySelectorAll('.ai-sugg');
+
+  function sendChat(message) {
+    if (!message || !message.trim()) return;
+    if (chatMsgEl) chatMsgEl.textContent = '...';
+    apiPost('/api/v1/ai/chat', {
+      message: message,
+      city: typeof currentCity !== 'undefined' ? currentCity : undefined
+    }).then(function(data) {
+      if (chatMsgEl) chatMsgEl.textContent = data.reply || message;
+      if (data.suggestions && data.suggestions.length && chatSuggs.length) {
+        var suggs = data.suggestions.slice(0, 4);
+        chatSuggs.forEach(function(el, i) {
+          if (suggs[i]) el.textContent = suggs[i];
+        });
+      }
+    }).catch(function() {
+      if (chatMsgEl) chatMsgEl.textContent = 'Unable to connect. Call +91-XXXXX-XXXXX to book instantly.';
+    });
+  }
+
+  if (chatSendBtn && chatInput) {
+    chatSendBtn.addEventListener('click', function() {
+      var msg = chatInput.value;
+      if (msg.trim()) { sendChat(msg); chatInput.value = ''; }
+    });
+    chatInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        var msg = chatInput.value;
+        if (msg.trim()) { sendChat(msg); chatInput.value = ''; }
+      }
+    });
+  }
+
+  chatSuggs.forEach(function(s) {
+    s.addEventListener('click', function() { sendChat(s.textContent.trim()); });
+  });
+
+  // ── Header Search ────────────────────────────────────────────────────────────
+  // Route: GET /api/v1/services/search?q=  (Public — query string, not POST body)
+  var headerInput   = document.getElementById('headerSearchInput');
+  var headerSrchBtn = document.querySelector('.search-btn-icon');
+
+  function runSearch(query) {
+    if (!query || !query.trim()) return;
+    apiGet('/api/v1/services/search?q=' + encodeURIComponent(query.trim()))
+      .then(function(data) {
+        console.info('[Remont Search]', data);
+      })
+      .catch(function() { /* silent — no results UI yet */ });
+  }
+
+  if (headerSrchBtn && headerInput) {
+    headerSrchBtn.addEventListener('click', function() { runSearch(headerInput.value); });
+    headerInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') runSearch(headerInput.value);
+    });
+  }
+</script>
 </body>
 </html>
