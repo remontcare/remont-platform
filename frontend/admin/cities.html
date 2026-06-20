@@ -14,6 +14,7 @@
   <div class="topbar">
     <div class="topbar-left"><h1>Cities</h1><p>Manage serviceable cities</p></div>
     <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openAddCity()">+ Add City</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
@@ -26,6 +27,50 @@
   </div>
 </div>
 
+<!-- Add City Modal -->
+<div id="city-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add City</span>
+      <button class="modal-close" onclick="closeModal('city-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">City Name *</label>
+      <input id="city-name" class="form-control" placeholder="e.g. Indore">
+    </div>
+    <div class="form-group">
+      <label class="form-label">State *</label>
+      <input id="city-state" class="form-control" placeholder="e.g. Madhya Pradesh">
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Latitude *</label>
+        <input id="city-lat" class="form-control" type="number" step="any" placeholder="22.7196">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Longitude *</label>
+        <input id="city-lng" class="form-control" type="number" step="any" placeholder="75.8577">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pincodes (comma-separated)</label>
+      <input id="city-pincodes" class="form-control" placeholder="452001, 452002, 452010">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Active Service Keys (comma-separated)</label>
+      <input id="city-services" class="form-control" placeholder="AC_SERVICE, PLUMBING, ELECTRICAL">
+    </div>
+    <div class="form-check" style="margin-bottom:12px">
+      <input type="checkbox" id="city-active" checked>
+      <label for="city-active" style="margin-left:6px">Active</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('city-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCity()">Save City</button>
+    </div>
+  </div>
+</div>
+
 <script src="./common.js"></script>
 <script>
 renderSidebar('cities');
@@ -34,7 +79,7 @@ if (!requireAuth()) {}
 function load() {
   api('GET', '/admin/cities').then(function(cities) {
     if (!cities || !cities.length) {
-      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏙</div><h3>No cities configured</h3></div>';
+      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏙</div><h3>No cities configured</h3><p>Click "+ Add City" to add your first city.</p></div>';
       return;
     }
     var rows = cities.map(function(c) {
@@ -63,6 +108,42 @@ function toggle(name, active, btn) {
   api('PATCH', '/admin/cities/' + encodeURIComponent(name) + '/toggle', { isActive: active }).then(function(){
     toast(active ? name + ' enabled' : name + ' disabled', active ? 'success' : 'warning'); load();
   }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+function openAddCity() {
+  document.getElementById('city-name').value = '';
+  document.getElementById('city-state').value = '';
+  document.getElementById('city-lat').value = '';
+  document.getElementById('city-lng').value = '';
+  document.getElementById('city-pincodes').value = '';
+  document.getElementById('city-services').value = '';
+  document.getElementById('city-active').checked = true;
+  document.getElementById('city-overlay').style.display = 'flex';
+}
+
+function saveCity() {
+  var name = document.getElementById('city-name').value.trim();
+  var state = document.getElementById('city-state').value.trim();
+  var lat = parseFloat(document.getElementById('city-lat').value);
+  var lng = parseFloat(document.getElementById('city-lng').value);
+  if (!name || !state) { toast('City name and state are required', 'error'); return; }
+  if (isNaN(lat) || isNaN(lng)) { toast('Enter valid latitude and longitude', 'error'); return; }
+  var pincodeStr = document.getElementById('city-pincodes').value.trim();
+  var svcStr = document.getElementById('city-services').value.trim();
+  var data = {
+    name: name,
+    state: state,
+    latitude: lat,
+    longitude: lng,
+    isActive: document.getElementById('city-active').checked,
+    pincodes: pincodeStr ? pincodeStr.split(',').map(function(p){ return p.trim(); }).filter(Boolean) : [],
+    activeServiceKeys: svcStr ? svcStr.split(',').map(function(s){ return s.trim().toUpperCase(); }).filter(Boolean) : [],
+  };
+  api('POST', '/admin/cities', data).then(function(){
+    toast('City created', 'success');
+    closeModal('city-overlay');
+    load();
+  }).catch(function(e){ toast(e.message, 'error'); });
 }
 
 load();

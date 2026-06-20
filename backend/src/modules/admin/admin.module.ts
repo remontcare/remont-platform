@@ -212,6 +212,19 @@ export class AdminService {
 
   // ─── City activation ────────────────────────────────────────────────
 
+  async createCity(data: {
+    name: string; state: string; latitude: number; longitude: number;
+    pincodes?: string[]; isActive?: boolean; activeServiceKeys?: string[];
+  }) {
+    return this.prisma.city.create({
+      data: {
+        ...data,
+        pincodes: data.pincodes || [],
+        activeServiceKeys: data.activeServiceKeys || [],
+      },
+    });
+  }
+
   async toggleCityActive(cityName: string, isActive: boolean) {
     return this.prisma.city.update({
       where: { name: cityName },
@@ -391,6 +404,9 @@ export class AdminController {
 
   // ─── Cities ─────────────────────────────────────────────────────────
   @Get('cities') cities() { return this.admin.listCities(); }
+
+  @Post('cities')
+  createCity(@Body() b: any) { return this.admin.createCity(b); }
 
   @Patch('cities/:name/toggle')
   toggleCity(@Param('name') name: string, @Body() b: { isActive: boolean }) {

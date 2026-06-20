@@ -8,6 +8,20 @@ import { CitiesService, CitiesModule } from '../cities/cities.module';
 export class ServicesService {
   constructor(private prisma: PrismaService, private cities: CitiesService) {}
 
+  async listAll(categoryId?: string, city?: string) {
+    const where: any = { isActive: true };
+    if (categoryId) where.categoryId = categoryId;
+    if (city) {
+      const activeKeys = await this.cities.getActiveServicesForCity(city);
+      where.category = { key: { in: activeKeys } };
+    }
+    return this.prisma.service.findMany({
+      where,
+      include: { category: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   /**
    * List service categories with city-wise filtering.
    * If `city` is provided, services unavailable in that city
@@ -92,6 +106,11 @@ export class ServicesService {
 @Controller('services')
 export class ServicesController {
   constructor(private svc: ServicesService) {}
+
+  @Get()
+  list(@Query('categoryId') categoryId?: string, @Query('city') city?: string) {
+    return this.svc.listAll(categoryId, city);
+  }
 
   @Get('categories')
   categories(@Query('city') city?: string) { return this.svc.listCategories(city); }
