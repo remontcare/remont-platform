@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Blog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Blog Posts</h1><p>Content management for blog</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ New Post</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Posts</span>
+        <div style="display:flex;gap:8px">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search title…" oninput="load()">
+          <select id="filter-pub" class="form-control" style="width:140px" onchange="load()">
+            <option value="">All</option><option value="true">Published</option><option value="false">Drafts</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="blog-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">New Blog Post</span>
+      <button class="modal-close" onclick="closeModal('blog-overlay')">×</button>
+    </div>
+    <input type="hidden" id="blog-id">
+    <div class="form-group"><label class="form-label">Title *</label><input id="b-title" class="form-control" placeholder="5 Tips to Save on Home Repairs"></div>
+    <div class="form-group"><label class="form-label">Summary (shown in listing)</label><textarea id="b-summary" class="form-control" rows="2" placeholder="Brief summary…"></textarea></div>
+    <div class="form-group"><label class="form-label">Content *</label><textarea id="b-content" class="form-control" rows="10" placeholder="Full article content here… (HTML or plain text)"></textarea></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Author</label><input id="b-author" class="form-control" value="Remont Team"></div>
+      <div class="form-group" style="flex:2"><label class="form-label">Cover Image URL</label><input id="b-img" class="form-control" placeholder="https://…"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Tags (comma separated)</label><input id="b-tags" class="form-control" placeholder="home repair, AC service, tips"></div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="b-pub"><label for="b-pub" style="margin-left:6px">Publish immediately</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('blog-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBlog()">Save Post</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('blogs');
+requireAuth();
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var pub = document.getElementById('filter-pub').value;
+  var params = 'limit=100';
+  if (q) params += '&q=' + encodeURIComponent(q);
+  if (pub) params += '&published=' + pub;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/blogs?' + params).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><h3>No blog posts yet</h3></div>'; return; }
+    var rows = list.map(function(b) {
+      return '<tr>' +
+        (b.imageUrl ? '<td><img src="' + escape(b.imageUrl) + '" style="width:64px;height:44px;object-fit:cover;border-radius:4px"></td>' : '<td style="text-align:center;color:#9ca3af">—</td>') +
+        '<td><strong>' + escape(b.title) + '</strong><br><small style="color:#6b7280">' + escape(b.author) + ' · ' + (b.tags||[]).map(function(t){return'#'+t}).join(' ') + '</small></td>' +
+        '<td><strong>' + b.views + '</strong></td>' +
+        '<td>' + badge(b.isPublished ? 'Published' : 'Draft', b.isPublished ? 'green' : 'gray') + '</td>' +
+        '<td>' + (b.publishedAt ? fmtDateShort(b.publishedAt) : '—') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(b) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="togglePub(\'' + b.id + '\',' + (!b.isPublished) + ')">' + (b.isPublished ? 'Unpublish' : 'Publish') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + b.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Cover</th><th>Title</th><th>Views</th><th>Status</th><th>Published</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(b) {
+  document.getElementById('modal-title').textContent = b ? 'Edit Post' : 'New Blog Post';
+  document.getElementById('blog-id').value = b ? b.id : '';
+  document.getElementById('b-title').value = b ? b.title : '';
+  document.getElementById('b-summary').value = b ? (b.summary || '') : '';
+  document.getElementById('b-content').value = b ? b.content : '';
+  document.getElementById('b-author').value = b ? b.author : 'Remont Team';
+  document.getElementById('b-img').value = b ? (b.imageUrl || '') : '';
+  document.getElementById('b-tags').value = b ? (b.tags || []).join(', ') : '';
+  document.getElementById('b-pub').checked = b ? b.isPublished : false;
+  document.getElementById('blog-overlay').style.display = 'flex';
+}
+
+function saveBlog() {
+  var id = document.getElementById('blog-id').value;
+  var title = document.getElementById('b-title').value.trim();
+  var content = document.getElementById('b-content').value.trim();
+  if (!title || !content) { toast('Title and content required', 'error'); return; }
+  var tagsRaw = document.getElementById('b-tags').value.trim();
+  var data = {
+    title: title,
+    summary: document.getElementById('b-summary').value.trim() || undefined,
+    content: content,
+    author: document.getElementById('b-author').value.trim() || 'Remont Team',
+    imageUrl: document.getElementById('b-img').value.trim() || undefined,
+    tags: tagsRaw ? tagsRaw.split(',').map(function(t){return t.trim();}).filter(Boolean) : [],
+    isPublished: document.getElementById('b-pub').checked,
+  };
+  var p = id ? api('PATCH', '/admin/blogs/' + id, data) : api('POST', '/admin/blogs', data);
+  p.then(function() { toast(id ? 'Post updated' : 'Post created', 'success'); closeModal('blog-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function togglePub(id, val) {
+  api('PATCH', '/admin/blogs/' + id, { isPublished: val, publishedAt: val ? new Date().toISOString() : null }).then(function() { toast(val ? 'Published' : 'Unpublished', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this post permanently?')) return;
+  api('DELETE', '/admin/blogs/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

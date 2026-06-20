@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Newsletters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Newsletters</h1><p>Email subscriber management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportList()">⬇ Export CSV</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Subscribers</span>
+        <div style="display:flex;gap:8px">
+          <input id="filter-q" class="form-control" style="width:220px" placeholder="Search email or name…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+<script src="./common.js"></script>
+<script>
+renderSidebar('newsletters');
+requireAuth();
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var url = '/admin/newsletters?limit=200' + (q ? '&q='+encodeURIComponent(q) : '');
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', url).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">✉️</div><h3>No subscribers yet</h3></div>'; return; }
+    var rows = list.map(function(n) {
+      return '<tr>' +
+        '<td>' + escape(n.email) + '</td>' +
+        '<td>' + escape(n.name || '—') + '</td>' +
+        '<td>' + badge(n.source || 'website', 'blue') + '</td>' +
+        '<td>' + badge(n.isActive ? 'Active' : 'Unsubscribed', n.isActive ? 'green' : 'gray') + '</td>' +
+        '<td>' + fmtDateShort(n.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\''+n.id+'\')">Delete</button></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Email</th><th>Name</th><th>Source</th><th>Status</th><th>Joined</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.querySelector('.card-title').textContent = 'All Subscribers (' + list.length + ')';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function del(id) {
+  if (!confirm('Remove this subscriber?')) return;
+  api('DELETE', '/admin/newsletters/' + id).then(function() { toast('Removed', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function exportList() {
+  api('GET', '/admin/newsletters/export').then(function(list) {
+    if (!list || !list.length) { toast('No subscribers to export', 'warning'); return; }
+    var csv = 'Email,Name,Source,Joined\n' + list.map(function(n) {
+      return [n.email, n.name || '', n.source || '', (n.createdAt || '').slice(0, 10)].map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\n');
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'remont_newsletters_' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.click();
+    toast('Exported ' + list.length + ' subscribers', 'success');
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

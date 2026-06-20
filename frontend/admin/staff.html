@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Staff</h1><p>Internal team management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Staff</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Team Members</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="staff-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Staff Member</span>
+      <button class="modal-close" onclick="closeModal('staff-overlay')">×</button>
+    </div>
+    <input type="hidden" id="staff-id">
+    <div class="form-group"><label class="form-label">Full Name *</label><input id="s-name" class="form-control" placeholder="Rahul Sharma"></div>
+    <div class="form-group"><label class="form-label">Email *</label><input id="s-email" class="form-control" type="email" placeholder="rahul@remontindia.com"></div>
+    <div class="form-group"><label class="form-label">Phone</label><input id="s-phone" class="form-control" placeholder="+91 98765 43210"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Role</label>
+        <select id="s-role" class="form-control"><option>STAFF</option><option>MANAGER</option><option>SUPPORT</option><option>TECH</option><option>OPS</option></select>
+      </div>
+      <div class="form-group" style="flex:1"><label class="form-label">Department</label>
+        <input id="s-dept" class="form-control" placeholder="Operations">
+      </div>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="s-active" checked><label for="s-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('staff-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStaff()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('staff');
+requireAuth();
+
+function load() {
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/staff').then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">👔</div><h3>No staff members yet</h3></div>'; return; }
+    var rows = list.map(function(s) {
+      return '<tr>' +
+        '<td><strong>' + escape(s.name) + '</strong></td>' +
+        '<td>' + escape(s.email) + '</td>' +
+        '<td>' + escape(s.phone || '—') + '</td>' +
+        '<td>' + badge(s.role, 'purple') + '</td>' +
+        '<td>' + escape(s.department || '—') + '</td>' +
+        '<td>' + badge(s.isActive ? 'Active' : 'Inactive', s.isActive ? 'green' : 'gray') + '</td>' +
+        '<td>' + fmtDateShort(s.joinedAt) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(s) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + s.id + '\',' + (!s.isActive) + ')">' + (s.isActive ? 'Deactivate' : 'Activate') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + s.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Department</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(s) {
+  document.getElementById('modal-title').textContent = s ? 'Edit Staff Member' : 'Add Staff Member';
+  document.getElementById('staff-id').value = s ? s.id : '';
+  document.getElementById('s-name').value = s ? s.name : '';
+  document.getElementById('s-email').value = s ? s.email : '';
+  document.getElementById('s-phone').value = s ? (s.phone || '') : '';
+  document.getElementById('s-role').value = s ? s.role : 'STAFF';
+  document.getElementById('s-dept').value = s ? (s.department || '') : '';
+  document.getElementById('s-active').checked = s ? s.isActive : true;
+  document.getElementById('staff-overlay').style.display = 'flex';
+}
+
+function saveStaff() {
+  var id = document.getElementById('staff-id').value;
+  var name = document.getElementById('s-name').value.trim();
+  var email = document.getElementById('s-email').value.trim();
+  if (!name || !email) { toast('Name and email required', 'error'); return; }
+  var data = { name, email, phone: document.getElementById('s-phone').value.trim() || undefined, role: document.getElementById('s-role').value, department: document.getElementById('s-dept').value.trim() || undefined, isActive: document.getElementById('s-active').checked };
+  var p = id ? api('PATCH', '/admin/staff/' + id, data) : api('POST', '/admin/staff', data);
+  p.then(function() { toast(id ? 'Updated' : 'Staff added', 'success'); closeModal('staff-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleActive(id, val) {
+  api('PATCH', '/admin/staff/' + id, { isActive: val }).then(function() { toast(val ? 'Activated' : 'Deactivated', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Remove this staff member?')) return;
+  api('DELETE', '/admin/staff/' + id).then(function() { toast('Removed', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

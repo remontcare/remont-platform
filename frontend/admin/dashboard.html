@@ -9,20 +9,29 @@
 <link rel="stylesheet" href="./style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.metric-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
-.metric-icon{font-size:26px;margin-bottom:8px}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:24px}
+.metric-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px 20px;position:relative;overflow:hidden}
+.metric-icon{font-size:22px;margin-bottom:6px}
 .metric-label{font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-.metric-value{font-size:26px;font-weight:700;color:#111827;margin:4px 0}
-.metric-sub{font-size:12px;color:#9ca3af}
+.metric-value{font-size:28px;font-weight:700;color:#111827;margin:4px 0 2px}
+.metric-sub{font-size:11px;color:#9ca3af}
 .metric-card.highlight{border-color:#c4601a;background:linear-gradient(135deg,#c4601a,#a84f14)}
 .metric-card.highlight .metric-label,.metric-card.highlight .metric-value,.metric-card.highlight .metric-sub{color:#fff}
+.metric-card.blue{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
+.metric-card.blue .metric-label,.metric-card.blue .metric-value,.metric-card.blue .metric-sub{color:#fff}
+.metric-card.green{background:linear-gradient(135deg,#22c55e,#15803d)}
+.metric-card.green .metric-label,.metric-card.green .metric-value,.metric-card.green .metric-sub{color:#fff}
+.metric-card.purple{background:linear-gradient(135deg,#8b5cf6,#6d28d9)}
+.metric-card.purple .metric-label,.metric-card.purple .metric-value,.metric-card.purple .metric-sub{color:#fff}
 .charts-row{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px}
 .chart-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
-.chart-card h3{font-size:14px;font-weight:600;color:#374151;margin-bottom:16px}
-.bottom-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.chart-card h3{font-size:13px;font-weight:600;color:#374151;margin:0 0 14px}
+.bottom-row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:24px}
 .seed-bar{background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:16px}
 .seed-bar p{margin:0;font-size:13px;color:#92400e;flex:1}
+.stat-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f3f4f6;font-size:13px}
+.stat-row:last-child{border-bottom:none}
+.stat-row strong{color:#111827}
 @media(max-width:900px){.charts-row,.bottom-row{grid-template-columns:1fr}}
 </style>
 </head>
@@ -32,6 +41,7 @@
   <div class="topbar">
     <div class="topbar-left"><h1>Dashboard</h1><p id="topbar-date">Platform overview</p></div>
     <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="runSeed(this)">🌱 Seed Data</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
@@ -43,15 +53,27 @@
       <button class="btn btn-primary btn-sm" onclick="runSeed(this)">🌱 Seed Initial Data</button>
     </div>
 
+    <!-- Row 1: Key business metrics -->
     <div id="metric-grid" class="metric-grid">
-      <div class="metric-card loading" style="height:110px"></div>
-      <div class="metric-card loading" style="height:110px"></div>
-      <div class="metric-card loading" style="height:110px"></div>
-      <div class="metric-card loading" style="height:110px"></div>
-      <div class="metric-card loading" style="height:110px"></div>
-      <div class="metric-card loading" style="height:110px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
+      <div class="metric-card loading" style="height:100px"></div>
     </div>
 
+    <!-- Row 2: Order metrics -->
+    <div id="order-grid" class="metric-grid">
+      <div class="metric-card loading" style="height:90px"></div>
+      <div class="metric-card loading" style="height:90px"></div>
+      <div class="metric-card loading" style="height:90px"></div>
+      <div class="metric-card loading" style="height:90px"></div>
+      <div class="metric-card loading" style="height:90px"></div>
+      <div class="metric-card loading" style="height:90px"></div>
+    </div>
+
+    <!-- Charts -->
     <div class="charts-row">
       <div class="chart-card">
         <h3>Orders &amp; Revenue — Last 30 Days</h3>
@@ -63,6 +85,7 @@
       </div>
     </div>
 
+    <!-- Bottom cards -->
     <div class="bottom-row">
       <div class="card">
         <div class="card-header"><span class="card-title">Top Services (30d)</span></div>
@@ -70,16 +93,19 @@
       </div>
       <div class="card">
         <div class="card-header"><span class="card-title">Quick Actions</span></div>
-        <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
-          <a href="/admin/vendors.html" class="btn btn-outline" style="justify-content:center">⚠️ Pending Vendors</a>
-          <a href="/admin/orders.html" class="btn btn-outline" style="justify-content:center">📦 Manage Orders</a>
-          <a href="/admin/services.html" class="btn btn-outline" style="justify-content:center">🔧 Services &amp; Categories</a>
-          <a href="/admin/cities.html" class="btn btn-outline" style="justify-content:center">🏙 Manage Cities</a>
-          <a href="/admin/banners.html" class="btn btn-outline" style="justify-content:center">🖼 Homepage Banners</a>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+          <a href="/admin/vendors.html" class="btn btn-outline btn-sm" style="justify-content:center">⚠️ Pending Vendors</a>
+          <a href="/admin/orders.html" class="btn btn-outline btn-sm" style="justify-content:center">📦 Orders</a>
+          <a href="/admin/reviews.html" class="btn btn-outline btn-sm" style="justify-content:center">⭐ Pending Reviews</a>
+          <a href="/admin/coupons.html" class="btn btn-outline btn-sm" style="justify-content:center">🏷 Coupons</a>
+          <a href="/admin/blogs.html" class="btn btn-outline btn-sm" style="justify-content:center">📝 Blog Posts</a>
+          <a href="/admin/services.html" class="btn btn-outline btn-sm" style="justify-content:center">🔧 Services</a>
+          <a href="/admin/cities.html" class="btn btn-outline btn-sm" style="justify-content:center">🏙 Cities</a>
+          <a href="/admin/banners.html" class="btn btn-outline btn-sm" style="justify-content:center">🖼 Banners</a>
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-title">CRM Summary</span></div>
+        <div class="card-header"><span class="card-title">Platform Summary</span></div>
         <div id="crm-table" class="card-body loading" style="min-height:80px">Loading…</div>
       </div>
     </div>
@@ -100,29 +126,47 @@ function runSeed(btn) {
     toast('Seed complete! ' + (r.results||[]).length + ' tasks done', 'success');
     document.getElementById('seed-bar').style.display = 'none';
     loadAll();
-  }).catch(function(e) { toast(e.message,'error'); btn.textContent='🌱 Seed Initial Data'; btn.disabled=false; });
+  }).catch(function(e) { toast(e.message,'error'); btn.textContent='🌱 Seed Data'; btn.disabled=false; });
 }
 
-function mc(icon, label, value, sub, hi) {
-  return '<div class="metric-card' + (hi?' highlight':'') + '"><div class="metric-icon">'+icon+'</div><div class="metric-label">'+label+'</div><div class="metric-value">'+value+'</div><div class="metric-sub">'+escape(String(sub))+'</div></div>';
+function mc(icon, label, value, sub, cls) {
+  return '<div class="metric-card'+(cls?' '+cls:'')+'"><div class="metric-icon">'+icon+'</div><div class="metric-label">'+label+'</div><div class="metric-value">'+value+'</div><div class="metric-sub">'+escape(String(sub||''))+'</div></div>';
 }
+function sr(label, value) { return '<div class="stat-row"><span>'+label+'</span><strong>'+value+'</strong></div>'; }
 
 function loadAll() {
-  Promise.all([api('GET','/admin/stats'), api('GET','/admin/analytics?days=30')]).then(function(res) {
+  Promise.all([
+    api('GET','/admin/fullstats').catch(function(){ return api('GET','/admin/stats'); }),
+    api('GET','/admin/analytics?days=30'),
+  ]).then(function(res) {
     var s = res[0], a = res[1];
 
-    if (s.cities.active === 0) document.getElementById('seed-bar').style.display = 'flex';
+    if (s.cities && s.cities.active === 0) document.getElementById('seed-bar').style.display = 'flex';
 
+    // Row 1 — revenue & people
     document.getElementById('metric-grid').innerHTML =
-      mc('💰',"Today's Revenue", fmtCur(s.orders.today.gmv), s.orders.today.count+' orders today', true) +
-      mc('📊','MTD Revenue', fmtCur(s.orders.thisMonth.gmv), s.orders.thisMonth.count+' orders this month') +
-      mc('👥','Total Users', s.users.total, s.users.customers+' customers') +
-      mc('🏪','Service Vendors', s.vendors.service, s.vendors.onlineNow+' online · '+s.vendors.pendingApprovals+' pending') +
-      mc('🏙','Active Cities', s.cities.active, (s.catalog&&s.catalog.services||0)+' services · '+(s.catalog&&s.catalog.products||0)+' products') +
-      mc('🎯','Lead Conversion', s.crm.conversionRate, s.crm.totalLeads+' leads · '+s.crm.conversions+' converted');
+      mc('💰',"Today's Revenue", fmtCur((s.orders&&s.orders.today&&s.orders.today.gmv)||0), (s.orders&&s.orders.today&&s.orders.today.count||0)+' orders today', 'highlight') +
+      mc('📊','MTD Revenue', fmtCur((s.orders&&s.orders.thisMonth&&s.orders.thisMonth.gmv)||0), (s.orders&&s.orders.thisMonth&&s.orders.thisMonth.count||0)+' orders this month', '') +
+      mc('👥','Total Customers', (s.users&&s.users.customers)||0, (s.members&&s.members.prime||0)+' prime members', '') +
+      mc('💎','Prime Members', (s.members&&s.members.prime)||0, 'Active memberships', 'purple') +
+      mc('🏪','Service Vendors', (s.vendors&&s.vendors.service)||0, (s.vendors&&s.vendors.pendingApprovals||0)+' pending approval', '') +
+      mc('✉️','Newsletters', (s.newsletters&&s.newsletters.total)||0, 'Active subscribers', 'blue');
+
+    // Row 2 — order states
+    var ordTotal = (s.orders&&s.orders.total)||0;
+    var ordActive = (s.orders&&s.orders.active)||(s.orders&&s.orders.activeOrders)||0;
+    var ordCompleted = (s.orders&&s.orders.completed)||0;
+    var ordCancelled = (s.orders&&s.orders.cancelled)||0;
+    document.getElementById('order-grid').innerHTML =
+      mc('📦','Total Orders', ordTotal, 'All time', '') +
+      mc('🆕','New Orders', (s.orders&&s.orders.today&&s.orders.today.count)||0, 'Today', '') +
+      mc('⚡','Active Orders', ordActive, 'In progress', 'blue') +
+      mc('✅','Completed', ordCompleted, 'Successfully done', 'green') +
+      mc('❌','Cancelled', ordCancelled, 'Cancelled orders', '') +
+      mc('⭐','Avg Rating', (s.reviews&&s.reviews.avgRating)?Number(s.reviews.avgRating).toFixed(1)+'★':'—', (s.reviews&&s.reviews.pending||0)+' pending reviews', '');
 
     // Orders+Revenue chart
-    var days = (a&&a.daily)||[], labels=[], cnts=[], revs=[];
+    var days=(a&&a.daily)||[], labels=[], cnts=[], revs=[];
     days.forEach(function(d){ labels.push(d.date.slice(5)); cnts.push(d.orders); revs.push(d.revenue); });
     if (ordersChartInst) ordersChartInst.destroy();
     ordersChartInst = new Chart(document.getElementById('ordersChart'),{
@@ -131,10 +175,10 @@ function loadAll() {
         {label:'Orders',data:cnts,backgroundColor:'rgba(196,96,26,0.75)',borderRadius:3,yAxisID:'y'},
         {label:'Revenue (₹)',data:revs,type:'line',borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,0.1)',fill:true,tension:0.4,yAxisID:'y1'},
       ]},
-      options:{ responsive:true, interaction:{mode:'index'}, scales:{
+      options:{responsive:true,interaction:{mode:'index'},scales:{
         y:{position:'left',title:{display:true,text:'Orders'},beginAtZero:true},
         y1:{position:'right',title:{display:true,text:'₹ Revenue'},beginAtZero:true,grid:{drawOnChartArea:false}},
-      }, plugins:{legend:{position:'top'}} },
+      },plugins:{legend:{position:'top'}}},
     });
 
     // Status donut
@@ -149,28 +193,32 @@ function loadAll() {
         options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}}},
       });
     } else {
-      document.getElementById('statusChart').parentElement.innerHTML = '<h3>Order Status Breakdown</h3><div style="text-align:center;padding:40px;color:#9ca3af">No orders yet</div>';
+      document.getElementById('statusChart').parentElement.innerHTML='<h3>Order Status Breakdown</h3><div style="text-align:center;padding:40px;color:#9ca3af">No orders yet</div>';
     }
 
     // Top services
     var ts=(a&&a.topServices)||[];
-    document.getElementById('top-services').className = 'card-body';
+    document.getElementById('top-services').className='card-body';
     document.getElementById('top-services').innerHTML = ts.length===0
       ? '<div style="color:#9ca3af;font-size:13px;padding:8px 0">No order data yet</div>'
-      : ts.map(function(t,i){ return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:13px">'+(i+1)+'. '+escape(t.name)+'</span><strong style="font-size:13px">'+t.orders+'</strong></div>'; }).join('');
+      : ts.map(function(t,i){ return '<div class="stat-row"><span>'+(i+1)+'. '+escape(t.name)+'</span><strong>'+t.orders+' orders</strong></div>'; }).join('');
 
-    // CRM table
-    document.getElementById('crm-table').className = 'card-body';
+    // Platform summary
+    document.getElementById('crm-table').className='card-body';
     document.getElementById('crm-table').innerHTML =
-      '<table><tbody>'+
-      '<tr><td>Total Leads</td><td><strong>'+s.crm.totalLeads+'</strong></td></tr>'+
-      '<tr><td>Conversions</td><td><strong>'+s.crm.conversions+'</strong></td></tr>'+
-      '<tr><td>Conversion Rate</td><td>'+badge(s.crm.conversionRate,'green')+'</td></tr>'+
-      '<tr><td>Active AMC</td><td><strong>'+s.amc.active+'</strong></td></tr>'+
-      '</tbody></table>';
+      sr('Total Leads', (s.crm&&s.crm.totalLeads)||0) +
+      sr('Conversions', (s.crm&&s.crm.conversions)||0) +
+      sr('Conversion Rate', (s.crm&&s.crm.conversionRate)||'0%') +
+      sr('Active AMC', (s.amc&&s.amc.active)||0) +
+      sr('Active Services', (s.services&&s.services.active)||(s.catalog&&s.catalog.services)||0) +
+      sr('Active Coupons', (s.coupons&&s.coupons.active)||0) +
+      sr('Blog Posts', (s.blogs&&s.blogs.published)||0) +
+      sr('Active FAQs', (s.faqs&&s.faqs.active)||0) +
+      sr('Active Cities', (s.cities&&s.cities.active)||0);
 
   }).catch(function(e){
     document.getElementById('metric-grid').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';
+    console.error(e);
   });
 }
 

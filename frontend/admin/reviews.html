@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Reviews</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Ratings &amp; Reviews</h1><p>Moderate customer reviews</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Reviews</span>
+        <div style="display:flex;gap:8px">
+          <select id="filter-v" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All</option><option value="false">Pending Approval</option><option value="true">Approved</option>
+          </select>
+          <input id="filter-q" class="form-control" style="width:180px" placeholder="Search comment…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+<script src="./common.js"></script>
+<script>
+renderSidebar('reviews');
+requireAuth();
+
+function stars(n) {
+  var s = '';
+  for (var i=1;i<=5;i++) s += '<span style="color:'+(i<=n?'#f59e0b':'#e5e7eb')+'">★</span>';
+  return s;
+}
+
+function load() {
+  var v = document.getElementById('filter-v').value;
+  var q = document.getElementById('filter-q').value;
+  var params = 'limit=150';
+  if (v !== '') params += '&verified=' + v;
+  if (q) params += '&q=' + encodeURIComponent(q);
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/reviews?' + params).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⭐</div><h3>No reviews found</h3></div>'; return; }
+    var rows = list.map(function(r) {
+      return '<tr>' +
+        '<td>' + stars(r.rating) + ' <strong>' + r.rating + '/5</strong></td>' +
+        '<td style="max-width:260px">' + escape(r.comment || '—') + '</td>' +
+        '<td>' + escape((r.customer && r.customer.name) || '—') + '<br><small style="color:#9ca3af">' + escape((r.customer && r.customer.phone) || '') + '</small></td>' +
+        '<td>' + escape((r.service && r.service.name) || '—') + '</td>' +
+        '<td>' + escape((r.vendor && r.vendor.fullName) || '—') + '</td>' +
+        '<td>' + badge(r.isVerified ? 'Approved' : 'Pending', r.isVerified ? 'green' : 'yellow') + '</td>' +
+        '<td>' + fmtDateShort(r.createdAt) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          (!r.isVerified ? '<button class="btn btn-xs btn-success" onclick="approve(\'' + r.id + '\')">Approve</button>' : '') +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + r.id + '\')">Delete</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Rating</th><th>Comment</th><th>Customer</th><th>Service</th><th>Vendor</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function approve(id) {
+  api('PATCH', '/admin/reviews/' + id + '/approve').then(function() { toast('Review approved', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this review permanently?')) return;
+  api('DELETE', '/admin/reviews/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

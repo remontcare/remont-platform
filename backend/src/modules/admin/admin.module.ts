@@ -482,6 +482,234 @@ export class AdminService {
 
     return { success: true, results };
   }
+
+  // ─── Enhanced global stats ───────────────────────────────────────────
+  async fullStats() {
+    const base = await this.globalStats();
+    const [
+      totalReviews, pendingReviews, avgRating,
+      totalNewsletters, activeCoupons, totalBlogPosts, publishedBlogs,
+      totalFaqs, activeFaqs, totalOrders, completedOrders, cancelledOrders, activeOrders,
+      primeMembers, totalServices, inactiveServices,
+    ] = await Promise.all([
+      this.prisma.review.count(),
+      this.prisma.review.count({ where: { isVerified: false } }),
+      this.prisma.review.aggregate({ _avg: { rating: true } }),
+      this.prisma.newsletter.count({ where: { isActive: true } }).catch(() => 0),
+      this.prisma.coupon.count({ where: { isActive: true } }),
+      this.prisma.blogPost.count().catch(() => 0),
+      this.prisma.blogPost.count({ where: { isPublished: true } }).catch(() => 0),
+      this.prisma.faq.count().catch(() => 0),
+      this.prisma.faq.count({ where: { isActive: true } }).catch(() => 0),
+      this.prisma.order.count(),
+      this.prisma.order.count({ where: { status: 'COMPLETED' } }),
+      this.prisma.order.count({ where: { status: 'CANCELLED' } }),
+      this.prisma.order.count({ where: { status: { in: ['CONFIRMED','VENDOR_ASSIGNED','EN_ROUTE','IN_PROGRESS'] } } }),
+      this.prisma.userMembership.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.service.count({ where: { isActive: true } }),
+      this.prisma.service.count({ where: { isActive: false } }),
+    ]);
+    return {
+      ...base,
+      reviews: { total: totalReviews, pending: pendingReviews, avgRating: avgRating._avg.rating || 0 },
+      newsletters: { total: totalNewsletters },
+      coupons: { active: activeCoupons },
+      blogs: { total: totalBlogPosts, published: publishedBlogs },
+      faqs: { total: totalFaqs, active: activeFaqs },
+      orders: {
+        ...base.orders,
+        total: totalOrders, completed: completedOrders, cancelled: cancelledOrders, active: activeOrders,
+      },
+      members: { prime: primeMembers },
+      services: { active: totalServices, inactive: inactiveServices },
+    };
+  }
+
+  // ─── Newsletters ─────────────────────────────────────────────────────
+
+  async listNewsletters(opts: { q?: string; limit?: number; offset?: number }) {
+    return this.prisma.newsletter.findMany({
+      where: opts.q ? { OR: [{ email: { contains: opts.q, mode: 'insensitive' } }, { name: { contains: opts.q, mode: 'insensitive' } }] } : {},
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+      skip: opts.offset || 0,
+    }).catch(() => []);
+  }
+
+  async deleteNewsletter(id: string) {
+    return this.prisma.newsletter.delete({ where: { id } }).catch(() => null);
+  }
+
+  async exportNewsletters() {
+    const list = await this.prisma.newsletter.findMany({ where: { isActive: true }, select: { email: true, name: true, source: true, createdAt: true } }).catch(() => []);
+    return list;
+  }
+
+  // ─── FAQs ─────────────────────────────────────────────────────────────
+
+  async listFaqs(category?: string) {
+    return this.prisma.faq.findMany({
+      where: category ? { category } : {},
+      orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
+    }).catch(() => []);
+  }
+
+  async createFaq(data: { question: string; answer: string; category?: string; sortOrder?: number }) {
+    return this.prisma.faq.create({ data: { question: data.question, answer: data.answer, category: data.category || 'general', sortOrder: data.sortOrder || 0 } }).catch((e) => { throw e; });
+  }
+
+  async updateFaq(id: string, data: { question?: string; answer?: string; category?: string; sortOrder?: number; isActive?: boolean }) {
+    return this.prisma.faq.update({ where: { id }, data }).catch((e) => { throw e; });
+  }
+
+  async deleteFaq(id: string) {
+    return this.prisma.faq.delete({ where: { id } }).catch((e) => { throw e; });
+  }
+
+  // ─── Blog Posts ───────────────────────────────────────────────────────
+
+  async listBlogs(opts: { published?: boolean; q?: string; limit?: number; offset?: number }) {
+    return this.prisma.blogPost.findMany({
+      where: {
+        ...(opts.published !== undefined ? { isPublished: opts.published } : {}),
+        ...(opts.q ? { OR: [{ title: { contains: opts.q, mode: 'insensitive' } }, { author: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 50,
+      skip: opts.offset || 0,
+    }).catch(() => []);
+  }
+
+  async createBlog(data: { title: string; content: string; summary?: string; imageUrl?: string; author?: string; tags?: string[]; isPublished?: boolean }) {
+    const slug = slugify(data.title) + '-' + Date.now();
+    return this.prisma.blogPost.create({
+      data: { ...data, slug, tags: data.tags || [], publishedAt: data.isPublished ? new Date() : null },
+    }).catch((e) => { throw e; });
+  }
+
+  async updateBlog(id: string, data: any) {
+    if (data.isPublished && !data.publishedAt) data.publishedAt = new Date();
+    return this.prisma.blogPost.update({ where: { id }, data }).catch((e) => { throw e; });
+  }
+
+  async deleteBlog(id: string) {
+    return this.prisma.blogPost.delete({ where: { id } }).catch((e) => { throw e; });
+  }
+
+  // ─── Taxes ────────────────────────────────────────────────────────────
+
+  async listTaxes() {
+    return this.prisma.taxConfig.findMany({ orderBy: { createdAt: 'asc' } }).catch(() => []);
+  }
+
+  async createTax(data: { name: string; type?: string; rate: number; hsnCode?: string; appliesTo?: string[] }) {
+    return this.prisma.taxConfig.create({ data: { ...data, appliesTo: data.appliesTo || ['SERVICE'] } }).catch((e) => { throw e; });
+  }
+
+  async updateTax(id: string, data: { name?: string; rate?: number; isActive?: boolean; appliesTo?: string[] }) {
+    return this.prisma.taxConfig.update({ where: { id }, data }).catch((e) => { throw e; });
+  }
+
+  async deleteTax(id: string) {
+    return this.prisma.taxConfig.delete({ where: { id } }).catch((e) => { throw e; });
+  }
+
+  // ─── Seasonal Ads ─────────────────────────────────────────────────────
+
+  async listAds(type?: string) {
+    return this.prisma.seasonalAd.findMany({
+      where: type ? { type } : {},
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    }).catch(() => []);
+  }
+
+  async createAd(data: any) {
+    return this.prisma.seasonalAd.create({ data: { ...data, cityFilter: data.cityFilter || [] } }).catch((e) => { throw e; });
+  }
+
+  async updateAd(id: string, data: any) {
+    return this.prisma.seasonalAd.update({ where: { id }, data }).catch((e) => { throw e; });
+  }
+
+  async deleteAd(id: string) {
+    return this.prisma.seasonalAd.delete({ where: { id } }).catch((e) => { throw e; });
+  }
+
+  // ─── Staff ────────────────────────────────────────────────────────────
+
+  async listStaff() {
+    return this.prisma.staffMember.findMany({ orderBy: { joinedAt: 'desc' } }).catch(() => []);
+  }
+
+  async createStaff(data: { name: string; email: string; phone?: string; role?: string; department?: string }) {
+    return this.prisma.staffMember.create({ data }).catch((e) => { throw e; });
+  }
+
+  async updateStaff(id: string, data: any) {
+    return this.prisma.staffMember.update({ where: { id }, data }).catch((e) => { throw e; });
+  }
+
+  async deleteStaff(id: string) {
+    return this.prisma.staffMember.delete({ where: { id } }).catch((e) => { throw e; });
+  }
+
+  // ─── Reviews management ───────────────────────────────────────────────
+
+  async listReviews(opts: { verified?: boolean; q?: string; limit?: number }) {
+    return this.prisma.review.findMany({
+      where: {
+        ...(opts.verified !== undefined ? { isVerified: opts.verified } : {}),
+        ...(opts.q ? { OR: [{ comment: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+      },
+      include: {
+        customer: { select: { name: true, phone: true } },
+        service: { select: { name: true } },
+        vendor: { select: { fullName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+    });
+  }
+
+  async approveReview(id: string) {
+    return this.prisma.review.update({ where: { id }, data: { isVerified: true } });
+  }
+
+  async deleteReview(id: string) {
+    return this.prisma.review.delete({ where: { id } });
+  }
+
+  // ─── Coupons management ───────────────────────────────────────────────
+
+  async listCoupons() {
+    return this.prisma.coupon.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async createCoupon(data: any) {
+    return this.prisma.coupon.create({ data });
+  }
+
+  async updateCoupon(id: string, data: any) {
+    return this.prisma.coupon.update({ where: { id }, data });
+  }
+
+  async deleteCoupon(id: string) {
+    return this.prisma.coupon.delete({ where: { id } });
+  }
+
+  // ─── Membership plans ─────────────────────────────────────────────────
+
+  async listMembershipPlans() {
+    return this.prisma.membershipPlan.findMany({ orderBy: { price: 'asc' } });
+  }
+
+  async createMembershipPlan(data: any) {
+    return this.prisma.membershipPlan.create({ data });
+  }
+
+  async updateMembershipPlan(id: string, data: any) {
+    return this.prisma.membershipPlan.update({ where: { id }, data });
+  }
 }
 
 // ─── Controller ─────────────────────────────────────────────────────────────
@@ -563,6 +791,68 @@ export class AdminController {
   @Patch('settings/:key') upsertSetting(@Param('key') key: string, @Body() b: { value: string; label?: string; group?: string }) {
     return this.admin.upsertSetting(key, b.value, b.label, b.group);
   }
+
+  // Full stats (replaces stats for dashboard)
+  @Get('fullstats') fullStats() { return this.admin.fullStats(); }
+
+  // Newsletters
+  @Get('newsletters') newsletters(@Query('q') q?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+    return this.admin.listNewsletters({ q, limit: limit ? +limit : 100, offset: offset ? +offset : 0 });
+  }
+  @Delete('newsletters/:id') deleteNewsletter(@Param('id') id: string) { return this.admin.deleteNewsletter(id); }
+  @Get('newsletters/export') exportNewsletters() { return this.admin.exportNewsletters(); }
+
+  // FAQs
+  @Get('faqs') faqs(@Query('category') cat?: string) { return this.admin.listFaqs(cat); }
+  @Post('faqs') createFaq(@Body() b: any) { return this.admin.createFaq(b); }
+  @Patch('faqs/:id') updateFaq(@Param('id') id: string, @Body() b: any) { return this.admin.updateFaq(id, b); }
+  @Delete('faqs/:id') deleteFaq(@Param('id') id: string) { return this.admin.deleteFaq(id); }
+
+  // Blogs
+  @Get('blogs') blogs(@Query('published') published?: string, @Query('q') q?: string, @Query('limit') limit?: number) {
+    const pub = published === 'true' ? true : published === 'false' ? false : undefined;
+    return this.admin.listBlogs({ published: pub, q, limit: limit ? +limit : 50 });
+  }
+  @Post('blogs') createBlog(@Body() b: any) { return this.admin.createBlog(b); }
+  @Patch('blogs/:id') updateBlog(@Param('id') id: string, @Body() b: any) { return this.admin.updateBlog(id, b); }
+  @Delete('blogs/:id') deleteBlog(@Param('id') id: string) { return this.admin.deleteBlog(id); }
+
+  // Taxes
+  @Get('taxes') taxes() { return this.admin.listTaxes(); }
+  @Post('taxes') createTax(@Body() b: any) { return this.admin.createTax(b); }
+  @Patch('taxes/:id') updateTax(@Param('id') id: string, @Body() b: any) { return this.admin.updateTax(id, b); }
+  @Delete('taxes/:id') deleteTax(@Param('id') id: string) { return this.admin.deleteTax(id); }
+
+  // Seasonal Ads
+  @Get('ads') ads(@Query('type') type?: string) { return this.admin.listAds(type); }
+  @Post('ads') createAd(@Body() b: any) { return this.admin.createAd(b); }
+  @Patch('ads/:id') updateAd(@Param('id') id: string, @Body() b: any) { return this.admin.updateAd(id, b); }
+  @Delete('ads/:id') deleteAd(@Param('id') id: string) { return this.admin.deleteAd(id); }
+
+  // Staff
+  @Get('staff') staff() { return this.admin.listStaff(); }
+  @Post('staff') createStaff(@Body() b: any) { return this.admin.createStaff(b); }
+  @Patch('staff/:id') updateStaff(@Param('id') id: string, @Body() b: any) { return this.admin.updateStaff(id, b); }
+  @Delete('staff/:id') deleteStaff(@Param('id') id: string) { return this.admin.deleteStaff(id); }
+
+  // Reviews
+  @Get('reviews') reviews(@Query('verified') v?: string, @Query('q') q?: string, @Query('limit') limit?: number) {
+    const verified = v === 'true' ? true : v === 'false' ? false : undefined;
+    return this.admin.listReviews({ verified, q, limit: limit ? +limit : 100 });
+  }
+  @Patch('reviews/:id/approve') approveReview(@Param('id') id: string) { return this.admin.approveReview(id); }
+  @Delete('reviews/:id') deleteReview(@Param('id') id: string) { return this.admin.deleteReview(id); }
+
+  // Coupons
+  @Get('coupons') coupons() { return this.admin.listCoupons(); }
+  @Post('coupons') createCoupon(@Body() b: any) { return this.admin.createCoupon(b); }
+  @Patch('coupons/:id') updateCoupon(@Param('id') id: string, @Body() b: any) { return this.admin.updateCoupon(id, b); }
+  @Delete('coupons/:id') deleteCoupon(@Param('id') id: string) { return this.admin.deleteCoupon(id); }
+
+  // Membership plans
+  @Get('membership-plans') membershipPlans() { return this.admin.listMembershipPlans(); }
+  @Post('membership-plans') createMembershipPlan(@Body() b: any) { return this.admin.createMembershipPlan(b); }
+  @Patch('membership-plans/:id') updateMembershipPlan(@Param('id') id: string, @Body() b: any) { return this.admin.updateMembershipPlan(id, b); }
 }
 
 @Module({

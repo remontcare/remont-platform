@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Taxes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Tax Configuration</h1><p>GST rates and tax slabs</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Tax</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card" style="margin-bottom:16px;background:#fef3c7;border-color:#fde68a">
+      <div class="card-body" style="padding:12px 16px;font-size:13px;color:#92400e">
+        ⚠️ Tax rates defined here are informational for invoicing. Integration with billing must be done in the order creation flow.
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Tax Rates</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="tax-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Tax Rate</span>
+      <button class="modal-close" onclick="closeModal('tax-overlay')">×</button>
+    </div>
+    <input type="hidden" id="tax-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label class="form-label">Name *</label><input id="t-name" class="form-control" placeholder="GST 18%"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Type</label>
+        <select id="t-type" class="form-control"><option>GST</option><option>IGST</option><option>CESS</option><option>SERVICE_TAX</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Rate (%) *</label><input id="t-rate" class="form-control" type="number" step="0.01" placeholder="18.00"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">HSN / SAC Code</label><input id="t-hsn" class="form-control" placeholder="998511"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Applies To</label>
+      <div style="display:flex;gap:16px;margin-top:6px">
+        <label><input type="checkbox" id="t-svc" checked> Services</label>
+        <label><input type="checkbox" id="t-prod"> Products</label>
+        <label><input type="checkbox" id="t-amc"> AMC Plans</label>
+      </div>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="t-active" checked><label for="t-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('tax-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTax()">Save Tax</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('taxes');
+requireAuth();
+
+function load() {
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/taxes').then(function(list) {
+    if (!list || !list.length) {
+      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><h3>No tax rates yet</h3><p>Add GST rates to use in invoicing.</p></div>'; return;
+    }
+    var rows = list.map(function(t) {
+      return '<tr>' +
+        '<td><strong>' + escape(t.name) + '</strong></td>' +
+        '<td>' + badge(t.type, 'blue') + '</td>' +
+        '<td><strong>' + Number(t.rate).toFixed(2) + '%</strong></td>' +
+        '<td>' + escape(t.hsnCode || '—') + '</td>' +
+        '<td>' + (t.appliesTo||[]).map(function(a){return badge(a,'gray');}).join(' ') + '</td>' +
+        '<td>' + badge(t.isActive ? 'Active' : 'Inactive', t.isActive ? 'green' : 'gray') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(t) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + t.id + '\',' + (!t.isActive) + ')">' + (t.isActive ? 'Disable' : 'Enable') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + t.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>HSN/SAC</th><th>Applies To</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(t) {
+  document.getElementById('modal-title').textContent = t ? 'Edit Tax Rate' : 'Add Tax Rate';
+  document.getElementById('tax-id').value = t ? t.id : '';
+  document.getElementById('t-name').value = t ? t.name : '';
+  document.getElementById('t-type').value = t ? t.type : 'GST';
+  document.getElementById('t-rate').value = t ? t.rate : '';
+  document.getElementById('t-hsn').value = t ? (t.hsnCode || '') : '';
+  document.getElementById('t-svc').checked = !t || (t.appliesTo||[]).includes('SERVICE');
+  document.getElementById('t-prod').checked = t && (t.appliesTo||[]).includes('PRODUCT');
+  document.getElementById('t-amc').checked = t && (t.appliesTo||[]).includes('AMC');
+  document.getElementById('t-active').checked = t ? t.isActive : true;
+  document.getElementById('tax-overlay').style.display = 'flex';
+}
+
+function saveTax() {
+  var id = document.getElementById('tax-id').value;
+  var name = document.getElementById('t-name').value.trim();
+  var rate = parseFloat(document.getElementById('t-rate').value);
+  if (!name) { toast('Name required', 'error'); return; }
+  if (isNaN(rate) || rate <= 0) { toast('Enter a valid rate', 'error'); return; }
+  var appliesTo = [];
+  if (document.getElementById('t-svc').checked) appliesTo.push('SERVICE');
+  if (document.getElementById('t-prod').checked) appliesTo.push('PRODUCT');
+  if (document.getElementById('t-amc').checked) appliesTo.push('AMC');
+  var data = { name, type: document.getElementById('t-type').value, rate, hsnCode: document.getElementById('t-hsn').value.trim() || undefined, appliesTo, isActive: document.getElementById('t-active').checked };
+  var p = id ? api('PATCH', '/admin/taxes/' + id, data) : api('POST', '/admin/taxes', data);
+  p.then(function() { toast(id ? 'Tax updated' : 'Tax created', 'success'); closeModal('tax-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleActive(id, val) {
+  api('PATCH', '/admin/taxes/' + id, { isActive: val }).then(function() { toast(val ? 'Enabled' : 'Disabled', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this tax rate?')) return;
+  api('DELETE', '/admin/taxes/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Coupons</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Coupons</h1><p>Discount codes and promotions</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Create Coupon</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">All Coupons</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="coupon-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Create Coupon</span>
+      <button class="modal-close" onclick="closeModal('coupon-overlay')">×</button>
+    </div>
+    <input type="hidden" id="coupon-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Code * (UPPERCASE)</label><input id="c-code" class="form-control" placeholder="SUMMER30" style="text-transform:uppercase"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Discount Type</label>
+        <select id="c-type" class="form-control" onchange="toggleMinMax()">
+          <option value="PERCENTAGE">Percentage (%)</option>
+          <option value="FLAT">Flat Amount (₹)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Discount Value *</label><input id="c-val" class="form-control" type="number" step="1" placeholder="30"></div>
+      <div class="form-group" id="max-group" style="flex:1"><label class="form-label">Max Discount (₹)</label><input id="c-max" class="form-control" type="number" placeholder="500"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Min Order Value (₹)</label><input id="c-min" class="form-control" type="number" placeholder="500"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Usage Limit</label><input id="c-limit" class="form-control" type="number" placeholder="100 (blank = unlimited)"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Valid From</label><input id="c-from" class="form-control" type="datetime-local"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Valid Until</label><input id="c-to" class="form-control" type="datetime-local"></div>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="c-active" checked><label for="c-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('coupon-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCoupon()">Save Coupon</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('coupons');
+requireAuth();
+
+function toggleMinMax() {
+  document.getElementById('max-group').style.display = document.getElementById('c-type').value === 'PERCENTAGE' ? '' : 'none';
+}
+
+function load() {
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/coupons').then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏷</div><h3>No coupons yet</h3></div>'; return; }
+    var rows = list.map(function(c) {
+      var now = Date.now();
+      var expired = c.validUntil && new Date(c.validUntil) < now;
+      return '<tr>' +
+        '<td><code style="background:#f3f4f6;padding:3px 8px;border-radius:4px;font-size:13px;font-weight:700">' + escape(c.code) + '</code></td>' +
+        '<td>' + (c.discountType === 'PERCENTAGE' ? c.discountValue + '%' : '₹' + c.discountValue) + (c.maxDiscount ? ' (max ₹' + c.maxDiscount + ')' : '') + '</td>' +
+        '<td>' + (c.minOrderValue ? '₹' + c.minOrderValue : '—') + '</td>' +
+        '<td>' + (c.usageLimit ? c.usedCount + '/' + c.usageLimit : c.usedCount + ' used') + '</td>' +
+        '<td>' + (c.validUntil ? fmtDateShort(c.validUntil) : '∞') + '</td>' +
+        '<td>' + badge(expired ? 'Expired' : (c.isActive ? 'Active' : 'Inactive'), expired ? 'red' : (c.isActive ? 'green' : 'gray')) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(c) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + c.id + '\',' + (!c.isActive) + ')">' + (c.isActive ? 'Disable' : 'Enable') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + c.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Code</th><th>Discount</th><th>Min Order</th><th>Usage</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function toLocal(iso) { if (!iso) return ''; return new Date(iso).toISOString().slice(0, 16); }
+
+function openModal(c) {
+  document.getElementById('modal-title').textContent = c ? 'Edit Coupon' : 'Create Coupon';
+  document.getElementById('coupon-id').value = c ? c.id : '';
+  document.getElementById('c-code').value = c ? c.code : '';
+  document.getElementById('c-type').value = c ? (c.discountType || 'PERCENTAGE') : 'PERCENTAGE';
+  document.getElementById('c-val').value = c ? c.discountValue : '';
+  document.getElementById('c-max').value = c ? (c.maxDiscount || '') : '';
+  document.getElementById('c-min').value = c ? (c.minOrderValue || '') : '';
+  document.getElementById('c-limit').value = c ? (c.usageLimit || '') : '';
+  document.getElementById('c-from').value = c ? toLocal(c.validFrom) : '';
+  document.getElementById('c-to').value = c ? toLocal(c.validUntil) : '';
+  document.getElementById('c-active').checked = c ? c.isActive : true;
+  toggleMinMax();
+  document.getElementById('coupon-overlay').style.display = 'flex';
+}
+
+function saveCoupon() {
+  var id = document.getElementById('coupon-id').value;
+  var code = document.getElementById('c-code').value.trim().toUpperCase();
+  var val = parseFloat(document.getElementById('c-val').value);
+  if (!code) { toast('Code required', 'error'); return; }
+  if (isNaN(val) || val <= 0) { toast('Valid discount value required', 'error'); return; }
+  var from = document.getElementById('c-from').value;
+  var to = document.getElementById('c-to').value;
+  var lim = parseInt(document.getElementById('c-limit').value);
+  var mx = parseFloat(document.getElementById('c-max').value);
+  var mn = parseFloat(document.getElementById('c-min').value);
+  var data = {
+    code, discountType: document.getElementById('c-type').value, discountValue: val,
+    maxDiscount: isNaN(mx) ? undefined : mx,
+    minOrderValue: isNaN(mn) ? undefined : mn,
+    usageLimit: isNaN(lim) ? undefined : lim,
+    validFrom: from ? new Date(from).toISOString() : undefined,
+    validUntil: to ? new Date(to).toISOString() : undefined,
+    isActive: document.getElementById('c-active').checked,
+  };
+  var p = id ? api('PATCH', '/admin/coupons/' + id, data) : api('POST', '/admin/coupons', data);
+  p.then(function() { toast(id ? 'Coupon updated' : 'Coupon created', 'success'); closeModal('coupon-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleActive(id, val) {
+  api('PATCH', '/admin/coupons/' + id, { isActive: val }).then(function() { toast(val ? 'Coupon enabled' : 'Coupon disabled', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this coupon?')) return;
+  api('DELETE', '/admin/coupons/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

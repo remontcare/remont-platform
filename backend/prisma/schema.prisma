@@ -1024,3 +1024,78 @@ model SiteSetting {
   label     String?
   group     String  @default("general")
 }
+
+model Newsletter {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String?
+  isActive    Boolean  @default(true)
+  source      String   @default("website") // website, app, whatsapp
+  createdAt   DateTime @default(now())
+}
+
+model Faq {
+  id          String   @id @default(cuid())
+  question    String
+  answer      String
+  category    String   @default("general")
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  summary     String?
+  content     String
+  imageUrl    String?
+  author      String   @default("Remont Team")
+  tags        String[]
+  isPublished Boolean  @default(false)
+  views       Int      @default(0)
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TaxConfig {
+  id          String   @id @default(cuid())
+  name        String   // e.g. "GST 18%"
+  type        String   @default("GST") // GST, SERVICE_TAX, CESS
+  rate        Decimal  @db.Decimal(5, 2)
+  hsnCode     String?  // HSN/SAC code
+  appliesTo   String[] // SERVICE, PRODUCT, AMC
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model SeasonalAd {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  imageUrl    String?
+  ctaText     String?
+  ctaUrl      String   @default("#")
+  type        String   @default("SEASONAL") // SEASONAL, APP_AD, POPUP, STRIP
+  startDate   DateTime?
+  endDate     DateTime?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  cityFilter  String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StaffMember {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  phone       String?
+  role        String   @default("STAFF") // STAFF, MANAGER, SUPPORT
+  department  String?
+  isActive    Boolean  @default(true)
+  joinedAt    DateTime @default(now())
+}

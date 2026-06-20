@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Seasonal Ads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Seasonal Ads</h1><p>Promotional banners, popups and app ads</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Ad</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Ads</span>
+        <div style="display:flex;gap:8px">
+          <select id="filter-type" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All Types</option>
+            <option>SEASONAL</option><option>APP_AD</option><option>POPUP</option><option>STRIP</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="ad-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Ad</span>
+      <button class="modal-close" onclick="closeModal('ad-overlay')">×</button>
+    </div>
+    <input type="hidden" id="ad-id">
+    <div class="form-group"><label class="form-label">Title *</label><input id="a-title" class="form-control" placeholder="Summer AC Service Offer"></div>
+    <div class="form-group"><label class="form-label">Description</label><textarea id="a-desc" class="form-control" rows="2" placeholder="Up to 30% off on AC servicing"></textarea></div>
+    <div class="form-group"><label class="form-label">Image URL</label><input id="a-img" class="form-control" placeholder="https://…"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">CTA Button</label><input id="a-cta" class="form-control" placeholder="Book Now"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">CTA URL</label><input id="a-url" class="form-control" placeholder="#ac"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Type</label>
+        <select id="a-type" class="form-control"><option>SEASONAL</option><option>APP_AD</option><option>POPUP</option><option>STRIP</option></select>
+      </div>
+      <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="a-sort" class="form-control" type="number" value="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Start Date</label><input id="a-start" class="form-control" type="datetime-local"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">End Date</label><input id="a-end" class="form-control" type="datetime-local"></div>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="a-active" checked><label for="a-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('ad-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAd()">Save Ad</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('ads');
+requireAuth();
+
+function load() {
+  var type = document.getElementById('filter-type').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/ads' + (type ? '?type=' + type : '')).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📢</div><h3>No ads yet</h3></div>'; return; }
+    var now = Date.now();
+    var rows = list.map(function(a) {
+      var isLive = a.isActive && (!a.startDate || new Date(a.startDate) <= now) && (!a.endDate || new Date(a.endDate) >= now);
+      return '<tr>' +
+        (a.imageUrl ? '<td><img src="' + escape(a.imageUrl) + '" style="width:64px;height:40px;object-fit:cover;border-radius:4px"></td>' : '<td style="color:#9ca3af">—</td>') +
+        '<td><strong>' + escape(a.title) + '</strong><br><small style="color:#6b7280">' + escape(a.description || '') + '</small></td>' +
+        '<td>' + badge(a.type, 'blue') + '</td>' +
+        '<td>' + (a.startDate ? fmtDateShort(a.startDate) : '—') + '<br><small style="color:#9ca3af">' + (a.endDate ? fmtDateShort(a.endDate) : 'no end') + '</small></td>' +
+        '<td>' + badge(isLive ? 'Live' : (a.isActive ? 'Active' : 'Hidden'), isLive ? 'green' : (a.isActive ? 'yellow' : 'gray')) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(a) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + a.id + '\',' + (!a.isActive) + ')">' + (a.isActive ? 'Hide' : 'Show') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + a.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Preview</th><th>Title</th><th>Type</th><th>Schedule</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function toLocal(iso) { if (!iso) return ''; return new Date(iso).toISOString().slice(0, 16); }
+
+function openModal(a) {
+  document.getElementById('modal-title').textContent = a ? 'Edit Ad' : 'Add Ad';
+  document.getElementById('ad-id').value = a ? a.id : '';
+  document.getElementById('a-title').value = a ? a.title : '';
+  document.getElementById('a-desc').value = a ? (a.description || '') : '';
+  document.getElementById('a-img').value = a ? (a.imageUrl || '') : '';
+  document.getElementById('a-cta').value = a ? (a.ctaText || '') : '';
+  document.getElementById('a-url').value = a ? (a.ctaUrl || '#') : '#';
+  document.getElementById('a-type').value = a ? a.type : 'SEASONAL';
+  document.getElementById('a-sort').value = a ? (a.sortOrder || 0) : 0;
+  document.getElementById('a-start').value = a ? toLocal(a.startDate) : '';
+  document.getElementById('a-end').value = a ? toLocal(a.endDate) : '';
+  document.getElementById('a-active').checked = a ? a.isActive : true;
+  document.getElementById('ad-overlay').style.display = 'flex';
+}
+
+function saveAd() {
+  var id = document.getElementById('ad-id').value;
+  var title = document.getElementById('a-title').value.trim();
+  if (!title) { toast('Title required', 'error'); return; }
+  var start = document.getElementById('a-start').value;
+  var end = document.getElementById('a-end').value;
+  var data = {
+    title, description: document.getElementById('a-desc').value.trim() || undefined,
+    imageUrl: document.getElementById('a-img').value.trim() || undefined,
+    ctaText: document.getElementById('a-cta').value.trim() || undefined,
+    ctaUrl: document.getElementById('a-url').value.trim() || '#',
+    type: document.getElementById('a-type').value,
+    sortOrder: parseInt(document.getElementById('a-sort').value) || 0,
+    startDate: start ? new Date(start).toISOString() : null,
+    endDate: end ? new Date(end).toISOString() : null,
+    isActive: document.getElementById('a-active').checked,
+    cityFilter: [],
+  };
+  var p = id ? api('PATCH', '/admin/ads/' + id, data) : api('POST', '/admin/ads', data);
+  p.then(function() { toast(id ? 'Ad updated' : 'Ad created', 'success'); closeModal('ad-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleActive(id, val) {
+  api('PATCH', '/admin/ads/' + id, { isActive: val }).then(function() { toast(val ? 'Ad shown' : 'Ad hidden', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this ad?')) return;
+  api('DELETE', '/admin/ads/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

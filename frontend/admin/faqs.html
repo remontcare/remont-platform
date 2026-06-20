@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — FAQs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>FAQs</h1><p>Frequently asked questions management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add FAQ</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All FAQs</span>
+        <div style="display:flex;gap:8px">
+          <select id="filter-cat" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All Categories</option>
+            <option>general</option><option>services</option><option>payment</option><option>booking</option><option>vendor</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="faq-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add FAQ</span>
+      <button class="modal-close" onclick="closeModal('faq-overlay')">×</button>
+    </div>
+    <input type="hidden" id="faq-id">
+    <div class="form-group"><label class="form-label">Question *</label><input id="f-q" class="form-control" placeholder="What is Remont India?"></div>
+    <div class="form-group"><label class="form-label">Answer *</label><textarea id="f-a" class="form-control" rows="4" placeholder="Detailed answer here…"></textarea></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Category</label>
+        <select id="f-cat" class="form-control">
+          <option>general</option><option>services</option><option>payment</option><option>booking</option><option>vendor</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="f-sort" class="form-control" type="number" value="0" style="width:90px"></div>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="f-active" checked><label for="f-active" style="margin-left:6px">Active (shown on website)</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('faq-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFaq()">Save FAQ</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('faqs');
+requireAuth();
+
+function load() {
+  var cat = document.getElementById('filter-cat').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/faqs' + (cat ? '?category='+cat : '')).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">❓</div><h3>No FAQs yet</h3><p>Click "+ Add FAQ" to create one.</p></div>'; return; }
+    var rows = list.map(function(f) {
+      return '<tr>' +
+        '<td style="max-width:320px"><strong>' + escape(f.question) + '</strong><br><small style="color:#6b7280">' + escape((f.answer||'').slice(0,80)) + '…</small></td>' +
+        '<td>' + badge(f.category, 'blue') + '</td>' +
+        '<td>' + f.sortOrder + '</td>' +
+        '<td>' + badge(f.isActive ? 'Active' : 'Hidden', f.isActive ? 'green' : 'gray') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(f) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + f.id + '\',' + (!f.isActive) + ')">' + (f.isActive ? 'Hide' : 'Show') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + f.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Question / Answer</th><th>Category</th><th>#</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(f) {
+  document.getElementById('modal-title').textContent = f ? 'Edit FAQ' : 'Add FAQ';
+  document.getElementById('faq-id').value = f ? f.id : '';
+  document.getElementById('f-q').value = f ? f.question : '';
+  document.getElementById('f-a').value = f ? f.answer : '';
+  document.getElementById('f-cat').value = f ? (f.category || 'general') : 'general';
+  document.getElementById('f-sort').value = f ? (f.sortOrder || 0) : 0;
+  document.getElementById('f-active').checked = f ? f.isActive : true;
+  document.getElementById('faq-overlay').style.display = 'flex';
+}
+
+function saveFaq() {
+  var id = document.getElementById('faq-id').value;
+  var q = document.getElementById('f-q').value.trim();
+  var a = document.getElementById('f-a').value.trim();
+  if (!q || !a) { toast('Question and answer required', 'error'); return; }
+  var data = { question: q, answer: a, category: document.getElementById('f-cat').value, sortOrder: parseInt(document.getElementById('f-sort').value) || 0, isActive: document.getElementById('f-active').checked };
+  var p = id ? api('PATCH', '/admin/faqs/' + id, data) : api('POST', '/admin/faqs', data);
+  p.then(function() { toast(id ? 'FAQ updated' : 'FAQ created', 'success'); closeModal('faq-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleActive(id, val) {
+  api('PATCH', '/admin/faqs/' + id, { isActive: val }).then(function() { toast(val ? 'FAQ shown' : 'FAQ hidden', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this FAQ?')) return;
+  api('DELETE', '/admin/faqs/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Membership</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Membership</h1><p>Prime membership plans management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Plan</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Active Members -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><span class="card-title">Active Prime Members</span></div>
+      <div class="table-wrap"><div id="members-tbl" class="loading">Loading…</div></div>
+    </div>
+
+    <!-- Plans -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Membership Plans</span>
+        <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Plan</button>
+      </div>
+      <div id="plans-container" class="card-body loading">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<div id="plan-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Membership Plan</span>
+      <button class="modal-close" onclick="closeModal('plan-overlay')">×</button>
+    </div>
+    <input type="hidden" id="plan-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label class="form-label">Plan Name *</label><input id="p-name" class="form-control" placeholder="Remont Prime Annual"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Price (₹) *</label><input id="p-price" class="form-control" type="number" placeholder="1999"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Duration (months) *</label><input id="p-dur" class="form-control" type="number" placeholder="12"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Discount (%)</label><input id="p-disc" class="form-control" type="number" placeholder="15"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Features (one per line)</label><textarea id="p-features" class="form-control" rows="5" placeholder="Free inspection on every booking&#10;15% off all services&#10;Priority support 24x7&#10;2 free AMC checkups"></textarea></div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="p-active" checked><label for="p-active" style="margin-left:6px">Active (visible to customers)</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('plan-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePlan()">Save Plan</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('membership');
+requireAuth();
+
+function loadMembers() {
+  api('GET', '/admin/users?role=CUSTOMER&limit=200').then(function(users) {
+    var members = (users || []).filter(function(u) { return u.membershipStatus === 'ACTIVE' || u.role === 'PRIME_CUSTOMER'; });
+    if (!members.length) { document.getElementById('members-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💎</div><h3>No prime members yet</h3></div>'; return; }
+    var rows = members.map(function(u) {
+      return '<tr><td><strong>' + escape(u.name || '—') + '</strong></td><td>' + escape(u.phone || '—') + '</td><td>' + escape(u.email || '—') + '</td><td>' + badge('Prime', 'purple') + '</td><td>' + fmtDateShort(u.createdAt) + '</td></tr>';
+    }).join('');
+    document.getElementById('members-tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Type</th><th>Since</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function() { document.getElementById('members-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💎</div><h3>No prime members yet</h3></div>'; });
+}
+
+function loadPlans() {
+  api('GET', '/admin/membership-plans').then(function(plans) {
+    if (!plans || !plans.length) { document.getElementById('plans-container').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h3>No plans yet</h3></div>'; return; }
+    document.getElementById('plans-container').className = '';
+    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px">';
+    plans.forEach(function(p) {
+      var features = Array.isArray(p.features) ? p.features : (p.features ? JSON.parse(p.features) : []);
+      html += '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:20px;' + (p.isActive ? '' : 'opacity:.6') + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">' +
+          '<strong style="font-size:15px">' + escape(p.name) + '</strong>' +
+          badge(p.isActive ? 'Active' : 'Inactive', p.isActive ? 'green' : 'gray') +
+        '</div>' +
+        '<div style="font-size:24px;font-weight:700;color:#c4601a;margin:8px 0">₹' + fmtCur(p.price).replace('₹','') + ' <span style="font-size:13px;font-weight:400;color:#6b7280">/' + p.durationMonths + ' months</span></div>' +
+        (p.discountPercent ? '<div style="font-size:12px;color:#22c55e;margin-bottom:8px">Save ' + p.discountPercent + '% vs individual bookings</div>' : '') +
+        '<ul style="margin:0 0 12px;padding-left:16px;font-size:13px;color:#374151">' + features.map(function(f){return'<li style="margin-bottom:4px">'+escape(f)+'</li>';}).join('') + '</ul>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(p) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="togglePlan(\'' + p.id + '\',' + (!p.isActive) + ')">' + (p.isActive ? 'Deactivate' : 'Activate') + '</button>' +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+    document.getElementById('plans-container').innerHTML = html;
+  }).catch(function(e) { document.getElementById('plans-container').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(p) {
+  document.getElementById('modal-title').textContent = p ? 'Edit Plan' : 'Add Membership Plan';
+  document.getElementById('plan-id').value = p ? p.id : '';
+  document.getElementById('p-name').value = p ? p.name : '';
+  document.getElementById('p-price').value = p ? p.price : '';
+  document.getElementById('p-dur').value = p ? p.durationMonths : '';
+  document.getElementById('p-disc').value = p ? (p.discountPercent || '') : '';
+  var features = p ? (Array.isArray(p.features) ? p.features : (p.features ? JSON.parse(p.features) : [])) : [];
+  document.getElementById('p-features').value = features.join('\n');
+  document.getElementById('p-active').checked = p ? p.isActive : true;
+  document.getElementById('plan-overlay').style.display = 'flex';
+}
+
+function savePlan() {
+  var id = document.getElementById('plan-id').value;
+  var name = document.getElementById('p-name').value.trim();
+  var price = parseFloat(document.getElementById('p-price').value);
+  var dur = parseInt(document.getElementById('p-dur').value);
+  if (!name || isNaN(price) || isNaN(dur)) { toast('Name, price and duration required', 'error'); return; }
+  var features = document.getElementById('p-features').value.trim().split('\n').map(function(f){return f.trim();}).filter(Boolean);
+  var disc = parseFloat(document.getElementById('p-disc').value);
+  var data = { name, price, durationMonths: dur, discountPercent: isNaN(disc) ? 0 : disc, features, isActive: document.getElementById('p-active').checked };
+  var p = id ? api('PATCH', '/admin/membership-plans/' + id, data) : api('POST', '/admin/membership-plans', data);
+  p.then(function() { toast(id ? 'Plan updated' : 'Plan created', 'success'); closeModal('plan-overlay'); loadPlans(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function togglePlan(id, val) {
+  api('PATCH', '/admin/membership-plans/' + id, { isActive: val }).then(function() { loadPlans(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+loadMembers();
+loadPlans();
+</script>
+</body>
+</html>
