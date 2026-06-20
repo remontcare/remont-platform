@@ -4,6 +4,6 @@
   "scripts": {
     "dev": "npx http-server . -p 3000 --cors -c-1 -o",
     "start": "npx http-server . -p 3000 --cors -c-1",
-    "build": "echo 'Static site — no build step required'"
+    "build": "mkdir -p public && cp index.html public/ && cp -r admin public/"
   }
 }
