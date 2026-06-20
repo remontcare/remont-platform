@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Site Settings</h1><p>Global platform configuration</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div id="settings-container" class="loading">Loading…</div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('settings');
+requireAuth();
+
+var settingsData = {};
+var groups = { general: 'General', contact: '📞 Contact Info', stats: '📊 Homepage Stats', social: '🔗 Social Links' };
+
+function load() {
+  api('GET','/admin/settings').then(function(settings) {
+    if (!settings||!settings.length){ document.getElementById('settings-container').innerHTML='<div class="empty-state"><div class="empty-icon">⚙️</div><h3>No settings yet</h3><p>Run seed from the Dashboard to create default settings.</p></div>'; return; }
+
+    // Group by group field
+    var grouped = {};
+    settings.forEach(function(s){
+      settingsData[s.key]=s;
+      if (!grouped[s.group]) grouped[s.group]=[];
+      grouped[s.group].push(s);
+    });
+
+    var html = '';
+    Object.keys(grouped).forEach(function(grp){
+      html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">'+(groups[grp]||grp)+'</span></div><div class="card-body"><table><tbody>';
+      grouped[grp].forEach(function(s){
+        html += '<tr>'+
+          '<td style="width:220px;font-weight:500;color:#374151">'+escape(s.label||s.key)+'</td>'+
+          '<td><input class="form-control" id="setting-'+escape(s.key)+'" value="'+escape(s.value)+'" style="max-width:360px" onblur="saveSetting(\''+escape(s.key)+'\')" onkeydown="if(event.key===\'Enter\')saveSetting(\''+escape(s.key)+'\')"></td>'+
+          '<td style="width:80px;color:#9ca3af;font-size:11px"><code>'+escape(s.key)+'</code></td>'+
+        '</tr>';
+      });
+      html += '</tbody></table></div></div>';
+    });
+
+    html += '<div class="card"><div class="card-header"><span class="card-title">Add New Setting</span></div><div class="card-body"><div class="form-row">'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Key</label><input id="new-key" class="form-control" placeholder="my_setting_key"></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Value</label><input id="new-value" class="form-control" placeholder="value"></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Label</label><input id="new-label" class="form-control" placeholder="Human-readable label"></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Group</label><select id="new-group" class="form-control"><option>general</option><option>contact</option><option>stats</option><option>social</option></select></div>'+
+      '</div>'+
+      '<button class="btn btn-primary btn-sm" onclick="addSetting()">+ Add Setting</button>'+
+    '</div></div>';
+
+    document.getElementById('settings-container').innerHTML = html;
+    document.getElementById('settings-container').className = '';
+  }).catch(function(e){document.getElementById('settings-container').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
+}
+
+function saveSetting(key) {
+  var el = document.getElementById('setting-'+key);
+  if (!el) return;
+  var val = el.value.trim();
+  api('PATCH','/admin/settings/'+encodeURIComponent(key),{value:val}).then(function(){
+    toast('Saved: '+key,'success');
+  }).catch(function(e){toast(e.message,'error');});
+}
+
+function addSetting() {
+  var key=document.getElementById('new-key').value.trim();
+  var value=document.getElementById('new-value').value.trim();
+  var label=document.getElementById('new-label').value.trim();
+  var group=document.getElementById('new-group').value;
+  if(!key||!value){toast('Key and value required','error');return;}
+  api('PATCH','/admin/settings/'+encodeURIComponent(key),{value,label,group}).then(function(){
+    toast('Setting saved','success'); load();
+  }).catch(function(e){toast(e.message,'error');});
+}
+
+load();
+</script>
+</body>
+</html>

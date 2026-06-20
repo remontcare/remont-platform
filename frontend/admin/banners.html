@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Banners</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Homepage Banners</h1><p>Manage hero slider content</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add Banner</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Active Banners (shown in homepage hero slider)</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="banner-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Banner</span>
+      <button class="modal-close" onclick="closeModal('banner-overlay')">×</button>
+    </div>
+    <input type="hidden" id="banner-id">
+    <div class="form-group"><label class="form-label">Title *</label><input id="b-title" class="form-control" placeholder="India's Smartest Home Service Platform"></div>
+    <div class="form-group"><label class="form-label">Subtitle</label><input id="b-subtitle" class="form-control" placeholder="Tell our AI what's wrong — we auto-match the best vendor"></div>
+    <div class="form-group"><label class="form-label">Tag / Chip (shown above title)</label><input id="b-tag" class="form-control" placeholder="AI-Powered Marketplace"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">CTA Button Text</label><input id="b-cta-text" class="form-control" placeholder="Book Now"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">CTA URL / Anchor</label><input id="b-cta-url" class="form-control" placeholder="#ai-chat"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Background Image URL</label><input id="b-img" class="form-control" placeholder="https://images.unsplash.com/…"></div>
+    <div class="form-group"><label class="form-label">Background Colour (fallback)</label><input id="b-color" class="form-control" type="color" value="#1a1a2e" style="width:60px;height:36px;padding:2px"></div>
+    <div class="form-group"><label class="form-label">Sort Order</label><input id="b-sort" class="form-control" type="number" value="0" style="width:100px"></div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="b-active" checked><label for="b-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('banner-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBanner()">Save Banner</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('banners');
+requireAuth();
+
+function load() {
+  api('GET','/admin/banners').then(function(banners){
+    if (!banners||!banners.length){ document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🖼</div><h3>No banners yet</h3><p>Add banners to populate the homepage hero slider.</p></div>'; return; }
+    var rows=banners.map(function(b){
+      return '<tr>'+
+        '<td style="text-align:center">'+b.sortOrder+'</td>'+
+        (b.imageUrl?'<td><img src="'+escape(b.imageUrl)+'" style="width:80px;height:48px;object-fit:cover;border-radius:4px"></td>':'<td><div style="width:80px;height:48px;border-radius:4px;background:'+(b.bgColor||'#1a1a2e')+'"></div></td>')+
+        '<td><strong>'+escape(b.title)+'</strong><br><small style="color:#6b7280">'+escape(b.subtitle||'')+'</small></td>'+
+        '<td>'+escape(b.tag||'—')+'</td>'+
+        '<td>'+escape(b.ctaText||'—')+' → <code style="font-size:11px">'+escape(b.ctaUrl||'#')+'</code></td>'+
+        '<td>'+badge(b.isActive?'Active':'Hidden',b.isActive?'green':'gray')+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          '<button class="btn btn-xs btn-outline" onclick="openModal('+JSON.stringify(b)+')">Edit</button>'+
+          '<button class="btn btn-xs btn-warning" onclick="toggleActive(\''+b.id+'\','+(!b.isActive)+')">'+(b.isActive?'Hide':'Show')+'</button>'+
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer" onclick="deleteBanner(\''+b.id+'\')">Delete</button>'+
+        '</div></td>'+
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML='<table><thead><tr><th>#</th><th>Preview</th><th>Title / Subtitle</th><th>Tag</th><th>CTA</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
+}
+
+function openModal(b) {
+  document.getElementById('modal-title').textContent=b?'Edit Banner':'Add Banner';
+  document.getElementById('banner-id').value=b?b.id:'';
+  document.getElementById('b-title').value=b?b.title:'';
+  document.getElementById('b-subtitle').value=b?(b.subtitle||''):'';
+  document.getElementById('b-tag').value=b?(b.tag||''):'';
+  document.getElementById('b-cta-text').value=b?(b.ctaText||''):'';
+  document.getElementById('b-cta-url').value=b?(b.ctaUrl||'#'):'#';
+  document.getElementById('b-img').value=b?(b.imageUrl||''):'';
+  document.getElementById('b-color').value=b?(b.bgColor||'#1a1a2e'):'#1a1a2e';
+  document.getElementById('b-sort').value=b?(b.sortOrder||0):0;
+  document.getElementById('b-active').checked=b?b.isActive:true;
+  document.getElementById('banner-overlay').style.display='flex';
+}
+
+function saveBanner(){
+  var id=document.getElementById('banner-id').value;
+  var title=document.getElementById('b-title').value.trim();
+  if (!title){toast('Title required','error');return;}
+  var data={
+    title:title,
+    subtitle:document.getElementById('b-subtitle').value.trim()||undefined,
+    tag:document.getElementById('b-tag').value.trim()||undefined,
+    ctaText:document.getElementById('b-cta-text').value.trim()||undefined,
+    ctaUrl:document.getElementById('b-cta-url').value.trim()||'#',
+    imageUrl:document.getElementById('b-img').value.trim()||undefined,
+    bgColor:document.getElementById('b-color').value||undefined,
+    sortOrder:parseInt(document.getElementById('b-sort').value)||0,
+    isActive:document.getElementById('b-active').checked,
+  };
+  var p=id?api('PATCH','/admin/banners/'+id,data):api('POST','/admin/banners',data);
+  p.then(function(){toast(id?'Banner updated':'Banner created','success');closeModal('banner-overlay');load();}).catch(function(e){toast(e.message,'error');});
+}
+
+function toggleActive(id,active){
+  api('PATCH','/admin/banners/'+id,{isActive:active}).then(function(){toast(active?'Banner shown':'Banner hidden','success');load();}).catch(function(e){toast(e.message,'error');});
+}
+
+function deleteBanner(id){
+  if (!confirm('Delete this banner permanently?')) return;
+  api('DELETE','/admin/banners/'+id).then(function(){toast('Banner deleted','warning');load();}).catch(function(e){toast(e.message,'error');});
+}
+
+load();
+</script>
+</body>
+</html>

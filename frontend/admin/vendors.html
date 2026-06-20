@@ -12,32 +12,28 @@
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Vendors</h1><p>Approve, reject and manage service vendors</p></div>
+    <div class="topbar-left"><h1>Vendors</h1><p>Manage service vendors</p></div>
     <div class="topbar-right">
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
   </div>
   <div class="content">
-    <!-- Pending approvals -->
-    <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><span class="card-title">⚠️ Pending Approvals</span></div>
+    <div id="pending-section" class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b">
+      <div class="card-header"><span class="card-title">⚠️ Pending Approval</span></div>
       <div class="table-wrap"><div id="pending-tbl" class="loading">Loading…</div></div>
     </div>
-
-    <!-- All vendors -->
     <div class="card">
-      <div class="card-header"><span class="card-title">All Service Vendors</span></div>
-      <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
-        <div class="filter-bar">
-          <input id="q" class="search-input" placeholder="Search name / business…" oninput="debounce(loadAll)">
-          <select id="status" class="form-control" style="width:180px" onchange="loadAll()">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Vendors</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-status" class="form-control" style="width:200px" onchange="loadAll()">
             <option value="">All Statuses</option>
-            <option value="PENDING_VERIFICATION">Pending</option>
-            <option value="ACTIVE">Active</option>
-            <option value="SUSPENDED">Suspended</option>
-            <option value="REJECTED">Rejected</option>
+            <option>ACTIVE</option><option>PENDING_VERIFICATION</option>
+            <option>SUSPENDED</option><option>REJECTED</option>
           </select>
+          <input id="filter-q" class="form-control" style="width:160px" placeholder="Search name…" oninput="loadAll()">
+          <button class="btn btn-outline btn-sm" onclick="loadAll()">↺ Refresh</button>
         </div>
       </div>
       <div class="table-wrap"><div id="all-tbl" class="loading">Loading…</div></div>
@@ -45,20 +41,19 @@
   </div>
 </div>
 
-<!-- Reject modal -->
-<div id="reject-overlay" class="overlay">
+<div id="reject-overlay" class="overlay" style="display:none">
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title">Reject Vendor</span>
       <button class="modal-close" onclick="closeModal('reject-overlay')">×</button>
     </div>
     <div class="form-group">
-      <label class="form-label">Rejection Reason</label>
-      <textarea id="reject-reason" class="form-control" placeholder="Explain why this vendor is being rejected…"></textarea>
+      <label class="form-label">Rejection Reason *</label>
+      <textarea id="reject-reason" class="form-control" rows="3" placeholder="Explain why this vendor is being rejected…"></textarea>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModal('reject-overlay')">Cancel</button>
-      <button class="btn btn-danger btn-sm" onclick="confirmReject()">Reject Vendor</button>
+      <button class="btn btn-outline" onclick="closeModal('reject-overlay')">Cancel</button>
+      <button class="btn btn-primary" style="background:#ef4444" onclick="confirmReject()">Reject Vendor</button>
     </div>
   </div>
 </div>
@@ -66,106 +61,77 @@
 <script src="./common.js"></script>
 <script>
 renderSidebar('vendors');
-if (!requireAuth()) {}
-
-var selectedVendorId = '';
-var timer;
-function debounce(fn) { clearTimeout(timer); timer = setTimeout(fn, 400); }
+requireAuth();
+var rejectVendorId = null;
 
 function loadPending() {
-  api('GET', '/admin/vendors/pending').then(function(vendors) {
-    if (!vendors || !vendors.length) {
-      document.getElementById('pending-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h3>No pending approvals</h3></div>';
+  api('GET','/admin/vendors/pending').then(function(vendors) {
+    if (!vendors||!vendors.length) {
+      document.getElementById('pending-tbl').innerHTML='<div style="padding:12px;color:#6b7280;font-size:13px">No pending vendors 🎉</div>';
       return;
     }
     var rows = vendors.map(function(v) {
-      return '<tr>' +
-        '<td><strong>' + escape(v.fullName) + '</strong><br><span class="text-muted">' + escape(v.baseCity) + '</span></td>' +
-        '<td>' + escape(v.user.phone) + '</td>' +
-        '<td>' + escape(v.user.email||'—') + '</td>' +
-        '<td>' + (v.skills||[]).map(function(s){ return '<span class="badge badge-blue" style="margin:1px">' + escape(s) + '</span>'; }).join('') + '</td>' +
-        '<td>' + fmtDate(v.createdAt) + '</td>' +
-        '<td style="white-space:nowrap">' +
-          '<button class="btn btn-xs btn-success" onclick="approve(\'' + v.id + '\',this)">Approve</button> ' +
-          '<button class="btn btn-xs btn-danger" onclick="openReject(\'' + v.id + '\')">Reject</button>' +
-        '</td>' +
+      var u=v.user||{};
+      return '<tr>'+
+        '<td><strong>'+escape(v.fullName||v.businessName||'—')+'</strong><br><small style="color:#6b7280">'+escape(u.phone||'')+'</small></td>'+
+        '<td>'+escape(v.businessName||'—')+'</td>'+
+        '<td>'+(v.skills||[]).map(function(s){return badge(s,'blue');}).join(' ')+'</td>'+
+        '<td>'+escape(v.currentCity||'—')+'</td>'+
+        '<td>'+fmtDateShort(v.createdAt)+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          '<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">✓ Approve</button>'+
+          '<button class="btn btn-xs btn-warning" onclick="openReject(\''+v.id+'\')">✗ Reject</button>'+
+        '</div></td>'+
       '</tr>';
     }).join('');
-    document.getElementById('pending-tbl').innerHTML =
-      '<table><thead><tr><th>Name / City</th><th>Phone</th><th>Email</th><th>Skills</th><th>Applied</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }).catch(function(e){
-    document.getElementById('pending-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
+    document.getElementById('pending-tbl').innerHTML='<table><thead><tr><th>Name</th><th>Business</th><th>Skills</th><th>City</th><th>Applied</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){document.getElementById('pending-tbl').innerHTML='<div class="empty-state"><small>'+escape(e.message)+'</small></div>';});
 }
 
 function loadAll() {
-  var q = document.getElementById('q').value.trim();
-  var status = document.getElementById('status').value;
-  var path = '/admin/vendors?limit=100' + (q?'&q='+encodeURIComponent(q):'') + (status?'&status='+status:'');
-  document.getElementById('all-tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET', path).then(function(vendors) {
-    if (!vendors || !vendors.length) {
-      document.getElementById('all-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏪</div><h3>No vendors found</h3></div>';
-      return;
-    }
-    var rows = vendors.map(function(v) {
-      return '<tr>' +
-        '<td><strong>' + escape(v.fullName) + '</strong>' + (v.businessName?'<br><span class="text-muted">'+escape(v.businessName)+'</span>':'') + '</td>' +
-        '<td>' + escape(v.user.phone) + '</td>' +
-        '<td>' + escape(v.baseCity) + '</td>' +
-        '<td><span class="badge ' + statusBadge(v.status) + '">' + v.status + '</span></td>' +
-        '<td>' + (v.isOnline?'<span class="badge badge-green">Online</span>':'<span class="badge badge-gray">Offline</span>') + '</td>' +
-        '<td>' + v.rating.toFixed(1) + '★ (' + v.completedJobs + ' jobs)</td>' +
-        '<td>' + fmtDate(v.createdAt) + '</td>' +
-        '<td style="white-space:nowrap">' +
-          (v.status==='ACTIVE' ? '<button class="btn btn-xs btn-warning" onclick="suspend(\'' + v.id + '\',this)">Suspend</button>' : '') +
-          (v.status==='SUSPENDED' ? '<button class="btn btn-xs btn-success" onclick="approve(\'' + v.id + '\',this)">Restore</button>' : '') +
-        '</td>' +
+  var status=document.getElementById('filter-status').value;
+  var q=document.getElementById('filter-q').value;
+  var p=[];
+  if (status) p.push('status='+encodeURIComponent(status));
+  if (q) p.push('q='+encodeURIComponent(q));
+  p.push('limit=100');
+  document.getElementById('all-tbl').innerHTML='<div class="loading">Loading…</div>';
+  api('GET','/admin/vendors'+(p.length?'?'+p.join('&'):'')).then(function(vendors) {
+    if (!vendors||!vendors.length) { document.getElementById('all-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🏪</div><h3>No vendors found</h3></div>'; return; }
+    var rows=vendors.map(function(v) {
+      var u=v.user||{};
+      return '<tr>'+
+        '<td><strong>'+escape(v.fullName||'—')+'</strong><br><small style="color:#6b7280">'+escape(u.phone||u.email||'')+'</small></td>'+
+        '<td>'+escape(v.businessName||'—')+'</td>'+
+        '<td>'+(v.skills||[]).slice(0,3).map(function(s){return badge(s,'blue');}).join(' ')+'</td>'+
+        '<td>'+escape(v.currentCity||'—')+'</td>'+
+        '<td style="text-align:center">'+escape(String(v.rating||'—'))+' ★ ('+escape(String(v.totalJobs||0))+')</td>'+
+        '<td>'+badge(v.isOnline?'Online':'Offline',v.isOnline?'green':'gray')+'</td>'+
+        '<td>'+statusBadge(v.status)+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          (v.status==='PENDING_VERIFICATION'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Approve</button>':'')+
+          (v.status==='ACTIVE'?'<button class="btn btn-xs btn-warning" onclick="suspend(\''+v.id+'\')">Suspend</button>':'')+
+          (v.status==='SUSPENDED'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Reactivate</button>':'')+
+        '</div></td>'+
       '</tr>';
     }).join('');
-    document.getElementById('all-tbl').innerHTML =
-      '<table><thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Status</th><th>Online</th><th>Rating</th><th>Joined</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }).catch(function(e){
-    document.getElementById('all-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
+    document.getElementById('all-tbl').innerHTML='<table><thead><tr><th>Vendor</th><th>Business</th><th>Skills</th><th>City</th><th>Rating / Jobs</th><th>Online</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){document.getElementById('all-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
 }
 
-function statusBadge(s) {
-  return {ACTIVE:'badge-green',PENDING_VERIFICATION:'badge-yellow',SUSPENDED:'badge-orange',REJECTED:'badge-red'}[s] || 'badge-gray';
+function approve(id) {
+  api('PATCH','/admin/vendors/'+id+'/approve').then(function(){ toast('Vendor approved','success'); loadPending(); loadAll(); }).catch(function(e){toast(e.message,'error');});
 }
-
-function approve(id, btn) {
-  if (btn) btn.disabled = true;
-  api('PATCH', '/admin/vendors/' + id + '/approve').then(function(){
-    toast('Vendor approved', 'success');
-    loadPending(); loadAll();
-  }).catch(function(e){ toast(e.message,'error'); if(btn)btn.disabled=false; });
-}
-
-function openReject(id) {
-  selectedVendorId = id;
-  document.getElementById('reject-reason').value = '';
-  document.getElementById('reject-overlay').classList.add('open');
-}
-
-function confirmReject() {
-  var reason = document.getElementById('reject-reason').value.trim();
-  if (!reason) { toast('Enter a rejection reason', 'error'); return; }
-  api('PATCH', '/admin/vendors/' + selectedVendorId + '/reject', { reason: reason }).then(function(){
-    toast('Vendor rejected', 'error');
-    closeModal('reject-overlay'); loadPending(); loadAll();
-  }).catch(function(e){ toast(e.message,'error'); });
-}
-
-function suspend(id, btn) {
+function suspend(id) {
   if (!confirm('Suspend this vendor?')) return;
-  if (btn) btn.disabled = true;
-  api('PATCH', '/admin/vendors/' + id + '/suspend').then(function(){
-    toast('Vendor suspended', 'warning'); loadAll();
-  }).catch(function(e){ toast(e.message,'error'); if(btn)btn.disabled=false; });
+  api('PATCH','/admin/vendors/'+id+'/suspend').then(function(){ toast('Vendor suspended','warning'); loadAll(); }).catch(function(e){toast(e.message,'error');});
 }
-
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function openReject(id) { rejectVendorId=id; document.getElementById('reject-reason').value=''; document.getElementById('reject-overlay').style.display='flex'; }
+function confirmReject() {
+  var reason=document.getElementById('reject-reason').value.trim();
+  if (!reason){toast('Enter rejection reason','error');return;}
+  api('PATCH','/admin/vendors/'+rejectVendorId+'/reject',{reason:reason}).then(function(){ toast('Vendor rejected','warning'); closeModal('reject-overlay'); loadPending(); loadAll(); }).catch(function(e){toast(e.message,'error');});
+}
 
 loadPending(); loadAll();
 </script>

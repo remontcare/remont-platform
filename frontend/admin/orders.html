@@ -12,7 +12,7 @@
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Orders</h1><p>View and manage all platform orders</p></div>
+    <div class="topbar-left"><h1>Orders</h1><p>Manage all customer orders</p></div>
     <div class="topbar-right">
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
@@ -20,21 +20,17 @@
   </div>
   <div class="content">
     <div class="card">
-      <div class="card-header"><span class="card-title">All Orders</span></div>
-      <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
-        <div class="filter-bar">
-          <select id="status" class="form-control" style="width:200px" onchange="load()">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Orders</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-status" class="form-control" style="width:180px" onchange="load()">
             <option value="">All Statuses</option>
-            <option value="PENDING_PAYMENT">Pending Payment</option>
-            <option value="CONFIRMED">Confirmed</option>
-            <option value="VENDOR_ASSIGNED">Vendor Assigned</option>
-            <option value="VENDOR_EN_ROUTE">En Route</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="CANCELLED">Cancelled</option>
-            <option value="REFUNDED">Refunded</option>
+            <option>PENDING</option><option>CONFIRMED</option><option>VENDOR_ASSIGNED</option>
+            <option>EN_ROUTE</option><option>IN_PROGRESS</option><option>COMPLETED</option>
+            <option>CANCELLED</option><option>REFUNDED</option>
           </select>
-          <button class="btn btn-outline btn-sm" onclick="load()">🔄 Refresh</button>
+          <input id="filter-city" class="form-control" style="width:130px" placeholder="Filter city…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
       <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
@@ -42,21 +38,19 @@
   </div>
 </div>
 
-<!-- Refund modal -->
-<div id="refund-overlay" class="overlay">
+<div id="action-overlay" class="overlay" style="display:none">
   <div class="modal">
     <div class="modal-header">
-      <span class="modal-title">Issue Refund</span>
-      <button class="modal-close" onclick="closeModal('refund-overlay')">×</button>
+      <span class="modal-title" id="action-title">Order Action</span>
+      <button class="modal-close" onclick="closeModal('action-overlay')">×</button>
     </div>
-    <p style="font-size:13px;color:#64748b;margin-bottom:14px">Order: <strong id="refund-order-num"></strong></p>
     <div class="form-group">
-      <label class="form-label">Reason for Refund</label>
-      <textarea id="refund-reason" class="form-control" placeholder="Explain why this order is being refunded…"></textarea>
+      <label class="form-label" id="action-label">Reason</label>
+      <textarea id="action-reason" class="form-control" rows="3" placeholder="Enter reason…"></textarea>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModal('refund-overlay')">Cancel</button>
-      <button class="btn btn-danger btn-sm" onclick="confirmRefund()">Issue Refund</button>
+      <button class="btn btn-outline" onclick="closeModal('action-overlay')">Cancel</button>
+      <button class="btn btn-primary" id="action-confirm-btn" onclick="confirmAction()">Confirm</button>
     </div>
   </div>
 </div>
@@ -64,73 +58,66 @@
 <script src="./common.js"></script>
 <script>
 renderSidebar('orders');
-if (!requireAuth()) {}
-
-var selectedOrderId = '';
+requireAuth();
+var pendingAction = null;
 
 function load() {
-  var status = document.getElementById('status').value;
-  var path = '/admin/orders?limit=80' + (status ? '&status=' + status : '');
+  var status = document.getElementById('filter-status').value;
+  var city = document.getElementById('filter-city').value;
+  var p = [];
+  if (status) p.push('status='+encodeURIComponent(status));
+  if (city) p.push('city='+encodeURIComponent(city));
+  p.push('limit=100');
   document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET', path).then(renderTable).catch(function(e){
-    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
+  api('GET','/admin/orders'+(p.length?'?'+p.join('&'):'')).then(function(orders) {
+    if (!orders||!orders.length) { document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">📦</div><h3>No orders found</h3></div>'; return; }
+    var rows = orders.map(function(o) {
+      var customer=(o.customer&&o.customer.name)||(o.customer&&o.customer.phone)||'—';
+      var vendor=o.vendor?((o.vendor.user&&o.vendor.user.name)||o.vendor.fullName||'Assigned'):'<span style="color:#9ca3af">Unassigned</span>';
+      var svc=(o.service&&o.service.name)||'—';
+      var city=(o.address&&o.address.city)||'—';
+      var canCancel = ['COMPLETED','CANCELLED','REFUNDED'].indexOf(o.status)===-1;
+      var canRefund = ['REFUNDED','CANCELLED'].indexOf(o.status)===-1 && o.paymentStatus==='PAID';
+      return '<tr>'+
+        '<td style="font-family:monospace;font-size:11px">'+escape(o.id.slice(-8))+'</td>'+
+        '<td>'+escape(customer)+'</td>'+
+        '<td>'+escape(svc)+'</td>'+
+        '<td>'+escape(city)+'</td>'+
+        '<td>'+fmtCur(o.totalAmount)+'</td>'+
+        '<td>'+statusBadge(o.status)+'</td>'+
+        '<td>'+statusBadge(o.paymentStatus||'—')+'</td>'+
+        '<td>'+fmtDateShort(o.createdAt)+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          (canCancel?'<button class="btn btn-xs btn-warning" onclick="openAction(\'cancel\',\''+o.id+'\')">Cancel</button>':'')+
+          (canRefund?'<button class="btn btn-xs" style="background:#f97316;color:#fff;padding:3px 8px;font-size:11px;border-radius:4px;border:none;cursor:pointer" onclick="openAction(\'refund\',\''+o.id+'\')">Refund</button>':'')+
+        '</div></td>'+
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML='<table><thead><tr><th>ID</th><th>Customer</th><th>Service</th><th>City</th><th>Amount</th><th>Status</th><th>Payment</th><th>Date</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){ document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>'; });
 }
 
-function renderTable(orders) {
-  if (!orders || !orders.length) {
-    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><h3>No orders found</h3></div>';
-    return;
-  }
-  var rows = orders.map(function(o) {
-    var customer = o.customer ? escape(o.customer.name||o.customer.phone) : '—';
-    var vendor = o.vendor ? escape(o.vendor.user.name||o.vendor.user.phone) : '<span class="text-muted">Unassigned</span>';
-    var service = o.service ? escape(o.service.name) : '—';
-    var city = o.address ? escape(o.address.city) : '—';
-    return '<tr>' +
-      '<td><strong>' + escape(o.orderNumber) + '</strong></td>' +
-      '<td>' + customer + '</td>' +
-      '<td>' + service + '</td>' +
-      '<td>' + vendor + '</td>' +
-      '<td>' + city + '</td>' +
-      '<td><span class="badge ' + statusBadge(o.status) + '">' + o.status.replace(/_/g,' ') + '</span></td>' +
-      '<td><span class="badge ' + payBadge(o.paymentStatus) + '">' + o.paymentStatus + '</span></td>' +
-      '<td>' + fmtCur(o.totalAmount) + '</td>' +
-      '<td>' + fmtDate(o.createdAt) + '</td>' +
-      '<td style="white-space:nowrap">' +
-        (o.status !== 'COMPLETED' && o.status !== 'REFUNDED' && o.status !== 'CANCELLED' ?
-          '<button class="btn btn-xs btn-danger" onclick="openRefund(\'' + o.id + '\',\'' + escape(o.orderNumber) + '\')">Refund</button>' : '') +
-      '</td>' +
-    '</tr>';
-  }).join('');
-  document.getElementById('tbl').innerHTML =
-    '<table><thead><tr><th>Order #</th><th>Customer</th><th>Service</th><th>Vendor</th><th>City</th><th>Status</th><th>Payment</th><th>Amount</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+function openAction(type, orderId) {
+  pendingAction={type:type,orderId:orderId};
+  document.getElementById('action-title').textContent=type==='cancel'?'Cancel Order':'Refund Order';
+  document.getElementById('action-label').textContent=type==='cancel'?'Cancellation Reason':'Refund Reason';
+  document.getElementById('action-reason').value='';
+  var btn=document.getElementById('action-confirm-btn');
+  btn.style.background=type==='cancel'?'#ef4444':'#f97316';
+  btn.textContent=type==='cancel'?'Cancel Order':'Refund Order';
+  document.getElementById('action-overlay').style.display='flex';
 }
 
-function statusBadge(s) {
-  var m = {PENDING_PAYMENT:'badge-yellow',CONFIRMED:'badge-blue',VENDOR_ASSIGNED:'badge-purple',VENDOR_EN_ROUTE:'badge-purple',IN_PROGRESS:'badge-orange',COMPLETED:'badge-green',CANCELLED:'badge-gray',REFUNDED:'badge-red'};
-  return m[s] || 'badge-gray';
-}
-function payBadge(s) {
-  return {PAID:'badge-green',PENDING:'badge-yellow',FAILED:'badge-red',REFUNDED:'badge-red',PARTIAL:'badge-orange'}[s] || 'badge-gray';
-}
-
-function openRefund(id, num) {
-  selectedOrderId = id;
-  document.getElementById('refund-order-num').textContent = num;
-  document.getElementById('refund-reason').value = '';
-  document.getElementById('refund-overlay').classList.add('open');
-}
-
-function confirmRefund() {
-  var reason = document.getElementById('refund-reason').value.trim();
-  if (!reason) { toast('Enter a refund reason', 'error'); return; }
-  api('PATCH', '/admin/orders/' + selectedOrderId + '/refund', { reason: reason }).then(function(){
-    toast('Refund processed', 'success'); closeModal('refund-overlay'); load();
+function confirmAction() {
+  if (!pendingAction) return;
+  var reason=document.getElementById('action-reason').value.trim();
+  if (!reason) { toast('Enter a reason','error'); return; }
+  api('PATCH','/admin/orders/'+pendingAction.orderId+'/'+pendingAction.type,{reason:reason}).then(function(){
+    toast(pendingAction.type==='cancel'?'Order cancelled':'Order refunded','success');
+    closeModal('action-overlay'); load();
   }).catch(function(e){ toast(e.message,'error'); });
 }
 
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 load();
 </script>
 </body>

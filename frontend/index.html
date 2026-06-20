@@ -3800,11 +3800,11 @@
       <div class="sub-row-title">Choose a sub-service <span>Starting prices · Final via vendor</span></div>
       <div class="sub-svc-grid">
         ${d.subServices.map(s => `
-          <div class="sub-svc-card">
+          <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''} style="cursor:pointer">
             <span class="icn">${s.ic}</span>
             <div class="nm">${s.n}</div>
             <div class="pr">${s.o !== '—' ? `<small>${s.o}</small>` : ''}${s.p}</div>
-            <span class="three-click">⚡ 3-Click</span>
+            <span class="three-click">⚡ Book Now</span>
           </div>
         `).join('')}
       </div>
@@ -4123,6 +4123,234 @@
       if (e.key === 'Enter') runSearch(headerInput.value);
     });
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  // DYNAMIC DATA LOADING — replaces hardcoded static content
+  // All data is now fetched from the Remont backend API.
+  // ══════════════════════════════════════════════════════════════════
+
+  // ── City selector — load from API ─────────────────────────────────
+  function buildCityModal(cities) {
+    if (!cities || cities.length === 0) return;
+    var grid = document.getElementById('cmCities');
+    if (!grid) return;
+
+    // Build city icon map (fallback emoji set)
+    var icons = ['🏙️','🌆','🏞️','🏛️','🌅','🏰','🌉','🌃','🏟️','🌄','🌇','🏯','🌃','🏙️','🌆'];
+    var activeCities = cities.filter(function(c){ return c.isActive; });
+
+    var html = '<div class="cm-section-label">Available Cities</div><div class="cm-city-grid">';
+    activeCities.forEach(function(c, i) {
+      var selected = c.name === currentCity ? ' selected' : '';
+      html += '<div class="cm-city'+selected+'" data-city="'+c.name+'" onclick="selectCity(\''+c.name+'\',this)">'+
+        '<span class="ic">'+(icons[i % icons.length])+'</span>'+
+        '<div class="nm">'+c.name+'</div>'+
+        '<div class="ct">'+(c.activeVendors > 0 ? c.activeVendors+'+ pros' : c.state)+'</div>'+
+      '</div>';
+    });
+    html += '</div>';
+
+    grid.innerHTML = html;
+
+    // Also update CITY_SERVICES map from API data
+    activeCities.forEach(function(c) {
+      CITY_SERVICES[c.name] = (c.activeServiceKeys || []).map(function(k){ return k.toLowerCase().replace(/_service$/,'').replace(/_/g,'-'); });
+      // Map API keys (AC_SERVICE) to frontend keys (ac)
+      var keyMap = { 'ac_service':'ac','plumbing':'plumbing','electrical':'electrical','appliance':'appliance','cleaning':'cleaning','interior':'interior','renovation':'renovation','construction':'construction' };
+      CITY_SERVICES[c.name] = (c.activeServiceKeys || []).map(function(k){ return keyMap[k.toLowerCase()] || k.toLowerCase(); });
+    });
+
+    // Re-apply filter for current city
+    applyCityFilter();
+  }
+
+  // ── Service categories — load from API ────────────────────────────
+  function buildServicePanel(categories) {
+    if (!categories || categories.length === 0) return;
+
+    // Map category key to frontend svc-item key
+    var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction' };
+
+    // Update serviceData from API categories
+    categories.forEach(function(cat) {
+      var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+      var services = cat.services || [];
+      if (services.length === 0) return;
+
+      serviceData[fkey] = {
+        id: cat.id,
+        key: cat.key,
+        title: cat.name,
+        subtitle: cat.description || 'Professional ' + cat.name + ' services',
+        subServices: services.slice(0, 6).map(function(s){
+          return {
+            id: s.id,
+            ic: cat.icon || '🔧',
+            n: s.name,
+            p: '₹' + Number(s.basePrice).toLocaleString('en-IN'),
+            o: s.originalPrice ? '₹' + Number(s.originalPrice).toLocaleString('en-IN') : '—',
+          };
+        }),
+        productTitle: 'Related Products',
+        productPillText: 'Best prices',
+        products: [],
+        _fromApi: true,
+      };
+    });
+
+    // Update the static svc-panel HTML items to match API categories
+    var panel = document.querySelector('.svc-panel');
+    if (panel) {
+      var title = panel.querySelector('.svc-panel-title');
+      var newHtml = title ? title.outerHTML : '<div class="svc-panel-title">Select a Service</div>';
+      categories.forEach(function(cat) {
+        var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+        newHtml += '<div class="svc-item" data-svc="'+fkey+'" onclick="switchService(this)">'+
+          '<div class="svc-icon-box"><span>'+cat.icon+'</span></div>'+
+          '<div class="svc-text"><h4>'+cat.name+'</h4><p>'+(cat.description||'')+'</p></div>'+
+          '<span class="svc-arrow">→</span>'+
+        '</div>';
+      });
+      panel.innerHTML = newHtml;
+    }
+
+    // Update cat-nav
+    var catNav = document.querySelector('.cat-nav-inner');
+    if (catNav) {
+      var navLinks = ['<a href="#shop" class="cat-link active"><span class="ic">⚡</span> Quick Repair</a>'];
+      categories.forEach(function(cat){
+        var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'"><span class="ic">'+cat.icon+'</span> '+cat.name+'</a>');
+      });
+      navLinks.push('<a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
+      navLinks.push('<a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>');
+      navLinks.push('<a href="#corporate" class="cat-link"><span class="ic">🏢</span> For Business</a>');
+      catNav.innerHTML = navLinks.join('');
+    }
+
+    // Render first available category
+    var firstKey = categories[0] ? (keyMap[categories[0].key] || categories[0].key.toLowerCase()) : null;
+    if (firstKey && serviceData[firstKey]) renderService(firstKey);
+  }
+
+  // ── Load products for a service category from API ─────────────────
+  function loadProductsForCategory(catKey, fkey) {
+    apiGet('/api/v1/products?category=' + encodeURIComponent(catKey) + '&limit=4').then(function(resp) {
+      var products = resp && resp.data ? resp.data : (Array.isArray(resp) ? resp : []);
+      if (!products.length || !serviceData[fkey]) return;
+      serviceData[fkey].products = products.map(function(p){
+        return {
+          img: (p.images && p.images[0]) || 'https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80',
+          brand: p.brand || 'Remont',
+          name: p.name,
+          rating: p.rating ? p.rating.toFixed(1) : '4.5',
+          count: p.reviewCount ? p.reviewCount.toLocaleString() : '—',
+          price: Number(p.price).toLocaleString('en-IN'),
+          was: p.mrp ? Number(p.mrp).toLocaleString('en-IN') : null,
+          off: p.mrp ? Math.round((1 - Number(p.price)/Number(p.mrp))*100) + '%' : null,
+          id: p.id,
+          slug: p.slug,
+        };
+      });
+    }).catch(function(){});
+  }
+
+  // ── Cart functionality ─────────────────────────────────────────────
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+
+  function updateCartBadge() {
+    var badge = document.querySelector('.cart-btn .badge');
+    if (badge) badge.textContent = cart.length || '';
+  }
+
+  function addToCart(item) {
+    // item: { type, serviceId/productId, name, price, qty }
+    var existing = cart.find(function(c){ return c.id === item.id; });
+    if (existing) { existing.qty++; }
+    else { cart.push(Object.assign({ qty: 1 }, item)); }
+    localStorage.setItem('remont_cart', JSON.stringify(cart));
+    updateCartBadge();
+    showToast('Added to cart: ' + item.name, 'success');
+  }
+
+  function showToast(msg, type) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 24px;border-radius:8px;color:#fff;font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.2);transition:opacity .3s;';
+    t.style.background = type === 'error' ? '#ef4444' : '#22c55e';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 300); }, 2500);
+  }
+
+  // Hook Add to Cart buttons in service panel
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.product-cta');
+    if (!btn) return;
+    var card = btn.closest('.product-card');
+    if (!card) return;
+    var name = card.querySelector('.product-name');
+    var price = card.querySelector('.product-price .now');
+    addToCart({ id: 'prod-' + Math.random(), name: name ? name.textContent : 'Product', price: price ? price.textContent : '—', type: 'product' });
+  });
+
+  // Book service button handler
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.sub-svc-card');
+    if (!btn) return;
+    var name = btn.querySelector('.nm');
+    var price = btn.querySelector('.pr');
+    var svcId = btn.getAttribute('data-svc-id');
+    if (svcId) {
+      addToCart({ id: 'svc-' + svcId, name: name ? name.textContent : 'Service', price: price ? price.textContent : '—', type: 'service', serviceId: svcId });
+    }
+  });
+
+  updateCartBadge();
+
+  // ── Load site settings ─────────────────────────────────────────────
+  function loadSiteSettings() {
+    apiGet('/api/v1/cms/settings?group=stats').then(function(settings) {
+      if (!settings) return;
+      // Update hero trust bar
+      if (settings.total_cities) {
+        var cityEl = document.querySelector('.slide-trust div:nth-child(3)');
+        if (cityEl) cityEl.innerHTML = '📍 <strong>' + settings.total_cities + '+</strong> cities';
+      }
+      if (settings.total_reviews) {
+        var reviewEl = document.querySelector('.slide-trust div:first-child');
+        if (reviewEl) reviewEl.innerHTML = '⭐ <strong>4.8/5</strong> · ' + (Number(settings.total_reviews)/1000).toFixed(0) + 'K+ reviews';
+      }
+    }).catch(function(){});
+  }
+
+  // ── Bootstrap: fetch all data on page load ─────────────────────────
+  function initDynamicContent() {
+    // 1. Load cities
+    apiGet('/api/v1/cities').then(function(data) {
+      var cities = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      buildCityModal(cities);
+    }).catch(function(){});
+
+    // 2. Load service categories with services
+    apiGet('/api/v1/services/categories').then(function(data) {
+      var cats = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (cats && cats.length > 0) {
+        buildServicePanel(cats);
+        // Load products for each category
+        var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction' };
+        cats.forEach(function(cat){
+          var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+          loadProductsForCategory(cat.key, fkey);
+        });
+      }
+    }).catch(function(){});
+
+    // 3. Load site settings
+    loadSiteSettings();
+  }
+
+  initDynamicContent();
+
 </script>
 </body>
 </html>

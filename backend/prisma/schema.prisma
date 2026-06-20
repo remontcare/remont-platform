@@ -998,3 +998,29 @@ model Notification {
 
   @@index([userId, isRead])
 }
+
+// ─── CMS MODELS ────────────────────────────────────────────────────────────
+
+model HomeBanner {
+  id          String   @id @default(cuid())
+  title       String
+  subtitle    String?
+  ctaText     String?
+  ctaUrl      String   @default("#")
+  imageUrl    String?
+  bgColor     String?
+  tag         String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  cityFilter  String[] // empty = show in all cities
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SiteSetting {
+  id        String  @id @default(cuid())
+  key       String  @unique
+  value     String
+  label     String?
+  group     String  @default("general")
+}

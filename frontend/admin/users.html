@@ -12,7 +12,7 @@
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Users</h1><p>Manage registered users</p></div>
+    <div class="topbar-left"><h1>Users</h1><p>Manage customers and users</p></div>
     <div class="topbar-right">
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
@@ -20,50 +20,41 @@
   </div>
   <div class="content">
     <div class="card">
-      <div class="card-header">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
         <span class="card-title">All Users</span>
-      </div>
-      <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
-        <div class="filter-bar">
-          <input id="q" class="search-input" placeholder="Search name / phone / email…" oninput="debounce(load)">
-          <select id="role" class="form-control" style="width:160px" onchange="load()">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search name, phone, email…" oninput="load()">
+          <select id="filter-role" class="form-control" style="width:180px" onchange="load()">
             <option value="">All Roles</option>
-            <option value="CUSTOMER">Customer</option>
-            <option value="SERVICE_VENDOR">Service Vendor</option>
-            <option value="PRODUCT_VENDOR">Product Vendor</option>
-            <option value="DELIVERY_PARTNER">Delivery Partner</option>
-            <option value="CRM_AGENT">CRM Agent</option>
-            <option value="ADMIN">Admin</option>
-            <option value="SUPER_ADMIN">Super Admin</option>
+            <option>CUSTOMER</option><option>SERVICE_VENDOR</option><option>PRODUCT_VENDOR</option>
+            <option>CRM_AGENT</option><option>ADMIN</option><option>SUPER_ADMIN</option>
           </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
-      <div class="table-wrap">
-        <div id="tbl" class="loading">Loading…</div>
-      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
     </div>
   </div>
 </div>
 
-<!-- Wallet modal -->
-<div id="wallet-overlay" class="overlay">
+<div id="wallet-overlay" class="overlay" style="display:none">
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title">Adjust Wallet</span>
       <button class="modal-close" onclick="closeModal('wallet-overlay')">×</button>
     </div>
-    <p style="font-size:13px;color:#64748b;margin-bottom:16px">User: <strong id="wallet-user-name"></strong></p>
+    <p style="margin:0 0 12px;font-size:14px;color:#6b7280">For <strong id="wallet-user-name"></strong></p>
     <div class="form-group">
-      <label class="form-label">Amount (₹) <span style="font-size:11px;color:#94a3b8">Use negative to debit</span></label>
-      <input id="wallet-amount" class="form-control" type="number" placeholder="e.g. 100 or -50">
+      <label class="form-label">Amount (negative = debit)</label>
+      <input id="wallet-amount" class="form-control" type="number" placeholder="e.g. 500 or -200">
     </div>
     <div class="form-group">
-      <label class="form-label">Notes</label>
-      <input id="wallet-notes" class="form-control" type="text" placeholder="Reason for adjustment">
+      <label class="form-label">Notes / Reason</label>
+      <input id="wallet-notes" class="form-control" placeholder="e.g. Referral bonus">
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModal('wallet-overlay')">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="saveWallet()">Save</button>
+      <button class="btn btn-outline" onclick="closeModal('wallet-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmWallet()">Apply</button>
     </div>
   </div>
 </div>
@@ -71,77 +62,60 @@
 <script src="./common.js"></script>
 <script>
 renderSidebar('users');
-if (!requireAuth()) {}
-
-var selectedUserId = '';
-var timer;
-function debounce(fn) { clearTimeout(timer); timer = setTimeout(fn, 400); }
+requireAuth();
+var walletUserId = null;
 
 function load() {
-  var q = document.getElementById('q').value.trim();
-  var role = document.getElementById('role').value;
-  var path = '/admin/users?limit=80' + (q ? '&q=' + encodeURIComponent(q) : '') + (role ? '&role=' + role : '');
-  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET', path).then(renderTable).catch(function(e){
-    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
+  var q=document.getElementById('filter-q').value;
+  var role=document.getElementById('filter-role').value;
+  var p=['limit=100'];
+  if (q) p.push('q='+encodeURIComponent(q));
+  if (role) p.push('role='+encodeURIComponent(role));
+  document.getElementById('tbl').innerHTML='<div class="loading">Loading…</div>';
+  api('GET','/admin/users?'+p.join('&')).then(function(users){
+    if (!users||!users.length){ document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">👥</div><h3>No users found</h3></div>'; return; }
+    var rows=users.map(function(u){
+      return '<tr>'+
+        '<td><strong>'+escape(u.name||'—')+'</strong></td>'+
+        '<td>'+escape(u.phone||'—')+'</td>'+
+        '<td>'+escape(u.email||'—')+'</td>'+
+        '<td>'+badge(u.role,'blue')+'</td>'+
+        '<td>'+fmtCur(u.walletBalance||0)+'</td>'+
+        '<td>'+badge(u.isVerified?'Verified':'Unverified',u.isVerified?'green':'gray')+' '+badge(u.isBlocked?'Blocked':'Active',u.isBlocked?'red':'green')+'</td>'+
+        '<td>'+fmtDateShort(u.createdAt)+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          '<button class="btn btn-xs btn-outline" onclick="openWallet(\''+u.id+'\',\''+escape(u.name||u.phone||'User')+'\')">Wallet</button>'+
+          '<button class="btn btn-xs '+(u.isBlocked?'btn-success':'btn-warning')+'" onclick="toggleBlock(\''+u.id+'\','+(!u.isBlocked)+')">'+
+            (u.isBlocked?'Unblock':'Block')+'</button>'+
+        '</div></td>'+
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML='<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Role</th><th>Wallet</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
 }
 
-function renderTable(users) {
-  if (!users || !users.length) {
-    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h3>No users found</h3></div>';
-    return;
-  }
-  var rows = users.map(function(u) {
-    return '<tr>' +
-      '<td><strong>' + escape(u.name||'—') + '</strong><br><span class="text-muted">' + escape(u.phone) + '</span></td>' +
-      '<td>' + escape(u.email||'—') + '</td>' +
-      '<td><span class="badge ' + roleBadge(u.role) + '">' + u.role + '</span></td>' +
-      '<td>' + fmtCur(u.walletBalance) + '</td>' +
-      '<td><span class="badge ' + (u.isBlocked?'badge-red':'badge-green') + '">' + (u.isBlocked?'Blocked':'Active') + '</span></td>' +
-      '<td>' + fmtDate(u.createdAt) + '</td>' +
-      '<td style="white-space:nowrap">' +
-        '<button class="btn btn-xs ' + (u.isBlocked?'btn-success':'btn-danger') + '" onclick="toggleBlock(\'' + u.id + '\',' + (!u.isBlocked) + ',this)">' + (u.isBlocked?'Unblock':'Block') + '</button> ' +
-        '<button class="btn btn-xs btn-outline" onclick="openWallet(\'' + u.id + '\',\'' + escape(u.name||u.phone) + '\')">Wallet</button>' +
-      '</td>' +
-    '</tr>';
-  }).join('');
-  document.getElementById('tbl').innerHTML =
-    '<table><thead><tr><th>Name / Phone</th><th>Email</th><th>Role</th><th>Wallet</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
-}
-
-function roleBadge(r) {
-  var m = {CUSTOMER:'badge-blue',SERVICE_VENDOR:'badge-purple',PRODUCT_VENDOR:'badge-orange',DELIVERY_PARTNER:'badge-yellow',ADMIN:'badge-red',SUPER_ADMIN:'badge-red',CRM_AGENT:'badge-green'};
-  return m[r] || 'badge-gray';
-}
-
-function toggleBlock(id, block, btn) {
-  btn.disabled = true;
-  api('PATCH', '/admin/users/' + id + '/block', { block: block }).then(function() {
-    toast(block ? 'User blocked' : 'User unblocked', block ? 'error' : 'success');
-    load();
-  }).catch(function(e){ toast(e.message, 'error'); btn.disabled = false; });
+function toggleBlock(id, block) {
+  if (!confirm(block?'Block this user?':'Unblock this user?')) return;
+  api('PATCH','/admin/users/'+id+'/block',{block:block}).then(function(){toast(block?'User blocked':'User unblocked',block?'warning':'success');load();}).catch(function(e){toast(e.message,'error');});
 }
 
 function openWallet(id, name) {
-  selectedUserId = id;
-  document.getElementById('wallet-user-name').textContent = name;
-  document.getElementById('wallet-amount').value = '';
-  document.getElementById('wallet-notes').value = '';
-  document.getElementById('wallet-overlay').classList.add('open');
+  walletUserId=id;
+  document.getElementById('wallet-user-name').textContent=name;
+  document.getElementById('wallet-amount').value='';
+  document.getElementById('wallet-notes').value='';
+  document.getElementById('wallet-overlay').style.display='flex';
 }
 
-function saveWallet() {
-  var amount = parseFloat(document.getElementById('wallet-amount').value);
-  var notes = document.getElementById('wallet-notes').value.trim();
-  if (isNaN(amount)) { toast('Enter a valid amount', 'error'); return; }
-  if (!notes) { toast('Enter notes', 'error'); return; }
-  api('PATCH', '/admin/users/' + selectedUserId + '/wallet', { amount: amount, notes: notes })
-    .then(function(){ toast('Wallet updated', 'success'); closeModal('wallet-overlay'); load(); })
-    .catch(function(e){ toast(e.message, 'error'); });
+function confirmWallet() {
+  var amount=parseFloat(document.getElementById('wallet-amount').value);
+  var notes=document.getElementById('wallet-notes').value.trim();
+  if (isNaN(amount)||amount===0){toast('Enter a non-zero amount','error');return;}
+  if (!notes){toast('Enter notes / reason','error');return;}
+  api('PATCH','/admin/users/'+walletUserId+'/wallet',{amount,notes}).then(function(){
+    toast('Wallet adjusted by '+fmtCur(amount),'success'); closeModal('wallet-overlay'); load();
+  }).catch(function(e){toast(e.message,'error');});
 }
-
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 load();
 </script>
