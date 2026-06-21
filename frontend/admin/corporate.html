@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Corporate Accounts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Corporate Accounts</h1><p>B2B client management</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header"><span class="card-title">All Corporate Accounts</span></div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="detail-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:620px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="detail-title">Account Details</span>
+      <button class="modal-close" onclick="closeModal('detail-overlay')">×</button>
+    </div>
+    <div id="detail-body">Loading…</div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('corporate');
+requireAuth();
+
+function load() {
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/corporate').then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏢</div><h3>No corporate accounts yet</h3></div>'; return; }
+    var rows = list.map(function(c) {
+      return '<tr>' +
+        '<td><strong>' + escape(c.companyName) + '</strong><br><small style="color:#6b7280">' + escape(c.gstNumber || 'No GST') + '</small></td>' +
+        '<td>' + escape(c.contactName || '—') + '</td>' +
+        '<td>' + escape(c.contactEmail || '—') + '</td>' +
+        '<td>' + escape(c.contactPhone || '—') + '</td>' +
+        '<td><strong>' + ((c.members && c.members.length) || 0) + '</strong></td>' +
+        '<td>' + fmtCur(c.creditLimit || 0) + '</td>' +
+        '<td>' + badge(c.isActive ? 'Active' : 'Inactive', c.isActive ? 'green' : 'gray') + '</td>' +
+        '<td>' + fmtDateShort(c.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" onclick="openDetail(\'' + c.id + '\')">View</button></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Members</th><th>Credit Limit</th><th>Status</th><th>Joined</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openDetail(id) {
+  document.getElementById('detail-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('detail-overlay').style.display = 'flex';
+  api('GET', '/admin/corporate/' + id).then(function(c) {
+    document.getElementById('detail-title').textContent = c.companyName;
+    var membersHtml = (c.members || []).map(function(m) {
+      return '<tr><td>' + escape((m.user && m.user.name) || '—') + '</td><td>' + escape((m.user && m.user.phone) || '') + '</td><td>' + badge(m.role || 'MEMBER', 'blue') + '</td><td>' + escape(m.department || '—') + '</td></tr>';
+    }).join('');
+    document.getElementById('detail-body').innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
+        '<div><label class="form-label">Company</label><div class="form-control" style="background:#f9fafb">' + escape(c.companyName) + '</div></div>' +
+        '<div><label class="form-label">GST</label><div class="form-control" style="background:#f9fafb">' + escape(c.gstNumber || '—') + '</div></div>' +
+        '<div><label class="form-label">Contact</label><div class="form-control" style="background:#f9fafb">' + escape(c.contactName || '—') + '</div></div>' +
+        '<div><label class="form-label">Credit Limit</label><div class="form-control" style="background:#f9fafb">' + fmtCur(c.creditLimit || 0) + '</div></div>' +
+      '</div>' +
+      '<h4 style="font-size:13px;margin:0 0 8px">Team Members (' + (c.members || []).length + ')</h4>' +
+      '<table><thead><tr><th>Name</th><th>Phone</th><th>Role</th><th>Department</th></tr></thead><tbody>' + (membersHtml || '<tr><td colspan="4" style="text-align:center;color:#9ca3af">No members</td></tr>') + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('detail-body').innerHTML = '<div style="color:#ef4444">' + escape(e.message) + '</div>'; });
+}
+
+load();
+</script>
+</body>
+</html>

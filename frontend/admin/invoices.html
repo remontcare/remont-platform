@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Invoices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Invoices</h1><p>GST invoices and billing records</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Invoices</span>
+        <div style="display:flex;gap:8px">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Invoice number…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('invoices');
+requireAuth();
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/invoices?limit=100' + (q ? '&q='+encodeURIComponent(q) : '')).then(function(list) {
+    if (!list || !list.length) {
+      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><h3>No invoices yet</h3><p>Invoices are auto-generated on completed orders.</p></div>'; return;
+    }
+    var rows = list.map(function(inv) {
+      var cust = inv.order && inv.order.customer;
+      return '<tr>' +
+        '<td><strong>' + escape(inv.invoiceNumber || 'INV-' + inv.id.slice(-6)) + '</strong></td>' +
+        '<td>' + escape(inv.order ? inv.order.id.slice(-8).toUpperCase() : '—') + '</td>' +
+        '<td>' + escape((cust && cust.name) || '—') + '<br><small style="color:#9ca3af">' + escape((cust && cust.phone) || '') + '</small></td>' +
+        '<td>' + fmtCur(inv.subtotal || 0) + '</td>' +
+        '<td>' + fmtCur(inv.taxAmount || 0) + ' <small style="color:#6b7280">(GST 18%)</small></td>' +
+        '<td><strong>' + fmtCur(inv.totalAmount || 0) + '</strong></td>' +
+        '<td>' + badge(inv.isPaid ? 'Paid' : 'Unpaid', inv.isPaid ? 'green' : 'yellow') + '</td>' +
+        '<td>' + fmtDateShort(inv.issuedAt) + '</td>' +
+        '<td>' +
+          '<button class="btn btn-xs btn-outline" onclick="regenerate(\'' + (inv.order && inv.order.id) + '\')">Regenerate</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Invoice #</th><th>Order ID</th><th>Customer</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Status</th><th>Issued</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function regenerate(orderId) {
+  if (!orderId) { toast('No order linked', 'error'); return; }
+  api('POST', '/admin/invoices/' + orderId + '/generate').then(function(inv) {
+    toast('Invoice regenerated: ' + inv.invoiceNumber, 'success'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

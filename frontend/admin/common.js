@@ -87,28 +87,38 @@ var SIDEBAR_HTML = '<div class="sidebar">' +
     '<a class="nav-item" href="/admin/staff.html" data-page="staff"><span class="nav-icon">👔</span> Staff</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">People</div>' +
-    '<a class="nav-item" href="/admin/users.html" data-page="users"><span class="nav-icon">👥</span> Users</a>' +
-    '<a class="nav-item" href="/admin/vendors.html" data-page="vendors"><span class="nav-icon">🏪</span> Vendors</a>' +
+    '<a class="nav-item" href="/admin/users.html" data-page="users"><span class="nav-icon">👥</span> Customers</a>' +
+    '<a class="nav-item" href="/admin/vendors.html" data-page="vendors"><span class="nav-icon">🏪</span> Service Men</a>' +
     '<a class="nav-item" href="/admin/membership.html" data-page="membership"><span class="nav-icon">💎</span> Membership</a>' +
+    '<a class="nav-item" href="/admin/corporate.html" data-page="corporate"><span class="nav-icon">🏢</span> Corporate</a>' +
     '<a class="nav-item" href="/admin/newsletters.html" data-page="newsletters"><span class="nav-icon">✉️</span> Newsletters</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">Commerce</div>' +
-    '<a class="nav-item" href="/admin/orders.html" data-page="orders"><span class="nav-icon">📦</span> Orders</a>' +
+    '<a class="nav-item" href="/admin/orders.html" data-page="orders"><span class="nav-icon">📦</span> Customer Orders</a>' +
+    '<a class="nav-item" href="/admin/invoices.html" data-page="invoices"><span class="nav-icon">🧾</span> Invoices</a>' +
+    '<a class="nav-item" href="/admin/wallet.html" data-page="wallet"><span class="nav-icon">💰</span> Wallet</a>' +
+    '<a class="nav-item" href="/admin/amc.html" data-page="amc"><span class="nav-icon">🔒</span> AMC Plans</a>' +
+    '<a class="nav-item" href="/admin/coupons.html" data-page="coupons"><span class="nav-icon">🏷</span> Coupons</a>' +
+    '<a class="nav-item" href="/admin/taxes.html" data-page="taxes"><span class="nav-icon">📊</span> Taxes</a>' +
+  '</div>' +
+  '<div class="nav-group"><div class="nav-label">CRM</div>' +
+    '<a class="nav-item" href="/admin/leads.html" data-page="leads"><span class="nav-icon">📈</span> Leads</a>' +
+    '<a class="nav-item" href="/admin/reviews.html" data-page="reviews"><span class="nav-icon">⭐</span> Reviews</a>' +
+  '</div>' +
+  '<div class="nav-group"><div class="nav-label">Catalog</div>' +
     '<a class="nav-item" href="/admin/services.html" data-page="services"><span class="nav-icon">🔧</span> Services</a>' +
     '<a class="nav-item" href="/admin/products.html" data-page="products"><span class="nav-icon">🛍</span> Products</a>' +
-    '<a class="nav-item" href="/admin/coupons.html" data-page="coupons"><span class="nav-icon">🏷</span> Coupons</a>' +
-    '<a class="nav-item" href="/admin/taxes.html" data-page="taxes"><span class="nav-icon">🧾</span> Taxes</a>' +
+    '<a class="nav-item" href="/admin/cities.html" data-page="cities"><span class="nav-icon">🏙</span> Cities</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">Content</div>' +
-    '<a class="nav-item" href="/admin/banners.html" data-page="banners"><span class="nav-icon">🖼</span> Banners</a>' +
+    '<a class="nav-item" href="/admin/banners.html" data-page="banners"><span class="nav-icon">🖼</span> Front Slider</a>' +
     '<a class="nav-item" href="/admin/ads.html" data-page="ads"><span class="nav-icon">📢</span> Seasonal Ads</a>' +
     '<a class="nav-item" href="/admin/blogs.html" data-page="blogs"><span class="nav-icon">📝</span> Blog</a>' +
     '<a class="nav-item" href="/admin/faqs.html" data-page="faqs"><span class="nav-icon">❓</span> FAQs</a>' +
-    '<a class="nav-item" href="/admin/reviews.html" data-page="reviews"><span class="nav-icon">⭐</span> Reviews</a>' +
   '</div>' +
-  '<div class="nav-group"><div class="nav-label">Config</div>' +
-    '<a class="nav-item" href="/admin/cities.html" data-page="cities"><span class="nav-icon">🏙</span> Cities</a>' +
-    '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> Settings</a>' +
+  '<div class="nav-group"><div class="nav-label">Settings</div>' +
+    '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> General Setting</a>' +
+    '<a class="nav-item" href="/admin/staff.html" data-page="staff"><span class="nav-icon">👔</span> Staff</a>' +
   '</div>' +
   '<div class="sidebar-footer">Remont India © 2025</div>' +
 '</div>';

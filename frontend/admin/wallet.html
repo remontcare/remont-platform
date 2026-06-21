@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Wallet Transactions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Wallet Transactions</h1><p>Platform-wide wallet ledger</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportCsv()">⬇ Export CSV</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Transactions</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-user" class="form-control" style="width:200px" placeholder="User ID…" oninput="load()">
+          <select id="filter-type" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All Types</option>
+            <option>CREDIT</option><option>DEBIT</option><option>REFUND</option><option>CASHBACK</option><option>ADJUSTMENT</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+<script src="./common.js"></script>
+<script>
+renderSidebar('wallet');
+requireAuth();
+
+var lastData = [];
+
+function load() {
+  var userId = document.getElementById('filter-user').value.trim();
+  var type = document.getElementById('filter-type').value;
+  var params = 'limit=200';
+  if (userId) params += '&userId=' + encodeURIComponent(userId);
+  if (type) params += '&type=' + type;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/wallet-transactions?' + params).then(function(list) {
+    lastData = list || [];
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><h3>No transactions found</h3></div>'; return; }
+    var total = list.reduce(function(acc, t) { return acc + (t.type === 'CREDIT' || t.type === 'REFUND' || t.type === 'CASHBACK' ? Number(t.amount) : -Number(t.amount)); }, 0);
+    var rows = list.map(function(t) {
+      var isCredit = ['CREDIT','REFUND','CASHBACK'].includes(t.type);
+      return '<tr>' +
+        '<td>' + escape((t.user && t.user.name) || '—') + '<br><small style="color:#9ca3af">' + escape((t.user && t.user.phone) || '') + '</small></td>' +
+        '<td>' + badge(t.type, isCredit ? 'green' : 'red') + '</td>' +
+        '<td style="font-weight:600;color:' + (isCredit ? '#22c55e' : '#ef4444') + '">' + (isCredit ? '+' : '-') + fmtCur(t.amount || 0) + '</td>' +
+        '<td>' + escape(t.description || '—') + '</td>' +
+        '<td style="font-size:11px;color:#9ca3af">' + escape(t.referenceId || '—') + '</td>' +
+        '<td>' + fmtDateShort(t.createdAt) + '</td>' +
+      '</tr>';
+    }).join('');
+    var summary = '<div style="padding:10px 0;font-size:13px;color:#6b7280">Showing ' + list.length + ' transactions · Net: <strong style="color:' + (total>=0?'#22c55e':'#ef4444') + '">' + fmtCur(Math.abs(total)) + '</strong></div>';
+    document.getElementById('tbl').innerHTML = summary + '<table><thead><tr><th>User</th><th>Type</th><th>Amount</th><th>Description</th><th>Reference</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function exportCsv() {
+  if (!lastData.length) { toast('Load data first', 'warning'); return; }
+  var csv = 'User Name,Phone,Type,Amount,Description,Reference,Date\n' + lastData.map(function(t) {
+    return [
+      (t.user && t.user.name) || '', (t.user && t.user.phone) || '', t.type, t.amount, t.description || '', t.referenceId || '', (t.createdAt || '').slice(0,10)
+    ].map(function(v){ return '"' + String(v).replace(/"/g,'""') + '"'; }).join(',');
+  }).join('\n');
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'remont_wallet_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  toast('Exported ' + lastData.length + ' transactions', 'success');
+}
+
+load();
+</script>
+</body>
+</html>

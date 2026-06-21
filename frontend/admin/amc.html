@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — AMC Plans</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>AMC Plans</h1><p>Annual Maintenance Contract management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add AMC Plan</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Plans -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><span class="card-title">AMC Plans</span></div>
+      <div id="plans-container" class="card-body loading">Loading…</div>
+    </div>
+
+    <!-- Active Subscriptions -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Subscriptions</span>
+        <select id="filter-status" class="form-control" style="width:160px" onchange="loadSubs()">
+          <option value="">All</option><option>ACTIVE</option><option>EXPIRED</option><option>CANCELLED</option>
+        </select>
+      </div>
+      <div class="table-wrap"><div id="subs-tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="plan-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add AMC Plan</span>
+      <button class="modal-close" onclick="closeModal('plan-overlay')">×</button>
+    </div>
+    <input type="hidden" id="plan-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label class="form-label">Plan Name *</label><input id="p-name" class="form-control" placeholder="AC + Appliance AMC Gold"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Price (₹) *</label><input id="p-price" class="form-control" type="number" placeholder="4999"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Duration (months)</label><input id="p-dur" class="form-control" type="number" value="12"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Free Service Credits</label><input id="p-credits" class="form-control" type="number" placeholder="4"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Service Keys (comma separated)</label><input id="p-keys" class="form-control" placeholder="AC_SERVICE,APPLIANCE,ELECTRICAL"></div>
+    <div class="form-group"><label class="form-label">Features (one per line)</label><textarea id="p-features" class="form-control" rows="5" placeholder="Free AC service twice a year&#10;Priority booking within 2 hours&#10;10% off on all other services"></textarea></div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="p-active" checked><label for="p-active" style="margin-left:6px">Active</label></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('plan-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePlan()">Save Plan</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('amc');
+requireAuth();
+
+function loadPlans() {
+  api('GET', '/admin/amc/plans').then(function(plans) {
+    if (!plans || !plans.length) { document.getElementById('plans-container').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h3>No AMC plans yet</h3></div>'; return; }
+    document.getElementById('plans-container').className = '';
+    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px">';
+    plans.forEach(function(p) {
+      var features = Array.isArray(p.features) ? p.features : [];
+      var keys = Array.isArray(p.serviceKeys) ? p.serviceKeys : [];
+      html += '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:20px;' + (p.isActive ? '' : 'opacity:.6') + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">' +
+          '<strong style="font-size:14px">' + escape(p.name) + '</strong>' +
+          badge(p.isActive ? 'Active' : 'Inactive', p.isActive ? 'green' : 'gray') +
+        '</div>' +
+        '<div style="font-size:24px;font-weight:700;color:#c4601a">₹' + Number(p.price).toLocaleString('en-IN') + ' <span style="font-size:12px;font-weight:400;color:#6b7280">/' + p.durationMonths + ' months</span></div>' +
+        '<div style="font-size:11px;color:#6b7280;margin:6px 0">' + keys.map(function(k){return badge(k,'gray');}).join(' ') + '</div>' +
+        '<ul style="margin:8px 0 12px;padding-left:16px;font-size:12px;color:#374151">' + features.slice(0,3).map(function(f){return'<li>'+escape(f)+'</li>';}).join('') + '</ul>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(p) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="togglePlan(\'' + p.id + '\',' + (!p.isActive) + ')">' + (p.isActive ? 'Deactivate' : 'Activate') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="delPlan(\'' + p.id + '\')">Del</button>' +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+    document.getElementById('plans-container').innerHTML = html;
+  }).catch(function(e) { document.getElementById('plans-container').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function loadSubs() {
+  var status = document.getElementById('filter-status').value;
+  document.getElementById('subs-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/amc/subscriptions' + (status ? '?status=' + status : '')).then(function(list) {
+    if (!list || !list.length) { document.getElementById('subs-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h3>No subscriptions found</h3></div>'; return; }
+    var rows = list.map(function(s) {
+      return '<tr>' +
+        '<td><strong>' + escape((s.customer && s.customer.name) || '—') + '</strong><br><small style="color:#6b7280">' + escape((s.customer && s.customer.phone) || '') + '</small></td>' +
+        '<td>' + escape((s.plan && s.plan.name) || '—') + '</td>' +
+        '<td>' + badge(s.status, s.status === 'ACTIVE' ? 'green' : s.status === 'CANCELLED' ? 'red' : 'gray') + '</td>' +
+        '<td>' + fmtDateShort(s.startDate) + '</td>' +
+        '<td>' + fmtDateShort(s.endDate) + '</td>' +
+        '<td><strong>' + (s.servicesUsed || 0) + '</strong> / ' + (s.servicesAllowed || '∞') + '</td>' +
+        '<td>' + fmtCur(s.paidAmount || 0) + '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('subs-tbl').innerHTML = '<table><thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Start</th><th>End</th><th>Services Used</th><th>Paid</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('subs-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openModal(p) {
+  document.getElementById('modal-title').textContent = p ? 'Edit AMC Plan' : 'Add AMC Plan';
+  document.getElementById('plan-id').value = p ? p.id : '';
+  document.getElementById('p-name').value = p ? p.name : '';
+  document.getElementById('p-price').value = p ? p.price : '';
+  document.getElementById('p-dur').value = p ? (p.durationMonths || 12) : 12;
+  document.getElementById('p-credits').value = p ? (p.freeServiceCredits || '') : '';
+  document.getElementById('p-keys').value = p ? (Array.isArray(p.serviceKeys) ? p.serviceKeys.join(', ') : '') : '';
+  var features = p ? (Array.isArray(p.features) ? p.features : []) : [];
+  document.getElementById('p-features').value = features.join('\n');
+  document.getElementById('p-active').checked = p ? p.isActive : true;
+  document.getElementById('plan-overlay').style.display = 'flex';
+}
+
+function savePlan() {
+  var id = document.getElementById('plan-id').value;
+  var name = document.getElementById('p-name').value.trim();
+  var price = parseFloat(document.getElementById('p-price').value);
+  if (!name || isNaN(price)) { toast('Name and price required', 'error'); return; }
+  var keysRaw = document.getElementById('p-keys').value.trim();
+  var features = document.getElementById('p-features').value.trim().split('\n').map(function(f){return f.trim();}).filter(Boolean);
+  var credits = parseInt(document.getElementById('p-credits').value);
+  var data = {
+    name, price, durationMonths: parseInt(document.getElementById('p-dur').value) || 12,
+    freeServiceCredits: isNaN(credits) ? 0 : credits,
+    serviceKeys: keysRaw ? keysRaw.split(',').map(function(k){return k.trim().toUpperCase();}).filter(Boolean) : [],
+    features, isActive: document.getElementById('p-active').checked,
+  };
+  var p = id ? api('PATCH', '/admin/amc/plans/' + id, data) : api('POST', '/admin/amc/plans', data);
+  p.then(function() { toast(id ? 'Updated' : 'Plan created', 'success'); closeModal('plan-overlay'); loadPlans(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function togglePlan(id, val) {
+  api('PATCH', '/admin/amc/plans/' + id, { isActive: val }).then(function() { loadPlans(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function delPlan(id) {
+  if (!confirm('Delete this AMC plan?')) return;
+  api('DELETE', '/admin/amc/plans/' + id).then(function() { toast('Deleted', 'warning'); loadPlans(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+loadPlans();
+loadSubs();
+</script>
+</body>
+</html>

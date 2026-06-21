@@ -679,6 +679,153 @@ export class AdminService {
     return this.prisma.review.delete({ where: { id } });
   }
 
+  // ─── CRM Leads ───────────────────────────────────────────────────────
+
+  async listLeads(opts: { status?: string; source?: string; q?: string; limit?: number }) {
+    return this.prisma.lead.findMany({
+      where: {
+        ...(opts.status ? { status: opts.status as any } : {}),
+        ...(opts.source ? { source: opts.source as any } : {}),
+        ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { phone: { contains: opts.q } }, { email: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+      },
+      include: { assignedAgent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+    });
+  }
+
+  async getLead(id: string) {
+    return this.prisma.lead.findUnique({ where: { id }, include: { assignedAgent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' } }, convertedOrder: true } });
+  }
+
+  async updateLeadStatus(id: string, status: string, notes?: string, lostReason?: string) {
+    return this.prisma.lead.update({ where: { id }, data: { status: status as any, notes, lostReason } });
+  }
+
+  async assignLead(id: string, agentId: string) {
+    return this.prisma.lead.update({ where: { id }, data: { assignedAgentId: agentId } });
+  }
+
+  async deleteLead(id: string) {
+    return this.prisma.lead.delete({ where: { id } });
+  }
+
+  async crmFunnel() {
+    const grouped = await this.prisma.lead.groupBy({ by: ['status'], _count: true });
+    const result: Record<string, number> = {};
+    grouped.forEach((g) => { result[g.status] = g._count; });
+    return result;
+  }
+
+  // ─── AMC ────────────────────────────────────────────────────────────
+
+  async listAmcPlans() {
+    return this.prisma.amcPlan.findMany({ orderBy: { price: 'asc' } });
+  }
+
+  async createAmcPlan(data: any) {
+    return this.prisma.amcPlan.create({ data: { ...data, serviceKeys: data.serviceKeys || [], features: data.features || [] } });
+  }
+
+  async updateAmcPlan(id: string, data: any) {
+    return this.prisma.amcPlan.update({ where: { id }, data });
+  }
+
+  async deleteAmcPlan(id: string) {
+    return this.prisma.amcPlan.delete({ where: { id } });
+  }
+
+  async listAmcSubscriptions(status?: string) {
+    return this.prisma.amcSubscription.findMany({
+      where: status ? { status: status as any } : {},
+      include: { plan: { select: { name: true } }, customer: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+  }
+
+  // ─── Invoices ────────────────────────────────────────────────────────
+
+  async listInvoices(opts: { q?: string; limit?: number }) {
+    return this.prisma.invoice.findMany({
+      where: opts.q ? { OR: [{ invoiceNumber: { contains: opts.q } }] } : {},
+      include: { order: { select: { id: true, status: true }, include: { customer: { select: { name: true, phone: true } } } } },
+      orderBy: { issuedAt: 'desc' },
+      take: opts.limit || 100,
+    });
+  }
+
+  async getInvoice(id: string) {
+    return this.prisma.invoice.findUnique({
+      where: { id },
+      include: { order: { include: { customer: true, items: { include: { service: true } } } } },
+    });
+  }
+
+  async generateInvoice(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { items: { include: { service: true } }, customer: true } });
+    if (!order) throw new NotFoundException('Order not found');
+    const invoiceNumber = 'INV-' + Date.now();
+    const taxAmount = Math.round(Number(order.totalAmount) * 0.18);
+    return this.prisma.invoice.upsert({
+      where: { orderId },
+      create: { orderId, invoiceNumber, subtotal: order.totalAmount, taxAmount, totalAmount: Number(order.totalAmount) + taxAmount, issuedAt: new Date() },
+      update: { invoiceNumber, subtotal: order.totalAmount, taxAmount, totalAmount: Number(order.totalAmount) + taxAmount },
+    });
+  }
+
+  // ─── Corporate ────────────────────────────────────────────────────────
+
+  async listCorporate() {
+    return this.prisma.corporateAccount.findMany({
+      include: { members: { select: { id: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getCorporate(id: string) {
+    return this.prisma.corporateAccount.findUnique({ where: { id }, include: { members: { include: { user: { select: { name: true, phone: true, email: true } } } } } });
+  }
+
+  async updateCorporate(id: string, data: any) {
+    return this.prisma.corporateAccount.update({ where: { id }, data });
+  }
+
+  // ─── Wallet Transactions ──────────────────────────────────────────────
+
+  async listWalletTransactions(opts: { userId?: string; type?: string; limit?: number }) {
+    return this.prisma.walletTransaction.findMany({
+      where: {
+        ...(opts.userId ? { userId: opts.userId } : {}),
+        ...(opts.type ? { type: opts.type as any } : {}),
+      },
+      include: { user: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+    });
+  }
+
+  async exportWalletTransactions() {
+    return this.prisma.walletTransaction.findMany({
+      include: { user: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+  }
+
+  // ─── Servicemen Enquiries ─────────────────────────────────────────────
+
+  async listServicemenEnquiries() {
+    return this.prisma.serviceVendor.findMany({
+      where: { status: { in: ['PENDING', 'UNDER_REVIEW'] as any } },
+      include: {
+        user: { select: { name: true, phone: true, email: true, createdAt: true } },
+        documents: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   // ─── Coupons management ───────────────────────────────────────────────
 
   async listCoupons() {
@@ -853,6 +1000,44 @@ export class AdminController {
   @Get('membership-plans') membershipPlans() { return this.admin.listMembershipPlans(); }
   @Post('membership-plans') createMembershipPlan(@Body() b: any) { return this.admin.createMembershipPlan(b); }
   @Patch('membership-plans/:id') updateMembershipPlan(@Param('id') id: string, @Body() b: any) { return this.admin.updateMembershipPlan(id, b); }
+
+  // CRM Leads (proxy to CRM module data via Prisma)
+  @Get('leads') leads(@Query('status') status?: string, @Query('source') source?: string, @Query('q') q?: string, @Query('limit') limit?: number) {
+    return this.admin.listLeads({ status, source, q, limit: limit ? +limit : 100 });
+  }
+  @Get('leads/:id') lead(@Param('id') id: string) { return this.admin.getLead(id); }
+  @Patch('leads/:id/status') updateLeadStatus(@Param('id') id: string, @Body() b: { status: string; notes?: string; lostReason?: string }) {
+    return this.admin.updateLeadStatus(id, b.status, b.notes, b.lostReason);
+  }
+  @Patch('leads/:id/assign') assignLead(@Param('id') id: string, @Body() b: { agentId: string }) { return this.admin.assignLead(id, b.agentId); }
+  @Delete('leads/:id') deleteLead(@Param('id') id: string) { return this.admin.deleteLead(id); }
+  @Get('crm/funnel') crmFunnel() { return this.admin.crmFunnel(); }
+
+  // AMC Plans + Subscriptions
+  @Get('amc/plans') amcPlans() { return this.admin.listAmcPlans(); }
+  @Post('amc/plans') createAmcPlan(@Body() b: any) { return this.admin.createAmcPlan(b); }
+  @Patch('amc/plans/:id') updateAmcPlan(@Param('id') id: string, @Body() b: any) { return this.admin.updateAmcPlan(id, b); }
+  @Delete('amc/plans/:id') deleteAmcPlan(@Param('id') id: string) { return this.admin.deleteAmcPlan(id); }
+  @Get('amc/subscriptions') amcSubs(@Query('status') status?: string) { return this.admin.listAmcSubscriptions(status); }
+
+  // Invoices
+  @Get('invoices') invoices(@Query('q') q?: string, @Query('limit') limit?: number) { return this.admin.listInvoices({ q, limit: limit ? +limit : 100 }); }
+  @Get('invoices/:id') invoice(@Param('id') id: string) { return this.admin.getInvoice(id); }
+  @Post('invoices/:orderId/generate') genInvoice(@Param('orderId') id: string) { return this.admin.generateInvoice(id); }
+
+  // Corporate Accounts
+  @Get('corporate') corporateList() { return this.admin.listCorporate(); }
+  @Get('corporate/:id') corporateOne(@Param('id') id: string) { return this.admin.getCorporate(id); }
+  @Patch('corporate/:id') updateCorporate(@Param('id') id: string, @Body() b: any) { return this.admin.updateCorporate(id, b); }
+
+  // Wallet Transactions
+  @Get('wallet-transactions') walletTx(@Query('userId') userId?: string, @Query('type') type?: string, @Query('limit') limit?: number) {
+    return this.admin.listWalletTransactions({ userId, type, limit: limit ? +limit : 100 });
+  }
+  @Get('wallet-transactions/export') walletExport() { return this.admin.exportWalletTransactions(); }
+
+  // Service Man Enquiries (vendor registrations = vendor pending)
+  @Get('servicemen-enquiries') servicemenEnquiries() { return this.admin.listServicemenEnquiries(); }
 }
 
 @Module({

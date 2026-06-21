@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — CRM Leads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.pipeline{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;margin-bottom:20px}
+.pipeline-col{min-width:180px;flex:1;background:#f9fafb;border-radius:10px;padding:12px}
+.pipeline-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.pipeline-count{background:#e5e7eb;border-radius:10px;padding:1px 7px;font-size:11px}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>CRM — Leads</h1><p>Pipeline, funnel and conversion tracking</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Funnel stats -->
+    <div id="funnel-row" class="pipeline">
+      <div style="color:#9ca3af;font-size:13px;padding:20px">Loading funnel…</div>
+    </div>
+
+    <!-- Leads table -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Leads</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:180px" placeholder="Name, phone, email…" oninput="load()">
+          <select id="filter-status" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All Statuses</option>
+            <option>NEW</option><option>CONTACTED</option><option>SITE_VISIT</option><option>QUOTATION_SENT</option>
+            <option>NEGOTIATION</option><option>WON</option><option>LOST</option>
+          </select>
+          <select id="filter-source" class="form-control" style="width:140px" onchange="load()">
+            <option value="">All Sources</option>
+            <option>WEBSITE</option><option>JUSTDIAL</option><option>GOOGLE</option><option>WHATSAPP</option>
+            <option>REFERRAL</option><option>SULEKHA</option><option>MANUAL</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="status-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title">Update Lead Status</span>
+      <button class="modal-close" onclick="closeModal('status-overlay')">×</button>
+    </div>
+    <input type="hidden" id="lead-id-input">
+    <div class="form-group"><label class="form-label">Status</label>
+      <select id="new-status" class="form-control">
+        <option>NEW</option><option>CONTACTED</option><option>SITE_VISIT</option><option>QUOTATION_SENT</option>
+        <option>NEGOTIATION</option><option>WON</option><option>LOST</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea id="status-notes" class="form-control" rows="3"></textarea></div>
+    <div id="lost-reason-row" class="form-group" style="display:none"><label class="form-label">Lost Reason</label><input id="lost-reason" class="form-control"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('status-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmStatus()">Update</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('leads');
+requireAuth();
+
+var COLORS = { NEW:'blue', CONTACTED:'purple', SITE_VISIT:'yellow', QUOTATION_SENT:'yellow', NEGOTIATION:'yellow', WON:'green', LOST:'red' };
+
+function loadFunnel() {
+  api('GET', '/admin/crm/funnel').then(function(data) {
+    var order = ['NEW','CONTACTED','SITE_VISIT','QUOTATION_SENT','NEGOTIATION','WON','LOST'];
+    var html = order.map(function(s) {
+      var n = data[s] || 0;
+      return '<div class="pipeline-col"><div class="pipeline-header">' + s.replace('_',' ') + '<span class="pipeline-count">' + n + '</span></div><div style="font-size:28px;font-weight:700;color:#111827">' + n + '</div></div>';
+    }).join('');
+    document.getElementById('funnel-row').innerHTML = html;
+  }).catch(function() {});
+}
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var status = document.getElementById('filter-status').value;
+  var source = document.getElementById('filter-source').value;
+  var params = 'limit=200';
+  if (q) params += '&q=' + encodeURIComponent(q);
+  if (status) params += '&status=' + status;
+  if (source) params += '&source=' + source;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/leads?' + params).then(function(list) {
+    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><h3>No leads found</h3></div>'; return; }
+    var rows = list.map(function(l) {
+      var lastAct = l.activities && l.activities[0];
+      return '<tr>' +
+        '<td><strong>' + escape(l.name) + '</strong><br><small style="color:#6b7280">' + escape(l.phone || '') + '</small></td>' +
+        '<td>' + escape(l.email || '—') + '</td>' +
+        '<td>' + badge(l.source || 'MANUAL', 'blue') + '</td>' +
+        '<td>' + escape(l.service || '—') + '</td>' +
+        '<td>' + escape(l.city || '—') + '</td>' +
+        '<td>' + badge(l.status, COLORS[l.status] || 'gray') + '</td>' +
+        '<td>' + escape((l.assignedAgent && l.assignedAgent.name) || 'Unassigned') + '</td>' +
+        '<td>' + (lastAct ? '<span style="font-size:11px;color:#6b7280">' + escape(lastAct.notes || '') + '</span>' : '—') + '</td>' +
+        '<td>' + fmtDateShort(l.createdAt) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick="openStatus(\'' + l.id + '\',\'' + l.status + '\')">Status</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + l.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table style="min-width:900px"><thead><tr><th>Name / Phone</th><th>Email</th><th>Source</th><th>Service</th><th>City</th><th>Status</th><th>Agent</th><th>Last Note</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openStatus(id, currentStatus) {
+  document.getElementById('lead-id-input').value = id;
+  document.getElementById('new-status').value = currentStatus;
+  document.getElementById('status-notes').value = '';
+  document.getElementById('lost-reason').value = '';
+  document.getElementById('lost-reason-row').style.display = currentStatus === 'LOST' ? '' : 'none';
+  document.getElementById('new-status').onchange = function() {
+    document.getElementById('lost-reason-row').style.display = this.value === 'LOST' ? '' : 'none';
+  };
+  document.getElementById('status-overlay').style.display = 'flex';
+}
+
+function confirmStatus() {
+  var id = document.getElementById('lead-id-input').value;
+  var status = document.getElementById('new-status').value;
+  var notes = document.getElementById('status-notes').value.trim();
+  var lostReason = document.getElementById('lost-reason').value.trim();
+  api('PATCH', '/admin/leads/' + id + '/status', { status, notes, lostReason: lostReason || undefined }).then(function() {
+    toast('Status updated to ' + status, 'success'); closeModal('status-overlay'); load(); loadFunnel();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this lead permanently?')) return;
+  api('DELETE', '/admin/leads/' + id).then(function() { toast('Lead deleted', 'warning'); load(); loadFunnel(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+loadFunnel();
+load();
+</script>
+</body>
+</html>
