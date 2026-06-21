@@ -3,8 +3,8 @@ import {
   NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { OrderStatus, OrderType, BookingChannel } from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, Min, ValidateNested } from 'class-validator';
+import { OrderStatus, OrderType, BookingChannel, UserRole } from '@prisma/client';
+import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { PrismaService } from '../../prisma/prisma.module';
@@ -13,6 +13,20 @@ import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
+
+// ─── Guest Booking DTO ───
+class GuestBookingDto {
+  @IsString() name: string;
+  @IsString() phone: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsString() serviceId: string;
+  @IsString() cityId: string;
+  @IsString() fullAddress: string;
+  @IsDateString() slotDate: string;
+  @IsString() slotTime: string; // e.g. "10:00", "14:00", "18:00"
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsEnum(BookingChannel) channel?: BookingChannel;
+}
 
 // ─── DTOs ───
 class OrderItemDto {
@@ -270,7 +284,43 @@ export class OrdersService {
         pendingPayout: { increment: Number(order.vendorPayout) },
       },
     });
+    this.autoGenerateInvoice(orderId).catch((e) => this.logger.warn(`Auto-invoice failed: ${e.message}`));
     return completed;
+  }
+
+  private async autoGenerateInvoice(orderId: string) {
+    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
+    if (existing) return;
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { extraWorkItems: { where: { customerApproved: true } } },
+    });
+    if (!order) return;
+    const customerSubtotal = Number(order.subtotal);
+    const customerTotal = Number(order.totalAmount);
+    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
+    const customerSgst = customerCgst;
+    const vendorLabor = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
+    const vendorCgst = Math.round(vendorLabor * 0.09 * 100) / 100;
+    const vendorSgst = vendorCgst;
+    const vendorTotal = vendorLabor + vendorCgst + vendorSgst;
+    const platformCommission = Number(order.remontCommission);
+    const bookingFee = 49;
+    const remontPretax = platformCommission + bookingFee;
+    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
+    const remontSgst = remontCgst;
+    const remontTotal = remontPretax + remontCgst + remontSgst;
+    const count = await this.prisma.invoice.count();
+    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
+    await this.prisma.invoice.create({
+      data: {
+        invoiceNumber, orderId,
+        customerSubtotal, customerCgst, customerSgst, customerTotal,
+        vendorLabor, vendorMaterial: 0, vendorCgst, vendorSgst, vendorTotal,
+        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
+      },
+    });
+    await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.INVOICED } });
   }
 
   async myOrders(customerId: string, status?: OrderStatus) {
@@ -313,6 +363,154 @@ export class OrdersService {
   }
 }
 
+// ─── Guest Booking Service (no auth required) ───
+@Injectable()
+export class GuestBookingService {
+  private readonly logger = new Logger(GuestBookingService.name);
+  constructor(private prisma: PrismaService) {}
+
+  async book(dto: GuestBookingDto) {
+    // Find or create customer by phone
+    let user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone: dto.phone,
+          name: dto.name,
+          email: dto.email || undefined,
+          role: UserRole.CUSTOMER,
+          isVerified: false,
+        },
+      });
+    }
+
+    // Verify service exists
+    const svc = await this.prisma.service.findUnique({
+      where: { id: dto.serviceId },
+      include: { category: true },
+    });
+    if (!svc || !svc.isActive) throw new NotFoundException('Service not found or inactive');
+
+    // Verify city
+    const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });
+    if (!city || !city.isActive) throw new NotFoundException('City not available');
+
+    // Determine price (city override or base price)
+    const cityService = await this.prisma.cityService.findUnique({
+      where: { cityId_serviceId: { cityId: dto.cityId, serviceId: dto.serviceId } },
+    });
+    const serviceAmount = (cityService?.isActive && cityService.customPrice)
+      ? Number(cityService.customPrice)
+      : Number(svc.basePrice);
+
+    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
+    const totalAmount = serviceAmount + gstAmount;
+
+    // Parse slot datetime
+    const [hours, minutes] = dto.slotTime.split(':').map(Number);
+    const slotStart = new Date(dto.slotDate);
+    slotStart.setHours(hours, minutes || 0, 0, 0);
+    const slotEnd = new Date(slotStart.getTime() + svc.durationMinutes * 60 * 1000);
+
+    const count = await this.prisma.order.count();
+    const orderNumber = generateOrderNumber('REM', count);
+    const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Create address inline (full address as free text)
+    const address = await this.prisma.address.create({
+      data: {
+        userId: user.id,
+        label: 'Booking Address',
+        fullAddress: dto.fullAddress,
+        city: city.name,
+        state: city.state,
+        pincode: '000000',
+        latitude: city.latitude,
+        longitude: city.longitude,
+        isDefault: false,
+      },
+    });
+
+    const order = await this.prisma.order.create({
+      data: {
+        orderNumber,
+        customerId: user.id,
+        serviceId: dto.serviceId,
+        addressId: address.id,
+        type: OrderType.SERVICE,
+        channel: dto.channel || BookingChannel.WEBSITE,
+        status: OrderStatus.CONFIRMED,
+        paymentStatus: 'PENDING',
+        guestName: dto.name,
+        guestPhone: dto.phone,
+        guestEmail: dto.email || null,
+        adminNotes: dto.notes || null,
+        slotStart,
+        slotEnd,
+        startOtp,
+        serviceAmount,
+        productsAmount: 0,
+        subtotal: serviceAmount,
+        couponDiscount: 0,
+        membershipDiscount: 0,
+        walletUsed: 0,
+        gstAmount,
+        totalAmount,
+        remontCommission: Math.round(serviceAmount * 0.15 * 100) / 100,
+        vendorPayout: serviceAmount - Math.round(serviceAmount * 0.15 * 100) / 100,
+      },
+      include: {
+        service: { select: { name: true, durationMinutes: true } },
+        address: true,
+        customer: { select: { name: true, phone: true } },
+      },
+    });
+
+    this.logger.log(`📋 Guest booking: ${orderNumber} for ${dto.name} (${dto.phone})`);
+    return {
+      orderNumber: order.orderNumber,
+      orderId: order.id,
+      status: order.status,
+      service: order.service?.name,
+      slot: slotStart.toISOString(),
+      city: city.name,
+      totalAmount: order.totalAmount,
+      message: 'Booking confirmed! Our team will contact you within 30 minutes.',
+    };
+  }
+
+  async trackOrder(orderNumber: string, phone: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: {
+        service: { select: { name: true, imageUrl: true } },
+        vendor: { include: { user: { select: { name: true, phone: true } } } },
+        address: { select: { city: true, fullAddress: true } },
+        extraWorkItems: { where: { customerApproved: false } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    // Verify phone matches
+    const ownerPhone = order.guestPhone || order.customer?.phone;
+    if (ownerPhone && ownerPhone !== phone) throw new ForbiddenException('Access denied');
+
+    return {
+      orderNumber: order.orderNumber,
+      status: order.status,
+      service: order.service?.name,
+      slotStart: order.slotStart,
+      vendor: order.vendor ? {
+        name: order.vendor.user?.name || order.vendor.fullName,
+        phone: order.vendor.user?.phone,
+      } : null,
+      city: order.address?.city,
+      totalAmount: order.totalAmount,
+      pendingApprovals: order.extraWorkItems.length,
+      createdAt: order.createdAt,
+    };
+  }
+}
+
 @ApiTags('Orders')
 @ApiBearerAuth() @UseGuards(JwtAuthGuard)
 @Controller('orders')
@@ -341,10 +539,22 @@ export class OrdersController {
   }
 }
 
+// ─── Public (no-auth) booking controller ───
+@ApiTags('Booking')
+@Controller('orders/public')
+export class PublicBookingController {
+  constructor(private guest: GuestBookingService) {}
+
+  @Post('book') book(@Body() dto: GuestBookingDto) { return this.guest.book(dto); }
+  @Get('track/:orderNumber') track(@Param('orderNumber') num: string, @Query('phone') phone: string) {
+    return this.guest.trackOrder(num, phone);
+  }
+}
+
 @Module({
   imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule],
-  controllers: [OrdersController],
-  providers: [OrdersService, DispatchService, ExtraWorkService],
+  controllers: [OrdersController, PublicBookingController],
+  providers: [OrdersService, DispatchService, ExtraWorkService, GuestBookingService],
   exports: [OrdersService],
 })
 export class OrdersModule {}

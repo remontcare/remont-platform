@@ -2376,7 +2376,7 @@
   <div class="grp">
     <div class="grp-title">Account</div>
     <a href="#">Sign In with OTP</a>
-    <a href="#">Track Orders</a>
+    <a href="#" onclick="openTrackingModal();return false">Track Orders</a>
     <a href="#">My Wallet</a>
   </div>
   <div style="margin-top: 24px;">
@@ -4138,6 +4138,7 @@
     // Build city icon map (fallback emoji set)
     var icons = ['🏙️','🌆','🏞️','🏛️','🌅','🏰','🌉','🌃','🏟️','🌄','🌇','🏯','🌃','🏙️','🌆'];
     var activeCities = cities.filter(function(c){ return c.isActive; });
+    bookingCities = activeCities;
 
     var html = '<div class="cm-section-label">Available Cities</div><div class="cm-city-grid">';
     activeCities.forEach(function(c, i) {
@@ -4257,6 +4258,8 @@
 
   // ── Cart functionality ─────────────────────────────────────────────
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var bookingCities = [];
+  var _lastBookedOrderNum = '';
 
   function updateCartBadge() {
     var badge = document.querySelector('.cart-btn .badge');
@@ -4293,16 +4296,14 @@
     addToCart({ id: 'prod-' + Math.random(), name: name ? name.textContent : 'Product', price: price ? price.textContent : '—', type: 'product' });
   });
 
-  // Book service button handler
+  // Book service button handler — opens real booking form
   document.addEventListener('click', function(e) {
     var btn = e.target.closest('.sub-svc-card');
     if (!btn) return;
-    var name = btn.querySelector('.nm');
-    var price = btn.querySelector('.pr');
-    var svcId = btn.getAttribute('data-svc-id');
-    if (svcId) {
-      addToCart({ id: 'svc-' + svcId, name: name ? name.textContent : 'Service', price: price ? price.textContent : '—', type: 'service', serviceId: svcId });
-    }
+    var svcId = btn.getAttribute('data-svc-id') || '';
+    var svcName = btn.querySelector('.nm') ? btn.querySelector('.nm').textContent.trim() : '';
+    var svcPrice = btn.querySelector('.pr') ? btn.querySelector('.pr').textContent.replace(/<[^>]*>/g, '').trim() : '';
+    openBookingModal(svcId, svcName, svcPrice);
   });
 
   updateCartBadge();
@@ -4351,6 +4352,276 @@
 
   initDynamicContent();
 
+  // ── Booking Modal ──────────────────────────────────────────────────────────
+
+  function openBookingModal(svcId, svcName, svcPrice) {
+    document.getElementById('bm-svc-id').value = svcId || '';
+    document.getElementById('bm-service').textContent = svcName
+      ? svcName + (svcPrice ? ' · ' + svcPrice : '')
+      : 'Home Service Booking';
+    var today = new Date().toISOString().slice(0, 10);
+    document.getElementById('bm-date').value = today;
+    document.getElementById('bm-date').min = today;
+    var sel = document.getElementById('bm-city');
+    sel.innerHTML = '<option value="">Select city…</option>';
+    bookingCities.forEach(function(c) {
+      sel.innerHTML += '<option value="' + c.id + '">' + c.name + '</option>';
+    });
+    if (typeof currentCity !== 'undefined' && currentCity) {
+      Array.from(sel.options).forEach(function(o) { if (o.textContent === currentCity) o.selected = true; });
+    }
+    document.getElementById('booking-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeBookingModal() {
+    document.getElementById('booking-modal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  function submitBooking() {
+    var svcId   = document.getElementById('bm-svc-id').value;
+    var name    = document.getElementById('bm-name').value.trim();
+    var phone   = document.getElementById('bm-phone').value.trim();
+    var email   = document.getElementById('bm-email').value.trim();
+    var cityId  = document.getElementById('bm-city').value;
+    var date    = document.getElementById('bm-date').value;
+    var time    = document.getElementById('bm-time').value;
+    var address = document.getElementById('bm-address').value.trim();
+    var notes   = document.getElementById('bm-notes').value.trim();
+    if (!name)    { showToast('Please enter your name', 'error'); return; }
+    if (!phone || phone.replace(/\D/g,'').length < 10) { showToast('Please enter a valid 10-digit phone number', 'error'); return; }
+    if (!cityId)  { showToast('Please select your city', 'error'); return; }
+    if (!date)    { showToast('Please select a date', 'error'); return; }
+    if (!address) { showToast('Please enter your address', 'error'); return; }
+    if (!svcId)   { showToast('Service not found — please try again', 'error'); return; }
+    var btn = document.getElementById('bm-submit');
+    btn.textContent = 'Booking…'; btn.disabled = true;
+    var payload = { name: name, phone: phone, serviceId: svcId, cityId: cityId, fullAddress: address, slotDate: date, slotTime: time, channel: 'WEBSITE' };
+    if (email) payload.email = email;
+    if (notes) payload.notes = notes;
+    apiPost('/api/v1/orders/public/book', payload).then(function(res) {
+      btn.textContent = 'Confirm Booking →'; btn.disabled = false;
+      var r = res && res.data ? res.data : res;
+      var orderNum = r.orderNumber || '—';
+      _lastBookedOrderNum = orderNum;
+      closeBookingModal();
+      ['bm-name','bm-phone','bm-email','bm-address','bm-notes'].forEach(function(id){ document.getElementById(id).value = ''; });
+      document.getElementById('success-order-num').textContent = orderNum;
+      document.getElementById('booking-success').style.display = 'flex';
+    }).catch(function(err) {
+      btn.textContent = 'Confirm Booking →'; btn.disabled = false;
+      showToast((err && err.message) || 'Booking failed. Please call us to book.', 'error');
+    });
+  }
+
+  function closeBookingSuccess() {
+    document.getElementById('booking-success').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  function openTrackingModalWithOrder() {
+    closeBookingSuccess();
+    document.getElementById('tr-order-num').value = _lastBookedOrderNum;
+    document.getElementById('tr-phone').value = document.getElementById('bm-phone') ? document.getElementById('bm-phone').value : '';
+    document.getElementById('tracking-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  // ── Order Tracking Modal ───────────────────────────────────────────────────
+
+  function openTrackingModal() {
+    document.getElementById('tracking-result').style.display = 'none';
+    document.getElementById('tracking-error').style.display = 'none';
+    document.getElementById('tracking-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeTrackingModal() {
+    document.getElementById('tracking-modal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  function trackOrderSubmit() {
+    var num   = document.getElementById('tr-order-num').value.trim();
+    var phone = document.getElementById('tr-phone').value.trim();
+    if (!num)   { showToast('Enter order number', 'error'); return; }
+    if (!phone) { showToast('Enter phone number', 'error'); return; }
+    document.getElementById('tracking-result').style.display = 'none';
+    document.getElementById('tracking-error').style.display = 'none';
+    var STATUS_LABELS = {
+      PENDING_PAYMENT: '⏳ Pending Payment', CONFIRMED: '✅ Confirmed',
+      VENDOR_ASSIGNED: '👷 Vendor Assigned', VENDOR_EN_ROUTE: '🚗 En Route',
+      STARTED: '🔧 Started', IN_PROGRESS: '⚡ In Progress',
+      EXTRA_WORK_ADDED: '📋 Extra Work Pending', COMPLETED: '✅ Completed',
+      INVOICED: '🧾 Invoiced', CLOSED: '🔒 Closed',
+      CANCELLED: '❌ Cancelled', REFUNDED: '↩️ Refunded',
+    };
+    apiGet('/api/v1/orders/public/track/' + encodeURIComponent(num) + '?phone=' + encodeURIComponent(phone))
+      .then(function(res) {
+        var d = res && res.data ? res.data : res;
+        document.getElementById('tr-order-display').textContent = d.orderNumber || num;
+        document.getElementById('tr-status-display').textContent = STATUS_LABELS[d.status] || d.status || '—';
+        document.getElementById('tr-service-display').textContent = d.service || '—';
+        var slot = d.slotStart ? new Date(d.slotStart).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled';
+        document.getElementById('tr-slot-display').textContent = slot;
+        document.getElementById('tr-amount-display').textContent = d.totalAmount ? '₹' + Number(d.totalAmount).toLocaleString('en-IN') : '—';
+        if (d.vendor && d.vendor.name) {
+          document.getElementById('tr-vendor-block').style.display = '';
+          document.getElementById('tr-vendor-display').textContent = d.vendor.name + (d.vendor.phone ? ' · ' + d.vendor.phone : '');
+        } else {
+          document.getElementById('tr-vendor-block').style.display = 'none';
+        }
+        document.getElementById('tracking-result').style.display = '';
+      }).catch(function() {
+        document.getElementById('tracking-error').style.display = '';
+        document.getElementById('tracking-error').textContent = 'Order not found. Please check your order number and phone number.';
+      });
+  }
+
+  // Close modals on backdrop click
+  ['booking-modal','booking-success','tracking-modal'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('click', function(e) { if (e.target === el) { el.style.display='none'; document.body.style.overflow=''; } });
+  });
+
 </script>
+
+<!-- ═══ BOOKING MODAL ═══ -->
+<div id="booking-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto">
+  <div style="background:#fff;border-radius:20px;max-width:500px;width:100%;padding:28px 24px;position:relative;margin:auto">
+    <button onclick="closeBookingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+    <div style="font-size:22px;margin-bottom:4px">📅</div>
+    <h3 style="font-size:19px;font-weight:700;color:#111;margin:0 0 4px">Book Service</h3>
+    <div id="bm-service" style="color:#c4601a;font-size:13px;font-weight:600;margin-bottom:18px"></div>
+    <input type="hidden" id="bm-svc-id">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Your Name *</label>
+        <input id="bm-name" type="text" placeholder="Rahul Sharma" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Phone *</label>
+        <input id="bm-phone" type="tel" placeholder="+91 98765 43210" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Email (optional)</label>
+      <input id="bm-email" type="email" placeholder="rahul@email.com" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">City *</label>
+        <select id="bm-city" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:#fff">
+          <option value="">Select city…</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Date *</label>
+        <input id="bm-date" type="date" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Time Slot *</label>
+      <select id="bm-time" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:#fff">
+        <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
+        <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
+        <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
+        <option value="13:00">1:00 PM</option><option value="14:00">2:00 PM</option>
+        <option value="15:00">3:00 PM</option><option value="16:00">4:00 PM</option>
+        <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
+        <option value="19:00">7:00 PM</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Full Address *</label>
+      <textarea id="bm-address" rows="2" placeholder="Flat/House No, Street, Area, Pincode…" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;resize:none;box-sizing:border-box"></textarea>
+    </div>
+
+    <div style="margin-bottom:20px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Notes (optional)</label>
+      <textarea id="bm-notes" rows="2" placeholder="Describe the problem or any special instructions…" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;resize:none;box-sizing:border-box"></textarea>
+    </div>
+
+    <button id="bm-submit" onclick="submitBooking()" style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s">Confirm Booking →</button>
+    <p style="text-align:center;font-size:11px;color:#9ca3af;margin:10px 0 0">🔒 Our team will call you within 30 min to confirm. No advance payment needed.</p>
+  </div>
+</div>
+
+<!-- ═══ BOOKING SUCCESS ═══ -->
+<div id="booking-success" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9001;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:20px;max-width:400px;width:100%;padding:32px 24px;text-align:center">
+    <div style="font-size:52px;margin-bottom:12px">🎉</div>
+    <h3 style="font-size:20px;font-weight:700;color:#111;margin:0 0 8px">Booking Confirmed!</h3>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 16px;line-height:1.5">Our team will call you within 30 minutes to confirm your slot and vendor.</p>
+    <div style="background:#fef3ec;border:1.5px solid #fed7aa;border-radius:12px;padding:16px;margin-bottom:20px">
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Your Order Number</div>
+      <div id="success-order-num" style="font-size:24px;font-weight:800;color:#c4601a;font-family:monospace;letter-spacing:1px"></div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:4px">Save this to track your order</div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="closeBookingSuccess()" style="padding:10px 20px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;cursor:pointer;background:#fff;color:#374151">Done</button>
+      <button onclick="openTrackingModalWithOrder()" style="padding:10px 20px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Track Order →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ORDER TRACKING MODAL ═══ -->
+<div id="tracking-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto">
+  <div style="background:#fff;border-radius:20px;max-width:460px;width:100%;padding:28px 24px;position:relative;margin:auto">
+    <button onclick="closeTrackingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+    <div style="font-size:22px;margin-bottom:4px">📦</div>
+    <h3 style="font-size:19px;font-weight:700;color:#111;margin:0 0 4px">Track Your Order</h3>
+    <p style="font-size:13px;color:#6b7280;margin:0 0 20px">Enter your order number and registered phone number.</p>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Order Number *</label>
+      <input id="tr-order-num" placeholder="e.g. REM-001" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;font-family:monospace;box-sizing:border-box">
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Phone Number *</label>
+      <input id="tr-phone" type="tel" placeholder="+91 98765 43210" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+    </div>
+    <button onclick="trackOrderSubmit()" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:16px">Track Order →</button>
+
+    <div id="tracking-error" style="display:none;background:#fef2f2;border:1px solid #fee2e2;border-radius:8px;padding:12px;color:#ef4444;font-size:13px;text-align:center;margin-bottom:12px"></div>
+
+    <div id="tracking-result" style="display:none">
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:#f9fafb;border-radius:8px;padding:12px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Order</div>
+          <div id="tr-order-display" style="font-size:12px;font-weight:700;font-family:monospace;color:#111"></div>
+        </div>
+        <div style="background:#f9fafb;border-radius:8px;padding:12px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Status</div>
+          <div id="tr-status-display" style="font-size:13px;font-weight:700;color:#c4601a"></div>
+        </div>
+        <div style="background:#f9fafb;border-radius:8px;padding:12px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Service</div>
+          <div id="tr-service-display" style="font-size:13px;font-weight:500;color:#111"></div>
+        </div>
+        <div style="background:#f9fafb;border-radius:8px;padding:12px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Scheduled</div>
+          <div id="tr-slot-display" style="font-size:12px;font-weight:500;color:#374151"></div>
+        </div>
+        <div id="tr-vendor-block" style="background:#f9fafb;border-radius:8px;padding:12px;display:none">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Assigned Vendor</div>
+          <div id="tr-vendor-display" style="font-size:13px;font-weight:500;color:#111"></div>
+        </div>
+        <div style="background:#fef3ec;border-radius:8px;padding:12px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Amount</div>
+          <div id="tr-amount-display" style="font-size:14px;font-weight:700;color:#c4601a"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

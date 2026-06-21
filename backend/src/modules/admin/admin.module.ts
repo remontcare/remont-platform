@@ -182,34 +182,195 @@ export class AdminService {
 
   // ─── Orders ─────────────────────────────────────────────────────────
 
-  async listOrders(opts: { status?: OrderStatus; city?: string; limit?: number; offset?: number }) {
+  async orderStats() {
+    const [total, newOrders, active, completed, cancelled, revenue] = await Promise.all([
+      this.prisma.order.count(),
+      this.prisma.order.count({ where: { status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } } }),
+      this.prisma.order.count({ where: { status: { in: ['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } } }),
+      this.prisma.order.count({ where: { status: 'COMPLETED' } }),
+      this.prisma.order.count({ where: { status: 'CANCELLED' } }),
+      this.prisma.order.aggregate({ _sum: { totalAmount: true }, where: { paymentStatus: 'PAID' } }),
+    ]);
+    return { total, new: newOrders, active, completed, cancelled, revenue: Number(revenue._sum.totalAmount || 0) };
+  }
+
+  async listOrders(opts: { status?: string; city?: string; q?: string; channel?: string; limit?: number; offset?: number }) {
+    const where: any = {
+      ...(opts.status ? { status: opts.status as OrderStatus } : {}),
+      ...(opts.channel ? { channel: opts.channel as any } : {}),
+      ...(opts.city ? { address: { city: { contains: opts.city, mode: 'insensitive' } } } : {}),
+      ...(opts.q ? {
+        OR: [
+          { orderNumber: { contains: opts.q, mode: 'insensitive' } },
+          { guestPhone: { contains: opts.q, mode: 'insensitive' } },
+          { guestName: { contains: opts.q, mode: 'insensitive' } },
+          { customer: { phone: { contains: opts.q, mode: 'insensitive' } } },
+          { customer: { name: { contains: opts.q, mode: 'insensitive' } } },
+        ],
+      } : {}),
+    };
     return this.prisma.order.findMany({
-      where: {
-        ...(opts.status ? { status: opts.status } : {}),
-        ...(opts.city ? { address: { city: { contains: opts.city, mode: 'insensitive' } } } : {}),
-      },
+      where,
       include: {
         customer: { select: { name: true, phone: true } },
-        vendor: { include: { user: { select: { name: true, phone: true } } } },
-        service: { select: { name: true, basePrice: true } },
+        vendor: { select: { id: true, fullName: true, user: { select: { name: true, phone: true } } } },
+        service: { select: { name: true, basePrice: true, durationMinutes: true } },
         address: { select: { city: true, fullAddress: true } },
+        invoice: { select: { id: true, invoiceNumber: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: opts.limit || 50,
-      skip: opts.offset || 0,
+      take: opts.limit ? Number(opts.limit) : 100,
+      skip: opts.offset ? Number(opts.offset) : 0,
+    });
+  }
+
+  async adminGetOrder(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        customer: { select: { id: true, name: true, phone: true, email: true, walletBalance: true } },
+        vendor: { include: { user: { select: { name: true, phone: true } } } },
+        service: { include: { category: { select: { name: true } } } },
+        address: true,
+        items: { include: { product: { select: { name: true, sku: true, images: true } } } },
+        extraWorkItems: true,
+        invoice: true,
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
+  }
+
+  async adminCreateOrder(data: {
+    serviceId: string; cityId: string; slotDate: string; slotTime: string;
+    guestName: string; guestPhone: string; guestEmail?: string;
+    fullAddress: string; notes?: string; channel?: string;
+  }) {
+    const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId } });
+    if (!svc) throw new NotFoundException('Service not found');
+    const city = await this.prisma.city.findUnique({ where: { id: data.cityId } });
+    if (!city) throw new NotFoundException('City not found');
+
+    let user = await this.prisma.user.findUnique({ where: { phone: data.guestPhone } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: { phone: data.guestPhone, name: data.guestName, role: 'CUSTOMER', isVerified: false },
+      });
+    }
+
+    const cityService = await this.prisma.cityService.findUnique({
+      where: { cityId_serviceId: { cityId: data.cityId, serviceId: data.serviceId } },
+    });
+    const serviceAmount = (cityService?.isActive && cityService.customPrice)
+      ? Number(cityService.customPrice) : Number(svc.basePrice);
+    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
+
+    const [h, m] = data.slotTime.split(':').map(Number);
+    const slotStart = new Date(data.slotDate); slotStart.setHours(h, m || 0, 0, 0);
+    const slotEnd = new Date(slotStart.getTime() + svc.durationMinutes * 60000);
+
+    const address = await this.prisma.address.create({
+      data: { userId: user.id, label: 'Booking', fullAddress: data.fullAddress, city: city.name, state: city.state, pincode: '000000', latitude: city.latitude, longitude: city.longitude, isDefault: false },
+    });
+
+    const count = await this.prisma.order.count();
+    const orderNumber = (await import('../../common')).generateOrderNumber('REM', count);
+    return this.prisma.order.create({
+      data: {
+        orderNumber, customerId: user.id, serviceId: data.serviceId, addressId: address.id,
+        type: 'SERVICE', channel: (data.channel as any) || 'CRM_AGENT',
+        status: 'CONFIRMED', paymentStatus: 'PENDING',
+        guestName: data.guestName, guestPhone: data.guestPhone, guestEmail: data.guestEmail || null,
+        adminNotes: data.notes || null, slotStart, slotEnd,
+        startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
+        serviceAmount, productsAmount: 0, subtotal: serviceAmount,
+        couponDiscount: 0, membershipDiscount: 0, walletUsed: 0,
+        gstAmount, totalAmount: serviceAmount + gstAmount,
+        remontCommission: Math.round(serviceAmount * 0.15 * 100) / 100,
+        vendorPayout: serviceAmount - Math.round(serviceAmount * 0.15 * 100) / 100,
+      },
+      include: { service: true, address: true, customer: { select: { name: true, phone: true } } },
     });
   }
 
   async forceAssignVendor(orderId: string, vendorId: string) {
-    return this.prisma.order.update({ where: { id: orderId }, data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED } });
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
+      include: { vendor: { include: { user: { select: { name: true, phone: true } } } } },
+    });
+  }
+
+  async adminUpdateStatus(orderId: string, status: string, note?: string) {
+    const validStatuses = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED', 'COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'];
+    if (!validStatuses.includes(status)) throw new BadRequestException(`Invalid status: ${status}`);
+    const data: any = { status };
+    if (note) data.adminNotes = note;
+    if (status === 'COMPLETED') data.completedAt = new Date();
+    if (status === 'CANCELLED') { data.cancelledAt = new Date(); if (note) data.cancelReason = note; }
+    if (status === 'REFUNDED') data.paymentStatus = 'REFUNDED';
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data });
+    if (status === 'COMPLETED') this.autoGenerateInvoice(orderId).catch(() => {});
+    return updated;
+  }
+
+  private async autoGenerateInvoice(orderId: string) {
+    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
+    if (existing) return;
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { extraWorkItems: { where: { customerApproved: true } } },
+    });
+    if (!order) return;
+    const customerSubtotal = Number(order.subtotal);
+    const customerTotal = Number(order.totalAmount);
+    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
+    const customerSgst = customerCgst;
+    const vendorLabor = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
+    const vendorCgst = Math.round(vendorLabor * 0.09 * 100) / 100;
+    const vendorSgst = vendorCgst;
+    const vendorTotal = vendorLabor + vendorCgst + vendorSgst;
+    const platformCommission = Number(order.remontCommission);
+    const bookingFee = 49;
+    const remontPretax = platformCommission + bookingFee;
+    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
+    const remontSgst = remontCgst;
+    const remontTotal = remontPretax + remontCgst + remontSgst;
+    const count = await this.prisma.invoice.count();
+    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
+    await this.prisma.invoice.create({
+      data: {
+        invoiceNumber, orderId,
+        customerSubtotal, customerCgst, customerSgst, customerTotal,
+        vendorLabor, vendorMaterial: 0, vendorCgst, vendorSgst, vendorTotal,
+        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
+      },
+    });
+    await this.prisma.order.update({ where: { id: orderId }, data: { status: 'INVOICED' as any } });
+  }
+
+  async adminUpdateNote(orderId: string, note: string) {
+    return this.prisma.order.update({ where: { id: orderId }, data: { adminNotes: note } });
+  }
+
+  async listActiveVendors(skill?: string) {
+    return this.prisma.serviceVendor.findMany({
+      where: {
+        status: 'ACTIVE',
+        ...(skill ? { skills: { has: skill } } : {}),
+      },
+      include: { user: { select: { name: true, phone: true } } },
+      orderBy: { rating: 'desc' },
+      take: 100,
+    });
   }
 
   async adminCancelOrder(orderId: string, reason: string) {
-    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelReason: `Admin: ${reason}` } });
+    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
   }
 
   async refundOrder(orderId: string, reason: string) {
-    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}` } });
+    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}`, adminNotes: reason } });
   }
 
   // ─── Cities ─────────────────────────────────────────────────────────
@@ -592,13 +753,13 @@ export class AdminService {
   async fullStats() {
     const base = await this.globalStats();
     const [
-      totalReviews, pendingReviews, avgRating,
+      totalReviews, avgRating,
       totalNewsletters, activeCoupons, totalBlogPosts, publishedBlogs,
       totalFaqs, activeFaqs, totalOrders, completedOrders, cancelledOrders, activeOrders,
       primeMembers, totalServices, inactiveServices,
     ] = await Promise.all([
       this.prisma.review.count(),
-      this.prisma.review.count({ where: { isVerified: false } }),
+      this.prisma.review.count().catch(() => 0), // Bug fix: Review has no isVerified
       this.prisma.review.aggregate({ _avg: { rating: true } }),
       this.prisma.newsletter.count({ where: { isActive: true } }).catch(() => 0),
       this.prisma.coupon.count({ where: { isActive: true } }),
@@ -609,14 +770,14 @@ export class AdminService {
       this.prisma.order.count(),
       this.prisma.order.count({ where: { status: 'COMPLETED' } }),
       this.prisma.order.count({ where: { status: 'CANCELLED' } }),
-      this.prisma.order.count({ where: { status: { in: ['CONFIRMED','VENDOR_ASSIGNED','EN_ROUTE','IN_PROGRESS'] } } }),
-      this.prisma.userMembership.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.order.count({ where: { status: { in: ['CONFIRMED','VENDOR_ASSIGNED','VENDOR_EN_ROUTE','IN_PROGRESS'] } } }),
+      this.prisma.userMembership.count({ where: { isActive: true } }),
       this.prisma.service.count({ where: { isActive: true } }),
       this.prisma.service.count({ where: { isActive: false } }),
     ]);
     return {
       ...base,
-      reviews: { total: totalReviews, pending: pendingReviews, avgRating: avgRating._avg.rating || 0 },
+      reviews: { total: totalReviews, avgRating: avgRating._avg.rating || 0 },
       newsletters: { total: totalNewsletters },
       coupons: { active: activeCoupons },
       blogs: { total: totalBlogPosts, published: publishedBlogs },
@@ -760,24 +921,19 @@ export class AdminService {
 
   // ─── Reviews management ───────────────────────────────────────────────
 
-  async listReviews(opts: { verified?: boolean; q?: string; limit?: number }) {
+  async listReviews(opts: { q?: string; limit?: number }) {
     return this.prisma.review.findMany({
       where: {
-        ...(opts.verified !== undefined ? { isVerified: opts.verified } : {}),
         ...(opts.q ? { OR: [{ comment: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
       include: {
-        customer: { select: { name: true, phone: true } },
+        user: { select: { name: true, phone: true } },
         service: { select: { name: true } },
         vendor: { select: { fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
     });
-  }
-
-  async approveReview(id: string) {
-    return this.prisma.review.update({ where: { id }, data: { isVerified: true } });
   }
 
   async deleteReview(id: string) {
@@ -791,16 +947,23 @@ export class AdminService {
       where: {
         ...(opts.status ? { status: opts.status as any } : {}),
         ...(opts.source ? { source: opts.source as any } : {}),
-        ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { phone: { contains: opts.q } }, { email: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+        ...(opts.q ? { OR: [
+          { customerName: { contains: opts.q, mode: 'insensitive' } },
+          { customerPhone: { contains: opts.q } },
+          { customerEmail: { contains: opts.q, mode: 'insensitive' } },
+        ]} : {}),
       },
-      include: { assignedAgent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: { agent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' }, take: 1 } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
     });
   }
 
   async getLead(id: string) {
-    return this.prisma.lead.findUnique({ where: { id }, include: { assignedAgent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' } }, convertedOrder: true } });
+    return this.prisma.lead.findUnique({
+      where: { id },
+      include: { agent: { select: { name: true, phone: true } }, activities: { orderBy: { createdAt: 'desc' } } },
+    });
   }
 
   async updateLeadStatus(id: string, status: string, notes?: string, lostReason?: string) {
@@ -825,15 +988,18 @@ export class AdminService {
   // ─── AMC ────────────────────────────────────────────────────────────
 
   async listAmcPlans() {
-    return this.prisma.amcPlan.findMany({ orderBy: { price: 'asc' } });
+    return this.prisma.amcPlan.findMany({ orderBy: { priceYearly: 'asc' } });
   }
 
   async createAmcPlan(data: any) {
-    return this.prisma.amcPlan.create({ data: { ...data, serviceKeys: data.serviceKeys || [], features: data.features || [] } });
+    const { serviceKeys, features, ...rest } = data;
+    return this.prisma.amcPlan.create({ data: { ...rest, includedServices: serviceKeys || rest.includedServices || [] } });
   }
 
   async updateAmcPlan(id: string, data: any) {
-    return this.prisma.amcPlan.update({ where: { id }, data });
+    const { serviceKeys, features, ...rest } = data;
+    if (serviceKeys) rest.includedServices = serviceKeys;
+    return this.prisma.amcPlan.update({ where: { id }, data: rest });
   }
 
   async deleteAmcPlan(id: string) {
@@ -843,7 +1009,7 @@ export class AdminService {
   async listAmcSubscriptions(status?: string) {
     return this.prisma.amcSubscription.findMany({
       where: status ? { status: status as any } : {},
-      include: { plan: { select: { name: true } }, customer: { select: { name: true, phone: true } } },
+      include: { plan: { select: { name: true } }, user: { select: { name: true, phone: true } } },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
@@ -853,9 +1019,13 @@ export class AdminService {
 
   async listInvoices(opts: { q?: string; limit?: number }) {
     return this.prisma.invoice.findMany({
-      where: opts.q ? { OR: [{ invoiceNumber: { contains: opts.q } }] } : {},
-      include: { order: { select: { id: true, status: true }, include: { customer: { select: { name: true, phone: true } } } } },
-      orderBy: { issuedAt: 'desc' },
+      where: opts.q ? { invoiceNumber: { contains: opts.q, mode: 'insensitive' } } : {},
+      include: {
+        order: {
+          include: { customer: { select: { name: true, phone: true } } },
+        },
+      },
+      orderBy: { generatedAt: 'desc' },
       take: opts.limit || 100,
     });
   }
@@ -863,19 +1033,45 @@ export class AdminService {
   async getInvoice(id: string) {
     return this.prisma.invoice.findUnique({
       where: { id },
-      include: { order: { include: { customer: true, items: { include: { service: true } } } } },
+      include: { order: { include: { customer: true, items: { include: { product: true } } } } },
     });
   }
 
   async generateInvoice(orderId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { items: { include: { service: true } }, customer: true } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { extraWorkItems: { where: { customerApproved: true } } },
+    });
     if (!order) throw new NotFoundException('Order not found');
-    const invoiceNumber = 'INV-' + Date.now();
-    const taxAmount = Math.round(Number(order.totalAmount) * 0.18);
-    return this.prisma.invoice.upsert({
-      where: { orderId },
-      create: { orderId, invoiceNumber, subtotal: order.totalAmount, taxAmount, totalAmount: Number(order.totalAmount) + taxAmount, issuedAt: new Date() },
-      update: { invoiceNumber, subtotal: order.totalAmount, taxAmount, totalAmount: Number(order.totalAmount) + taxAmount },
+    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
+    if (existing) return existing;
+
+    const customerSubtotal = Number(order.subtotal);
+    const customerTotal = Number(order.totalAmount);
+    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
+    const customerSgst = customerCgst;
+    const vendorLabor = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
+    const vendorMaterial = 0;
+    const vendorPretax = vendorLabor + vendorMaterial;
+    const vendorCgst = Math.round(vendorPretax * 0.09 * 100) / 100;
+    const vendorSgst = vendorCgst;
+    const vendorTotal = vendorPretax + vendorCgst + vendorSgst;
+    const platformCommission = Number(order.remontCommission);
+    const bookingFee = 49;
+    const remontPretax = platformCommission + bookingFee;
+    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
+    const remontSgst = remontCgst;
+    const remontTotal = remontPretax + remontCgst + remontSgst;
+    const count = await this.prisma.invoice.count();
+    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
+
+    return this.prisma.invoice.create({
+      data: {
+        invoiceNumber, orderId,
+        customerSubtotal, customerCgst, customerSgst, customerTotal,
+        vendorLabor, vendorMaterial, vendorCgst, vendorSgst, vendorTotal,
+        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
+      },
     });
   }
 
@@ -952,7 +1148,7 @@ export class AdminService {
   // ─── Membership plans ─────────────────────────────────────────────────
 
   async listMembershipPlans() {
-    return this.prisma.membershipPlan.findMany({ orderBy: { price: 'asc' } });
+    return this.prisma.membershipPlan.findMany({ orderBy: { priceMonthly: 'asc' } });
   }
 
   async createMembershipPlan(data: any) {
@@ -996,9 +1192,17 @@ export class AdminController {
   @Patch('vendors/:id/suspend') suspend(@Param('id') id: string) { return this.admin.suspendVendor(id); }
 
   // Orders
-  @Get('orders') orders(@Query('status') status?: OrderStatus, @Query('city') city?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
-    return this.admin.listOrders({ status, city, limit, offset });
-  }
+  // Orders — stats + list + management
+  @Get('orders/stats') orderStats() { return this.admin.orderStats(); }
+  @Get('orders/vendors') orderVendors(@Query('skill') skill?: string) { return this.admin.listActiveVendors(skill); }
+  @Get('orders') listOrders(
+    @Query('status') status?: string, @Query('city') city?: string, @Query('q') q?: string,
+    @Query('channel') channel?: string, @Query('limit') limit?: number, @Query('offset') offset?: number,
+  ) { return this.admin.listOrders({ status, city, q, channel, limit, offset }); }
+  @Post('orders') adminCreateOrder(@Body() b: any) { return this.admin.adminCreateOrder(b); }
+  @Get('orders/:id') adminGetOrder(@Param('id') id: string) { return this.admin.adminGetOrder(id); }
+  @Patch('orders/:id/status') updateOrderStatus(@Param('id') id: string, @Body() b: { status: string; note?: string }) { return this.admin.adminUpdateStatus(id, b.status, b.note); }
+  @Patch('orders/:id/note') updateOrderNote(@Param('id') id: string, @Body() b: { note: string }) { return this.admin.adminUpdateNote(id, b.note); }
   @Patch('orders/:id/assign-vendor') assignVendor(@Param('id') id: string, @Body() b: { vendorId: string }) { return this.admin.forceAssignVendor(id, b.vendorId); }
   @Patch('orders/:id/cancel') cancelOrder(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.adminCancelOrder(id, b.reason); }
   @Patch('orders/:id/refund') refund(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason); }
@@ -1113,11 +1317,9 @@ export class AdminController {
   @Delete('staff/:id') deleteStaff(@Param('id') id: string) { return this.admin.deleteStaff(id); }
 
   // Reviews
-  @Get('reviews') reviews(@Query('verified') v?: string, @Query('q') q?: string, @Query('limit') limit?: number) {
-    const verified = v === 'true' ? true : v === 'false' ? false : undefined;
-    return this.admin.listReviews({ verified, q, limit: limit ? +limit : 100 });
+  @Get('reviews') reviews(@Query('q') q?: string, @Query('limit') limit?: number) {
+    return this.admin.listReviews({ q, limit: limit ? +limit : 100 });
   }
-  @Patch('reviews/:id/approve') approveReview(@Param('id') id: string) { return this.admin.approveReview(id); }
   @Delete('reviews/:id') deleteReview(@Param('id') id: string) { return this.admin.deleteReview(id); }
 
   // Coupons
