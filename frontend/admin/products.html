@@ -7,73 +7,202 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
+<style>
+.tab-bar{display:flex;gap:4px;background:#f1f5f9;padding:4px;border-radius:10px;width:fit-content;margin-bottom:20px}
+.tab-bar .tab{padding:6px 16px;border-radius:7px;font-size:13px;font-weight:500;border:none;cursor:pointer;background:transparent;color:#6b7280}
+.tab-bar .tab.active{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.modal-tabs{display:flex;gap:2px;border-bottom:2px solid #e5e7eb;margin-bottom:16px}
+.modal-tab{padding:8px 14px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px}
+.modal-tab.active{color:#c4601a;border-bottom-color:#c4601a}
+.modal-pane{display:none}.modal-pane.active{display:block}
+.city-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6}
+.city-row:last-child{border-bottom:none}
+.bulk-bar{background:#1d4ed8;color:#fff;border-radius:8px;padding:10px 16px;margin-bottom:12px;display:none;align-items:center;gap:12px;font-size:13px}
+.img-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.img-chip{position:relative;display:inline-block}
+.img-chip img{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb}
+.img-chip button{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer}
+</style>
 </head>
 <body>
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Products</h1><p>Manage products catalog</p></div>
+    <div class="topbar-left"><h1>Products</h1><p>Product catalog, categories and city-wise pricing</p></div>
     <div class="topbar-right">
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
   </div>
   <div class="content">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="tab-bar">
+      <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Product Categories</button>
+      <button class="tab" id="tab-btn-prod" onclick="showTab('prod')">Products</button>
+    </div>
+
+    <!-- CATEGORIES TAB -->
+    <div id="tab-cat">
       <div class="card">
-        <div class="card-header"><span class="card-title">Product Categories</span><button class="btn btn-primary btn-sm" onclick="openCatModal()">+ Add Category</button></div>
+        <div class="card-header">
+          <span class="card-title">Product Categories</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="openCatModal()">+ Add Category</button>
+            <button class="btn btn-outline btn-sm" onclick="loadCategories()">↺</button>
+          </div>
+        </div>
         <div class="table-wrap"><div id="cat-tbl" class="loading">Loading…</div></div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-header" style="flex-wrap:wrap;gap:8px">
-        <span class="card-title">All Products</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search name, SKU, brand…" oninput="loadProducts()">
-          <select id="filter-cat" class="form-control" style="width:180px" onchange="loadProducts()">
-            <option value="">All Categories</option>
-          </select>
-          <button class="btn btn-outline btn-sm" onclick="loadProducts()">↺ Refresh</button>
+
+    <!-- PRODUCTS TAB -->
+    <div id="tab-prod" style="display:none">
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Products</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="prod-search" class="form-control" style="width:180px" placeholder="Search name/SKU…" oninput="loadProducts()">
+            <select id="prod-filter-cat" class="form-control" style="width:170px" onchange="loadProducts()">
+              <option value="">All Categories</option>
+            </select>
+            <select id="prod-filter-status" class="form-control" style="width:120px" onchange="loadProducts()">
+              <option value="">All</option><option value="true">Active</option><option value="false">Inactive</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openProdModal()">+ Add Product</button>
+            <button class="btn btn-outline btn-sm" onclick="exportProducts()">⬇ Export CSV</button>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('xl-overlay').style.display='flex'">⬆ Import Excel</button>
+            <button class="btn btn-outline btn-sm" onclick="loadProducts()">↺</button>
+          </div>
         </div>
+        <div id="prod-bulk-bar" class="bulk-bar">
+          <span id="prod-bulk-count">0 selected</span>
+          <button class="btn btn-sm" style="background:#22c55e;color:#fff;border:none" onclick="bulkProd(true)">Activate</button>
+          <button class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none" onclick="bulkProd(false)">Deactivate</button>
+          <button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="clearProdSelect()">Clear</button>
+        </div>
+        <div class="table-wrap"><div id="prod-tbl" class="loading">Loading…</div></div>
       </div>
-      <div class="table-wrap"><div id="prod-tbl" class="loading">Loading…</div></div>
     </div>
   </div>
 </div>
 
-<!-- Category Modal -->
+<!-- CATEGORY MODAL -->
 <div id="cat-overlay" class="overlay" style="display:none">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Add Product Category</span><button class="modal-close" onclick="closeModal('cat-overlay')">×</button></div>
-    <div class="form-group"><label class="form-label">Key (uppercase) *</label><input id="pcat-key" class="form-control" placeholder="AC_PRODUCTS"></div>
-    <div class="form-group"><label class="form-label">Name *</label><input id="pcat-name" class="form-control" placeholder="AC & Cooling"></div>
-    <div class="form-group"><label class="form-label">Icon</label><input id="pcat-icon" class="form-control" placeholder="❄️"></div>
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title" id="cat-modal-title">Add Product Category</span>
+      <button class="modal-close" onclick="closeModal('cat-overlay')">×</button>
+    </div>
+    <input type="hidden" id="cat-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Key *</label><input id="cat-key" class="form-control" placeholder="CLEANING_SUPPLIES" style="text-transform:uppercase"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Icon / Emoji</label><input id="cat-icon" class="form-control" placeholder="🧹"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Name *</label><input id="cat-name" class="form-control" placeholder="Cleaning Supplies"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="cat-sort" class="form-control" type="number" value="0"></div>
+      <div class="form-group" style="flex:1;display:flex;align-items:flex-end"><label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:12px"><input type="checkbox" id="cat-active" checked> Active</label></div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('cat-overlay')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCat()">Save</button>
+      <button class="btn btn-primary" onclick="saveCategory()">Save Category</button>
     </div>
   </div>
 </div>
 
-<!-- Edit Product Modal -->
+<!-- PRODUCT MODAL -->
 <div id="prod-overlay" class="overlay" style="display:none">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Edit Product</span><button class="modal-close" onclick="closeModal('prod-overlay')">×</button></div>
-    <input type="hidden" id="edit-prod-id">
-    <div class="form-group"><label class="form-label">Name</label><input id="edit-name" class="form-control"></div>
-    <div class="form-group"><label class="form-label">Brand</label><input id="edit-brand" class="form-control"></div>
-    <div class="form-row">
-      <div class="form-group" style="flex:1"><label class="form-label">Price (₹) *</label><input id="edit-price" class="form-control" type="number"></div>
-      <div class="form-group" style="flex:1"><label class="form-label">MRP (₹)</label><input id="edit-mrp" class="form-control" type="number"></div>
+  <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="prod-modal-title">Add Product</span>
+      <button class="modal-close" onclick="closeModal('prod-overlay')">×</button>
     </div>
-    <div class="form-group"><label class="form-label">Stock</label><input id="edit-stock" class="form-control" type="number"></div>
-    <div class="form-check">
-      <input type="checkbox" id="edit-active">
-      <label for="edit-active" style="margin-left:6px">Active (visible on website)</label>
+    <div class="modal-tabs">
+      <button class="modal-tab active" onclick="switchModalTab(this,'prod-basic')">Basic</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'prod-media')">Images</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'prod-seo')">SEO</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'prod-cities')">Cities</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'prod-ai')">AI Generate</button>
+    </div>
+    <input type="hidden" id="prod-id">
+
+    <div id="prod-basic" class="modal-pane active">
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label class="form-label">Product Name *</label><input id="prod-name" class="form-control" placeholder="Phenyl Floor Cleaner 500ml"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">SKU</label><input id="prod-sku" class="form-control" placeholder="Auto-generated"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Category *</label><select id="prod-cat" class="form-control"><option value="">Select…</option></select></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Brand</label><input id="prod-brand" class="form-control" placeholder="Remont Care"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Description</label><textarea id="prod-desc" class="form-control" rows="3" placeholder="Product details…"></textarea></div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Price (₹) *</label><input id="prod-price" class="form-control" type="number" placeholder="199"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">MRP (₹)</label><input id="prod-mrp" class="form-control" type="number" placeholder="249"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Stock</label><input id="prod-stock" class="form-control" type="number" value="0"></div>
+      </div>
+      <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-active" checked> Active</label>
+    </div>
+
+    <div id="prod-media" class="modal-pane">
+      <div class="form-group">
+        <label class="form-label">Product Images</label>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="prod-img-input" class="form-control" placeholder="Paste image URL and press Add">
+          <button class="btn btn-outline btn-sm" onclick="addProdImg()">Add</button>
+        </div>
+        <div id="prod-img-chips" class="img-chips"></div>
+      </div>
+    </div>
+
+    <div id="prod-seo" class="modal-pane">
+      <div class="form-group"><label class="form-label">SEO Title</label><input id="prod-seo-title" class="form-control" placeholder="Phenyl Cleaner | Buy Online | Remont India"><div id="prod-seo-title-cnt" style="font-size:11px;color:#9ca3af;margin-top:2px">0 / 60 chars</div></div>
+      <div class="form-group"><label class="form-label">SEO Description</label><textarea id="prod-seo-desc" class="form-control" rows="3"></textarea><div id="prod-seo-desc-cnt" style="font-size:11px;color:#9ca3af;margin-top:2px">0 / 160 chars</div></div>
+      <div class="form-group"><label class="form-label">SEO Keywords (comma separated)</label><input id="prod-seo-kw" class="form-control" placeholder="floor cleaner, phenyl, cleaning supplies"></div>
+    </div>
+
+    <div id="prod-cities" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">Save product first. Then set city-specific availability, price and stock.</p>
+      <div id="prod-cities-list" style="margin-top:8px"><div style="color:#9ca3af;font-size:13px">Save product to manage city availability.</div></div>
+    </div>
+
+    <div id="prod-ai" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">Fill in the product name on the Basic tab, then click Generate.</p>
+      <button class="btn btn-primary" onclick="generateAi()">Generate AI Content</button>
+      <div id="prod-ai-preview" style="margin-top:12px;display:none">
+        <div class="card" style="background:#f9fafb"><div class="card-body" id="prod-ai-content" style="font-size:13px;white-space:pre-wrap"></div></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="applyAi()">Apply to Form</button>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('prod-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProduct()">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXCEL IMPORT MODAL -->
+<div id="xl-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Bulk Import Products</span>
+      <button class="modal-close" onclick="closeModal('xl-overlay')">×</button>
+    </div>
+    <div style="background:#f9fafb;border:2px dashed #e5e7eb;border-radius:8px;padding:20px;text-align:center;margin-bottom:16px">
+      <div style="font-size:32px;margin-bottom:8px">📊</div>
+      <p style="margin:0;font-size:13px;color:#374151">Upload a CSV file</p>
+      <p style="margin:4px 0 12px;font-size:11px;color:#9ca3af">Columns: name, categoryKey, price, mrp, stock, brand, description</p>
+      <input type="file" id="xl-file" accept=".csv" style="display:none" onchange="readExcel()">
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('xl-file').click()">Choose File</button>
+    </div>
+    <div id="xl-preview" style="display:none">
+      <p id="xl-count" style="font-size:13px;margin-bottom:8px"></p>
+      <div id="xl-errors" style="color:#ef4444;font-size:12px;margin-bottom:8px;white-space:pre-wrap"></div>
+      <button class="btn btn-primary" onclick="importProducts()">Import</button>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('prod-overlay')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProduct()">Save Changes</button>
+      <button class="btn btn-outline" onclick="closeModal('xl-overlay')">Close</button>
+      <a href="javascript:void(0)" onclick="downloadTemplate()" style="font-size:12px;color:#3b82f6;text-decoration:underline">Download Template</a>
     </div>
   </div>
 </div>
@@ -83,80 +212,355 @@
 renderSidebar('products');
 requireAuth();
 
-function loadCats() {
-  api('GET','/admin/product-categories').then(function(cats){
-    if (!cats||!cats.length){ document.getElementById('cat-tbl').innerHTML='<div style="padding:12px;color:#6b7280;font-size:13px">No categories yet. Add one.</div>'; return; }
-    var sel=document.getElementById('filter-cat');
-    sel.innerHTML='<option value="">All Categories</option>';
-    cats.forEach(function(c){ var o=document.createElement('option'); o.value=c.id; o.textContent=(c.icon||'')+' '+c.name; sel.appendChild(o); });
-    var rows=cats.map(function(c){return '<tr><td>'+(c.icon||'')+'</td><td>'+escape(c.name)+'</td><td><code style="font-size:11px">'+escape(c.key)+'</code></td></tr>';}).join('');
-    document.getElementById('cat-tbl').innerHTML='<table><thead><tr><th></th><th>Name</th><th>Key</th></tr></thead><tbody>'+rows+'</tbody></table>';
-  }).catch(function(e){document.getElementById('cat-tbl').innerHTML='<small style="color:red">'+escape(e.message)+'</small>';});
+var categories = [];
+var selectedProds = new Set();
+var aiDataProd = null;
+var prodImages = [];
+var importRows = [];
+
+function showTab(tab) {
+  document.getElementById('tab-cat').style.display = tab==='cat'?'':'none';
+  document.getElementById('tab-prod').style.display = tab==='prod'?'':'none';
+  document.getElementById('tab-btn-cat').className='tab'+(tab==='cat'?' active':'');
+  document.getElementById('tab-btn-prod').className='tab'+(tab==='prod'?' active':'');
 }
 
-function loadProducts() {
-  var q=document.getElementById('filter-q').value;
-  var catId=document.getElementById('filter-cat').value;
-  var p=['limit=100'];
-  if (q) p.push('q='+encodeURIComponent(q));
-  if (catId) p.push('categoryId='+encodeURIComponent(catId));
-  document.getElementById('prod-tbl').innerHTML='<div class="loading">Loading…</div>';
-  api('GET','/admin/products?'+p.join('&')).then(function(prods){
-    if (!prods||!prods.length){ document.getElementById('prod-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🛍</div><h3>No products found</h3></div>'; return; }
-    var rows=prods.map(function(p){
-      var cat=(p.category&&p.category.name)||'—';
-      var vendor=(p.vendor&&p.vendor.businessName)||'—';
+function switchModalTab(btn, pane) {
+  var container = btn.closest('.modal');
+  container.querySelectorAll('.modal-tab').forEach(function(t){ t.className='modal-tab'; });
+  container.querySelectorAll('.modal-pane').forEach(function(p){ p.className='modal-pane'; });
+  btn.className='modal-tab active';
+  document.getElementById(pane).className='modal-pane active';
+}
+
+// ── CATEGORIES ──────────────────────────────────────────────────────
+
+function loadCategories() {
+  document.getElementById('cat-tbl').innerHTML='<div class="loading">Loading…</div>';
+  api('GET','/admin/product-categories').then(function(cats) {
+    categories = cats || [];
+    var opts = categories.map(function(c){ return '<option value="'+c.id+'">'+escape(c.name)+'</option>'; }).join('');
+    document.getElementById('prod-cat').innerHTML='<option value="">Select category…</option>'+opts;
+    document.getElementById('prod-filter-cat').innerHTML='<option value="">All Categories</option>'+opts;
+    if (!cats||!cats.length) {
+      document.getElementById('cat-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🛍</div><h3>No categories yet</h3><p>Add a product category to get started.</p></div>';
+      return;
+    }
+    var rows = cats.map(function(c) {
       return '<tr>'+
-        '<td>'+escape(p.sku||'—')+'</td>'+
-        '<td><strong>'+escape(p.name)+'</strong></td>'+
-        '<td>'+escape(p.brand||'—')+'</td>'+
-        '<td>'+escape(cat)+'</td>'+
-        '<td>'+fmtCur(p.price)+' / MRP '+fmtCur(p.mrp)+'</td>'+
-        '<td style="text-align:center">'+escape(String(p.stock||0))+'</td>'+
-        '<td>'+badge(p.isActive?'Active':'Inactive',p.isActive?'green':'gray')+'</td>'+
-        '<td><button class="btn btn-xs btn-outline" onclick="openEdit('+JSON.stringify(p)+')">Edit</button></td>'+
+        '<td style="font-size:20px;text-align:center">'+(c.icon||'🛍')+'</td>'+
+        '<td><strong>'+escape(c.name)+'</strong></td>'+
+        '<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">'+escape(c.key)+'</code></td>'+
+        '<td>'+c.sortOrder+'</td>'+
+        '<td>'+badge(c.isActive?'Active':'Inactive',c.isActive?'green':'gray')+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          '<button class="btn btn-xs btn-outline" onclick=\'openCatModal('+JSON.stringify(c)+')\'>Edit</button>'+
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteCat(\''+c.id+'\',\''+escape(c.name)+'\')">Delete</button>'+
+        '</div></td>'+
       '</tr>';
     }).join('');
-    document.getElementById('prod-tbl').innerHTML='<table><thead><tr><th>SKU</th><th>Product</th><th>Brand</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
-  }).catch(function(e){document.getElementById('prod-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
+    document.getElementById('cat-tbl').innerHTML='<table><thead><tr><th>Icon</th><th>Name</th><th>Key</th><th>Sort</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){ document.getElementById('cat-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>'; });
 }
 
-function openCatModal(){document.getElementById('cat-overlay').style.display='flex';}
-function saveCat(){
-  var key=document.getElementById('pcat-key').value.trim().toUpperCase();
-  var name=document.getElementById('pcat-name').value.trim();
-  var icon=document.getElementById('pcat-icon').value.trim();
-  if(!key||!name){toast('Key and name required','error');return;}
-  api('POST','/admin/product-categories',{key,name,icon}).then(function(){toast('Category created','success');closeModal('cat-overlay');loadCats();}).catch(function(e){toast(e.message,'error');});
+function openCatModal(cat) {
+  document.getElementById('cat-modal-title').textContent = cat ? 'Edit Product Category' : 'Add Product Category';
+  document.getElementById('cat-id').value = cat ? cat.id : '';
+  document.getElementById('cat-key').value = cat ? cat.key : '';
+  document.getElementById('cat-key').disabled = !!cat;
+  document.getElementById('cat-icon').value = cat ? (cat.icon||'') : '';
+  document.getElementById('cat-name').value = cat ? cat.name : '';
+  document.getElementById('cat-sort').value = cat ? cat.sortOrder : 0;
+  document.getElementById('cat-active').checked = cat ? cat.isActive : true;
+  document.getElementById('cat-overlay').style.display='flex';
 }
 
-function openEdit(p){
-  document.getElementById('edit-prod-id').value=p.id;
-  document.getElementById('edit-name').value=p.name||'';
-  document.getElementById('edit-brand').value=p.brand||'';
-  document.getElementById('edit-price').value=p.price||'';
-  document.getElementById('edit-mrp').value=p.mrp||'';
-  document.getElementById('edit-stock').value=p.stock||0;
-  document.getElementById('edit-active').checked=p.isActive!==false;
+function saveCategory() {
+  var id = document.getElementById('cat-id').value;
+  var data = {
+    key: document.getElementById('cat-key').value.trim().toUpperCase(),
+    icon: document.getElementById('cat-icon').value.trim()||undefined,
+    name: document.getElementById('cat-name').value.trim(),
+    sortOrder: parseInt(document.getElementById('cat-sort').value)||0,
+    isActive: document.getElementById('cat-active').checked,
+  };
+  if (!data.name) { toast('Name required','error'); return; }
+  if (!id && !data.key) { toast('Key required','error'); return; }
+  var p = id ? api('PATCH','/admin/product-categories/'+id,data) : api('POST','/admin/product-categories',data);
+  p.then(function(){ toast(id?'Updated':'Created','success'); closeModal('cat-overlay'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function deleteCat(id, name) {
+  if (!confirm('Delete category "'+name+'"?')) return;
+  api('DELETE','/admin/product-categories/'+id).then(function(){ toast('Deleted','warning'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── PRODUCTS ────────────────────────────────────────────────────────
+
+function loadProducts() {
+  var q = document.getElementById('prod-search').value;
+  var cat = document.getElementById('prod-filter-cat').value;
+  var status = document.getElementById('prod-filter-status').value;
+  var params = 'limit=200';
+  if (q) params += '&q='+encodeURIComponent(q);
+  if (cat) params += '&categoryId='+cat;
+  if (status) params += '&isActive='+status;
+  document.getElementById('prod-tbl').innerHTML='<div class="loading">Loading…</div>';
+  api('GET','/admin/products?'+params).then(function(prods) {
+    if (!prods||!prods.length) {
+      document.getElementById('prod-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🛍</div><h3>No products found</h3><p>Add your first product using the button above.</p></div>';
+      return;
+    }
+    var rows = prods.map(function(p) {
+      var img = (p.images&&p.images[0]) ? '<img src="'+escape(p.images[0])+'" style="width:40px;height:40px;object-fit:cover;border-radius:4px">' : '<span style="font-size:20px">🛍</span>';
+      return '<tr>'+
+        '<td style="width:32px"><input type="checkbox" '+(selectedProds.has(p.id)?'checked':'')+' onchange="toggleProdSel(\''+p.id+'\',this.checked)"></td>'+
+        '<td style="width:48px;text-align:center">'+img+'</td>'+
+        '<td><strong>'+escape(p.name)+'</strong><br><small style="color:#9ca3af">SKU: '+escape(p.sku||'—')+'</small></td>'+
+        '<td>'+escape(p.category?p.category.name:'—')+'</td>'+
+        '<td>'+escape(p.brand||'—')+'</td>'+
+        '<td>'+fmtCur(p.price)+(p.mrp&&Number(p.mrp)>0?' <span style="text-decoration:line-through;color:#9ca3af;font-size:11px">'+fmtCur(p.mrp)+'</span>':'')+'</td>'+
+        '<td>'+p.stock+'</td>'+
+        '<td>'+badge(p.isActive?'Active':'Inactive',p.isActive?'green':'gray')+'</td>'+
+        '<td><div style="display:flex;gap:4px">'+
+          '<button class="btn btn-xs btn-outline" onclick="editProduct(\''+p.id+'\')">Edit</button>'+
+          '<button class="btn btn-xs btn-warning" onclick="toggleProd(\''+p.id+'\','+(!p.isActive)+')">'+( p.isActive?'Disable':'Enable')+'</button>'+
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteProd(\''+p.id+'\',\''+escape(p.name)+'\')">Del</button>'+
+        '</div></td>'+
+      '</tr>';
+    }).join('');
+    document.getElementById('prod-tbl').innerHTML='<table style="min-width:900px"><thead><tr><th></th><th>Img</th><th>Name / SKU</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }).catch(function(e){ document.getElementById('prod-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>'; });
+}
+
+function openProdModal(prod) {
+  document.getElementById('prod-modal-title').textContent = prod ? 'Edit Product' : 'Add Product';
+  document.getElementById('prod-id').value = prod ? prod.id : '';
+  document.getElementById('prod-name').value = prod ? prod.name : '';
+  document.getElementById('prod-sku').value = prod ? (prod.sku||'') : '';
+  document.getElementById('prod-sku').disabled = !!prod;
+  document.getElementById('prod-cat').value = prod ? prod.categoryId : '';
+  document.getElementById('prod-brand').value = prod ? (prod.brand||'') : '';
+  document.getElementById('prod-desc').value = prod ? (prod.description||'') : '';
+  document.getElementById('prod-price').value = prod ? prod.price : '';
+  document.getElementById('prod-mrp').value = prod ? (prod.mrp||'') : '';
+  document.getElementById('prod-stock').value = prod ? prod.stock : 0;
+  document.getElementById('prod-active').checked = prod ? prod.isActive : true;
+  document.getElementById('prod-seo-title').value = prod ? (prod.seoTitle||'') : '';
+  document.getElementById('prod-seo-desc').value = prod ? (prod.seoDesc||'') : '';
+  document.getElementById('prod-seo-kw').value = prod ? (prod.seoKeywords||[]).join(', ') : '';
+  prodImages = prod ? (prod.images||[]) : [];
+  renderProdImages();
+  document.getElementById('prod-ai-preview').style.display='none';
+  if (prod) loadProdCities(prod.id);
+  else document.getElementById('prod-cities-list').innerHTML='<div style="color:#9ca3af;font-size:13px">Save product first.</div>';
   document.getElementById('prod-overlay').style.display='flex';
 }
 
-function saveProduct(){
-  var id=document.getElementById('edit-prod-id').value;
-  var price=parseFloat(document.getElementById('edit-price').value);
-  if(isNaN(price)){toast('Enter valid price','error');return;}
-  var data={
-    name:document.getElementById('edit-name').value.trim(),
-    brand:document.getElementById('edit-brand').value.trim(),
-    price:price,
-    mrp:parseFloat(document.getElementById('edit-mrp').value)||undefined,
-    stock:parseInt(document.getElementById('edit-stock').value)||0,
-    isActive:document.getElementById('edit-active').checked,
-  };
-  api('PATCH','/admin/products/'+id,data).then(function(){toast('Product updated','success');closeModal('prod-overlay');loadProducts();}).catch(function(e){toast(e.message,'error');});
+function editProduct(id) {
+  api('GET','/admin/products?limit=500').then(function(list){
+    var prod = (list||[]).find(function(p){ return p.id===id; });
+    if (prod) openProdModal(prod);
+  });
 }
 
-loadCats();
+function saveProduct() {
+  var id = document.getElementById('prod-id').value;
+  var price = parseFloat(document.getElementById('prod-price').value);
+  var mrp = parseFloat(document.getElementById('prod-mrp').value);
+  if (!document.getElementById('prod-cat').value) { toast('Select a category','error'); return; }
+  if (!document.getElementById('prod-name').value.trim()) { toast('Enter product name','error'); return; }
+  if (isNaN(price)||price<=0) { toast('Enter valid price','error'); return; }
+  var data = {
+    categoryId: document.getElementById('prod-cat').value,
+    name: document.getElementById('prod-name').value.trim(),
+    brand: document.getElementById('prod-brand').value.trim()||undefined,
+    description: document.getElementById('prod-desc').value.trim()||undefined,
+    price: price,
+    mrp: isNaN(mrp)||mrp<=0 ? undefined : mrp,
+    stock: parseInt(document.getElementById('prod-stock').value)||0,
+    images: prodImages,
+    isActive: document.getElementById('prod-active').checked,
+    seoTitle: document.getElementById('prod-seo-title').value.trim()||undefined,
+    seoDesc: document.getElementById('prod-seo-desc').value.trim()||undefined,
+    seoKeywords: document.getElementById('prod-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
+  };
+  if (!id) { var sku = document.getElementById('prod-sku').value.trim(); if (sku) data.sku = sku; }
+  var p = id ? api('PATCH','/admin/products/'+id,data) : api('POST','/admin/products',data);
+  p.then(function(saved){
+    document.getElementById('prod-id').value = saved.id;
+    toast(id?'Product updated':'Product created!','success');
+    closeModal('prod-overlay'); loadProducts();
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleProd(id, active) {
+  api('PATCH','/admin/products/'+id,{isActive:active}).then(function(){ toast(active?'Enabled':'Disabled',active?'success':'warning'); loadProducts(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function deleteProd(id, name) {
+  if (!confirm('Delete "'+name+'"?')) return;
+  api('DELETE','/admin/products/'+id).then(function(){ toast('Done','warning'); loadProducts(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleProdSel(id, checked) {
+  checked ? selectedProds.add(id) : selectedProds.delete(id);
+  var bar = document.getElementById('prod-bulk-bar');
+  bar.style.display = selectedProds.size>0?'flex':'none';
+  document.getElementById('prod-bulk-count').textContent = selectedProds.size+' selected';
+}
+function clearProdSelect() { selectedProds.clear(); loadProducts(); document.getElementById('prod-bulk-bar').style.display='none'; }
+function bulkProd(active) {
+  if (!selectedProds.size) return;
+  api('POST','/admin/products/bulk',{ids:[...selectedProds],isActive:active}).then(function(){ toast('Updated','success'); selectedProds.clear(); loadProducts(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── CITY AVAILABILITY ────────────────────────────────────────────────
+
+function loadProdCities(productId) {
+  document.getElementById('prod-cities-list').innerHTML='<div class="loading" style="padding:8px">Loading cities…</div>';
+  api('GET','/admin/products/'+productId+'/cities').then(function(cities){
+    if (!cities||!cities.length) { document.getElementById('prod-cities-list').innerHTML='<div style="color:#9ca3af;font-size:13px">No active cities. Run Seed from Dashboard.</div>'; return; }
+    var html = cities.map(function(c){
+      var a=c.assignment;
+      var isActive=!a||a.isActive!==false;
+      var customPrice=a&&a.customPrice?Number(a.customPrice):'';
+      var stock=a&&a.stock!==undefined?a.stock:'';
+      return '<div class="city-row">'+
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;min-width:140px">'+
+          '<input type="checkbox" id="city-toggle-'+c.id+'" '+(isActive?'checked':'')+' onchange="saveProdCity(\''+productId+'\',\''+c.id+'\')"> '+escape(c.name)+
+        '</label>'+
+        '<input id="city-price-'+c.id+'" type="number" class="form-control" style="width:110px" placeholder="Custom price" value="'+customPrice+'" onblur="saveProdCity(\''+productId+'\',\''+c.id+'\')">'+
+        '<input id="city-stock-'+c.id+'" type="number" class="form-control" style="width:80px" placeholder="Stock" value="'+stock+'" onblur="saveProdCity(\''+productId+'\',\''+c.id+'\')">'+
+      '</div>';
+    }).join('');
+    document.getElementById('prod-cities-list').innerHTML=html;
+  }).catch(function(e){ document.getElementById('prod-cities-list').innerHTML='<div style="color:#ef4444;font-size:13px">'+escape(e.message)+'</div>'; });
+}
+
+function saveProdCity(productId, cityId) {
+  var isActive=document.getElementById('city-toggle-'+cityId).checked;
+  var priceEl=document.getElementById('city-price-'+cityId);
+  var stockEl=document.getElementById('city-stock-'+cityId);
+  var customPrice=priceEl?(parseFloat(priceEl.value)||null):null;
+  var stock=stockEl?(parseInt(stockEl.value)||0):0;
+  api('PATCH','/admin/products/'+productId+'/cities/'+cityId,{isActive,customPrice,stock}).then(function(){ toast('Saved','success'); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── IMAGES ──────────────────────────────────────────────────────────
+
+function addProdImg() {
+  var url=document.getElementById('prod-img-input').value.trim();
+  if (!url) return;
+  prodImages.push(url);
+  document.getElementById('prod-img-input').value='';
+  renderProdImages();
+}
+function removeProdImg(idx) { prodImages.splice(idx,1); renderProdImages(); }
+function renderProdImages() {
+  var html=prodImages.map(function(url,i){
+    return '<div class="img-chip"><img src="'+escape(url)+'"><button onclick="removeProdImg('+i+')">×</button></div>';
+  }).join('');
+  document.getElementById('prod-img-chips').innerHTML=html||'<small style="color:#9ca3af">No images. Paste URL above.</small>';
+}
+
+// ── SEO COUNTERS ─────────────────────────────────────────────────────
+
+(function(){
+  function counter(inputId,counterId,max){
+    var el=document.getElementById(inputId);var cnt=document.getElementById(counterId);
+    if(!el||!cnt) return;
+    function update(){var n=el.value.length;cnt.textContent=n+' / '+max+' chars';cnt.style.color=n>max?'#ef4444':'#9ca3af';}
+    el.addEventListener('input',update);
+  }
+  counter('prod-seo-title','prod-seo-title-cnt',60);
+  counter('prod-seo-desc','prod-seo-desc-cnt',160);
+})();
+
+// ── AI CONTENT ───────────────────────────────────────────────────────
+
+function generateAi() {
+  var name=document.getElementById('prod-name').value.trim();
+  if (!name) { toast('Enter product name first','error'); return; }
+  toast('Generating…','success');
+  api('POST','/admin/ai/generate',{type:'PRODUCT',name}).then(function(data){
+    aiDataProd=data;
+    document.getElementById('prod-ai-preview').style.display='';
+    document.getElementById('prod-ai-content').textContent='Description:\n'+data.description+'\n\nSEO Title:\n'+data.seoTitle+'\n\nSEO Desc:\n'+data.seoDesc+'\n\nKeywords:\n'+(data.seoKeywords||[]).join(', ');
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function applyAi() {
+  if (!aiDataProd) return;
+  if (aiDataProd.description) document.getElementById('prod-desc').value=aiDataProd.description;
+  if (aiDataProd.seoTitle) document.getElementById('prod-seo-title').value=aiDataProd.seoTitle;
+  if (aiDataProd.seoDesc) document.getElementById('prod-seo-desc').value=aiDataProd.seoDesc;
+  if (aiDataProd.seoKeywords) document.getElementById('prod-seo-kw').value=aiDataProd.seoKeywords.join(', ');
+  toast('Applied!','success');
+}
+
+// ── EXPORT / IMPORT ──────────────────────────────────────────────────
+
+function exportProducts() {
+  api('GET','/admin/products/export').then(function(list){
+    if (!list||!list.length) { toast('No products','warning'); return; }
+    var csv='Name,SKU,Category,Brand,Price,MRP,Stock,IsActive,Description\n'+list.map(function(p){
+      return [p.name,p.sku||'',(p.category&&p.category.name)||'',p.brand||'',p.price,p.mrp||'',p.stock,p.isActive,(p.description||'').replace(/,/g,' ')].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"';}).join(',');
+    }).join('\n');
+    var blob=new Blob([csv],{type:'text/csv'});var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='products_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+    toast('Exported '+list.length,'success');
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function readExcel() {
+  var file=document.getElementById('xl-file').files[0];if(!file) return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try {
+      var lines=e.target.result.trim().split('\n');
+      var headers=lines[0].split(',').map(function(h){return h.trim().replace(/"/g,'');});
+      importRows=lines.slice(1).map(function(line){
+        var vals=line.split(',').map(function(v){return v.trim().replace(/"/g,'');});
+        var obj={};headers.forEach(function(h,i){obj[h]=vals[i]||'';});return obj;
+      }).filter(function(r){return r.name;});
+      document.getElementById('xl-count').textContent=importRows.length+' rows found.';
+      document.getElementById('xl-preview').style.display='';
+    } catch(ex){toast('Error: '+ex.message,'error');}
+  };
+  reader.readAsText(file);
+}
+
+function downloadTemplate() {
+  var csv='name,categoryKey,price,mrp,stock,brand,description\nPhenyl Floor Cleaner 500ml,CLEANING_SUPPLIES,199,249,50,Remont Care,"Premium floor cleaner"';
+  var blob=new Blob([csv],{type:'text/csv'});var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='product_template.csv';a.click();
+}
+
+function importProducts() {
+  if (!importRows.length) return;
+  var errors=[];
+  var promises=importRows.map(function(row,idx){
+    var catMatch=categories.find(function(c){return c.key===(row.categoryKey||'').toUpperCase();});
+    if (!catMatch){errors.push('Row '+(idx+2)+': Category "'+row.categoryKey+'" not found');return Promise.resolve();}
+    var price=parseFloat(row.price);
+    if (isNaN(price)){errors.push('Row '+(idx+2)+': Invalid price');return Promise.resolve();}
+    return api('POST','/admin/products',{
+      categoryId:catMatch.id,name:row.name,price,mrp:parseFloat(row.mrp)||undefined,
+      stock:parseInt(row.stock)||0,brand:row.brand||undefined,description:row.description||undefined,
+    });
+  });
+  Promise.allSettled(promises).then(function(results){
+    var success=results.filter(function(r){return r.status==='fulfilled'&&r.value;}).length;
+    if (errors.length) document.getElementById('xl-errors').textContent=errors.join('\n');
+    toast('Imported '+success+(errors.length?', '+errors.length+' errors':''),errors.length?'warning':'success');
+    closeModal('xl-overlay');loadProducts();
+  });
+}
+
+// ── INIT ────────────────────────────────────────────────────────────
+
+loadCategories();
 loadProducts();
 </script>
 </body>

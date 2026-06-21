@@ -7,48 +7,84 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
+<style>
+.tab-bar{display:flex;gap:4px;background:#f1f5f9;padding:4px;border-radius:10px;width:fit-content;margin-bottom:20px}
+.tab-bar .tab{padding:6px 16px;border-radius:7px;font-size:13px;font-weight:500;border:none;cursor:pointer;background:transparent;color:#6b7280}
+.tab-bar .tab.active{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.modal-tabs{display:flex;gap:2px;border-bottom:2px solid #e5e7eb;margin-bottom:16px}
+.modal-tab{padding:8px 14px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px}
+.modal-tab.active{color:#c4601a;border-bottom-color:#c4601a}
+.modal-pane{display:none}.modal-pane.active{display:block}
+.city-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6}
+.city-row:last-child{border-bottom:none}
+.bulk-bar{background:#1d4ed8;color:#fff;border-radius:8px;padding:10px 16px;margin-bottom:12px;display:none;align-items:center;gap:12px;font-size:13px}
+.img-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.img-chip{position:relative;display:inline-block}
+.img-chip img{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb}
+.img-chip button{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+</style>
 </head>
 <body>
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Services</h1><p>Manage service categories and individual services</p></div>
+    <div class="topbar-left"><h1>Services</h1><p>Service categories, services and city-wise pricing</p></div>
     <div class="topbar-right">
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
   </div>
   <div class="content">
-    <!-- Tabs -->
-    <div style="display:flex;gap:4px;margin-bottom:20px;background:#f1f5f9;padding:4px;border-radius:10px;width:fit-content">
-      <button id="tab-cat" class="btn btn-primary btn-sm" onclick="showTab('categories')">Categories</button>
-      <button id="tab-svc" class="btn btn-outline btn-sm" onclick="showTab('services')">Services</button>
+    <div class="tab-bar">
+      <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Categories</button>
+      <button class="tab" id="tab-btn-svc" onclick="showTab('svc')">Services</button>
     </div>
 
-    <!-- Categories tab -->
-    <div id="tab-categories">
+    <!-- ── CATEGORIES TAB ─────────────────────────────────────────────── -->
+    <div id="tab-cat">
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
           <span class="card-title">Service Categories</span>
-          <button class="btn btn-primary btn-sm" onclick="openCatModal()">+ Add Category</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="cat-search" class="form-control" style="width:200px" placeholder="Search…" oninput="loadCategories()">
+            <button class="btn btn-primary btn-sm" onclick="openCatModal()">+ Add Category</button>
+            <button class="btn btn-outline btn-sm" onclick="loadCategories()">↺</button>
+          </div>
+        </div>
+        <div id="cat-bulk-bar" class="bulk-bar">
+          <span id="cat-bulk-count">0 selected</span>
+          <button class="btn btn-sm" style="background:#22c55e;color:#fff;border:none" onclick="bulkCat(true)">Activate</button>
+          <button class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none" onclick="bulkCat(false)">Deactivate</button>
+          <button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="clearCatSelect()">Clear</button>
         </div>
         <div class="table-wrap"><div id="cat-tbl" class="loading">Loading…</div></div>
       </div>
     </div>
 
-    <!-- Services tab -->
-    <div id="tab-services" style="display:none">
+    <!-- ── SERVICES TAB ──────────────────────────────────────────────── -->
+    <div id="tab-svc" style="display:none">
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
           <span class="card-title">Services</span>
-          <button class="btn btn-primary btn-sm" onclick="openSvcModal()">+ Add Service</button>
-        </div>
-        <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9">
-          <div class="filter-bar">
-            <select id="filter-cat" class="form-control" style="width:200px" onchange="loadServices()">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="svc-search" class="form-control" style="width:180px" placeholder="Search name…" oninput="loadServices()">
+            <select id="svc-filter-cat" class="form-control" style="width:170px" onchange="loadServices()">
               <option value="">All Categories</option>
             </select>
+            <select id="svc-filter-status" class="form-control" style="width:120px" onchange="loadServices()">
+              <option value="">All</option><option value="true">Active</option><option value="false">Inactive</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openSvcModal()">+ Add Service</button>
+            <button class="btn btn-outline btn-sm" onclick="exportServices()">⬇ Export CSV</button>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('xl-overlay').style.display='flex'">⬆ Import Excel</button>
+            <button class="btn btn-outline btn-sm" onclick="loadServices()">↺</button>
           </div>
+        </div>
+        <div id="svc-bulk-bar" class="bulk-bar">
+          <span id="svc-bulk-count">0 selected</span>
+          <button class="btn btn-sm" style="background:#22c55e;color:#fff;border:none" onclick="bulkSvc(true)">Activate</button>
+          <button class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none" onclick="bulkSvc(false)">Deactivate</button>
+          <button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="clearSvcSelect()">Clear</button>
         </div>
         <div class="table-wrap"><div id="svc-tbl" class="loading">Loading…</div></div>
       </div>
@@ -56,105 +92,153 @@
   </div>
 </div>
 
-<!-- Category modal -->
-<div id="cat-overlay" class="overlay">
-  <div class="modal">
+<!-- ── CATEGORY MODAL ──────────────────────────────────────────────── -->
+<div id="cat-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:580px">
     <div class="modal-header">
       <span class="modal-title" id="cat-modal-title">Add Category</span>
       <button class="modal-close" onclick="closeModal('cat-overlay')">×</button>
     </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" onclick="switchModalTab(this,'cat-basic')">Basic</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'cat-seo')">SEO</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'cat-ai')">AI Generate</button>
+    </div>
     <input type="hidden" id="cat-id">
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Key <span class="req">*</span></label>
-        <input id="cat-key" class="form-control" placeholder="AC_SERVICE" style="text-transform:uppercase">
+
+    <div id="cat-basic" class="modal-pane active">
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Key <span style="color:red">*</span></label><input id="cat-key" class="form-control" placeholder="AC_SERVICE" style="text-transform:uppercase"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Icon / Emoji <span style="color:red">*</span></label><input id="cat-icon" class="form-control" placeholder="❄️"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Icon / Emoji <span class="req">*</span></label>
-        <input id="cat-icon" class="form-control" placeholder="❄️">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Name <span class="req">*</span></label>
-      <input id="cat-name" class="form-control" placeholder="AC Servicing">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description</label>
-      <textarea id="cat-desc" class="form-control" placeholder="Short description…"></textarea>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Sort Order</label>
-        <input id="cat-sort" class="form-control" type="number" value="0">
-      </div>
-      <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:2px">
-        <label class="form-check">
-          <input type="checkbox" id="cat-premium">
-          Premium category
-        </label>
+      <div class="form-group"><label class="form-label">Name <span style="color:red">*</span></label><input id="cat-name" class="form-control" placeholder="AC Servicing"></div>
+      <div class="form-group"><label class="form-label">Description</label><textarea id="cat-desc" class="form-control" rows="3" placeholder="Short description…"></textarea></div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="cat-sort" class="form-control" type="number" value="0"></div>
+        <div class="form-group" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="cat-premium"> Premium category</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:8px"><input type="checkbox" id="cat-active" checked> Active</label>
+        </div>
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-check">
-        <input type="checkbox" id="cat-active" checked>
-        Active (visible to customers)
-      </label>
+
+    <div id="cat-seo" class="modal-pane">
+      <div class="form-group"><label class="form-label">URL Slug</label><input id="cat-slug" class="form-control" placeholder="ac-servicing"></div>
+      <div class="form-group"><label class="form-label">SEO Title</label><input id="cat-seo-title" class="form-control" placeholder="AC Service & Repair | Remont India"><small style="color:#9ca3af;font-size:11px">Recommended: 50–60 chars</small></div>
+      <div class="form-group"><label class="form-label">SEO Description</label><textarea id="cat-seo-desc" class="form-control" rows="3" placeholder="Book AC service online…"></textarea><small style="color:#9ca3af;font-size:11px">Recommended: 150–160 chars</small></div>
+      <div class="form-group"><label class="form-label">SEO Keywords (comma separated)</label><input id="cat-seo-kw" class="form-control" placeholder="ac service, ac repair, ac cleaning"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModal('cat-overlay')">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="saveCategory()">Save Category</button>
+
+    <div id="cat-ai" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">Enter the category name above and click Generate. AI will fill in description and SEO fields automatically.</p>
+      <button class="btn btn-primary" onclick="generateAi('CATEGORY','cat')">Generate AI Content</button>
+      <div id="cat-ai-preview" style="margin-top:12px;display:none">
+        <div class="card" style="background:#f9fafb"><div class="card-body" id="cat-ai-content" style="font-size:13px;white-space:pre-wrap"></div></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="applyAi('cat')">Apply to Form</button>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('cat-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCategory()">Save Category</button>
     </div>
   </div>
 </div>
 
-<!-- Service modal -->
-<div id="svc-overlay" class="overlay">
-  <div class="modal">
+<!-- ── SERVICE MODAL ───────────────────────────────────────────────── -->
+<div id="svc-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
     <div class="modal-header">
       <span class="modal-title" id="svc-modal-title">Add Service</span>
       <button class="modal-close" onclick="closeModal('svc-overlay')">×</button>
     </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" onclick="switchModalTab(this,'svc-basic')">Basic</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'svc-media')">Media</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'svc-seo')">SEO</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'svc-cities')">Cities</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'svc-ai')">AI Generate</button>
+    </div>
     <input type="hidden" id="svc-id">
-    <div class="form-group">
-      <label class="form-label">Category <span class="req">*</span></label>
-      <select id="svc-cat" class="form-control"></select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Service Name <span class="req">*</span></label>
-      <input id="svc-name" class="form-control" placeholder="1.5 Ton Split AC Service">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description</label>
-      <textarea id="svc-desc" class="form-control" placeholder="What's included in this service…"></textarea>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Base Price (₹) <span class="req">*</span></label>
-        <input id="svc-price" class="form-control" type="number" placeholder="499">
+
+    <div id="svc-basic" class="modal-pane active">
+      <div class="form-group"><label class="form-label">Category <span style="color:red">*</span></label><select id="svc-cat" class="form-control"><option value="">Select…</option></select></div>
+      <div class="form-group"><label class="form-label">Service Name <span style="color:red">*</span></label><input id="svc-name" class="form-control" placeholder="1.5 Ton Split AC Service"></div>
+      <div class="form-group"><label class="form-label">Description</label><textarea id="svc-desc" class="form-control" rows="4" placeholder="What's included in this service…"></textarea></div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Base Price (₹) <span style="color:red">*</span></label><input id="svc-price" class="form-control" type="number" placeholder="499"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Original / MRP (₹)</label><input id="svc-mrp" class="form-control" type="number" placeholder="699"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Duration (min)</label><input id="svc-duration" class="form-control" type="number" value="60"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Original Price (₹)</label>
-        <input id="svc-original-price" class="form-control" type="number" placeholder="699">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-active" checked> Active</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-popular"> Popular</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-premium"> Premium</label>
       </div>
     </div>
-    <div class="form-row">
+
+    <div id="svc-media" class="modal-pane">
+      <div class="form-group"><label class="form-label">Cover Image URL</label><input id="svc-img" class="form-control" placeholder="https://…" oninput="previewImg()"></div>
+      <div id="svc-img-preview" style="margin-bottom:12px;display:none"><img id="svc-cover-preview" style="height:120px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb"></div>
       <div class="form-group">
-        <label class="form-label">Duration (minutes)</label>
-        <input id="svc-duration" class="form-control" type="number" value="60">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Image URL</label>
-        <input id="svc-img" class="form-control" placeholder="https://…">
+        <label class="form-label">Gallery Images</label>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="svc-gallery-input" class="form-control" placeholder="Paste image URL and press Add">
+          <button class="btn btn-outline btn-sm" onclick="addGalleryImg()">Add</button>
+        </div>
+        <div id="svc-gallery-chips" class="img-chips"></div>
       </div>
     </div>
-    <div style="display:flex;gap:20px;margin-bottom:16px">
-      <label class="form-check"><input type="checkbox" id="svc-active" checked> Active</label>
-      <label class="form-check"><input type="checkbox" id="svc-popular"> Popular</label>
-      <label class="form-check"><input type="checkbox" id="svc-premium"> Premium</label>
+
+    <div id="svc-seo" class="modal-pane">
+      <div class="form-group"><label class="form-label">SEO Title</label><input id="svc-seo-title" class="form-control" placeholder="AC Service & Repair | Remont India"><div id="svc-seo-title-cnt" style="font-size:11px;color:#9ca3af;margin-top:2px">0 / 60 chars</div></div>
+      <div class="form-group"><label class="form-label">SEO Description</label><textarea id="svc-seo-desc" class="form-control" rows="3"></textarea><div id="svc-seo-desc-cnt" style="font-size:11px;color:#9ca3af;margin-top:2px">0 / 160 chars</div></div>
+      <div class="form-group"><label class="form-label">SEO Keywords (comma separated)</label><input id="svc-seo-kw" class="form-control" placeholder="ac service, split ac, window ac"></div>
+    </div>
+
+    <div id="svc-cities" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">Save the service first. Then toggle availability and set city-specific prices below.</p>
+      <div id="svc-cities-list" style="margin-top:8px"><div style="color:#9ca3af;font-size:13px">Save service to manage city availability.</div></div>
+    </div>
+
+    <div id="svc-ai" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">AI will generate description, SEO fields and FAQ based on the service name. Fill in the name on Basic tab first.</p>
+      <button class="btn btn-primary" onclick="generateAi('SERVICE','svc')">Generate AI Content</button>
+      <div id="svc-ai-preview" style="margin-top:12px;display:none">
+        <div class="card" style="background:#f9fafb"><div class="card-body" id="svc-ai-content" style="font-size:13px;white-space:pre-wrap"></div></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="applyAi('svc')">Apply to Form</button>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('svc-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveService()">Save Service</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EXCEL IMPORT MODAL ──────────────────────────────────────────── -->
+<div id="xl-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Bulk Import Services via Excel</span>
+      <button class="modal-close" onclick="closeModal('xl-overlay')">×</button>
+    </div>
+    <div style="background:#f9fafb;border:2px dashed #e5e7eb;border-radius:8px;padding:20px;text-align:center;margin-bottom:16px">
+      <div style="font-size:32px;margin-bottom:8px">📊</div>
+      <p style="margin:0;font-size:13px;color:#374151">Upload an Excel (.xlsx) or CSV file</p>
+      <p style="margin:4px 0 12px;font-size:11px;color:#9ca3af">Required columns: name, categoryKey, basePrice, description, durationMinutes</p>
+      <input type="file" id="xl-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="readExcel()">
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('xl-file').click()">Choose File</button>
+    </div>
+    <div id="xl-preview" style="display:none">
+      <p id="xl-count" style="font-size:13px;color:#374151;margin-bottom:8px"></p>
+      <div id="xl-errors" style="color:#ef4444;font-size:12px;margin-bottom:8px"></div>
+      <button class="btn btn-primary" onclick="importServices()">Import Services</button>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModal('svc-overlay')">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="saveService()">Save Service</button>
+      <button class="btn btn-outline" onclick="closeModal('xl-overlay')">Close</button>
+      <a href="javascript:void(0)" onclick="downloadTemplate()" style="font-size:12px;color:#3b82f6;text-decoration:underline">Download Template</a>
     </div>
   </div>
 </div>
@@ -162,98 +246,87 @@
 <script src="./common.js"></script>
 <script>
 renderSidebar('services');
-if (!requireAuth()) {}
+requireAuth();
 
 var categories = [];
+var selectedCats = new Set();
+var selectedSvcs = new Set();
+var currentSvcId = null;
+var aiData = {};
+var galleryImages = [];
+var importRows = [];
+
+// ── TAB SWITCHING ─────────────────────────────────────────────────────
 
 function showTab(tab) {
-  document.getElementById('tab-categories').style.display = tab==='categories' ? '' : 'none';
-  document.getElementById('tab-services').style.display = tab==='services' ? '' : 'none';
-  document.getElementById('tab-cat').className = 'btn btn-sm ' + (tab==='categories'?'btn-primary':'btn-outline');
-  document.getElementById('tab-svc').className = 'btn btn-sm ' + (tab==='services'?'btn-primary':'btn-outline');
+  document.getElementById('tab-cat').style.display = tab==='cat' ? '' : 'none';
+  document.getElementById('tab-svc').style.display = tab==='svc' ? '' : 'none';
+  document.getElementById('tab-btn-cat').className = 'tab' + (tab==='cat' ? ' active' : '');
+  document.getElementById('tab-btn-svc').className = 'tab' + (tab==='svc' ? ' active' : '');
 }
+
+function switchModalTab(btn, pane) {
+  var container = btn.closest('.modal');
+  container.querySelectorAll('.modal-tab').forEach(function(t){ t.className='modal-tab'; });
+  container.querySelectorAll('.modal-pane').forEach(function(p){ p.className='modal-pane'; });
+  btn.className = 'modal-tab active';
+  document.getElementById(pane).className = 'modal-pane active';
+}
+
+// ── CATEGORIES ────────────────────────────────────────────────────────
 
 function loadCategories() {
+  var q = document.getElementById('cat-search').value.trim();
+  document.getElementById('cat-tbl').innerHTML = '<div class="loading">Loading…</div>';
   api('GET', '/admin/services/categories').then(function(cats) {
     categories = cats || [];
-    populateCatSelects();
-    if (!cats || !cats.length) {
-      document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No categories yet</h3><p>Click "+ Add Category" to create the first one.</p></div>';
-      return;
-    }
-    var rows = cats.map(function(c) {
+    populateCatSelect();
+    var filtered = cats.filter(function(c){ return !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.key.toLowerCase().includes(q.toLowerCase()); });
+    if (!filtered.length) { document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No categories found</h3></div>'; return; }
+    var rows = filtered.map(function(c) {
       return '<tr>' +
-        '<td>' + escape(c.icon) + '</td>' +
-        '<td><strong>' + escape(c.name) + '</strong></td>' +
+        '<td style="width:32px"><input type="checkbox" ' + (selectedCats.has(c.id) ? 'checked' : '') + ' onchange="toggleCatSel(\'' + c.id + '\',this.checked)"></td>' +
+        '<td style="width:40px;font-size:22px;text-align:center">' + escape(c.icon) + '</td>' +
+        '<td><strong>' + escape(c.name) + '</strong>' + (c.description ? '<br><small style="color:#9ca3af">' + escape(c.description.slice(0,60)) + '</small>' : '') + '</td>' +
         '<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">' + escape(c.key) + '</code></td>' +
-        '<td>' + c.services.length + ' services</td>' +
+        '<td>' + (c.services ? c.services.length : 0) + ' svcs</td>' +
         '<td>' + c.sortOrder + '</td>' +
-        '<td><span class="badge ' + (c.isActive?'badge-green':'badge-gray') + '">' + (c.isActive?'Active':'Inactive') + '</span>' +
-          (c.isPremium ? ' <span class="badge badge-purple">Premium</span>' : '') + '</td>' +
-        '<td style="white-space:nowrap">' +
-          '<button class="btn btn-xs btn-outline" onclick="editCategory(' + JSON.stringify(c).replace(/"/g,'&quot;') + ')">Edit</button> ' +
-          '<button class="btn btn-xs ' + (c.isActive?'btn-warning':'btn-success') + '" onclick="toggleCat(\'' + c.id + '\',' + !c.isActive + ',this)">' + (c.isActive?'Disable':'Enable') + '</button>' +
-        '</td>' +
+        '<td>' + badge(c.isActive?'Active':'Inactive',c.isActive?'green':'gray') + (c.isPremium?' '+badge('Premium','purple'):'') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openCatModal(' + JSON.stringify(c) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleCat(\'' + c.id + '\',' + (!c.isActive) + ')">' + (c.isActive?'Disable':'Enable') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteCat(\'' + c.id + '\',\'' + escape(c.name) + '\')">Delete</button>' +
+        '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('cat-tbl').innerHTML =
-      '<table><thead><tr><th>Icon</th><th>Name</th><th>Key</th><th>Services</th><th>Sort</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }).catch(function(e){
-    document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
+    document.getElementById('cat-tbl').innerHTML = '<table><thead><tr><th></th><th>Icon</th><th>Name</th><th>Key</th><th>Services</th><th>Sort</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){ document.getElementById('cat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
-function loadServices() {
-  var catId = document.getElementById('filter-cat').value;
-  var path = '/admin/services' + (catId ? '?categoryId=' + catId : '');
-  document.getElementById('svc-tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET', path).then(function(svcs) {
-    if (!svcs || !svcs.length) {
-      document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No services found</h3></div>';
-      return;
-    }
-    var rows = svcs.map(function(s) {
-      return '<tr>' +
-        '<td><strong>' + escape(s.name) + '</strong></td>' +
-        '<td>' + escape(s.category.name) + '</td>' +
-        '<td>' + fmtCur(s.basePrice) + (s.originalPrice ? ' <span class="text-muted" style="text-decoration:line-through">' + fmtCur(s.originalPrice) + '</span>' : '') + '</td>' +
-        '<td>' + s.durationMinutes + ' min</td>' +
-        '<td><span class="badge ' + (s.isActive?'badge-green':'badge-gray') + '">' + (s.isActive?'Active':'Inactive') + '</span>' +
-          (s.isPopular ? ' <span class="badge badge-blue">Popular</span>' : '') +
-          (s.isPremium ? ' <span class="badge badge-purple">Premium</span>' : '') + '</td>' +
-        '<td style="white-space:nowrap">' +
-          '<button class="btn btn-xs btn-outline" onclick="editService(' + JSON.stringify(s).replace(/"/g,'&quot;') + ')">Edit</button> ' +
-          '<button class="btn btn-xs ' + (s.isActive?'btn-warning':'btn-success') + '" onclick="toggleSvc(\'' + s.id + '\',' + !s.isActive + ',this)">' + (s.isActive?'Disable':'Enable') + '</button>' +
-        '</td>' +
-      '</tr>';
-    }).join('');
-    document.getElementById('svc-tbl').innerHTML =
-      '<table><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }).catch(function(e){
-    document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
-  });
-}
-
-function populateCatSelects() {
+function populateCatSelect() {
   var opts = categories.map(function(c){ return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
   document.getElementById('svc-cat').innerHTML = '<option value="">Select category…</option>' + opts;
-  document.getElementById('filter-cat').innerHTML = '<option value="">All Categories</option>' + opts;
+  document.getElementById('svc-filter-cat').innerHTML = '<option value="">All Categories</option>' + opts;
 }
 
-// Category CRUD
 function openCatModal(cat) {
   document.getElementById('cat-modal-title').textContent = cat ? 'Edit Category' : 'Add Category';
   document.getElementById('cat-id').value = cat ? cat.id : '';
   document.getElementById('cat-key').value = cat ? cat.key : '';
+  document.getElementById('cat-key').disabled = !!cat;
   document.getElementById('cat-icon').value = cat ? cat.icon : '';
   document.getElementById('cat-name').value = cat ? cat.name : '';
   document.getElementById('cat-desc').value = cat ? (cat.description||'') : '';
   document.getElementById('cat-sort').value = cat ? cat.sortOrder : 0;
   document.getElementById('cat-premium').checked = cat ? cat.isPremium : false;
   document.getElementById('cat-active').checked = cat ? cat.isActive : true;
-  document.getElementById('cat-overlay').classList.add('open');
+  document.getElementById('cat-slug').value = cat ? (cat.slug||'') : '';
+  document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
+  document.getElementById('cat-seo-desc').value = cat ? (cat.seoDesc||'') : '';
+  document.getElementById('cat-seo-kw').value = cat ? (cat.seoKeywords||[]).join(', ') : '';
+  document.getElementById('cat-ai-preview').style.display = 'none';
+  document.getElementById('cat-overlay').style.display = 'flex';
 }
-function editCategory(cat) { openCatModal(cat); }
 
 function saveCategory() {
   var id = document.getElementById('cat-id').value;
@@ -261,74 +334,357 @@ function saveCategory() {
     key: document.getElementById('cat-key').value.trim().toUpperCase(),
     icon: document.getElementById('cat-icon').value.trim(),
     name: document.getElementById('cat-name').value.trim(),
-    description: document.getElementById('cat-desc').value.trim()||undefined,
-    sortOrder: parseInt(document.getElementById('cat-sort').value)||0,
+    description: document.getElementById('cat-desc').value.trim() || undefined,
+    sortOrder: parseInt(document.getElementById('cat-sort').value) || 0,
     isPremium: document.getElementById('cat-premium').checked,
     isActive: document.getElementById('cat-active').checked,
+    slug: document.getElementById('cat-slug').value.trim() || undefined,
+    seoTitle: document.getElementById('cat-seo-title').value.trim() || undefined,
+    seoDesc: document.getElementById('cat-seo-desc').value.trim() || undefined,
+    seoKeywords: document.getElementById('cat-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
   };
-  if (!data.key||!data.icon||!data.name) { toast('Key, icon, and name are required', 'error'); return; }
-  var p = id ? api('PATCH', '/admin/services/categories/'+id, data) : api('POST', '/admin/services/categories', data);
-  p.then(function(){ toast(id?'Category updated':'Category created','success'); closeModal('cat-overlay'); loadCategories(); })
-   .catch(function(e){ toast(e.message,'error'); });
+  if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
+  var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);
+  p.then(function(){ toast(id?'Category updated':'Category created','success'); closeModal('cat-overlay'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
 }
 
-function toggleCat(id, active, btn) {
-  btn.disabled = true;
-  api('PATCH', '/admin/services/categories/'+id, { isActive: active }).then(function(){
-    toast(active?'Category enabled':'Category disabled', active?'success':'warning'); loadCategories();
-  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+function toggleCat(id, active) {
+  api('PATCH','/admin/services/categories/'+id,{isActive:active}).then(function(){ toast(active?'Enabled':'Disabled',active?'success':'warning'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
 }
 
-// Service CRUD
+function deleteCat(id, name) {
+  if (!confirm('Delete category "' + name + '"? This will fail if any services are attached.')) return;
+  api('DELETE','/admin/services/categories/'+id).then(function(){ toast('Category deleted','warning'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleCatSel(id, checked) {
+  checked ? selectedCats.add(id) : selectedCats.delete(id);
+  updateCatBulkBar();
+}
+function updateCatBulkBar() {
+  var bar = document.getElementById('cat-bulk-bar');
+  bar.style.display = selectedCats.size > 0 ? 'flex' : 'none';
+  document.getElementById('cat-bulk-count').textContent = selectedCats.size + ' selected';
+}
+function clearCatSelect() { selectedCats.clear(); loadCategories(); updateCatBulkBar(); }
+function bulkCat(active) {
+  if (!selectedCats.size) return;
+  api('PATCH','/admin/services/categories/bulk',{ids:[...selectedCats],isActive:active}).then(function(){ toast('Updated '+selectedCats.size+' categories','success'); selectedCats.clear(); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── SERVICES ──────────────────────────────────────────────────────────
+
+function loadServices() {
+  var q = document.getElementById('svc-search').value;
+  var cat = document.getElementById('svc-filter-cat').value;
+  var status = document.getElementById('svc-filter-status').value;
+  var params = 'limit=200';
+  if (q) params += '&q=' + encodeURIComponent(q);
+  if (cat) params += '&categoryId=' + cat;
+  if (status) params += '&isActive=' + status;
+  document.getElementById('svc-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET','/admin/services?'+params).then(function(svcs) {
+    if (!svcs||!svcs.length) { document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No services found</h3></div>'; return; }
+    var rows = svcs.map(function(s) {
+      var cityCount = (s.cityServices || []).length;
+      return '<tr>' +
+        '<td style="width:32px"><input type="checkbox" ' + (selectedSvcs.has(s.id)?'checked':'') + ' onchange="toggleSvcSel(\'' + s.id + '\',this.checked)"></td>' +
+        (s.imageUrl ? '<td><img src="' + escape(s.imageUrl) + '" style="width:48px;height:36px;object-fit:cover;border-radius:4px"></td>' : '<td style="text-align:center;color:#9ca3af;font-size:18px">' + (s.category && s.category.key ? '🔧' : '') + '</td>') +
+        '<td><strong>' + escape(s.name) + '</strong></td>' +
+        '<td>' + escape(s.category ? s.category.name : '—') + '</td>' +
+        '<td>' + fmtCur(s.basePrice) + (s.originalPrice && s.originalPrice > 0 ? ' <span style="text-decoration:line-through;color:#9ca3af;font-size:11px">' + fmtCur(s.originalPrice) + '</span>' : '') + '</td>' +
+        '<td>' + s.durationMinutes + ' min</td>' +
+        '<td>' + badge(cityCount > 0 ? cityCount + ' cities' : 'All cities', cityCount > 0 ? 'blue' : 'gray') + '</td>' +
+        '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick="editService(\'' + s.id + '\')">Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleSvc(\'' + s.id + '\',' + (!s.isActive) + ')">' + (s.isActive?'Disable':'Enable') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteSvc(\'' + s.id + '\',\'' + escape(s.name) + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('svc-tbl').innerHTML = '<table style="min-width:900px"><thead><tr><th></th><th>Img</th><th>Name</th><th>Category</th><th>Price</th><th>Duration</th><th>Cities</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){ document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
 function openSvcModal(svc) {
   document.getElementById('svc-modal-title').textContent = svc ? 'Edit Service' : 'Add Service';
   document.getElementById('svc-id').value = svc ? svc.id : '';
+  currentSvcId = svc ? svc.id : null;
   document.getElementById('svc-cat').value = svc ? svc.categoryId : '';
   document.getElementById('svc-name').value = svc ? svc.name : '';
   document.getElementById('svc-desc').value = svc ? (svc.description||'') : '';
   document.getElementById('svc-price').value = svc ? svc.basePrice : '';
-  document.getElementById('svc-original-price').value = svc ? (svc.originalPrice||'') : '';
+  document.getElementById('svc-mrp').value = svc ? (svc.originalPrice||'') : '';
   document.getElementById('svc-duration').value = svc ? svc.durationMinutes : 60;
   document.getElementById('svc-img').value = svc ? (svc.imageUrl||'') : '';
   document.getElementById('svc-active').checked = svc ? svc.isActive : true;
   document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
   document.getElementById('svc-premium').checked = svc ? svc.isPremium : false;
-  document.getElementById('svc-overlay').classList.add('open');
+  document.getElementById('svc-seo-title').value = svc ? (svc.seoTitle||'') : '';
+  document.getElementById('svc-seo-desc').value = svc ? (svc.seoDesc||'') : '';
+  document.getElementById('svc-seo-kw').value = svc ? (svc.seoKeywords||[]).join(', ') : '';
+  galleryImages = svc ? (svc.images||[]) : [];
+  renderGallery();
+  previewImg();
+  document.getElementById('svc-ai-preview').style.display = 'none';
+  // Load city assignments if editing
+  if (svc) loadSvcCities(svc.id);
+  else document.getElementById('svc-cities-list').innerHTML = '<div style="color:#9ca3af;font-size:13px">Save service first to manage city availability.</div>';
+  document.getElementById('svc-overlay').style.display = 'flex';
 }
-function editService(svc) { openSvcModal(svc); }
+
+function editService(id) {
+  api('GET','/admin/services?limit=1').then(function(){}).catch(function(){});
+  // Find service in current list via re-fetch
+  api('GET','/admin/services/'+id).catch(function(){
+    // fallback: refetch list and find
+    api('GET','/admin/services?limit=500').then(function(list){
+      var svc = (list||[]).find(function(s){ return s.id === id; });
+      if (svc) openSvcModal(svc);
+    });
+  });
+  // Direct approach: fetch full list and find
+  api('GET','/admin/services?limit=500').then(function(list){
+    var svc = (list||[]).find(function(s){ return s.id === id; });
+    if (svc) openSvcModal(svc);
+  });
+}
 
 function saveService() {
   var id = document.getElementById('svc-id').value;
   var price = parseFloat(document.getElementById('svc-price').value);
-  var origPrice = parseFloat(document.getElementById('svc-original-price').value);
+  var mrp = parseFloat(document.getElementById('svc-mrp').value);
+  if (!document.getElementById('svc-cat').value) { toast('Select a category','error'); return; }
+  if (!document.getElementById('svc-name').value.trim()) { toast('Enter service name','error'); return; }
+  if (isNaN(price)||price<=0) { toast('Enter valid price','error'); return; }
   var data = {
     categoryId: document.getElementById('svc-cat').value,
     name: document.getElementById('svc-name').value.trim(),
     description: document.getElementById('svc-desc').value.trim()||undefined,
     basePrice: price,
-    originalPrice: origPrice||undefined,
+    originalPrice: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     durationMinutes: parseInt(document.getElementById('svc-duration').value)||60,
     imageUrl: document.getElementById('svc-img').value.trim()||undefined,
+    images: galleryImages,
     isActive: document.getElementById('svc-active').checked,
     isPopular: document.getElementById('svc-popular').checked,
     isPremium: document.getElementById('svc-premium').checked,
+    seoTitle: document.getElementById('svc-seo-title').value.trim()||undefined,
+    seoDesc: document.getElementById('svc-seo-desc').value.trim()||undefined,
+    seoKeywords: document.getElementById('svc-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
   };
-  if (!data.categoryId) { toast('Select a category', 'error'); return; }
-  if (!data.name) { toast('Enter service name', 'error'); return; }
-  if (isNaN(price) || price <= 0) { toast('Enter a valid price', 'error'); return; }
-  var p = id ? api('PATCH', '/admin/services/'+id, data) : api('POST', '/admin/services', data);
-  p.then(function(){ toast(id?'Service updated':'Service created','success'); closeModal('svc-overlay'); loadServices(); })
-   .catch(function(e){ toast(e.message,'error'); });
+  var p = id ? api('PATCH','/admin/services/'+id,data) : api('POST','/admin/services',data);
+  p.then(function(saved){
+    currentSvcId = saved.id;
+    document.getElementById('svc-id').value = saved.id;
+    toast(id?'Service updated':'Service created. Now set city availability →','success');
+    closeModal('svc-overlay');
+    loadServices();
+  }).catch(function(e){ toast(e.message,'error'); });
 }
 
-function toggleSvc(id, active, btn) {
-  btn.disabled = true;
-  api('PATCH', '/admin/services/'+id, { isActive: active }).then(function(){
-    toast(active?'Service enabled':'Service disabled', active?'success':'warning'); loadServices();
-  }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+function toggleSvc(id, active) {
+  api('PATCH','/admin/services/'+id,{isActive:active}).then(function(){ toast(active?'Enabled':'Disabled',active?'success':'warning'); loadServices(); }).catch(function(e){ toast(e.message,'error'); });
 }
 
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function deleteSvc(id, name) {
+  if (!confirm('Delete "' + name + '"? If it has orders it will be deactivated instead.')) return;
+  api('DELETE','/admin/services/'+id).then(function(){ toast('Done','warning'); loadServices(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleSvcSel(id, checked) {
+  checked ? selectedSvcs.add(id) : selectedSvcs.delete(id);
+  var bar = document.getElementById('svc-bulk-bar');
+  bar.style.display = selectedSvcs.size > 0 ? 'flex' : 'none';
+  document.getElementById('svc-bulk-count').textContent = selectedSvcs.size + ' selected';
+}
+function clearSvcSelect() { selectedSvcs.clear(); loadServices(); document.getElementById('svc-bulk-bar').style.display='none'; }
+function bulkSvc(active) {
+  if (!selectedSvcs.size) return;
+  api('POST','/admin/services/bulk',{ids:[...selectedSvcs],isActive:active}).then(function(){ toast('Updated','success'); selectedSvcs.clear(); loadServices(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── CITY AVAILABILITY (Services) ──────────────────────────────────────
+
+function loadSvcCities(serviceId) {
+  document.getElementById('svc-cities-list').innerHTML = '<div class="loading" style="padding:8px">Loading cities…</div>';
+  api('GET','/admin/services/'+serviceId+'/cities').then(function(cities) {
+    if (!cities||!cities.length) { document.getElementById('svc-cities-list').innerHTML='<div style="color:#9ca3af;font-size:13px">No active cities configured. Run Seed from Dashboard first.</div>'; return; }
+    var html = cities.map(function(c) {
+      var a = c.assignment;
+      var isActive = !a || a.isActive !== false;
+      var customPrice = a && a.customPrice ? Number(a.customPrice) : '';
+      return '<div class="city-row">' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:13px;min-width:140px">' +
+          '<input type="checkbox" id="city-toggle-' + c.id + '" ' + (isActive?'checked':'') + ' onchange="saveCityService(\'' + serviceId + '\',\'' + c.id + '\')"> ' + escape(c.name) +
+        '</label>' +
+        '<input id="city-price-' + c.id + '" type="number" class="form-control" style="width:120px" placeholder="Default price" value="' + customPrice + '" onblur="saveCityService(\'' + serviceId + '\',\'' + c.id + '\')">' +
+        '<small style="color:#9ca3af;font-size:11px">Custom price (optional)</small>' +
+      '</div>';
+    }).join('');
+    document.getElementById('svc-cities-list').innerHTML = html;
+  }).catch(function(e){ document.getElementById('svc-cities-list').innerHTML='<div style="color:#ef4444;font-size:13px">'+escape(e.message)+'</div>'; });
+}
+
+function saveCityService(serviceId, cityId) {
+  var isActive = document.getElementById('city-toggle-' + cityId).checked;
+  var priceEl = document.getElementById('city-price-' + cityId);
+  var customPrice = priceEl ? (parseFloat(priceEl.value) || null) : null;
+  api('PATCH','/admin/services/'+serviceId+'/cities/'+cityId,{isActive,customPrice}).then(function(){
+    toast('City availability saved','success');
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── MEDIA ─────────────────────────────────────────────────────────────
+
+function previewImg() {
+  var url = document.getElementById('svc-img').value.trim();
+  var p = document.getElementById('svc-img-preview');
+  if (url) { document.getElementById('svc-cover-preview').src = url; p.style.display=''; }
+  else p.style.display = 'none';
+}
+
+function addGalleryImg() {
+  var url = document.getElementById('svc-gallery-input').value.trim();
+  if (!url) return;
+  galleryImages.push(url);
+  document.getElementById('svc-gallery-input').value = '';
+  renderGallery();
+}
+
+function removeGalleryImg(idx) {
+  galleryImages.splice(idx, 1);
+  renderGallery();
+}
+
+function renderGallery() {
+  var html = galleryImages.map(function(url, i) {
+    return '<div class="img-chip"><img src="' + escape(url) + '" onerror="this.src=\'\'"><button onclick="removeGalleryImg(' + i + ')">×</button></div>';
+  }).join('');
+  document.getElementById('svc-gallery-chips').innerHTML = html;
+}
+
+// ── SEO CHAR COUNTERS ─────────────────────────────────────────────────
+
+document.getElementById && (function(){
+  function counter(inputId, counterId, max) {
+    var el = document.getElementById(inputId);
+    var cnt = document.getElementById(counterId);
+    if (!el||!cnt) return;
+    function update() { var n=el.value.length; cnt.textContent=n+' / '+max+' chars'; cnt.style.color=n>max?'#ef4444':'#9ca3af'; }
+    el.addEventListener('input', update);
+  }
+  counter('svc-seo-title','svc-seo-title-cnt',60);
+  counter('svc-seo-desc','svc-seo-desc-cnt',160);
+})();
+
+// ── AI GENERATION ─────────────────────────────────────────────────────
+
+function generateAi(type, prefix) {
+  var nameField = prefix === 'cat' ? 'cat-name' : 'svc-name';
+  var name = document.getElementById(nameField).value.trim();
+  if (!name) { toast('Enter the name first on Basic tab','error'); return; }
+  toast('Generating AI content…','success');
+  api('POST','/admin/ai/generate',{type,name}).then(function(data) {
+    aiData[prefix] = data;
+    var preview = document.getElementById(prefix+'-ai-preview');
+    var content = document.getElementById(prefix+'-ai-content');
+    preview.style.display = '';
+    var text = 'Description:\n' + data.description + '\n\nSEO Title:\n' + data.seoTitle + '\n\nSEO Desc:\n' + data.seoDesc + '\n\nKeywords:\n' + (data.seoKeywords||[]).join(', ');
+    if (data.faq && data.faq.length) {
+      text += '\n\nFAQ:\n' + data.faq.map(function(f){ return 'Q: '+f.q+'\nA: '+f.a; }).join('\n\n');
+    }
+    content.textContent = text;
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function applyAi(prefix) {
+  var data = aiData[prefix];
+  if (!data) return;
+  if (prefix === 'cat') {
+    if (data.description) document.getElementById('cat-desc').value = data.description;
+    if (data.seoTitle) document.getElementById('cat-seo-title').value = data.seoTitle;
+    if (data.seoDesc) document.getElementById('cat-seo-desc').value = data.seoDesc;
+    if (data.seoKeywords) document.getElementById('cat-seo-kw').value = data.seoKeywords.join(', ');
+  } else {
+    if (data.description) document.getElementById('svc-desc').value = data.description;
+    if (data.seoTitle) document.getElementById('svc-seo-title').value = data.seoTitle;
+    if (data.seoDesc) document.getElementById('svc-seo-desc').value = data.seoDesc;
+    if (data.seoKeywords) document.getElementById('svc-seo-kw').value = data.seoKeywords.join(', ');
+  }
+  toast('AI content applied!','success');
+}
+
+// ── EXCEL IMPORT ──────────────────────────────────────────────────────
+
+function readExcel() {
+  var file = document.getElementById('xl-file').files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var text = e.target.result;
+      var lines = text.trim().split('\n');
+      var headers = lines[0].split(',').map(function(h){ return h.trim().replace(/"/g,''); });
+      importRows = lines.slice(1).map(function(line) {
+        var vals = line.split(',').map(function(v){ return v.trim().replace(/"/g,''); });
+        var obj = {};
+        headers.forEach(function(h, i){ obj[h] = vals[i] || ''; });
+        return obj;
+      }).filter(function(r){ return r.name; });
+      document.getElementById('xl-count').textContent = importRows.length + ' rows found. Click Import to proceed.';
+      document.getElementById('xl-preview').style.display = '';
+    } catch(ex) {
+      toast('Error reading file: ' + ex.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function downloadTemplate() {
+  var csv = 'name,categoryKey,basePrice,originalPrice,durationMinutes,description,isPopular,isPremium\n1.5 Ton Split AC Service,AC_SERVICE,499,699,60,"Full cleaning and gas check",true,false';
+  var blob = new Blob([csv],{type:'text/csv'});
+  var a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='service_import_template.csv'; a.click();
+}
+
+function importServices() {
+  if (!importRows.length) return;
+  var errors = [];
+  var promises = importRows.map(function(row, idx) {
+    var catMatch = categories.find(function(c){ return c.key === (row.categoryKey||'').toUpperCase(); });
+    if (!catMatch) { errors.push('Row '+(idx+2)+': Category "'+row.categoryKey+'" not found'); return Promise.resolve(); }
+    var price = parseFloat(row.basePrice);
+    if (isNaN(price)) { errors.push('Row '+(idx+2)+': Invalid price'); return Promise.resolve(); }
+    return api('POST','/admin/services',{
+      categoryId: catMatch.id, name: row.name, basePrice: price,
+      originalPrice: parseFloat(row.originalPrice)||undefined,
+      durationMinutes: parseInt(row.durationMinutes)||60,
+      description: row.description||undefined,
+      isPopular: row.isPopular==='true', isPremium: row.isPremium==='true',
+    });
+  });
+  Promise.allSettled(promises).then(function(results){
+    var success = results.filter(function(r){ return r.status==='fulfilled' && r.value; }).length;
+    if (errors.length) document.getElementById('xl-errors').textContent = errors.join('\n');
+    toast('Imported ' + success + ' services' + (errors.length ? ', ' + errors.length + ' errors' : ''), errors.length ? 'warning' : 'success');
+    closeModal('xl-overlay'); loadServices();
+  });
+}
+
+function exportServices() {
+  api('GET','/admin/services/export').then(function(list){
+    if (!list||!list.length) { toast('No services to export','warning'); return; }
+    var csv = 'Name,Category,CategoryKey,BasePrice,OriginalPrice,Duration,IsActive,IsPopular,IsPremium,Description\n' + list.map(function(s){
+      return [s.name,(s.category&&s.category.name)||'',(s.category&&s.category.key)||'',s.basePrice,s.originalPrice||'',s.durationMinutes,s.isActive,s.isPopular,s.isPremium,(s.description||'').replace(/,/g,' ')].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"';}).join(',');
+    }).join('\n');
+    var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='services_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+    toast('Exported ' + list.length + ' services','success');
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────
 
 loadCategories();
 loadServices();

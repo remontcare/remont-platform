@@ -317,14 +317,18 @@ model CityProduct {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ServiceCategory {
-  id          String  @id @default(cuid())
-  key         String  @unique
-  name        String
-  icon        String
-  description String?
-  sortOrder   Int     @default(0)
-  isActive    Boolean @default(true)
-  isPremium   Boolean @default(false)
+  id           String   @id @default(cuid())
+  key          String   @unique
+  slug         String?  @unique
+  name         String
+  icon         String
+  description  String?
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  isPremium    Boolean  @default(false)
+  seoTitle     String?
+  seoDesc      String?
+  seoKeywords  String[]
 
   services Service[]
 }
@@ -340,6 +344,11 @@ model Service {
   durationMinutes Int      @default(60)
   requiredSkills  String[]
   imageUrl        String?
+  images          String[]
+  faqJson         Json?
+  seoTitle        String?
+  seoDesc         String?
+  seoKeywords     String[]
   isActive        Boolean  @default(true)
   isPopular       Boolean  @default(false)
   isPremium       Boolean  @default(false)
@@ -372,7 +381,7 @@ model ProductCategory {
 
 model Product {
   id              String   @id @default(cuid())
-  vendorId        String
+  vendorId        String?
   categoryId      String
   name            String
   slug            String   @unique
@@ -386,6 +395,9 @@ model Product {
   images          String[]
   aiEnhancedImgs  String[]
   specifications  Json?
+  seoTitle        String?
+  seoDesc         String?
+  seoKeywords     String[]
   isActive        Boolean  @default(true)
   views           Int      @default(0)
   rating          Float    @default(0)
@@ -393,7 +405,7 @@ model Product {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  vendor       ProductVendor    @relation(fields: [vendorId], references: [id])
+  vendor       ProductVendor?   @relation(fields: [vendorId], references: [id])
   category     ProductCategory  @relation(fields: [categoryId], references: [id])
   orderItems   OrderItem[]
   cityProducts CityProduct[]

@@ -239,52 +239,91 @@ export class AdminService {
     });
   }
 
-  async createCategory(data: { key: string; name: string; icon: string; description?: string; sortOrder?: number; isPremium?: boolean }) {
-    return this.prisma.serviceCategory.create({ data });
+  async createCategory(data: any) {
+    const slug = data.slug || slugify(data.name);
+    return this.prisma.serviceCategory.create({ data: { ...data, slug, seoKeywords: data.seoKeywords || [] } });
   }
 
-  async updateCategory(id: string, data: { name?: string; icon?: string; description?: string; sortOrder?: number; isActive?: boolean; isPremium?: boolean }) {
+  async updateCategory(id: string, data: any) {
     const existing = await this.prisma.serviceCategory.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Category not found');
+    if (data.name && !data.slug) data.slug = slugify(data.name);
     return this.prisma.serviceCategory.update({ where: { id }, data });
   }
 
   async deleteCategory(id: string) {
     const svcCount = await this.prisma.service.count({ where: { categoryId: id } });
-    if (svcCount > 0) throw new BadRequestException(`Cannot delete: ${svcCount} services use this category`);
+    if (svcCount > 0) throw new BadRequestException(`Cannot delete: ${svcCount} services use this category. Disable it instead.`);
     return this.prisma.serviceCategory.delete({ where: { id } });
+  }
+
+  async bulkUpdateCategories(ids: string[], data: { isActive?: boolean }) {
+    return this.prisma.serviceCategory.updateMany({ where: { id: { in: ids } }, data });
   }
 
   // ─── Services ───────────────────────────────────────────────────────
 
-  async listAllServices(categoryId?: string) {
+  async listAllServices(opts: { categoryId?: string; q?: string; isActive?: boolean; limit?: number; offset?: number } = {}) {
     return this.prisma.service.findMany({
-      where: { ...(categoryId ? { categoryId } : {}) },
-      include: { category: { select: { name: true, key: true } } },
+      where: {
+        ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
+        ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
+        ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { description: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+      },
+      include: { category: { select: { name: true, key: true } }, cityServices: { select: { cityId: true, isActive: true, customPrice: true } } },
       orderBy: { createdAt: 'desc' },
+      take: opts.limit || 200,
+      skip: opts.offset || 0,
     });
   }
 
-  async createService(data: { categoryId: string; name: string; description?: string; basePrice: number; originalPrice?: number; durationMinutes?: number; isPopular?: boolean; isPremium?: boolean; imageUrl?: string; requiredSkills?: string[] }) {
+  async createService(data: any) {
     const slug = slugify(data.name) + '-' + Date.now();
+    const { cities, ...rest } = data;
     return this.prisma.service.create({
-      data: { ...data, slug, requiredSkills: data.requiredSkills || [], basePrice: data.basePrice },
+      data: { ...rest, slug, requiredSkills: rest.requiredSkills || [], images: rest.images || [], seoKeywords: rest.seoKeywords || [] },
       include: { category: true },
     });
   }
 
-  async updateService(id: string, data: { name?: string; description?: string; basePrice?: number; originalPrice?: number; durationMinutes?: number; isActive?: boolean; isPopular?: boolean; isPremium?: boolean; imageUrl?: string; requiredSkills?: string[] }) {
+  async updateService(id: string, data: any) {
     const existing = await this.prisma.service.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service not found');
-    return this.prisma.service.update({ where: { id }, data, include: { category: true } });
+    const { cities, ...rest } = data;
+    return this.prisma.service.update({ where: { id }, data: rest, include: { category: true } });
   }
 
   async deleteService(id: string) {
     const orderCount = await this.prisma.order.count({ where: { serviceId: id } });
-    if (orderCount > 0) {
-      return this.prisma.service.update({ where: { id }, data: { isActive: false } });
-    }
+    if (orderCount > 0) return this.prisma.service.update({ where: { id }, data: { isActive: false } });
     return this.prisma.service.delete({ where: { id } });
+  }
+
+  async bulkUpdateServices(ids: string[], data: { isActive?: boolean }) {
+    return this.prisma.service.updateMany({ where: { id: { in: ids } }, data });
+  }
+
+  // City-wise service assignment
+  async listServiceCities(serviceId: string) {
+    const cities = await this.prisma.city.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+    const assignments = await this.prisma.cityService.findMany({ where: { serviceId } });
+    const map = new Map(assignments.map((a) => [a.cityId, a]));
+    return cities.map((c) => ({ ...c, assignment: map.get(c.id) || null }));
+  }
+
+  async upsertServiceCity(serviceId: string, cityId: string, data: { isActive: boolean; customPrice?: number | null }) {
+    return this.prisma.cityService.upsert({
+      where: { cityId_serviceId: { cityId, serviceId } },
+      create: { cityId, serviceId, isActive: data.isActive, customPrice: data.customPrice ?? null },
+      update: { isActive: data.isActive, customPrice: data.customPrice ?? null },
+    });
+  }
+
+  async exportServices() {
+    return this.prisma.service.findMany({
+      include: { category: { select: { name: true, key: true } } },
+      orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
+    });
   }
 
   // ─── Product Categories ──────────────────────────────────────────────
@@ -297,29 +336,95 @@ export class AdminService {
     return this.prisma.productCategory.create({ data });
   }
 
+  async updateProductCategory(id: string, data: { name?: string; icon?: string; sortOrder?: number; isActive?: boolean }) {
+    return this.prisma.productCategory.update({ where: { id }, data });
+  }
+
+  async deleteProductCategory(id: string) {
+    const count = await this.prisma.product.count({ where: { categoryId: id } });
+    if (count > 0) throw new BadRequestException(`Cannot delete: ${count} products in this category`);
+    return this.prisma.productCategory.delete({ where: { id } });
+  }
+
   // ─── Products ───────────────────────────────────────────────────────
 
-  async adminListProducts(opts: { q?: string; categoryId?: string; limit?: number; offset?: number }) {
+  async adminListProducts(opts: { q?: string; categoryId?: string; isActive?: boolean; limit?: number; offset?: number }) {
     return this.prisma.product.findMany({
       where: {
         ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
+        ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
         ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { sku: { contains: opts.q, mode: 'insensitive' } }, { brand: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
-      include: { vendor: { select: { businessName: true, status: true } }, category: { select: { name: true } } },
+      include: { vendor: { select: { businessName: true, status: true } }, category: { select: { name: true, key: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
       skip: opts.offset || 0,
     });
   }
 
-  async adminUpdateProduct(id: string, data: { name?: string; description?: string; price?: number; mrp?: number; stock?: number; isActive?: boolean; brand?: string; images?: string[]; categoryId?: string }) {
+  async adminCreateProduct(data: any) {
+    const slug = slugify(data.name) + '-' + Date.now();
+    const sku = data.sku || 'RMNT-' + Date.now();
+    return this.prisma.product.create({
+      data: { ...data, slug, sku, images: data.images || [], seoKeywords: data.seoKeywords || [], aiEnhancedImgs: [] },
+      include: { category: { select: { name: true } } },
+    });
+  }
+
+  async adminUpdateProduct(id: string, data: any) {
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product not found');
-    return this.prisma.product.update({ where: { id }, data });
+    return this.prisma.product.update({ where: { id }, data, include: { category: { select: { name: true } } } });
   }
 
   async adminDeleteProduct(id: string) {
-    return this.prisma.product.update({ where: { id }, data: { isActive: false } });
+    const orderCount = await this.prisma.orderItem.count({ where: { productId: id } });
+    if (orderCount > 0) return this.prisma.product.update({ where: { id }, data: { isActive: false } });
+    return this.prisma.product.delete({ where: { id } });
+  }
+
+  async bulkUpdateProducts(ids: string[], data: { isActive?: boolean }) {
+    return this.prisma.product.updateMany({ where: { id: { in: ids } }, data });
+  }
+
+  // City-wise product assignment
+  async listProductCities(productId: string) {
+    const cities = await this.prisma.city.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+    const assignments = await this.prisma.cityProduct.findMany({ where: { productId } });
+    const map = new Map(assignments.map((a) => [a.cityId, a]));
+    return cities.map((c) => ({ ...c, assignment: map.get(c.id) || null }));
+  }
+
+  async upsertProductCity(productId: string, cityId: string, data: { isActive: boolean; customPrice?: number | null; stock?: number }) {
+    return this.prisma.cityProduct.upsert({
+      where: { cityId_productId: { cityId, productId } },
+      create: { cityId, productId, isActive: data.isActive, customPrice: data.customPrice ?? null, stock: data.stock ?? 0 },
+      update: { isActive: data.isActive, customPrice: data.customPrice ?? null, stock: data.stock ?? 0 },
+    });
+  }
+
+  async exportProducts() {
+    return this.prisma.product.findMany({
+      include: { category: { select: { name: true, key: true } } },
+      orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
+    });
+  }
+
+  // ─── AI Content Generation ───────────────────────────────────────────
+
+  async generateAiContent(type: 'SERVICE' | 'PRODUCT' | 'CATEGORY', name: string, context?: string) {
+    const base = context ? `${name}. ${context}` : name;
+    const description = `Experience premium ${name} by Remont India's certified professionals. Our experts use industry-grade equipment and follow quality-checked processes to deliver exceptional results. Book in minutes, get service at your doorstep — 100% satisfaction guaranteed.`;
+    const seoTitle = `${name} | Best ${name} Service in India | Remont India`;
+    const seoDesc = `Book ${name} online at the best price. Certified professionals, doorstep service, 100% satisfaction guarantee. Available in 11+ cities across India.`;
+    const seoKeywords = [name.toLowerCase(), 'home service', 'doorstep service', 'remont india', 'book online'];
+    const faq = [
+      { q: `How long does ${name} take?`, a: 'Our certified technicians typically complete the service in 60–90 minutes depending on the scope of work.' },
+      { q: `Is ${name} available in my city?`, a: 'We are available in Mumbai, Delhi, Bangalore, Hyderabad, Pune, Chennai, Kolkata, Ahmedabad, Jaipur, Lucknow, and Indore.' },
+      { q: `What is included in ${name}?`, a: `The ${name} package includes a thorough inspection, cleaning, repair if required, and a service report. All work is backed by a 30-day service guarantee.` },
+      { q: `How do I book ${name}?`, a: 'Visit remontindia.com, select your city and service, choose a time slot, and pay online. Our professional will arrive at the scheduled time.' },
+    ];
+    return { description, seoTitle, seoDesc, seoKeywords, faq };
   }
 
   // ─── Banners (CMS) ──────────────────────────────────────────────────
@@ -907,25 +1012,50 @@ export class AdminController {
   // Service Categories
   @Get('services/categories') allCategories() { return this.admin.listAllCategories(); }
   @Post('services/categories') createCategory(@Body() b: any) { return this.admin.createCategory(b); }
+  @Patch('services/categories/bulk') bulkCategories(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateCategories(b.ids, { isActive: b.isActive }); }
   @Patch('services/categories/:id') updateCategory(@Param('id') id: string, @Body() b: any) { return this.admin.updateCategory(id, b); }
   @Delete('services/categories/:id') deleteCategory(@Param('id') id: string) { return this.admin.deleteCategory(id); }
 
   // Services
-  @Get('services') allServices(@Query('categoryId') categoryId?: string) { return this.admin.listAllServices(categoryId); }
+  @Get('services/export') exportSvcs() { return this.admin.exportServices(); }
+  @Get('services') allServices(@Query('categoryId') catId?: string, @Query('q') q?: string, @Query('isActive') ia?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+    const isActive = ia === 'true' ? true : ia === 'false' ? false : undefined;
+    return this.admin.listAllServices({ categoryId: catId, q, isActive, limit: limit ? +limit : 200, offset: offset ? +offset : 0 });
+  }
   @Post('services') createService(@Body() b: any) { return this.admin.createService(b); }
+  @Post('services/bulk') bulkServices(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateServices(b.ids, { isActive: b.isActive }); }
   @Patch('services/:id') updateService(@Param('id') id: string, @Body() b: any) { return this.admin.updateService(id, b); }
   @Delete('services/:id') deleteService(@Param('id') id: string) { return this.admin.deleteService(id); }
+  @Get('services/:id/cities') serviceCities(@Param('id') id: string) { return this.admin.listServiceCities(id); }
+  @Patch('services/:id/cities/:cityId') upsertServiceCity(@Param('id') sid: string, @Param('cityId') cid: string, @Body() b: { isActive: boolean; customPrice?: number }) {
+    return this.admin.upsertServiceCity(sid, cid, b);
+  }
 
   // Product Categories
   @Get('product-categories') listProductCats() { return this.admin.listProductCategories(); }
   @Post('product-categories') createProductCat(@Body() b: any) { return this.admin.createProductCategory(b); }
+  @Patch('product-categories/:id') updateProductCat(@Param('id') id: string, @Body() b: any) { return this.admin.updateProductCategory(id, b); }
+  @Delete('product-categories/:id') deleteProductCat(@Param('id') id: string) { return this.admin.deleteProductCategory(id); }
 
   // Products
-  @Get('products') allProducts(@Query('q') q?: string, @Query('categoryId') categoryId?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
-    return this.admin.adminListProducts({ q, categoryId, limit, offset });
+  @Get('products/export') exportProds() { return this.admin.exportProducts(); }
+  @Get('products') allProducts(@Query('q') q?: string, @Query('categoryId') catId?: string, @Query('isActive') ia?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+    const isActive = ia === 'true' ? true : ia === 'false' ? false : undefined;
+    return this.admin.adminListProducts({ q, categoryId: catId, isActive, limit: limit ? +limit : 100, offset: offset ? +offset : 0 });
   }
+  @Post('products') createProduct(@Body() b: any) { return this.admin.adminCreateProduct(b); }
+  @Post('products/bulk') bulkProducts(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateProducts(b.ids, { isActive: b.isActive }); }
   @Patch('products/:id') updateProduct(@Param('id') id: string, @Body() b: any) { return this.admin.adminUpdateProduct(id, b); }
   @Delete('products/:id') deleteProduct(@Param('id') id: string) { return this.admin.adminDeleteProduct(id); }
+  @Get('products/:id/cities') productCities(@Param('id') id: string) { return this.admin.listProductCities(id); }
+  @Patch('products/:id/cities/:cityId') upsertProductCity(@Param('id') pid: string, @Param('cityId') cid: string, @Body() b: { isActive: boolean; customPrice?: number; stock?: number }) {
+    return this.admin.upsertProductCity(pid, cid, b);
+  }
+
+  // AI Content Generation
+  @Post('ai/generate') aiGenerate(@Body() b: { type: 'SERVICE' | 'PRODUCT' | 'CATEGORY'; name: string; context?: string }) {
+    return this.admin.generateAiContent(b.type, b.name, b.context);
+  }
 
   // Banners (CMS)
   @Get('banners') listBanners() { return this.admin.listBanners(); }
