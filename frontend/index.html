@@ -2364,7 +2364,7 @@
   <div class="grp">
     <div class="grp-title">Booking</div>
     <a href="#"><span>🤖</span> AI Chat Booking</a>
-    <a href="#"><span>💬</span> WhatsApp Booking</a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener"><span>💬</span> WhatsApp Booking</a>
     <a href="tel:+919876543210"><span>📞</span> Call to Book</a>
   </div>
   <div class="grp">
@@ -2398,7 +2398,7 @@
     <span class="strip-divider"></span>
     <a href="#corporate" class="strip-btn">🏢 Corporate Login</a>
     <span class="strip-divider"></span>
-    <a href="#" class="strip-btn whatsapp">💬 WhatsApp Book</a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp">💬 WhatsApp Book</a>
     <a href="#" class="strip-btn highlight">📱 Download App</a>
   </div>
 </div>
@@ -2547,7 +2547,7 @@
     <div class="bc-channels">
       <a href="#" class="bc-channel"><span class="icn">🌐</span> Website</a>
       <a href="#" class="bc-channel"><span class="icn">📱</span> Mobile App</a>
-      <a href="#" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
+      <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
       <a href="#" class="bc-channel"><span class="icn">🤖</span> AI Chat</a>
       <a href="tel:+919876543210" class="bc-channel"><span class="icn">📞</span> Call Us</a>
       <a href="#" class="bc-channel"><span class="icn">🎙️</span> Voice (Alexa)</a>
@@ -3508,7 +3508,7 @@
       <h4>Booking</h4>
       <div class="footer-links">
         <a href="#">AI Chat Booking</a>
-        <a href="#">WhatsApp Bot</a>
+        <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener">WhatsApp Bot</a>
         <a href="tel:+919876543210">Call Center</a>
         <a href="#">Mobile App</a>
         <a href="#">Voice (Alexa)</a>
@@ -3640,11 +3640,11 @@
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:relative;z-index:1;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
     <span class="fab-label">Chat with Remi AI</span>
   </button>
-  <button class="fab whatsapp" aria-label="WhatsApp">
+  <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="fab whatsapp" aria-label="WhatsApp">
     <div class="fab-pulse"></div>
     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="position:relative;z-index:1;"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
     <span class="fab-label">WhatsApp Booking</span>
-  </button>
+  </a>
 </div>
 
 <script>
@@ -3876,18 +3876,87 @@
   // ═══ Slider ═══
   let current = 0, total = 3, timer;
   const slidesEl = document.getElementById('slides');
-  const dots = document.querySelectorAll('.dot');
+  let dotsEls = document.querySelectorAll('.dot');
   function goSlide(n) {
-    document.getElementById('slide-' + current).classList.remove('active');
+    var prevSlideEl = document.getElementById('slide-' + current);
+    if (prevSlideEl) prevSlideEl.classList.remove('active');
     current = (n + total) % total;
-    document.getElementById('slide-' + current).classList.add('active');
-    slidesEl.style.transform = `translateX(-${current * 33.333}%)`;
-    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    var nextSlideEl = document.getElementById('slide-' + current);
+    if (nextSlideEl) nextSlideEl.classList.add('active');
+    slidesEl.style.transform = `translateX(-${current * (100 / total)}%)`;
+    dotsEls = document.querySelectorAll('.dot');
+    dotsEls.forEach((d, i) => d.classList.toggle('active', i === current));
+    if (window._banners && window._banners[current]) updateBannerContent(current);
     clearInterval(timer); timer = setInterval(() => goSlide(current + 1), 6500);
   }
   function nextSlide() { goSlide(current + 1); }
   function prevSlide() { goSlide(current - 1); }
   timer = setInterval(() => goSlide(current + 1), 6500);
+
+  function updateBannerContent(n) {
+    if (!window._banners || !window._banners[n]) return;
+    var b = window._banners[n];
+    var tagEl = document.querySelector('.slide-tag');
+    var h1El = document.querySelector('.slide-h1');
+    var pEl = document.querySelector('.slide-p');
+    if (tagEl && b.tag) tagEl.textContent = b.tag;
+    if (h1El && b.title) h1El.innerHTML = b.title;
+    if (pEl && b.subtitle) pEl.textContent = b.subtitle;
+  }
+
+  function loadHeroBanners(banners) {
+    window._banners = banners;
+    total = banners.length;
+    // Rebuild slide backgrounds
+    var slidesContainer = document.getElementById('slides');
+    if (slidesContainer && banners.length > 0) {
+      slidesContainer.innerHTML = banners.map(function(b, i) {
+        var style = b.imageUrl ? 'background-image:url(' + b.imageUrl + ');background-size:cover;background-position:center' : '';
+        return '<div class="slide' + (i === 0 ? ' active' : '') + '" id="slide-' + i + '"><div class="slide-bg" style="' + style + '"></div></div>';
+      }).join('');
+    }
+    // Rebuild dots
+    var dotsContainer = document.querySelector('.dots');
+    if (dotsContainer) {
+      dotsContainer.innerHTML = banners.map(function(_, i) {
+        return '<div class="dot' + (i === 0 ? ' active' : '') + '" onclick="goSlide(' + i + ')"></div>';
+      }).join('');
+    }
+    updateBannerContent(0);
+  }
+
+  function renderFaqList(faqs) {
+    var container = document.querySelector('.faq-list');
+    if (!container || !faqs.length) return;
+    container.innerHTML = faqs.map(function(f, i) {
+      return '<div class="faq-item' + (i === 0 ? ' open' : '') + '">' +
+        '<button class="faq-q" onclick="toggleFaq(this)">' + (f.question || '') + '<span class="faq-arrow">+</span></button>' +
+        '<div class="faq-a">' + (f.answer || '') + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderAmcPlans(plans) {
+    var container = document.querySelector('.amc-grid');
+    if (!container || !plans.length) return;
+    var icons = { HOME_ESSENTIALS: '🏠', HOME_COMPLETE: '🏡', CORPORATE: '🏢', CUSTOM: '✨' };
+    container.innerHTML = plans.map(function(p, i) {
+      var isFeatured = p.type === 'HOME_COMPLETE' || (plans.length > 1 && i === Math.floor(plans.length / 2));
+      var features = Array.isArray(p.includedServices) ? p.includedServices : [];
+      return '<div class="amc-card' + (isFeatured ? ' featured' : '') + ' reveal">' +
+        (isFeatured ? '<span class="featured-tag">Most Popular</span>' : '') +
+        '<div class="amc-icon">' + (icons[p.type] || '🏡') + '</div>' +
+        '<div class="amc-name">' + (p.name || '') + '</div>' +
+        '<div class="amc-period">Annual Plan</div>' +
+        '<div class="amc-desc">' + (p.description || '') + '</div>' +
+        '<ul class="amc-features">' + features.slice(0,6).map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
+        '<div class="amc-price"><span class="amc-price-now">₹' + Number(p.priceYearly || 0).toLocaleString('en-IN') + '</span>' +
+        (p.originalPrice ? '<span class="amc-price-old">₹' + Number(p.originalPrice).toLocaleString('en-IN') + '</span>' : '') +
+        '<small>/year</small></div>' +
+        '<button class="amc-btn">Subscribe Now</button>' +
+        '</div>';
+    }).join('');
+  }
 
   window.addEventListener('scroll', () => {
     document.getElementById('header').classList.toggle('scrolled', window.scrollY > 30);
@@ -4366,6 +4435,24 @@
 
     // 3. Load site settings
     loadSiteSettings();
+
+    // 4. Load hero banners from CMS
+    apiGet('/api/v1/cms/banners').then(function(data) {
+      var banners = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (banners && banners.length) loadHeroBanners(banners);
+    }).catch(function(){});
+
+    // 5. Load FAQs from CMS
+    apiGet('/api/v1/cms/faqs').then(function(data) {
+      var faqs = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (faqs && faqs.length) renderFaqList(faqs);
+    }).catch(function(){});
+
+    // 6. Load AMC plans from API
+    apiGet('/api/v1/amc/plans').then(function(data) {
+      var plans = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (plans && plans.length) renderAmcPlans(plans);
+    }).catch(function(){});
   }
 
   initDynamicContent();

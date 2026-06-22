@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Payments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.stat-mini{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px}
+.stat-mini-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.stat-mini-val{font-size:22px;font-weight:700;line-height:1}
+.stat-mini-label{font-size:12px;color:#9ca3af;margin-top:2px}
+.filter-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.filter-row select,.filter-row input{border:1px solid #e5e7eb;border-radius:6px;padding:7px 12px;font-size:13px;font-family:inherit;background:#fff}
+.gateway-pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase}
+.gw-razorpay{background:#3b82f622;color:#2563eb}
+.gw-razorpay_dev{background:#f59e0b22;color:#92400e}
+.gw-cashfree{background:#10b98122;color:#065f46}
+.gw-phonepe{background:#7c3aed22;color:#5b21b6}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Payments</h1><p>Payment transaction management & reconciliation</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportPayments()">⬇ Export CSV</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px" id="stats-row">
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#dcfce7">💰</div><div><div class="stat-mini-val" id="s-total">—</div><div class="stat-mini-label">Total Volume</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#dbeafe">✅</div><div><div class="stat-mini-val" id="s-paid">—</div><div class="stat-mini-label">Paid</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#fef3c7">⏳</div><div><div class="stat-mini-val" id="s-pending">—</div><div class="stat-mini-label">Pending</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#fee2e2">❌</div><div><div class="stat-mini-val" id="s-failed">—</div><div class="stat-mini-label">Failed</div></div></div>
+    </div>
+
+    <!-- Gateway Config Status -->
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="font-size:13px;font-weight:600">Gateway Status:</div>
+      <div id="gw-status-badge" style="font-size:13px;color:#9ca3af">Loading…</div>
+      <div style="margin-left:auto">
+        <button class="btn btn-outline btn-sm" onclick="window.location.href='integrations.html'">⚙ Configure Gateways</button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-row">
+      <select id="f-status" onchange="loadPayments()">
+        <option value="">All Statuses</option>
+        <option value="PAID">PAID</option>
+        <option value="PENDING">PENDING</option>
+        <option value="FAILED">FAILED</option>
+        <option value="REFUNDED">REFUNDED</option>
+      </select>
+      <select id="f-gateway" onchange="loadPayments()">
+        <option value="">All Gateways</option>
+        <option value="RAZORPAY">Razorpay (Live)</option>
+        <option value="RAZORPAY_DEV">Razorpay (Dev Mock)</option>
+        <option value="CASHFREE">Cashfree</option>
+        <option value="PHONEPE">PhonePe</option>
+      </select>
+      <input type="text" id="f-search" placeholder="Search reference…" oninput="filterLocal()">
+      <button class="btn btn-outline btn-sm" onclick="loadPayments()">Refresh</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table class="data-table" id="pay-table">
+        <thead>
+          <tr>
+            <th>Gateway</th>
+            <th>Order #</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Gateway Order ID</th>
+            <th>Gateway Payment ID</th>
+            <th>Date</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pay-tbody">
+          <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:32px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="pay-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center;font-size:13px;color:#6b7280"></div>
+
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+var allPayments = [];
+var totalCount = 0;
+var currentOffset = 0;
+var PAGE_SIZE = 50;
+
+function loadPayments() {
+  currentOffset = 0;
+  fetchPayments();
+}
+
+function fetchPayments() {
+  var status = document.getElementById('f-status').value;
+  var gateway = document.getElementById('f-gateway').value;
+  var params = '?limit=' + PAGE_SIZE + '&offset=' + currentOffset;
+  if (status) params += '&status=' + status;
+  if (gateway) params += '&gateway=' + gateway;
+
+  api('GET', '/admin/payments' + params).then(function(d) {
+    allPayments = d.transactions || [];
+    totalCount = d.total || 0;
+    renderPayments(allPayments);
+    renderStats();
+    renderPagination();
+  }).catch(function(e){ toast('Error loading payments: ' + e.message, 'error'); });
+}
+
+function renderStats() {
+  var paid = allPayments.filter(function(p){ return p.status === 'PAID'; });
+  var pending = allPayments.filter(function(p){ return p.status === 'PENDING'; });
+  var failed = allPayments.filter(function(p){ return p.status === 'FAILED'; });
+  var total = paid.reduce(function(s,p){ return s + Number(p.amount); }, 0);
+  document.getElementById('s-total').textContent = fmtCur(total);
+  document.getElementById('s-paid').textContent = paid.length;
+  document.getElementById('s-pending').textContent = pending.length;
+  document.getElementById('s-failed').textContent = failed.length;
+}
+
+function renderPayments(list) {
+  var tbody = document.getElementById('pay-tbody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:32px">No payment transactions found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(function(p) {
+    var gw = (p.gateway || 'UNKNOWN').toLowerCase();
+    var gwClass = 'gw-' + gw;
+    var ordNum = (p.order && p.order.orderNumber) ? p.order.orderNumber : '—';
+    return '<tr>' +
+      '<td><span class="gateway-pill ' + gwClass + '">' + escape(p.gateway || 'UNKNOWN') + '</span></td>' +
+      '<td><a href="orders.html" style="color:#c4601a;font-weight:500">' + escape(ordNum) + '</a></td>' +
+      '<td><strong>' + fmtCur(p.amount) + '</strong></td>' +
+      '<td>' + statusBadge(p.status) + '</td>' +
+      '<td style="font-family:monospace;font-size:11px;color:#6b7280">' + escape(p.gatewayOrderId || '—') + '</td>' +
+      '<td style="font-family:monospace;font-size:11px;color:#6b7280">' + escape(p.gatewayPaymentId || '—') + '</td>' +
+      '<td style="color:#9ca3af;font-size:12px">' + fmtDate(p.createdAt) + '</td>' +
+      '<td>' +
+        (p.status === 'PAID' ? '<button class="btn btn-outline btn-sm" onclick="viewReceipt(\'' + p.id + '\')">View</button>' : '') +
+        (p.status === 'PENDING' ? '<button class="btn btn-outline btn-sm" style="color:#f59e0b;border-color:#f59e0b" onclick="markFailed(\'' + p.id + '\')">Mark Failed</button>' : '') +
+      '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function filterLocal() {
+  var q = document.getElementById('f-search').value.toLowerCase();
+  if (!q) { renderPayments(allPayments); return; }
+  var filtered = allPayments.filter(function(p) {
+    return (p.gatewayOrderId || '').toLowerCase().includes(q) ||
+      (p.gatewayPaymentId || '').toLowerCase().includes(q) ||
+      (p.order && p.order.orderNumber && p.order.orderNumber.toLowerCase().includes(q));
+  });
+  renderPayments(filtered);
+}
+
+function renderPagination() {
+  var el = document.getElementById('pay-pagination');
+  var pages = Math.ceil(totalCount / PAGE_SIZE);
+  var current = Math.floor(currentOffset / PAGE_SIZE) + 1;
+  el.innerHTML = 'Page ' + current + ' of ' + Math.max(pages, 1) + ' · ' + totalCount + ' total' +
+    (currentOffset > 0 ? ' <button class="btn btn-outline btn-sm" onclick="prevPage()">← Prev</button>' : '') +
+    (currentOffset + PAGE_SIZE < totalCount ? ' <button class="btn btn-outline btn-sm" onclick="nextPage()">Next →</button>' : '');
+}
+
+function prevPage() { currentOffset = Math.max(0, currentOffset - PAGE_SIZE); fetchPayments(); }
+function nextPage() { currentOffset += PAGE_SIZE; fetchPayments(); }
+
+function viewReceipt(id) { toast('Receipt view coming soon. Use Invoices page.', 'warning'); }
+function markFailed(id) { toast('Manual status override coming soon. Contact tech team.', 'warning'); }
+
+function exportPayments() {
+  downloadCsv(allPayments, [
+    { label: 'Gateway', key: 'gateway' },
+    { label: 'Order #', key: 'order.orderNumber' },
+    { label: 'Amount', key: 'amount' },
+    { label: 'Status', key: 'status' },
+    { label: 'Gateway Order ID', key: 'gatewayOrderId' },
+    { label: 'Gateway Payment ID', key: 'gatewayPaymentId' },
+    { label: 'Date', key: 'createdAt' },
+  ], 'payments.csv');
+}
+
+function loadGatewayStatus() {
+  api('GET', '/payments/config').then(function(d) {
+    var el = document.getElementById('gw-status-badge');
+    if (d && d.isLive) {
+      el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Razorpay <strong>LIVE</strong> · Key: ' + d.keyId;
+    } else {
+      el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px"></span>Razorpay <strong>DEV MOCK</strong> · No real payments accepted';
+    }
+  }).catch(function(){});
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!requireAuth()) return;
+  renderSidebar('payments');
+  loadGatewayStatus();
+  loadPayments();
+});
+</script>
+</body>
+</html>

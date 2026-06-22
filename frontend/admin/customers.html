@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Customers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.stat-mini{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px}
+.stat-mini-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.stat-mini-val{font-size:22px;font-weight:700;line-height:1}
+.stat-mini-label{font-size:12px;color:#9ca3af;margin-top:2px}
+.cust-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.order-chip{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+
+/* Drawer */
+.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:100;display:none}
+.drawer{position:fixed;right:0;top:0;bottom:0;width:480px;background:#fff;z-index:101;box-shadow:-4px 0 24px rgba(0,0,0,.12);overflow-y:auto;transform:translateX(100%);transition:transform .25s;display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0)}
+.drawer-header{padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:12px;position:sticky;top:0;background:#fff;z-index:1}
+.drawer-body{padding:20px 24px;flex:1}
+.drawer-section{margin-bottom:20px}
+.drawer-section-title{font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
+.info-row{display:flex;margin-bottom:8px;font-size:13px}
+.info-row .label{width:120px;color:#9ca3af;flex-shrink:0}
+.info-row .val{color:#111827;font-weight:500}
+.mini-order-row{display:flex;align-items:center;padding:8px;border:1px solid #f3f4f6;border-radius:7px;margin-bottom:6px;gap:10px;font-size:12px}
+.mini-order-row:hover{background:#f9fafb}
+.wallet-badge{background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Customers</h1><p>CRM customer management</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportCustomers()">⬇ Export CSV</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#dbeafe">👥</div><div><div class="stat-mini-val" id="s-total">—</div><div class="stat-mini-label">Total Customers</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#dcfce7">🛒</div><div><div class="stat-mini-val" id="s-ordered">—</div><div class="stat-mini-label">Have Ordered</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#fee2e2">🚫</div><div><div class="stat-mini-val" id="s-blocked">—</div><div class="stat-mini-label">Blocked</div></div></div>
+      <div class="stat-mini"><div class="stat-mini-icon" style="background:#fef3c7">💰</div><div><div class="stat-mini-val" id="s-wallet">—</div><div class="stat-mini-label">Total Wallet</div></div></div>
+    </div>
+
+    <!-- Filters -->
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <input type="text" id="f-search" placeholder="Search name, phone, email…" style="border:1px solid #e5e7eb;border-radius:6px;padding:7px 12px;font-size:13px;font-family:inherit;flex:1;min-width:200px" oninput="searchCustomers()">
+      <select id="f-status" onchange="searchCustomers()" style="border:1px solid #e5e7eb;border-radius:6px;padding:7px 12px;font-size:13px;font-family:inherit;background:#fff">
+        <option value="">All Customers</option>
+        <option value="active">Active</option>
+        <option value="blocked">Blocked</option>
+        <option value="ordered">Has Orders</option>
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="loadCustomers()">Refresh</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Orders</th>
+            <th>Wallet</th>
+            <th>Status</th>
+            <th>Joined</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="cust-tbody">
+          <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:32px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="cust-pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center;font-size:13px;color:#6b7280"></div>
+
+  </div>
+</div>
+
+<!-- Customer Drawer -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+<div class="drawer" id="cust-drawer">
+  <div class="drawer-header">
+    <div class="cust-avatar" id="d-avatar" style="background:#fef3ec;color:#c4601a">U</div>
+    <div>
+      <div style="font-size:16px;font-weight:700" id="d-name">Customer</div>
+      <div style="font-size:12px;color:#9ca3af" id="d-phone">—</div>
+    </div>
+    <button onclick="closeDrawer()" style="margin-left:auto;border:none;background:none;cursor:pointer;font-size:20px;color:#9ca3af">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="drawer-section">
+      <div class="drawer-section-title">Contact Info</div>
+      <div class="info-row"><div class="label">Phone</div><div class="val" id="d-info-phone">—</div></div>
+      <div class="info-row"><div class="label">Email</div><div class="val" id="d-info-email">—</div></div>
+      <div class="info-row"><div class="label">City</div><div class="val" id="d-info-city">—</div></div>
+      <div class="info-row"><div class="label">Joined</div><div class="val" id="d-info-joined">—</div></div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Financials</div>
+      <div class="info-row"><div class="label">Wallet Balance</div><div class="val" id="d-wallet">—</div></div>
+      <div class="info-row"><div class="label">Total Orders</div><div class="val" id="d-total-orders">—</div></div>
+      <div class="info-row"><div class="label">Status</div><div class="val" id="d-status">—</div></div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Quick Actions</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="adjustWallet()">💰 Adjust Wallet</button>
+        <button class="btn btn-outline btn-sm" id="block-btn" onclick="toggleBlock()">🚫 Block</button>
+        <button class="btn btn-outline btn-sm" onclick="viewOrders()">📦 View Orders</button>
+      </div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Recent Orders</div>
+      <div id="d-orders">Loading…</div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Addresses</div>
+      <div id="d-addresses" style="font-size:13px;color:#374151">—</div>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+var allCustomers = [];
+var filteredCustomers = [];
+var totalCount = 0;
+var currentOffset = 0;
+var PAGE_SIZE = 100;
+var currentCustomer = null;
+
+function loadCustomers() {
+  currentOffset = 0;
+  fetchCustomers();
+}
+
+function fetchCustomers() {
+  var q = document.getElementById('f-search').value.trim();
+  var params = '?limit=' + PAGE_SIZE + '&offset=' + currentOffset;
+  if (q) params += '&q=' + encodeURIComponent(q);
+  api('GET', '/admin/customers' + params).then(function(d) {
+    allCustomers = d.customers || [];
+    totalCount = d.total || 0;
+    filteredCustomers = allCustomers;
+    renderStats();
+    renderTable(filteredCustomers);
+    renderPagination();
+  }).catch(function(e){ toast('Error: ' + e.message, 'error'); });
+}
+
+function renderStats() {
+  document.getElementById('s-total').textContent = totalCount;
+  var ordered = allCustomers.filter(function(c){ return c._count && c._count.orders > 0; }).length;
+  var blocked = allCustomers.filter(function(c){ return c.isBlocked; }).length;
+  var walletTotal = allCustomers.reduce(function(s,c){ return s + Number(c.walletBalance || 0); }, 0);
+  document.getElementById('s-ordered').textContent = ordered;
+  document.getElementById('s-blocked').textContent = blocked;
+  document.getElementById('s-wallet').textContent = fmtCur(walletTotal);
+}
+
+function searchCustomers() {
+  var q = document.getElementById('f-search').value.trim().toLowerCase();
+  var filter = document.getElementById('f-status').value;
+  filteredCustomers = allCustomers.filter(function(c) {
+    var matchQ = !q ||
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.phone || '').includes(q) ||
+      (c.email || '').toLowerCase().includes(q);
+    var matchFilter = true;
+    if (filter === 'blocked') matchFilter = c.isBlocked;
+    else if (filter === 'active') matchFilter = !c.isBlocked;
+    else if (filter === 'ordered') matchFilter = c._count && c._count.orders > 0;
+    return matchQ && matchFilter;
+  });
+  renderTable(filteredCustomers);
+}
+
+function renderTable(list) {
+  var tbody = document.getElementById('cust-tbody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:32px">No customers found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(function(c) {
+    var initial = ((c.name || c.phone || 'U')[0]).toUpperCase();
+    var orderCount = (c._count && c._count.orders) || 0;
+    var isBlocked = c.isBlocked;
+    return '<tr>' +
+      '<td><div style="display:flex;align-items:center;gap:10px">' +
+        '<div class="cust-avatar" style="background:' + avatarBg(c.id) + ';color:#fff">' + escape(initial) + '</div>' +
+        '<div><div style="font-weight:600;color:#111827">' + escape(c.name || 'New User') + '</div></div>' +
+      '</div></td>' +
+      '<td style="font-family:monospace;font-size:12px">' + escape(c.phone || '—') + '</td>' +
+      '<td style="color:#9ca3af;font-size:12px">' + escape(c.email || '—') + '</td>' +
+      '<td><span class="order-chip" style="background:' + (orderCount > 0 ? '#dbeafe' : '#f3f4f6') + ';color:' + (orderCount > 0 ? '#2563eb' : '#9ca3af') + '">' + orderCount + ' orders</span></td>' +
+      '<td>' + (Number(c.walletBalance) > 0 ? '<span class="wallet-badge">' + fmtCur(c.walletBalance) + '</span>' : '<span style="color:#d1d5db">₹0</span>') + '</td>' +
+      '<td>' + (isBlocked ? badge('Blocked', 'red') : badge('Active', 'green')) + '</td>' +
+      '<td style="color:#9ca3af;font-size:12px">' + fmtDateShort(c.createdAt) + '</td>' +
+      '<td><button class="btn btn-outline btn-sm" onclick="openCustomer(\'' + c.id + '\')">View</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+var AVATAR_COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f97316','#10b981','#06b6d4','#84cc16'];
+function avatarBg(id) { var n = 0; for(var i=0; i<id.length; i++) n += id.charCodeAt(i); return AVATAR_COLORS[n % AVATAR_COLORS.length]; }
+
+function openCustomer(id) {
+  api('GET', '/admin/customers/' + id).then(function(c) {
+    currentCustomer = c;
+    document.getElementById('d-name').textContent = c.name || 'New User';
+    document.getElementById('d-phone').textContent = c.phone || '—';
+    document.getElementById('d-avatar').textContent = ((c.name || c.phone || 'U')[0]).toUpperCase();
+    document.getElementById('d-avatar').style.background = avatarBg(c.id);
+    document.getElementById('d-info-phone').textContent = c.phone || '—';
+    document.getElementById('d-info-email').textContent = c.email || '—';
+    document.getElementById('d-info-city').textContent = c.cityId || '—';
+    document.getElementById('d-info-joined').textContent = fmtDateShort(c.createdAt);
+    document.getElementById('d-wallet').textContent = fmtCur(c.walletBalance);
+    document.getElementById('d-total-orders').textContent = (c.orders || []).length + ' recent';
+    document.getElementById('d-status').innerHTML = c.isBlocked ? badge('Blocked', 'red') : badge('Active', 'green');
+    document.getElementById('block-btn').textContent = c.isBlocked ? '✓ Unblock' : '🚫 Block';
+
+    // Orders
+    var ordersEl = document.getElementById('d-orders');
+    var orders = c.orders || [];
+    if (!orders.length) { ordersEl.innerHTML = '<div style="color:#9ca3af;font-size:13px">No orders yet</div>'; }
+    else {
+      ordersEl.innerHTML = orders.map(function(o) {
+        return '<div class="mini-order-row">' +
+          '<div style="font-weight:600;color:#c4601a;flex:1">' + escape(o.orderNumber) + '</div>' +
+          '<div>' + statusBadge(o.status) + '</div>' +
+          '<div style="color:#374151;font-weight:500">' + fmtCur(o.totalAmount) + '</div>' +
+          '<div style="color:#9ca3af">' + fmtDateShort(o.createdAt) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    // Addresses
+    var addrsEl = document.getElementById('d-addresses');
+    var addrs = c.addresses || [];
+    if (!addrs.length) addrsEl.innerHTML = '<div style="color:#9ca3af">No saved addresses</div>';
+    else {
+      addrsEl.innerHTML = addrs.map(function(a) {
+        return '<div style="padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:6px;font-size:12px">' +
+          '<strong>' + escape(a.label || a.type || 'Address') + '</strong><br>' +
+          escape([a.addressLine1, a.addressLine2, a.city, a.state, a.pincode].filter(Boolean).join(', ')) +
+          '</div>';
+      }).join('');
+    }
+
+    document.getElementById('drawer-backdrop').style.display = 'block';
+    setTimeout(function(){ document.getElementById('cust-drawer').classList.add('open'); }, 10);
+  }).catch(function(e){ toast('Error: ' + e.message, 'error'); });
+}
+
+function closeDrawer() {
+  document.getElementById('cust-drawer').classList.remove('open');
+  setTimeout(function(){ document.getElementById('drawer-backdrop').style.display = 'none'; }, 250);
+}
+
+function adjustWallet() {
+  if (!currentCustomer) return;
+  var amt = prompt('Wallet adjustment amount (+ to add, - to deduct):');
+  if (!amt || isNaN(Number(amt))) { toast('Invalid amount', 'error'); return; }
+  var notes = prompt('Reason / notes:') || 'Admin adjustment';
+  api('PATCH', '/admin/users/' + currentCustomer.id + '/wallet', { amount: Number(amt), notes: notes }).then(function() {
+    toast('Wallet adjusted by ' + fmtCur(Number(amt)), 'success');
+    openCustomer(currentCustomer.id);
+  }).catch(function(e){ toast('Error: ' + e.message, 'error'); });
+}
+
+function toggleBlock() {
+  if (!currentCustomer) return;
+  var blocking = !currentCustomer.isBlocked;
+  if (!confirm((blocking ? 'Block' : 'Unblock') + ' ' + (currentCustomer.name || currentCustomer.phone) + '?')) return;
+  api('PATCH', '/admin/users/' + currentCustomer.id + '/block', { block: blocking }).then(function() {
+    toast((blocking ? 'Blocked' : 'Unblocked') + ' ' + (currentCustomer.name || currentCustomer.phone), 'success');
+    closeDrawer();
+    loadCustomers();
+  }).catch(function(e){ toast('Error: ' + e.message, 'error'); });
+}
+
+function viewOrders() {
+  closeDrawer();
+  window.location.href = 'orders.html';
+}
+
+function renderPagination() {
+  var el = document.getElementById('cust-pagination');
+  el.innerHTML = 'Showing ' + filteredCustomers.length + ' of ' + totalCount + ' customers' +
+    (currentOffset + PAGE_SIZE < totalCount ? ' <button class="btn btn-outline btn-sm" onclick="nextPage()">Next →</button>' : '') +
+    (currentOffset > 0 ? ' <button class="btn btn-outline btn-sm" onclick="prevPage()">← Prev</button>' : '');
+}
+
+function prevPage() { currentOffset = Math.max(0, currentOffset - PAGE_SIZE); fetchCustomers(); }
+function nextPage() { currentOffset += PAGE_SIZE; fetchCustomers(); }
+
+function exportCustomers() {
+  downloadCsv(filteredCustomers, [
+    { label: 'Name', key: 'name' },
+    { label: 'Phone', key: 'phone' },
+    { label: 'Email', key: 'email' },
+    { label: 'Wallet Balance', key: 'walletBalance' },
+    { label: 'Is Blocked', key: 'isBlocked' },
+    { label: 'Joined', key: 'createdAt' },
+  ], 'customers.csv');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!requireAuth()) return;
+  renderSidebar('customers');
+  loadCustomers();
+});
+</script>
+</body>
+</html>

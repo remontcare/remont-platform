@@ -831,16 +831,17 @@ model CorporateMember {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Review {
-  id        String   @id @default(cuid())
-  orderId   String
-  userId    String
-  vendorId  String?
-  serviceId String?
-  productId String?
-  rating    Int
-  comment   String?
-  photos    String[]
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  orderId    String
+  userId     String
+  vendorId   String?
+  serviceId  String?
+  productId  String?
+  rating     Int
+  comment    String?
+  photos     String[]
+  isApproved Boolean  @default(true)
+  createdAt  DateTime @default(now())
 
   order   Order          @relation(fields: [orderId], references: [id])
   user    User           @relation(fields: [userId], references: [id])

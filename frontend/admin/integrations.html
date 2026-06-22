@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Integrations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;margin-bottom:24px}
+.int-card{background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;overflow:hidden}
+.int-card-header{padding:16px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:12px}
+.int-card-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.int-card-title{font-size:15px;font-weight:700;color:#111827}
+.int-card-sub{font-size:12px;color:#9ca3af;margin-top:2px}
+.int-status{margin-left:auto;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px}
+.int-status.live{background:#dcfce7;color:#16a34a}
+.int-status.test{background:#fef3c7;color:#92400e}
+.int-status.off{background:#f3f4f6;color:#9ca3af}
+.int-card-body{padding:18px 20px}
+.int-field{margin-bottom:12px}
+.int-field label{font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em}
+.int-field input,.int-field select{width:100%;border:1px solid #e5e7eb;border-radius:7px;padding:8px 12px;font-size:13px;font-family:inherit;box-sizing:border-box}
+.int-field input:focus,.int-field select:focus{outline:none;border-color:#c4601a;box-shadow:0 0 0 2px rgba(196,96,26,.1)}
+.int-field .hint{font-size:11px;color:#9ca3af;margin-top:3px}
+.int-card-footer{padding:12px 20px;border-top:1px solid #f3f4f6;display:flex;gap:8px;align-items:center}
+.section-title{font-size:16px;font-weight:700;color:#111827;margin:0 0 14px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#d1d5db;display:inline-block;margin-right:6px}
+.status-dot.live{background:#22c55e}
+.status-dot.test{background:#f59e0b}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Integrations</h1><p>Payment gateways, communication providers, AI configuration</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Payment Gateways -->
+    <div class="section-title">💳 Payment Gateways</div>
+    <div class="int-grid">
+
+      <div class="int-card" id="card-razorpay">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#3b82f622">💳</div>
+          <div><div class="int-card-title">Razorpay</div><div class="int-card-sub">Recommended · Most popular in India</div></div>
+          <span class="int-status off" id="rzp-status">Not Configured</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>Key ID</label><input type="text" id="rzp-key-id" placeholder="rzp_live_..."></div>
+          <div class="int-field"><label>Key Secret</label><input type="password" id="rzp-key-secret" placeholder="••••••••"></div>
+          <div class="int-field"><label>Webhook Secret</label><input type="password" id="rzp-webhook-secret" placeholder="Webhook signing secret">
+            <div class="hint">Set in Razorpay Dashboard → Webhooks → your webhook URL: <code>/api/v1/payments/webhook</code></div>
+          </div>
+          <div class="int-field"><label>Mode</label>
+            <select id="rzp-mode">
+              <option value="test">Test (Sandbox)</option>
+              <option value="live">Live (Production)</option>
+            </select>
+          </div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="saveGateway('razorpay')">Save</button>
+          <button class="btn btn-outline btn-sm" onclick="testGateway('razorpay')">Test Connection</button>
+        </div>
+      </div>
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#7c3aed22">📱</div>
+          <div><div class="int-card-title">PhonePe</div><div class="int-card-sub">UPI-first gateway</div></div>
+          <span class="int-status off" id="phonepe-status">Coming Soon</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>Merchant ID</label><input type="text" id="phonepe-mid" placeholder="Merchant ID" disabled></div>
+          <div class="int-field"><label>Salt Key</label><input type="password" id="phonepe-salt" placeholder="Salt key" disabled></div>
+          <div class="int-field"><label>Salt Index</label><input type="text" id="phonepe-idx" placeholder="1" disabled></div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-outline btn-sm" disabled>Coming Soon</button>
+        </div>
+      </div>
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#059669 22">🏦</div>
+          <div><div class="int-card-title">Cashfree</div><div class="int-card-sub">Low MDR, fast settlement</div></div>
+          <span class="int-status off" id="cf-status">Coming Soon</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>App ID</label><input type="text" id="cf-appid" placeholder="App ID" disabled></div>
+          <div class="int-field"><label>Secret Key</label><input type="password" id="cf-secret" placeholder="Secret key" disabled></div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-outline btn-sm" disabled>Coming Soon</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- WhatsApp / SMS -->
+    <div class="section-title">💬 Communication</div>
+    <div class="int-grid">
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#25D36622">💬</div>
+          <div><div class="int-card-title">WhatsApp (MSG91)</div><div class="int-card-sub">OTP + transactional messages</div></div>
+          <span class="int-status off" id="wa-status">Not Configured</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>Auth Key</label><input type="password" id="wa-key" placeholder="MSG91 Auth Key"></div>
+          <div class="int-field"><label>OTP Template ID</label><input type="text" id="wa-otp-tpl" placeholder="OTP Flow Template ID"></div>
+          <div class="int-field"><label>Sender ID / From</label><input type="text" id="wa-sender" placeholder="REMINT or WhatsApp number"></div>
+          <div class="int-field"><label>WhatsApp Business Number</label><input type="text" id="wa-number" placeholder="+91 9876543210">
+            <div class="hint">Shown as "Contact Us" across the website</div>
+          </div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="saveWhatsApp()">Save</button>
+          <button class="btn btn-outline btn-sm" onclick="sendTestWhatsApp()">Send Test</button>
+        </div>
+      </div>
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#3b82f622">📧</div>
+          <div><div class="int-card-title">Email (SMTP)</div><div class="int-card-sub">Invoice delivery & notifications</div></div>
+          <span class="int-status off" id="email-status">Not Configured</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>SMTP Host</label><input type="text" id="email-host" placeholder="smtp.gmail.com"></div>
+          <div class="int-field"><label>SMTP Port</label><input type="text" id="email-port" placeholder="587"></div>
+          <div class="int-field"><label>Username / Email</label><input type="text" id="email-user" placeholder="noreply@remontindia.com"></div>
+          <div class="int-field"><label>Password / App Password</label><input type="password" id="email-pass" placeholder="••••••••"></div>
+          <div class="int-field"><label>From Name</label><input type="text" id="email-from" placeholder="Remont India"></div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="saveEmail()">Save</button>
+          <button class="btn btn-outline btn-sm" onclick="sendTestEmail()">Send Test</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- AI Providers -->
+    <div class="section-title">🤖 AI Providers</div>
+    <div class="int-grid">
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#10b98122">🤖</div>
+          <div><div class="int-card-title">OpenAI (GPT-4o)</div><div class="int-card-sub">Powers Remi AI chat + content generation</div></div>
+          <span class="int-status off" id="ai-openai-status">Not Configured</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>API Key</label><input type="password" id="ai-openai-key" placeholder="sk-..."></div>
+          <div class="int-field"><label>Model</label>
+            <select id="ai-openai-model">
+              <option value="gpt-4o-mini">GPT-4o Mini (Fast, cheap)</option>
+              <option value="gpt-4o">GPT-4o (Powerful)</option>
+              <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            </select>
+          </div>
+          <div class="int-field"><label>Provider</label>
+            <select id="ai-provider">
+              <option value="OPENAI">OpenAI</option>
+              <option value="NONE">Disabled (Rule-based fallback)</option>
+            </select>
+          </div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-primary btn-sm" onclick="saveAI()">Save</button>
+          <button class="btn btn-outline btn-sm" onclick="testAI()">Test AI</button>
+        </div>
+      </div>
+
+      <div class="int-card">
+        <div class="int-card-header">
+          <div class="int-card-icon" style="background:#f59e0b22">🌟</div>
+          <div><div class="int-card-title">Google Gemini</div><div class="int-card-sub">Alternative AI provider</div></div>
+          <span class="int-status off">Coming Soon</span>
+        </div>
+        <div class="int-card-body">
+          <div class="int-field"><label>API Key</label><input type="password" placeholder="Google Gemini API key" disabled></div>
+          <div class="int-field"><label>Model</label><select disabled><option>gemini-1.5-pro</option></select></div>
+        </div>
+        <div class="int-card-footer">
+          <button class="btn btn-outline btn-sm" disabled>Coming Soon</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Env Variable Guide -->
+    <div class="section-title">🔧 Railway Environment Variables</div>
+    <div style="background:#1e293b;border-radius:10px;padding:20px;color:#e2e8f0;font-family:monospace;font-size:12px;line-height:1.8">
+      <div style="color:#94a3b8;margin-bottom:8px"># Payment</div>
+      <div><span style="color:#7dd3fc">RAZORPAY_KEY_ID</span>=<span style="color:#86efac">rzp_live_xxxxx</span></div>
+      <div><span style="color:#7dd3fc">RAZORPAY_KEY_SECRET</span>=<span style="color:#86efac">your_secret</span></div>
+      <div><span style="color:#7dd3fc">RAZORPAY_WEBHOOK_SECRET</span>=<span style="color:#86efac">webhook_secret</span></div>
+      <div style="color:#94a3b8;margin-top:10px;margin-bottom:8px"># WhatsApp</div>
+      <div><span style="color:#7dd3fc">MSG91_AUTH_KEY</span>=<span style="color:#86efac">your_msg91_key</span></div>
+      <div><span style="color:#7dd3fc">MSG91_OTP_TEMPLATE_ID</span>=<span style="color:#86efac">template_id</span></div>
+      <div style="color:#94a3b8;margin-top:10px;margin-bottom:8px"># AI</div>
+      <div><span style="color:#7dd3fc">OPENAI_API_KEY</span>=<span style="color:#86efac">sk-...</span></div>
+      <div><span style="color:#7dd3fc">AI_PROVIDER</span>=<span style="color:#86efac">OPENAI</span></div>
+      <div style="color:#94a3b8;margin-top:10px;margin-bottom:8px"># Deploy command after setting vars:</div>
+      <div style="color:#fde68a">railway variables --service remont-platform --set "RAZORPAY_KEY_ID=rzp_live_xxx"</div>
+      <div style="color:#fde68a">railway up --service remont-platform</div>
+    </div>
+
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+var integrationData = {};
+
+function loadIntegrations() {
+  api('GET', '/admin/integrations').then(function(d) {
+    integrationData = d || {};
+    // Razorpay
+    if (d.payment) {
+      var rzpKey = d.payment['razorpay_key_id'];
+      if (rzpKey) { document.getElementById('rzp-key-id').value = rzpKey; }
+    }
+    // WhatsApp number
+    api('GET', '/admin/settings?group=contact').then(function(s) {
+      var wa = (s || []).find(function(x){ return x.key === 'whatsapp_number'; });
+      if (wa) document.getElementById('wa-number').value = wa.value;
+    }).catch(function(){});
+    updateStatuses();
+  }).catch(function(e){ toast('Could not load integrations: ' + e.message, 'warning'); });
+}
+
+function updateStatuses() {
+  // Check live status via payment config
+  api('GET', '/payments/config').then(function(d) {
+    var el = document.getElementById('rzp-status');
+    if (d && d.isLive) { el.textContent = 'Live'; el.className = 'int-status live'; }
+    else if (d && d.keyId) { el.textContent = 'Test Mode'; el.className = 'int-status test'; }
+    else { el.textContent = 'DEV Mock'; el.className = 'int-status off'; }
+  }).catch(function(){});
+}
+
+function saveGateway(gw) {
+  if (gw !== 'razorpay') { toast('Coming soon', 'warning'); return; }
+  var keyId = document.getElementById('rzp-key-id').value.trim();
+  var keySecret = document.getElementById('rzp-key-secret').value.trim();
+  var webhookSecret = document.getElementById('rzp-webhook-secret').value.trim();
+  var mode = document.getElementById('rzp-mode').value;
+  if (!keyId) { toast('Enter Key ID', 'error'); return; }
+  // Save to site settings
+  var data = {};
+  if (keyId) data['razorpay_key_id'] = keyId;
+  if (keySecret) data['razorpay_key_secret'] = keySecret;
+  if (webhookSecret) data['razorpay_webhook_secret'] = webhookSecret;
+  data['razorpay_mode'] = mode;
+  api('PATCH', '/admin/integrations/payment', data).then(function() {
+    toast('Razorpay settings saved. Update Railway env vars to take effect on backend.', 'success');
+    updateStatuses();
+  }).catch(function(e){ toast('Save failed: ' + e.message, 'error'); });
+}
+
+function testGateway(gw) {
+  api('GET', '/payments/config').then(function(d) {
+    if (d && d.isLive) toast('✓ Razorpay LIVE mode active. Key: ' + d.keyId, 'success');
+    else if (d && !d.isLive) toast('⚠ Razorpay in DEV mock mode. Set RAZORPAY_KEY_ID in Railway env vars.', 'warning');
+    else toast('Cannot reach payment config endpoint', 'error');
+  }).catch(function(e){ toast('Test failed: ' + e.message, 'error'); });
+}
+
+function saveWhatsApp() {
+  var key = document.getElementById('wa-key').value.trim();
+  var otpTpl = document.getElementById('wa-otp-tpl').value.trim();
+  var sender = document.getElementById('wa-sender').value.trim();
+  var number = document.getElementById('wa-number').value.trim();
+  var data = {};
+  if (key) data['whatsapp_auth_key'] = key;
+  if (otpTpl) data['whatsapp_otp_template_id'] = otpTpl;
+  if (sender) data['whatsapp_sender'] = sender;
+  api('PATCH', '/admin/integrations/whatsapp', data).then(function() {
+    // Also update the display number in settings
+    if (number) {
+      api('PATCH', '/admin/settings/whatsapp_number', { value: number, group: 'contact' }).then(function(){}).catch(function(){});
+    }
+    toast('WhatsApp settings saved. Update MSG91_AUTH_KEY in Railway env vars.', 'success');
+  }).catch(function(e){ toast('Save failed: ' + e.message, 'error'); });
+}
+
+function sendTestWhatsApp() {
+  toast('Test WhatsApp: Send OTP from the customer login flow to verify MSG91 is active.', 'warning');
+}
+
+function saveEmail() {
+  var host = document.getElementById('email-host').value.trim();
+  var port = document.getElementById('email-port').value.trim();
+  var user = document.getElementById('email-user').value.trim();
+  var pass = document.getElementById('email-pass').value.trim();
+  var from = document.getElementById('email-from').value.trim();
+  var data = {};
+  if (host) data['email_host'] = host;
+  if (port) data['email_port'] = port;
+  if (user) data['email_user'] = user;
+  if (pass) data['email_password'] = pass;
+  if (from) data['email_from'] = from;
+  api('PATCH', '/admin/integrations/email', data).then(function() {
+    toast('Email settings saved.', 'success');
+  }).catch(function(e){ toast('Save failed: ' + e.message, 'error'); });
+}
+
+function sendTestEmail() {
+  toast('Email sending is not yet implemented in the backend.', 'warning');
+}
+
+function saveAI() {
+  var key = document.getElementById('ai-openai-key').value.trim();
+  var model = document.getElementById('ai-openai-model').value;
+  var provider = document.getElementById('ai-provider').value;
+  var data = {};
+  if (key) data['ai_openai_key'] = key;
+  if (model) data['ai_openai_model'] = model;
+  if (provider) data['ai_provider'] = provider;
+  api('PATCH', '/admin/integrations/ai', data).then(function() {
+    toast('AI settings saved. Update OPENAI_API_KEY + AI_PROVIDER in Railway env vars.', 'success');
+  }).catch(function(e){ toast('Save failed: ' + e.message, 'error'); });
+}
+
+function testAI() {
+  api('POST', '/admin/ai/generate', { type: 'SERVICE', name: 'Test Service', context: 'Integration test' }).then(function(d) {
+    toast('AI test OK: ' + JSON.stringify(d).slice(0, 80), 'success');
+  }).catch(function(e){ toast('AI test failed: ' + e.message + ' — Check OPENAI_API_KEY in Railway.', 'error'); });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!requireAuth()) return;
+  renderSidebar('integrations');
+  loadIntegrations();
+});
+</script>
+</body>
+</html>

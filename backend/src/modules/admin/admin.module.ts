@@ -1190,6 +1190,234 @@ Return JSON with:
   async updateMembershipPlan(id: string, data: any) {
     return this.prisma.membershipPlan.update({ where: { id }, data });
   }
+
+  // ─── Customers (CRM) ──────────────────────────────────────────────────
+  async listCustomers(opts: { q?: string; limit?: number; offset?: number; cityId?: string }) {
+    const where: any = { role: 'CUSTOMER' };
+    if (opts.q) {
+      where.OR = [
+        { name: { contains: opts.q, mode: 'insensitive' } },
+        { phone: { contains: opts.q } },
+        { email: { contains: opts.q, mode: 'insensitive' } },
+      ];
+    }
+    if (opts.cityId) where.cityId = opts.cityId;
+    const [customers, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true, name: true, phone: true, email: true, createdAt: true,
+          isBlocked: true, walletBalance: true, cityId: true,
+          _count: { select: { orders: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: opts.limit || 100,
+        skip: opts.offset || 0,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return { customers, total };
+  }
+
+  async getCustomer(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        orders: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, orderNumber: true, status: true, totalAmount: true, createdAt: true },
+        },
+        addresses: true,
+        walletTransactions: { orderBy: { createdAt: 'desc' }, take: 5 },
+      },
+    });
+  }
+
+  // ─── Reports ──────────────────────────────────────────────────────────
+  async salesReport(opts: { from?: string; to?: string }) {
+    const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
+    const to = opts.to ? new Date(opts.to) : new Date();
+    const [orders, revenue, byStatus, topServices, topProducts] = await Promise.all([
+      this.prisma.order.count({ where: { createdAt: { gte: from, lte: to } } }),
+      this.prisma.order.aggregate({
+        where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' },
+        _sum: { totalAmount: true, remontCommission: true },
+      }),
+      this.prisma.order.groupBy({
+        by: ['status'],
+        where: { createdAt: { gte: from, lte: to } },
+        _count: true,
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.orderItem.groupBy({
+        by: ['serviceId'],
+        where: { order: { createdAt: { gte: from, lte: to } }, serviceId: { not: null } },
+        _count: true,
+        _sum: { totalPrice: true },
+        orderBy: { _count: { serviceId: 'desc' } },
+        take: 10,
+      }),
+      this.prisma.orderItem.groupBy({
+        by: ['productId'],
+        where: { order: { createdAt: { gte: from, lte: to } }, productId: { not: null } },
+        _count: true,
+        _sum: { totalPrice: true },
+        orderBy: { _count: { productId: 'desc' } },
+        take: 10,
+      }),
+    ]);
+    return {
+      period: { from, to },
+      summary: {
+        totalOrders: orders,
+        totalRevenue: Number(revenue._sum.totalAmount || 0),
+        platformCommission: Number(revenue._sum.remontCommission || 0),
+      },
+      byStatus,
+      topServices,
+      topProducts,
+    };
+  }
+
+  async ordersReport(opts: { from?: string; to?: string; status?: string; city?: string }) {
+    const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
+    const to = opts.to ? new Date(opts.to) : new Date();
+    const where: any = { createdAt: { gte: from, lte: to } };
+    if (opts.status) where.status = opts.status;
+    if (opts.city) where.cityName = opts.city;
+    const [orders, byStatus, byChannel, avgValue] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        select: {
+          id: true, orderNumber: true, status: true, totalAmount: true,
+          paymentStatus: true, channel: true, cityName: true, createdAt: true,
+          customer: { select: { name: true, phone: true } },
+          vendor: { select: { fullName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      this.prisma.order.groupBy({ by: ['status'], where, _count: true, _sum: { totalAmount: true } }),
+      this.prisma.order.groupBy({ by: ['channel'], where, _count: true }),
+      this.prisma.order.aggregate({ where: { ...where, paymentStatus: 'PAID' }, _avg: { totalAmount: true } }),
+    ]);
+    return {
+      period: { from, to },
+      orders,
+      byStatus,
+      byChannel,
+      avgOrderValue: Number(avgValue._avg.totalAmount || 0),
+    };
+  }
+
+  async vendorReport() {
+    const [topVendors, pendingApprovals, byCity] = await Promise.all([
+      this.prisma.serviceVendor.findMany({
+        where: { status: 'ACTIVE' as any },
+        select: {
+          id: true, fullName: true, rating: true, totalEarnings: true, totalJobsCompleted: true,
+          skills: true, currentCity: true, user: { select: { phone: true } },
+        },
+        orderBy: { totalJobsCompleted: 'desc' },
+        take: 50,
+      }),
+      this.prisma.serviceVendor.count({ where: { status: { in: ['PENDING', 'UNDER_REVIEW'] as any } } }),
+      this.prisma.serviceVendor.groupBy({ by: ['currentCity'], _count: true }),
+    ]);
+    return { topVendors, pendingApprovals, byCity };
+  }
+
+  async financialReport(opts: { from?: string; to?: string }) {
+    const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
+    const to = opts.to ? new Date(opts.to) : new Date();
+    const [revenue, byGateway, recentTx, refunds, walletCredits] = await Promise.all([
+      this.prisma.order.aggregate({
+        where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' },
+        _sum: { totalAmount: true, gstAmount: true, remontCommission: true },
+        _count: true,
+      }),
+      this.prisma.paymentTransaction.groupBy({
+        by: ['gateway'],
+        where: { createdAt: { gte: from, lte: to }, status: 'PAID' },
+        _count: true,
+        _sum: { amount: true },
+      }),
+      this.prisma.paymentTransaction.findMany({
+        where: { createdAt: { gte: from, lte: to } },
+        select: { gateway: true, status: true, amount: true, createdAt: true, gatewayOrderId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      this.prisma.order.count({ where: { createdAt: { gte: from, lte: to }, paymentStatus: 'REFUNDED' } }),
+      this.prisma.walletTransaction.aggregate({
+        where: { createdAt: { gte: from, lte: to }, type: 'CREDIT' },
+        _sum: { amount: true },
+        _count: true,
+      }),
+    ]);
+    return {
+      period: { from, to },
+      revenue: {
+        gross: Number(revenue._sum.totalAmount || 0),
+        gst: Number(revenue._sum.gstAmount || 0),
+        commission: Number(revenue._sum.remontCommission || 0),
+        paidOrders: revenue._count,
+      },
+      byGateway,
+      recentTransactions: recentTx,
+      refunds,
+      walletCredits: { total: Number(walletCredits._sum.amount || 0), count: walletCredits._count },
+    };
+  }
+
+  // ─── Payment Transactions ─────────────────────────────────────────────
+  async listPaymentTransactions(opts: { status?: string; gateway?: string; limit?: number; offset?: number }) {
+    const where: any = {};
+    if (opts.status) where.status = opts.status;
+    if (opts.gateway) where.gateway = opts.gateway;
+    const [transactions, total] = await Promise.all([
+      this.prisma.paymentTransaction.findMany({
+        where,
+        include: { order: { select: { orderNumber: true, status: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: opts.limit || 100,
+        skip: opts.offset || 0,
+      }),
+      this.prisma.paymentTransaction.count({ where }),
+    ]);
+    return { transactions, total };
+  }
+
+  // ─── Integrations Config ──────────────────────────────────────────────
+  async getIntegrations() {
+    const settings = await this.prisma.siteSetting.findMany({
+      where: { group: { in: ['payment', 'whatsapp', 'sms', 'email', 'ai'] } },
+    });
+    const grouped: Record<string, any> = {};
+    for (const s of settings) {
+      if (!grouped[s.group]) grouped[s.group] = {};
+      grouped[s.group][s.key] = s.value;
+    }
+    return grouped;
+  }
+
+  async updateIntegration(group: string, data: Record<string, string>) {
+    const ops = Object.entries(data).map(([key, value]) =>
+      this.prisma.siteSetting.upsert({
+        where: { key },
+        create: { key, value, label: key.replace(/_/g, ' '), group },
+        update: { value },
+      }),
+    );
+    await Promise.all(ops);
+    return { success: true };
+  }
+
+  // ─── Review approve ───────────────────────────────────────────────────
+  async approveReview(id: string) {
+    return this.prisma.review.update({ where: { id }, data: { isApproved: true } }).catch(() => null);
+  }
 }
 
 // ─── Controller ─────────────────────────────────────────────────────────────
@@ -1402,6 +1630,44 @@ export class AdminController {
 
   // Service Man Enquiries (vendor registrations = vendor pending)
   @Get('servicemen-enquiries') servicemenEnquiries() { return this.admin.listServicemenEnquiries(); }
+
+  // Dashboard alias
+  @Get('dashboard') dashboard() { return this.admin.fullStats(); }
+
+  // Customers CRM
+  @Get('customers') customers(
+    @Query('q') q?: string, @Query('limit') limit?: number,
+    @Query('offset') offset?: number, @Query('cityId') cityId?: string,
+  ) { return this.admin.listCustomers({ q, limit: limit ? +limit : 100, offset: offset ? +offset : 0, cityId }); }
+  @Get('customers/:id') customerOne(@Param('id') id: string) { return this.admin.getCustomer(id); }
+
+  // Reports
+  @Get('reports/sales') reportSales(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.admin.salesReport({ from, to });
+  }
+  @Get('reports/orders') reportOrders(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('status') status?: string, @Query('city') city?: string,
+  ) { return this.admin.ordersReport({ from, to, status, city }); }
+  @Get('reports/vendors') reportVendors() { return this.admin.vendorReport(); }
+  @Get('reports/financial') reportFinancial(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.admin.financialReport({ from, to });
+  }
+
+  // Payment Transactions
+  @Get('payments') adminPayments(
+    @Query('status') status?: string, @Query('gateway') gateway?: string,
+    @Query('limit') limit?: number, @Query('offset') offset?: number,
+  ) { return this.admin.listPaymentTransactions({ status, gateway, limit: limit ? +limit : 100, offset: offset ? +offset : 0 }); }
+
+  // Integrations
+  @Get('integrations') getIntegrations() { return this.admin.getIntegrations(); }
+  @Patch('integrations/:group') updateIntegration(@Param('group') group: string, @Body() b: Record<string, string>) {
+    return this.admin.updateIntegration(group, b);
+  }
+
+  // Review approve
+  @Patch('reviews/:id/approve') approveReview(@Param('id') id: string) { return this.admin.approveReview(id); }
 }
 
 @Module({

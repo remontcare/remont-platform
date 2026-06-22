@@ -105,17 +105,19 @@ var SIDEBAR_HTML = '<div class="sidebar">' +
   '<div class="sidebar-brand"><div class="logo">Remont <span>ADMIN</span></div><div class="tagline">Platform Management</div></div>' +
   '<div class="nav-group"><div class="nav-label">Overview</div>' +
     '<a class="nav-item" href="/admin/dashboard.html" data-page="dashboard"><span class="nav-icon">📊</span> Dashboard</a>' +
-    '<a class="nav-item" href="/admin/staff.html" data-page="staff"><span class="nav-icon">👔</span> Staff</a>' +
+    '<a class="nav-item" href="/admin/reports.html" data-page="reports"><span class="nav-icon">📈</span> Reports</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">People</div>' +
-    '<a class="nav-item" href="/admin/users.html" data-page="users"><span class="nav-icon">👥</span> Customers</a>' +
+    '<a class="nav-item" href="/admin/customers.html" data-page="customers"><span class="nav-icon">👥</span> Customers</a>' +
+    '<a class="nav-item" href="/admin/users.html" data-page="users"><span class="nav-icon">👤</span> All Users</a>' +
     '<a class="nav-item" href="/admin/vendors.html" data-page="vendors"><span class="nav-icon">🏪</span> Service Men</a>' +
     '<a class="nav-item" href="/admin/membership.html" data-page="membership"><span class="nav-icon">💎</span> Membership</a>' +
     '<a class="nav-item" href="/admin/corporate.html" data-page="corporate"><span class="nav-icon">🏢</span> Corporate</a>' +
     '<a class="nav-item" href="/admin/newsletters.html" data-page="newsletters"><span class="nav-icon">✉️</span> Newsletters</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">Commerce</div>' +
-    '<a class="nav-item" href="/admin/orders.html" data-page="orders"><span class="nav-icon">📦</span> Customer Orders</a>' +
+    '<a class="nav-item" href="/admin/orders.html" data-page="orders"><span class="nav-icon">📦</span> Orders</a>' +
+    '<a class="nav-item" href="/admin/payments.html" data-page="payments"><span class="nav-icon">💳</span> Payments</a>' +
     '<a class="nav-item" href="/admin/invoices.html" data-page="invoices"><span class="nav-icon">🧾</span> Invoices</a>' +
     '<a class="nav-item" href="/admin/wallet.html" data-page="wallet"><span class="nav-icon">💰</span> Wallet</a>' +
     '<a class="nav-item" href="/admin/amc.html" data-page="amc"><span class="nav-icon">🔒</span> AMC Plans</a>' +
@@ -123,7 +125,7 @@ var SIDEBAR_HTML = '<div class="sidebar">' +
     '<a class="nav-item" href="/admin/taxes.html" data-page="taxes"><span class="nav-icon">📊</span> Taxes</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">CRM</div>' +
-    '<a class="nav-item" href="/admin/leads.html" data-page="leads"><span class="nav-icon">📈</span> Leads</a>' +
+    '<a class="nav-item" href="/admin/leads.html" data-page="leads"><span class="nav-icon">🎯</span> Leads</a>' +
     '<a class="nav-item" href="/admin/reviews.html" data-page="reviews"><span class="nav-icon">⭐</span> Reviews</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">Catalog</div>' +
@@ -137,11 +139,10 @@ var SIDEBAR_HTML = '<div class="sidebar">' +
     '<a class="nav-item" href="/admin/blogs.html" data-page="blogs"><span class="nav-icon">📝</span> Blog</a>' +
     '<a class="nav-item" href="/admin/faqs.html" data-page="faqs"><span class="nav-icon">❓</span> FAQs</a>' +
   '</div>' +
-  '<div class="nav-group"><div class="nav-label">AI</div>' +
+  '<div class="nav-group"><div class="nav-label">Platform</div>' +
     '<a class="nav-item" href="/admin/ai-tools.html" data-page="ai-tools"><span class="nav-icon">🤖</span> AI Tools</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">Settings</div>' +
-    '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> General Setting</a>' +
+    '<a class="nav-item" href="/admin/integrations.html" data-page="integrations"><span class="nav-icon">🔌</span> Integrations</a>' +
+    '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> Settings</a>' +
     '<a class="nav-item" href="/admin/staff.html" data-page="staff"><span class="nav-icon">👔</span> Staff</a>' +
   '</div>' +
   '<div class="sidebar-footer">Remont India © 2025</div>' +

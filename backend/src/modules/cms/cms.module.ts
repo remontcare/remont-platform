@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Body, Query,
+  Module, Injectable, Controller, Get, Post, Body, Query, Param,
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -116,7 +116,7 @@ export class CmsController {
   }
 
   @Get('blogs/:slug')
-  blog(@Query('slug') slug: string) { return this.cms.getBlogBySlug(slug); }
+  blog(@Param('slug') slug: string) { return this.cms.getBlogBySlug(slug); }
 
   @Get('ads')
   ads(@Query('type') type?: string, @Query('city') city?: string) { return this.cms.getAds(type, city); }
