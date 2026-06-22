@@ -20,6 +20,7 @@
   <div class="topbar">
     <div class="topbar-left"><h1>CRM — Leads</h1><p>Pipeline, funnel and conversion tracking</p></div>
     <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportLeads()">⬇ Export CSV</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
@@ -83,6 +84,7 @@ renderSidebar('leads');
 requireAuth();
 
 var COLORS = { NEW:'blue', CONTACTED:'purple', SITE_VISIT:'yellow', QUOTATION_SENT:'yellow', NEGOTIATION:'yellow', WON:'green', LOST:'red' };
+var _leadsCache = [];
 
 function loadFunnel() {
   api('GET', '/admin/crm/funnel').then(function(data) {
@@ -105,6 +107,7 @@ function load() {
   if (source) params += '&source=' + source;
   document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
   api('GET', '/admin/leads?' + params).then(function(list) {
+    _leadsCache = list || [];
     if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><h3>No leads found</h3></div>'; return; }
     var rows = list.map(function(l) {
       var lastAct = l.activities && l.activities[0];
@@ -153,6 +156,21 @@ function confirmStatus() {
 function del(id) {
   if (!confirm('Delete this lead permanently?')) return;
   api('DELETE', '/admin/leads/' + id).then(function() { toast('Lead deleted', 'warning'); load(); loadFunnel(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function exportLeads() {
+  downloadCsv(_leadsCache, [
+    { label: 'Name', key: 'name' },
+    { label: 'Phone', key: 'phone' },
+    { label: 'Email', key: 'email' },
+    { label: 'Source', key: 'source' },
+    { label: 'Service', key: 'service' },
+    { label: 'City', key: 'city' },
+    { label: 'Status', key: 'status' },
+    { label: 'Assigned Agent', key: 'assignedAgent.name' },
+    { label: 'Notes', key: 'notes' },
+    { label: 'Created', key: 'createdAt' },
+  ], 'leads-' + new Date().toISOString().slice(0,10) + '.csv');
 }
 
 loadFunnel();

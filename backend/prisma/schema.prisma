@@ -442,6 +442,7 @@ model ServiceVendor {
   completedJobs       Int          @default(0)
   totalEarnings       Decimal      @default(0) @db.Decimal(12, 2)
   pendingPayout       Decimal      @default(0) @db.Decimal(12, 2)
+  rejectionReason     String?
   createdAt           DateTime     @default(now())
 
   user             User              @relation(fields: [userId], references: [id])
@@ -464,6 +465,8 @@ model VendorDocument {
   uploadedAt DateTime @default(now())
 
   vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
 }
 
 model ProductVendor {
@@ -629,6 +632,8 @@ model OrderItem {
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
 }
 
 model ExtraWorkItem {
@@ -817,6 +822,8 @@ model CorporateMember {
 
   account CorporateAccount @relation(fields: [accountId], references: [id])
   user    User             @relation(fields: [userId], references: [id])
+
+  @@index([accountId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -843,6 +850,9 @@ model Review {
 
   @@index([vendorId])
   @@index([productId])
+  @@index([serviceId])
+  @@index([orderId])
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -938,7 +948,7 @@ model CrmActivity {
 
 model AmcPlan {
   id                 String      @id @default(cuid())
-  type               AmcPlanType
+  type               AmcPlanType @unique
   name               String
   description        String?
   durationMonths     Int         @default(12)

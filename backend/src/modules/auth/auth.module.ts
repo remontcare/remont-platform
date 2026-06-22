@@ -35,7 +35,7 @@ class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'dev-secret',
+      secretOrKey: process.env.JWT_SECRET!,
     });
   }
   async validate(payload: JwtPayload) {
@@ -121,8 +121,7 @@ export class AuthService {
 
   async adminPinLogin(phone: string, pin: string) {
     const adminPin = process.env.ADMIN_PIN;
-    if (!adminPin) throw new BadRequestException('ADMIN_PIN env var not set on server');
-    if (pin !== adminPin) throw new UnauthorizedException('Invalid admin PIN');
+    if (!adminPin || pin !== adminPin) throw new UnauthorizedException('Invalid admin PIN');
 
     const user = await this.prisma.user.upsert({
       where: { phone },
@@ -140,7 +139,7 @@ export class AuthService {
   async refresh(refreshToken: string) {
     try {
       const payload = await this.jwt.verifyAsync(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
+        secret: process.env.JWT_REFRESH_SECRET!,
       });
       const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
       if (!user) throw new UnauthorizedException();
@@ -154,7 +153,7 @@ export class AuthService {
     const payload = { sub: userId, phone, role };
     const accessToken = await this.jwt.signAsync(payload);
     const refreshToken = await this.jwt.signAsync(payload, {
-      secret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
+      secret: process.env.JWT_REFRESH_SECRET!,
       expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
     });
     return { accessToken, refreshToken, tokenType: 'Bearer' };
@@ -191,7 +190,7 @@ export class AuthController {
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       useFactory: () => ({
-        secret: process.env.JWT_SECRET || 'dev-secret',
+        secret: process.env.JWT_SECRET!,
         signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
       }),
     }),

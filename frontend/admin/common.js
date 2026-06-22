@@ -62,6 +62,22 @@ function fmtCur(n) {
   return '₹' + Number(n).toLocaleString('en-IN');
 }
 
+function downloadCsv(rows, columns, filename) {
+  if (!rows || !rows.length) { toast('No data to export', 'warning'); return; }
+  var csvRows = [columns.map(function(c) { return '"' + c.label + '"'; }).join(',')];
+  rows.forEach(function(row) {
+    csvRows.push(columns.map(function(c) {
+      var val = c.key.split('.').reduce(function(obj, k) { return obj && obj[k] != null ? obj[k] : ''; }, row);
+      return '"' + String(val).replace(/"/g, '""') + '"';
+    }).join(','));
+  });
+  var blob = new Blob(['﻿' + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV downloaded (' + rows.length + ' rows)', 'success');
+}
+
 function escape(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -73,10 +89,15 @@ function badge(text, color) {
 }
 
 var STATUS_COLORS = {
-  PENDING: 'yellow', CONFIRMED: 'blue', VENDOR_ASSIGNED: 'blue', EN_ROUTE: 'purple',
-  IN_PROGRESS: 'purple', COMPLETED: 'green', CANCELLED: 'red', REFUNDED: 'orange',
+  PENDING: 'yellow', PENDING_PAYMENT: 'yellow', CONFIRMED: 'blue',
+  VENDOR_ASSIGNED: 'blue', VENDOR_EN_ROUTE: 'purple', EN_ROUTE: 'purple',
+  STARTED: 'purple', IN_PROGRESS: 'purple', EXTRA_WORK_ADDED: 'orange',
+  COMPLETED: 'green', INVOICED: 'green', CLOSED: 'gray',
+  CANCELLED: 'red', REFUNDED: 'orange',
   ACTIVE: 'green', SUSPENDED: 'red', REJECTED: 'red', PENDING_VERIFICATION: 'yellow',
-  PAID: 'green', UNPAID: 'yellow', FAILED: 'red', PENDING: 'yellow',
+  PAID: 'green', UNPAID: 'yellow', FAILED: 'red', PARTIAL: 'orange',
+  NEW: 'blue', CONTACTED: 'purple', QUALIFIED: 'green', CONVERTED: 'green',
+  LOST: 'red', ON_HOLD: 'yellow',
 };
 function statusBadge(s) { return badge(s, STATUS_COLORS[s] || 'gray'); }
 
@@ -115,6 +136,9 @@ var SIDEBAR_HTML = '<div class="sidebar">' +
     '<a class="nav-item" href="/admin/ads.html" data-page="ads"><span class="nav-icon">📢</span> Seasonal Ads</a>' +
     '<a class="nav-item" href="/admin/blogs.html" data-page="blogs"><span class="nav-icon">📝</span> Blog</a>' +
     '<a class="nav-item" href="/admin/faqs.html" data-page="faqs"><span class="nav-icon">❓</span> FAQs</a>' +
+  '</div>' +
+  '<div class="nav-group"><div class="nav-label">AI</div>' +
+    '<a class="nav-item" href="/admin/ai-tools.html" data-page="ai-tools"><span class="nav-icon">🤖</span> AI Tools</a>' +
   '</div>' +
   '<div class="nav-group"><div class="nav-label">Settings</div>' +
     '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> General Setting</a>' +

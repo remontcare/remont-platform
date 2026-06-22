@@ -83,9 +83,33 @@ export class WhatsappService {
       data: { toPhone, messageType: type, messageBody: body, templateUsed: type, status: 'SENT', ...meta },
     });
 
-    if (process.env.NODE_ENV === 'production' && process.env.MSG91_AUTH_KEY) {
-      // TODO: real MSG91 API call here
-      this.logger.log(`📤 WhatsApp sent to ${toPhone} (${type})`);
+    if (process.env.MSG91_AUTH_KEY) {
+      const mobileNumber = toPhone.replace('+', '').replace(/\s/g, '');
+      try {
+        const res = await fetch('https://api.msg91.com/api/v5/flow/', {
+          method: 'POST',
+          headers: {
+            'authkey': process.env.MSG91_AUTH_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            template_id: process.env.MSG91_OTP_TEMPLATE_ID || process.env.MSG91_TEMPLATE_ID,
+            short_url: '0',
+            realTimeResponse: '1',
+            recipients: [{ mobiles: mobileNumber, message: body }],
+          }),
+        });
+        const result = await res.json() as any;
+        if (!res.ok || result.type === 'error') {
+          this.logger.warn(`MSG91 send failed for ${toPhone}: ${JSON.stringify(result)}`);
+          await this.prisma.whatsappLog.update({ where: { id: log.id }, data: { status: 'FAILED' } });
+        } else {
+          this.logger.log(`📤 MSG91 sent to ${toPhone} (${type})`);
+        }
+      } catch (e) {
+        this.logger.error(`MSG91 HTTP error for ${toPhone}: ${e.message}`);
+        await this.prisma.whatsappLog.update({ where: { id: log.id }, data: { status: 'FAILED' } });
+      }
     } else {
       this.logger.debug(`📱 [DEV] WhatsApp → ${toPhone}:\n${body}`);
     }

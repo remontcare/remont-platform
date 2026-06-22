@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -26,6 +27,7 @@ import { AmcModule } from './modules/amc/amc.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CmsModule } from './modules/cms/cms.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -65,14 +67,18 @@ import { HealthModule } from './modules/health/health.module';
     NotificationsModule,
     PaymentsModule,
 
-    // NEW Strategic modules
-    CrmModule,      // Lead management, funnel, conversions
-    AmcModule,      // Annual Maintenance Contracts
-    AiAgentModule,  // Inbuilt AI chat (ready for LLM swap)
+    // Strategic modules
+    CrmModule,
+    AmcModule,
+    AiAgentModule,
 
     AdminModule,
     CmsModule,
+    ReviewsModule,
     HealthModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

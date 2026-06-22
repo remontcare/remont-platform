@@ -1,4 +1,5 @@
-import { Module, Injectable, Controller, Post, Body, Get, Param, UseGuards, BadRequestException, Logger, Headers } from '@nestjs/common';
+import { Module, Injectable, Controller, Post, Body, UseGuards, BadRequestException, Logger, Headers, Req } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -127,8 +128,12 @@ export class PaymentsController {
   }
 
   @Public() @Post('webhook')
-  webhook(@Headers('x-razorpay-signature') signature: string, @Body() body: any) {
-    return this.p.handleWebhook(JSON.stringify(body), signature);
+  webhook(
+    @Headers('x-razorpay-signature') signature: string,
+    @Req() req: RawBodyRequest<any>,
+  ) {
+    const rawBody = req.rawBody?.toString('utf8') ?? '';
+    return this.p.handleWebhook(rawBody, signature);
   }
 }
 

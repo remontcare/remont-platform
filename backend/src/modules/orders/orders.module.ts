@@ -6,9 +6,10 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { OrderStatus, OrderType, BookingChannel, UserRole } from '@prisma/client';
 import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, generateOrderNumber } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -22,6 +23,7 @@ class GuestBookingDto {
   @IsString() serviceId: string;
   @IsString() cityId: string;
   @IsString() fullAddress: string;
+  @IsOptional() @IsString() pincode?: string;
   @IsDateString() slotDate: string;
   @IsString() slotTime: string; // e.g. "10:00", "14:00", "18:00"
   @IsOptional() @IsString() notes?: string;
@@ -210,8 +212,7 @@ export class OrdersService {
     const remontCommission = Math.round(serviceAmount * 0.15 * 100) / 100;
     const vendorPayout = serviceAmount - remontCommission;
 
-    const count = await this.prisma.order.count();
-    const orderNumber = generateOrderNumber('REM', count);
+    const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     const order = await this.prisma.order.create({
@@ -232,6 +233,27 @@ export class OrdersService {
     });
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, order.id, couponDiscount);
+
+    if (walletUsed > 0) {
+      const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+      if (!user || Number(user.walletBalance) < walletUsed) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+      const newBalance = Number(user.walletBalance) - walletUsed;
+      await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: walletUsed } } });
+      await this.prisma.walletTransaction.create({
+        data: {
+          userId: customerId,
+          type: 'DEBIT',
+          reason: 'ORDER_PAYMENT',
+          amount: walletUsed,
+          balanceAfter: newBalance,
+          orderId: order.id,
+          notes: `Payment for order ${order.orderNumber}`,
+        },
+      });
+    }
+
     return order;
   }
 
@@ -260,6 +282,7 @@ export class OrdersService {
     if (!v) throw new ForbiddenException();
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (order.status !== OrderStatus.VENDOR_EN_ROUTE) throw new BadRequestException('Order is not en-route');
     if (order.startOtp !== otp) throw new BadRequestException('Invalid OTP');
     return this.prisma.order.update({
       where: { id: orderId },
@@ -272,6 +295,9 @@ export class OrdersService {
     if (!v) throw new ForbiddenException();
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+      throw new BadRequestException('Order cannot be completed at this stage');
+    }
     const completed = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl },
@@ -367,7 +393,7 @@ export class OrdersService {
 @Injectable()
 export class GuestBookingService {
   private readonly logger = new Logger(GuestBookingService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private dispatch: DispatchService) {}
 
   async book(dto: GuestBookingDto) {
     // Find or create customer by phone
@@ -379,7 +405,7 @@ export class GuestBookingService {
           name: dto.name,
           email: dto.email || undefined,
           role: UserRole.CUSTOMER,
-          isVerified: false,
+          isVerified: true,
         },
       });
     }
@@ -406,14 +432,12 @@ export class GuestBookingService {
     const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
     const totalAmount = serviceAmount + gstAmount;
 
-    // Parse slot datetime
-    const [hours, minutes] = dto.slotTime.split(':').map(Number);
-    const slotStart = new Date(dto.slotDate);
-    slotStart.setHours(hours, minutes || 0, 0, 0);
+    // Parse slot datetime as IST (UTC+5:30) to avoid local-timezone drift
+    const paddedTime = dto.slotTime.length === 5 ? dto.slotTime : `${dto.slotTime}:00`;
+    const slotStart = new Date(`${dto.slotDate}T${paddedTime}:00+05:30`);
     const slotEnd = new Date(slotStart.getTime() + svc.durationMinutes * 60 * 1000);
 
-    const count = await this.prisma.order.count();
-    const orderNumber = generateOrderNumber('REM', count);
+    const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Create address inline (full address as free text)
@@ -424,7 +448,7 @@ export class GuestBookingService {
         fullAddress: dto.fullAddress,
         city: city.name,
         state: city.state,
-        pincode: '000000',
+        pincode: dto.pincode || '000000',
         latitude: city.latitude,
         longitude: city.longitude,
         isDefault: false,
@@ -467,6 +491,7 @@ export class GuestBookingService {
     });
 
     this.logger.log(`📋 Guest booking: ${orderNumber} for ${dto.name} (${dto.phone})`);
+    this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Guest dispatch failed: ${e.message}`));
     return {
       orderNumber: order.orderNumber,
       orderId: order.id,
@@ -487,6 +512,7 @@ export class GuestBookingService {
         vendor: { include: { user: { select: { name: true, phone: true } } } },
         address: { select: { city: true, fullAddress: true } },
         extraWorkItems: { where: { customerApproved: false } },
+        customer: { select: { phone: true } },
       },
     });
     if (!order) throw new NotFoundException('Order not found');

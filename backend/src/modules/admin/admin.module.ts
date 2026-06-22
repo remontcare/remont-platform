@@ -1,15 +1,24 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards,
-  NotFoundException, BadRequestException,
+  NotFoundException, BadRequestException, Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole, VendorStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, slugify } from '../../common';
+import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+  private readonly openaiKey: string;
+  private readonly openaiModel: string;
+
+  constructor(private prisma: PrismaService, private config: ConfigService) {
+    this.openaiKey = config.get('OPENAI_API_KEY', '');
+    this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
+  }
 
   // ─── Dashboard stats ────────────────────────────────────────────────
 
@@ -173,7 +182,7 @@ export class AdminService {
   }
 
   async rejectVendor(vendorId: string, reason: string) {
-    return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { status: VendorStatus.REJECTED } });
+    return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { status: VendorStatus.REJECTED, rejectionReason: reason || null } });
   }
 
   async suspendVendor(vendorId: string) {
@@ -574,7 +583,31 @@ export class AdminService {
   // ─── AI Content Generation ───────────────────────────────────────────
 
   async generateAiContent(type: 'SERVICE' | 'PRODUCT' | 'CATEGORY', name: string, context?: string) {
-    const base = context ? `${name}. ${context}` : name;
+    if (this.openaiKey) {
+      try {
+        const prompt = `Generate content for a Remont India home services listing:
+Type: ${type}
+Name: ${name}
+${context ? `Context: ${context}` : ''}
+
+Return JSON with:
+- description: 2-3 sentence professional description (60-80 words)
+- seoTitle: SEO title (50-60 chars)
+- seoDesc: meta description (140-155 chars)
+- seoKeywords: array of 5 relevant keywords
+- faq: array of 4 objects with {q, a} — common customer questions and answers`;
+
+        const raw = await openAiComplete(this.openaiKey, this.openaiModel, [
+          { role: 'system', content: 'You are a marketing copywriter for Remont India home services. Return only valid JSON.' },
+          { role: 'user', content: prompt },
+        ], { maxTokens: 500, jsonMode: true });
+        return parseAiJson(raw);
+      } catch (e) {
+        this.logger.warn(`AI content generation failed, using template: ${e.message}`);
+      }
+    }
+
+    // Fallback: template-based content
     const description = `Experience premium ${name} by Remont India's certified professionals. Our experts use industry-grade equipment and follow quality-checked processes to deliver exceptional results. Book in minutes, get service at your doorstep — 100% satisfaction guaranteed.`;
     const seoTitle = `${name} | Best ${name} Service in India | Remont India`;
     const seoDesc = `Book ${name} online at the best price. Certified professionals, doorstep service, 100% satisfaction guarantee. Available in 11+ cities across India.`;
@@ -759,7 +792,6 @@ export class AdminService {
       primeMembers, totalServices, inactiveServices,
     ] = await Promise.all([
       this.prisma.review.count(),
-      this.prisma.review.count().catch(() => 0), // Bug fix: Review has no isVerified
       this.prisma.review.aggregate({ _avg: { rating: true } }),
       this.prisma.newsletter.count({ where: { isActive: true } }).catch(() => 0),
       this.prisma.coupon.count({ where: { isActive: true } }),

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — AI Tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+  .ai-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media(max-width:900px){ .ai-grid { grid-template-columns:1fr; } }
+  .ai-card { background:#fff; border-radius:12px; padding:22px; border:1px solid #e5e7eb; }
+  .ai-card h3 { font-size:15px; font-weight:700; margin:0 0 4px; color:#111; }
+  .ai-card p { font-size:12px; color:#6b7280; margin:0 0 14px; }
+  .ai-output { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:14px; font-size:13px; min-height:80px; white-space:pre-wrap; color:#374151; margin-top:12px; display:none; }
+  .ai-output.visible { display:block; }
+  .ai-label { font-size:11px; font-weight:600; color:#374151; display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px; }
+  .ai-input { width:100%; padding:9px 12px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:13px; margin-bottom:10px; box-sizing:border-box; font-family:inherit; }
+  .ai-input:focus { outline:none; border-color:#c4601a; }
+  .ai-btn { padding:9px 18px; background:#c4601a; color:#fff; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .ai-btn:disabled { opacity:.6; cursor:not-allowed; }
+  .copy-btn { padding:5px 12px; background:#f3f4f6; color:#374151; border:1px solid #e5e7eb; border-radius:6px; font-size:12px; cursor:pointer; float:right; margin-top:-2px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; margin:2px; }
+  .tag-hot { background:#fef2f2; color:#ef4444; }
+  .tag-warm { background:#fff7ed; color:#f97316; }
+  .tag-cold { background:#eff6ff; color:#3b82f6; }
+  .insight-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:8px; font-size:13px; }
+  .insight-dot { width:6px; height:6px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+  .dot-green { background:#22c55e; }
+  .dot-red { background:#ef4444; }
+  .dot-blue { background:#3b82f6; }
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>🤖 AI Tools</h1><p>Powered by OpenAI — Generate content, qualify leads, get insights</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Row 1: Description generators -->
+    <div class="ai-grid" style="margin-bottom:20px">
+
+      <!-- Service Description -->
+      <div class="ai-card">
+        <h3>🔧 Service Description Generator</h3>
+        <p>Auto-generate professional marketing copy for any service listing</p>
+        <label class="ai-label">Service Name</label>
+        <input id="svc-name" class="ai-input" placeholder="e.g. AC Deep Cleaning & Gas Refill" />
+        <label class="ai-label">Category</label>
+        <input id="svc-cat" class="ai-input" placeholder="e.g. Air Conditioning" />
+        <label class="ai-label">Duration (minutes, optional)</label>
+        <input id="svc-dur" class="ai-input" type="number" placeholder="e.g. 90" />
+        <button class="ai-btn" onclick="genServiceDesc()">Generate →</button>
+        <div id="svc-out" class="ai-output"></div>
+      </div>
+
+      <!-- Product Description -->
+      <div class="ai-card">
+        <h3>🛍️ Product Description Generator</h3>
+        <p>Create compelling product listings with features and taglines</p>
+        <label class="ai-label">Product Name</label>
+        <input id="prd-name" class="ai-input" placeholder="e.g. Daikin 1.5T Inverter Split AC" />
+        <label class="ai-label">Category</label>
+        <input id="prd-cat" class="ai-input" placeholder="e.g. Air Conditioners" />
+        <label class="ai-label">Specs (optional)</label>
+        <input id="prd-specs" class="ai-input" placeholder="e.g. 5-star rating, WiFi enabled" />
+        <button class="ai-btn" onclick="genProductDesc()">Generate →</button>
+        <div id="prd-out" class="ai-output"></div>
+      </div>
+
+    </div>
+
+    <!-- Row 2: SEO + Lead Qualification -->
+    <div class="ai-grid" style="margin-bottom:20px">
+
+      <!-- SEO Generator -->
+      <div class="ai-card">
+        <h3>🔍 SEO Content Generator</h3>
+        <p>Generate meta titles, descriptions, and tags for any page</p>
+        <label class="ai-label">Content Type</label>
+        <select id="seo-type" class="ai-input">
+          <option value="service">Service Page</option>
+          <option value="blog">Blog Post</option>
+          <option value="city-page">City Landing Page</option>
+        </select>
+        <label class="ai-label">Subject</label>
+        <input id="seo-subject" class="ai-input" placeholder="e.g. AC Repair in Mumbai" />
+        <label class="ai-label">Target Keywords (optional)</label>
+        <input id="seo-keywords" class="ai-input" placeholder="e.g. AC repair, air conditioner service Mumbai" />
+        <button class="ai-btn" onclick="genSeo()">Generate →</button>
+        <div id="seo-out" class="ai-output"></div>
+      </div>
+
+      <!-- Lead Qualifier -->
+      <div class="ai-card">
+        <h3>📈 Lead Qualifier</h3>
+        <p>Score leads automatically and get recommended next actions</p>
+        <label class="ai-label">Customer Name</label>
+        <input id="lead-name" class="ai-input" placeholder="Rajesh Kumar" />
+        <label class="ai-label">City</label>
+        <input id="lead-city" class="ai-input" placeholder="Mumbai" />
+        <label class="ai-label">Service Interested</label>
+        <input id="lead-svc" class="ai-input" placeholder="AC Repair" />
+        <label class="ai-label">Notes / Conversation</label>
+        <textarea id="lead-notes" class="ai-input" rows="2" placeholder="Customer mentioned urgent AC issue, budget ₹2000-3000…"></textarea>
+        <button class="ai-btn" onclick="qualifyLead()">Qualify →</button>
+        <div id="lead-out" class="ai-output"></div>
+      </div>
+
+    </div>
+
+    <!-- Row 3: Insights + Vendor Reply -->
+    <div class="ai-grid" style="margin-bottom:20px">
+
+      <!-- AI Insights -->
+      <div class="ai-card">
+        <h3>📊 AI Business Insights</h3>
+        <p>Get AI-powered analysis of platform performance and growth recommendations</p>
+        <button class="ai-btn" onclick="getInsights()" style="margin-bottom:0">Analyze Platform →</button>
+        <div id="insights-out" class="ai-output"></div>
+      </div>
+
+      <!-- Vendor Reply Suggestion -->
+      <div class="ai-card">
+        <h3>💬 Vendor Auto-Reply Suggester</h3>
+        <p>Help vendors craft professional replies to customer messages</p>
+        <label class="ai-label">Customer Message</label>
+        <textarea id="reply-msg" class="ai-input" rows="3" placeholder="Paste the customer's message here…"></textarea>
+        <label class="ai-label">Service Type</label>
+        <input id="reply-svc" class="ai-input" placeholder="AC Repair" />
+        <label class="ai-label">Order Status</label>
+        <select id="reply-status" class="ai-input">
+          <option value="CONFIRMED">Confirmed</option>
+          <option value="VENDOR_ASSIGNED">Vendor Assigned</option>
+          <option value="IN_PROGRESS">In Progress</option>
+          <option value="COMPLETED">Completed</option>
+        </select>
+        <button class="ai-btn" onclick="suggestReply()">Suggest Reply →</button>
+        <div id="reply-out" class="ai-output"></div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+requireAuth();
+renderSidebar('ai-tools');
+
+function showOutput(id, content, copyText) {
+  var el = document.getElementById(id);
+  el.innerHTML = (copyText ? '<button class="copy-btn" onclick="copyText(\'' + id + '\')">Copy</button>' : '') + content;
+  el.className = 'ai-output visible';
+}
+
+function copyText(id) {
+  var el = document.getElementById(id);
+  navigator.clipboard.writeText(el.innerText.replace('Copy', '').trim());
+  toast('Copied!', 'success');
+}
+
+function setLoading(btnId, loading) {
+  var btn = document.querySelector('[onclick="' + btnId + '()"]');
+  if (btn) { btn.disabled = loading; btn.textContent = loading ? 'Generating…' : (btn.getAttribute('data-label') || 'Generate →'); }
+}
+
+function genServiceDesc() {
+  var name = document.getElementById('svc-name').value.trim();
+  var cat = document.getElementById('svc-cat').value.trim();
+  var dur = document.getElementById('svc-dur').value;
+  if (!name || !cat) { toast('Enter service name and category', 'error'); return; }
+  showOutput('svc-out', 'Generating…', false);
+  api('POST', '/ai/tools/generate/service-description', { name, category: cat, duration: dur ? +dur : undefined })
+    .then(function(r) {
+      var html = '<strong>Short Summary:</strong>\n' + r.shortSummary + '\n\n<strong>Description:</strong>\n' + r.description + '\n\n<strong>Benefits:</strong>\n' + r.benefits.map(function(b) { return '• ' + b; }).join('\n');
+      showOutput('svc-out', html, true);
+    }).catch(function(e) { showOutput('svc-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Generation failed', 'error'); });
+}
+
+function genProductDesc() {
+  var name = document.getElementById('prd-name').value.trim();
+  var cat = document.getElementById('prd-cat').value.trim();
+  var specs = document.getElementById('prd-specs').value.trim();
+  if (!name || !cat) { toast('Enter product name and category', 'error'); return; }
+  showOutput('prd-out', 'Generating…', false);
+  api('POST', '/ai/tools/generate/product-description', { name, category: cat, specs: specs || undefined })
+    .then(function(r) {
+      var html = '<strong>Tagline:</strong>\n' + r.shortSummary + '\n\n<strong>Description:</strong>\n' + r.description + '\n\n<strong>Key Features:</strong>\n' + r.keyFeatures.map(function(f) { return '• ' + f; }).join('\n');
+      showOutput('prd-out', html, true);
+    }).catch(function(e) { showOutput('prd-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Generation failed', 'error'); });
+}
+
+function genSeo() {
+  var type = document.getElementById('seo-type').value;
+  var subject = document.getElementById('seo-subject').value.trim();
+  var keywords = document.getElementById('seo-keywords').value.trim();
+  if (!subject) { toast('Enter a subject', 'error'); return; }
+  showOutput('seo-out', 'Generating…', false);
+  api('POST', '/ai/tools/generate/seo', { type, subject, keywords: keywords || undefined })
+    .then(function(r) {
+      var html = '<strong>Meta Title:</strong>\n' + r.metaTitle + '\n\n<strong>Meta Description:</strong>\n' + r.metaDescription + '\n\n<strong>H1:</strong>\n' + r.h1 + '\n\n<strong>Tags:</strong>\n' + r.suggestedTags.join(', ');
+      showOutput('seo-out', html, true);
+    }).catch(function(e) { showOutput('seo-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Generation failed', 'error'); });
+}
+
+function qualifyLead() {
+  var name = document.getElementById('lead-name').value.trim();
+  var city = document.getElementById('lead-city').value.trim();
+  var svc = document.getElementById('lead-svc').value.trim();
+  var notes = document.getElementById('lead-notes').value.trim();
+  if (!name) { toast('Enter customer name', 'error'); return; }
+  showOutput('lead-out', 'Qualifying…', false);
+  api('POST', '/ai/tools/qualify-lead', { customerName: name, customerPhone: '', city, serviceInterested: svc, notes })
+    .then(function(r) {
+      var tierClass = r.tier === 'HOT' ? 'tag-hot' : r.tier === 'WARM' ? 'tag-warm' : 'tag-cold';
+      var html = '<span class="tag ' + tierClass + '">' + r.tier + ' LEAD</span>  Score: <strong>' + r.score + '/100</strong>\n\n<strong>Reason:</strong>\n' + r.reason + '\n\n<strong>Next Action:</strong>\n→ ' + r.nextAction + '\n\n<strong>Est. Value:</strong> ₹' + Number(r.estimatedValue).toLocaleString('en-IN');
+      showOutput('lead-out', html, false);
+    }).catch(function(e) { showOutput('lead-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Qualification failed', 'error'); });
+}
+
+function getInsights() {
+  showOutput('insights-out', 'Analyzing platform data…', false);
+  api('GET', '/ai/tools/insights')
+    .then(function(r) {
+      var hl = r.highlights.map(function(h) { return '<div class="insight-row"><div class="insight-dot dot-green"></div>' + h + '</div>'; }).join('');
+      var rk = r.risks.map(function(h) { return '<div class="insight-row"><div class="insight-dot dot-red"></div>' + h + '</div>'; }).join('');
+      var sg = r.suggestions.map(function(h) { return '<div class="insight-row"><div class="insight-dot dot-blue"></div>' + h + '</div>'; }).join('');
+      var html = '<strong>Summary:</strong>\n' + r.summary + '\n\n<strong>✅ Highlights:</strong>\n' + hl + '\n<strong>⚠️ Risks:</strong>\n' + rk + '\n<strong>💡 Suggestions:</strong>\n' + sg;
+      showOutput('insights-out', html, false);
+    }).catch(function(e) { showOutput('insights-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Analysis failed', 'error'); });
+}
+
+function suggestReply() {
+  var msg = document.getElementById('reply-msg').value.trim();
+  var svc = document.getElementById('reply-svc').value.trim();
+  var status = document.getElementById('reply-status').value;
+  if (!msg) { toast('Enter a customer message', 'error'); return; }
+  showOutput('reply-out', 'Generating reply…', false);
+  api('POST', '/ai/tools/vendor-reply', { message: msg, service: svc, orderStatus: status })
+    .then(function(r) {
+      var html = '<strong>Suggested Reply:</strong>\n\n' + r.reply + '\n\n<em>Tone: ' + r.tone + '</em>';
+      showOutput('reply-out', html, true);
+    }).catch(function(e) { showOutput('reply-out', 'Error: ' + (e.message || 'Failed'), false); toast(e.message || 'Suggestion failed', 'error'); });
+}
+</script>
+</body>
+</html>

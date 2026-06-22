@@ -14,10 +14,12 @@ export class ServiceVendorsService {
   constructor(private prisma: PrismaService, private wa: WhatsappService) {}
 
   async register(userId: string, data: any) {
+    // Strip fields a vendor must not self-assign
+    const { status, rating, completedJobs, totalEarnings, pendingPayout, isOnline, ...safeData } = data;
     return this.prisma.serviceVendor.upsert({
       where: { userId },
-      create: { userId, ...data },
-      update: data,
+      create: { userId, ...safeData },
+      update: safeData,
     });
   }
 
@@ -116,7 +118,8 @@ export class ProductVendorsService {
   constructor(private prisma: PrismaService) {}
 
   async register(userId: string, data: any) {
-    return this.prisma.productVendor.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+    const { status, rating, totalEarnings, ...safeData } = data;
+    return this.prisma.productVendor.upsert({ where: { userId }, create: { userId, ...safeData }, update: safeData });
   }
 
   async profile(userId: string) {

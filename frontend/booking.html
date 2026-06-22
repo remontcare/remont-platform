@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Book a Service — Remont India</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#f8fafc;color:#111827;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-weight:800;font-size:18px;color:#111827}
+.logo span{color:#c4601a}
+.back-link{font-size:13px;color:#6b7280;text-decoration:none;display:flex;align-items:center;gap:4px}
+.back-link:hover{color:#c4601a}
+.hero{background:linear-gradient(135deg,#c4601a 0%,#e8782a 100%);color:#fff;padding:40px 24px;text-align:center}
+.hero h1{font-size:28px;font-weight:800;margin-bottom:8px}
+.hero p{font-size:15px;opacity:.9}
+.container{max-width:700px;margin:0 auto;padding:32px 16px}
+.card{background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:24px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.card-title{font-size:14px;font-weight:700;color:#374151;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.step-num{width:24px;height:24px;background:#c4601a;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+.form-label .req{color:#ef4444}
+.form-control{width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 14px;font-size:14px;font-family:inherit;transition:border-color .15s;background:#fff}
+.form-control:focus{outline:none;border-color:#c4601a;box-shadow:0 0 0 3px rgba(196,96,26,.1)}
+.form-control::placeholder{color:#9ca3af}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.slots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+.slot-btn{padding:10px 6px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;font-size:12px;font-weight:500;cursor:pointer;text-align:center;transition:all .15s;color:#374151}
+.slot-btn:hover{border-color:#c4601a;color:#c4601a}
+.slot-btn.selected{background:#c4601a;color:#fff;border-color:#c4601a}
+.slot-btn.disabled{opacity:.4;cursor:not-allowed}
+.service-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:6px}
+.svc-card{border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;cursor:pointer;transition:all .15s}
+.svc-card:hover{border-color:#c4601a}
+.svc-card.selected{border-color:#c4601a;background:#fef3ec}
+.svc-card-name{font-size:13px;font-weight:600;margin-bottom:2px}
+.svc-card-cat{font-size:11px;color:#9ca3af}
+.svc-card-price{font-size:14px;font-weight:700;color:#c4601a;margin-top:4px}
+.summary-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px}
+.summary-row:last-child{border-bottom:none;font-weight:700;font-size:15px;padding-top:12px}
+.btn-book{width:100%;padding:16px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .2s;margin-top:8px;letter-spacing:.3px}
+.btn-book:hover{opacity:.9}
+.btn-book:disabled{opacity:.5;cursor:not-allowed}
+.trust-row{display:flex;gap:16px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.trust-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280}
+/* Confirmation screen */
+.confirm-screen{display:none;text-align:center;padding:32px 16px}
+.confirm-icon{font-size:64px;margin-bottom:16px}
+.confirm-title{font-size:24px;font-weight:800;color:#22c55e;margin-bottom:8px}
+.confirm-sub{color:#6b7280;font-size:14px;margin-bottom:24px}
+.order-card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;padding:20px;text-align:left;max-width:400px;margin:0 auto 20px}
+.order-card-row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #f3f4f6}
+.order-card-row:last-child{border-bottom:none;font-weight:700}
+.track-link{display:inline-block;margin-top:12px;padding:10px 24px;background:#c4601a;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px}
+/* Toast */
+#toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:14px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.15);transition:opacity .3s}
+.toast-success{background:#22c55e}.toast-error{background:#ef4444}.toast-warning{background:#f59e0b}
+/* Loading skeleton */
+.svc-loading{text-align:center;padding:20px;color:#9ca3af;font-size:13px}
+@media(max-width:500px){
+  .slots{grid-template-columns:repeat(3,1fr)}
+  .service-grid{grid-template-columns:1fr}
+  .hero h1{font-size:22px}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a href="/" class="logo">Remont <span>India</span></a>
+  <a href="/" class="back-link">← Back to Home</a>
+</div>
+
+<div id="booking-screen">
+  <div class="hero">
+    <h1>Book a Home Service</h1>
+    <p>Certified professionals · On-time guarantee · 30-day service warranty</p>
+  </div>
+
+  <div class="container">
+
+    <!-- Step 1: Select Service -->
+    <div class="card">
+      <div class="card-title"><span class="step-num">1</span> Select a Service</div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="sel-category" class="form-control" onchange="loadServicesByCategory()">
+          <option value="">All categories</option>
+        </select>
+      </div>
+      <div id="service-grid" class="service-grid">
+        <div class="svc-loading">Loading services…</div>
+      </div>
+    </div>
+
+    <!-- Step 2: Select City -->
+    <div class="card">
+      <div class="card-title"><span class="step-num">2</span> Select Your City</div>
+      <div class="form-group">
+        <select id="sel-city" class="form-control" onchange="updateSummary()">
+          <option value="">Choose your city…</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Step 3: Date & Time -->
+    <div class="card">
+      <div class="card-title"><span class="step-num">3</span> Choose Date & Time</div>
+      <div class="form-group">
+        <label class="form-label">Preferred Date <span class="req">*</span></label>
+        <input type="date" id="sel-date" class="form-control" onchange="updateSummary()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Preferred Time Slot <span class="req">*</span></label>
+        <div class="slots" id="time-slots">
+          <button class="slot-btn" data-time="07:00" onclick="selectSlot(this)">7:00 AM</button>
+          <button class="slot-btn" data-time="09:00" onclick="selectSlot(this)">9:00 AM</button>
+          <button class="slot-btn selected" data-time="10:00" onclick="selectSlot(this)">10:00 AM</button>
+          <button class="slot-btn" data-time="11:00" onclick="selectSlot(this)">11:00 AM</button>
+          <button class="slot-btn" data-time="12:00" onclick="selectSlot(this)">12:00 PM</button>
+          <button class="slot-btn" data-time="14:00" onclick="selectSlot(this)">2:00 PM</button>
+          <button class="slot-btn" data-time="15:00" onclick="selectSlot(this)">3:00 PM</button>
+          <button class="slot-btn" data-time="17:00" onclick="selectSlot(this)">5:00 PM</button>
+          <button class="slot-btn" data-time="18:00" onclick="selectSlot(this)">6:00 PM</button>
+          <button class="slot-btn" data-time="19:00" onclick="selectSlot(this)">7:00 PM</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Your Details -->
+    <div class="card">
+      <div class="card-title"><span class="step-num">4</span> Your Details</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Full Name <span class="req">*</span></label>
+          <input id="inp-name" class="form-control" placeholder="Rahul Sharma" type="text">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mobile Number <span class="req">*</span></label>
+          <input id="inp-phone" class="form-control" placeholder="+91 98765 43210" type="tel">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email (optional)</label>
+        <input id="inp-email" class="form-control" placeholder="you@email.com" type="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Full Address <span class="req">*</span></label>
+        <textarea id="inp-address" class="form-control" rows="2" placeholder="Flat No, Building, Street, Area, PIN Code"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Special Instructions (optional)</label>
+        <textarea id="inp-notes" class="form-control" rows="2" placeholder="e.g. Call before arriving, dog at home, 2nd floor no lift…"></textarea>
+      </div>
+    </div>
+
+    <!-- Summary + Book -->
+    <div class="card">
+      <div class="card-title">Order Summary</div>
+      <div id="summary-content">
+        <div style="color:#9ca3af;font-size:13px;text-align:center;padding:12px">Select a service to see pricing</div>
+      </div>
+      <button class="btn-book" onclick="submitBooking()" id="book-btn">Confirm Booking</button>
+      <div class="trust-row">
+        <span class="trust-item">✅ Free cancellation</span>
+        <span class="trust-item">🔒 Secure booking</span>
+        <span class="trust-item">⏱ 30-min confirmation</span>
+        <span class="trust-item">🛡 Service warranty</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation screen -->
+<div id="confirm-screen" class="confirm-screen">
+  <div class="confirm-icon">🎉</div>
+  <div class="confirm-title">Booking Confirmed!</div>
+  <div class="confirm-sub">Our team will call you within 30 minutes to confirm the slot.</div>
+  <div class="order-card">
+    <div class="order-card-row"><span>Order Number</span><strong id="conf-order-num">—</strong></div>
+    <div class="order-card-row"><span>Service</span><span id="conf-service">—</span></div>
+    <div class="order-card-row"><span>Date &amp; Time</span><span id="conf-slot">—</span></div>
+    <div class="order-card-row"><span>City</span><span id="conf-city">—</span></div>
+    <div class="order-card-row"><span>Total (incl. GST)</span><span id="conf-amount">—</span></div>
+  </div>
+  <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Save your order number to track the booking status.</p>
+  <a href="/" class="track-link" style="background:#f3f4f6;color:#374151;margin-right:8px">← Back to Home</a>
+  <a href="javascript:void(0)" class="track-link" onclick="openTracker()">Track Order</a>
+</div>
+
+<!-- Track Order Modal (floating) -->
+<div id="track-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:none;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:24px;width:90%;max-width:440px">
+    <div style="font-weight:700;font-size:16px;margin-bottom:12px">Track Your Order</div>
+    <div class="form-group"><label class="form-label">Order Number</label><input id="track-num" class="form-control" placeholder="REM-XXXX-XX"></div>
+    <div class="form-group"><label class="form-label">Your Phone Number</label><input id="track-phone" class="form-control" placeholder="+91 98765 43210" type="tel"></div>
+    <div id="track-result" style="margin-top:12px;display:none"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="document.getElementById('track-modal').style.display='none'" style="flex:1;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px">Cancel</button>
+      <button onclick="trackOrder()" style="flex:2;padding:10px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Track</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+var allServices = [];
+var allCategories = [];
+var allCities = [];
+var selectedService = null;
+var selectedCityId = null;
+var selectedTime = '10:00';
+var lastOrderNum = '';
+
+function toast(msg, type) {
+  var t = document.createElement('div');
+  t.className = 'toast toast-'+(type||'success');
+  t.textContent = msg;
+  document.getElementById('toast-container').appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); },300); },3500);
+}
+
+function fmtCur(n) { return n!=null?'₹'+Number(n).toLocaleString('en-IN'):'—'; }
+
+function api(method, path, body) {
+  var opts={method:method.toUpperCase(),headers:{'Content-Type':'application/json'}};
+  if (body) opts.body=JSON.stringify(body);
+  return fetch(API_BASE+'/api/v1'+path,opts).then(function(r){
+    return r.json().then(function(d){
+      if (!r.ok) throw new Error((d&&d.message)?String(d.message):('Error '+r.status));
+      return d.data!==undefined?d.data:d;
+    });
+  });
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────
+
+function init() {
+  // Set default date to today
+  var today = new Date().toISOString().slice(0,10);
+  document.getElementById('sel-date').value = today;
+  document.getElementById('sel-date').min = today;
+
+  // Load categories + services + cities in parallel
+  Promise.all([
+    api('GET','/services/categories'),
+    api('GET','/services?isActive=true'),
+    api('GET','/cities?isActive=true'),
+  ]).then(function(results){
+    allCategories = results[0]||[];
+    allServices = results[1]||[];
+    allCities = results[2]||[];
+
+    // Populate category select
+    var catOpts = allCategories.map(function(c){
+      return '<option value="'+c.id+'">'+c.icon+' '+c.name+'</option>';
+    }).join('');
+    document.getElementById('sel-category').innerHTML='<option value="">All categories</option>'+catOpts;
+
+    // Populate cities
+    var cityOpts = allCities.map(function(c){
+      return '<option value="'+c.id+'">'+c.name+', '+c.state+'</option>';
+    }).join('');
+    document.getElementById('sel-city').innerHTML='<option value="">Choose your city…</option>'+cityOpts;
+
+    renderServices(allServices);
+
+    // Pre-select city from URL param or localStorage
+    var params = new URLSearchParams(window.location.search);
+    var preCity = params.get('city');
+    var preService = params.get('service');
+    if (preCity) {
+      var cityMatch = allCities.find(function(c){ return c.id===preCity||c.name.toLowerCase()===preCity.toLowerCase(); });
+      if (cityMatch) document.getElementById('sel-city').value = cityMatch.id;
+    }
+    if (preService) {
+      var svcMatch = allServices.find(function(s){ return s.id===preService||s.slug===preService; });
+      if (svcMatch) selectServiceCard(svcMatch);
+    }
+  }).catch(function(e){ toast('Error loading data: '+e.message,'error'); });
+}
+
+function renderServices(svcs) {
+  if (!svcs||!svcs.length) {
+    document.getElementById('service-grid').innerHTML='<div class="svc-loading">No services available. Please run seed from Admin → Dashboard.</div>';
+    return;
+  }
+  var html = svcs.map(function(s) {
+    var isSelected = selectedService && selectedService.id===s.id;
+    return '<div class="svc-card'+(isSelected?' selected':'')+'" onclick="selectServiceCard('+JSON.stringify(s).replace(/"/g,'&quot;')+')" data-id="'+s.id+'">'+
+      '<div class="svc-card-name">'+s.name+'</div>'+
+      '<div class="svc-card-cat">'+(s.category&&s.category.name?s.category.name:'')+'</div>'+
+      '<div class="svc-card-price">'+fmtCur(s.basePrice)+'</div>'+
+      '<div style="font-size:10px;color:#9ca3af;margin-top:2px">⏱ '+s.durationMinutes+' mins</div>'+
+    '</div>';
+  }).join('');
+  document.getElementById('service-grid').innerHTML = html;
+}
+
+function loadServicesByCategory() {
+  var catId = document.getElementById('sel-category').value;
+  var filtered = catId ? allServices.filter(function(s){ return s.categoryId===catId; }) : allServices;
+  renderServices(filtered);
+  if (selectedService && catId && selectedService.categoryId !== catId) {
+    selectedService = null;
+    updateSummary();
+  }
+}
+
+function selectServiceCard(svc) {
+  if (typeof svc === 'string') { try { svc=JSON.parse(svc); } catch(e){ return; } }
+  selectedService = svc;
+  document.querySelectorAll('.svc-card').forEach(function(c){ c.classList.remove('selected'); });
+  var el = document.querySelector('.svc-card[data-id="'+svc.id+'"]');
+  if (el) el.classList.add('selected');
+  updateSummary();
+  // Auto scroll to step 2
+  document.getElementById('sel-city').closest('.card').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function selectSlot(btn) {
+  document.querySelectorAll('.slot-btn').forEach(function(b){ b.classList.remove('selected'); });
+  btn.classList.add('selected');
+  selectedTime = btn.dataset.time;
+  updateSummary();
+}
+
+function updateSummary() {
+  selectedCityId = document.getElementById('sel-city').value;
+  if (!selectedService) {
+    document.getElementById('summary-content').innerHTML='<div style="color:#9ca3af;font-size:13px;text-align:center;padding:12px">Select a service to see pricing</div>';
+    return;
+  }
+  var price = Number(selectedService.basePrice);
+  var gst = Math.round(price*0.18*100)/100;
+  var total = price + gst;
+  var date = document.getElementById('sel-date').value;
+  var city = '';
+  if (selectedCityId) {
+    var cityObj = allCities.find(function(c){ return c.id===selectedCityId; });
+    if (cityObj) city = cityObj.name;
+  }
+  var slotLabel = selectedTime ? formatTime(selectedTime) : '—';
+  var dateLabel = date ? new Date(date).toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'long'}) : '—';
+  document.getElementById('summary-content').innerHTML =
+    '<div class="summary-row"><span>Service</span><span>'+selectedService.name+'</span></div>'+
+    (city?'<div class="summary-row"><span>City</span><span>'+city+'</span></div>':'')+
+    '<div class="summary-row"><span>Slot</span><span>'+dateLabel+', '+slotLabel+'</span></div>'+
+    '<div class="summary-row"><span>Service Charge</span><span>'+fmtCur(price)+'</span></div>'+
+    '<div class="summary-row"><span>GST (18%)</span><span>'+fmtCur(gst)+'</span></div>'+
+    '<div class="summary-row"><span>Total</span><span>'+fmtCur(total)+'</span></div>';
+}
+
+function formatTime(t) {
+  var parts=t.split(':');var h=parseInt(parts[0]);
+  var ampm=h>=12?'PM':'AM'; h=h>12?h-12:(h===0?12:h);
+  return h+':00 '+ampm;
+}
+
+function submitBooking() {
+  var name = document.getElementById('inp-name').value.trim();
+  var phone = document.getElementById('inp-phone').value.trim();
+  var email = document.getElementById('inp-email').value.trim();
+  var address = document.getElementById('inp-address').value.trim();
+  var notes = document.getElementById('inp-notes').value.trim();
+  var date = document.getElementById('sel-date').value;
+
+  if (!selectedService) { toast('Please select a service','error'); return; }
+  if (!selectedCityId) { toast('Please select your city','error'); return; }
+  if (!date) { toast('Please select a date','error'); return; }
+  if (!name) { toast('Please enter your name','error'); return; }
+  if (!phone||phone.length<8) { toast('Please enter a valid mobile number','error'); return; }
+  if (!address) { toast('Please enter your address','error'); return; }
+
+  var btn = document.getElementById('book-btn');
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+
+  api('POST','/orders/public/book',{
+    name, phone, email:email||undefined,
+    serviceId: selectedService.id,
+    cityId: selectedCityId,
+    slotDate: date,
+    slotTime: selectedTime,
+    fullAddress: address,
+    notes: notes||undefined,
+    channel: 'WEBSITE',
+  }).then(function(result){
+    lastOrderNum = result.orderNumber;
+    // Show confirmation screen
+    document.getElementById('booking-screen').style.display='none';
+    var conf = document.getElementById('confirm-screen');
+    conf.style.display='block';
+    document.getElementById('conf-order-num').textContent = result.orderNumber;
+    document.getElementById('conf-service').textContent = result.service || selectedService.name;
+    var slotDate = result.slot ? new Date(result.slot).toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : date+' '+formatTime(selectedTime);
+    document.getElementById('conf-slot').textContent = slotDate;
+    document.getElementById('conf-city').textContent = result.city || '';
+    document.getElementById('conf-amount').textContent = result.totalAmount ? fmtCur(result.totalAmount) : '—';
+    window.scrollTo(0,0);
+  }).catch(function(e){
+    toast(e.message,'error');
+    btn.disabled=false;
+    btn.textContent='Confirm Booking';
+  });
+}
+
+function openTracker() {
+  document.getElementById('track-num').value = lastOrderNum||'';
+  document.getElementById('track-phone').value = document.getElementById('inp-phone')?document.getElementById('inp-phone').value:'';
+  document.getElementById('track-result').style.display='none';
+  document.getElementById('track-modal').style.display='flex';
+}
+
+function trackOrder() {
+  var num = document.getElementById('track-num').value.trim();
+  var phone = document.getElementById('track-phone').value.trim();
+  if (!num||!phone) { toast('Enter order number and phone','error'); return; }
+  api('GET','/orders/public/track/'+encodeURIComponent(num)+'?phone='+encodeURIComponent(phone)).then(function(o){
+    var statusColors={CONFIRMED:'#3b82f6',VENDOR_ASSIGNED:'#8b5cf6',IN_PROGRESS:'#f59e0b',COMPLETED:'#22c55e',CANCELLED:'#ef4444'};
+    var sc=statusColors[o.status]||'#6b7280';
+    var html='<div style="background:#f9fafb;border-radius:8px;padding:12px;font-size:13px">'+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb"><span>Order</span><strong>'+o.orderNumber+'</strong></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb"><span>Status</span><span style="background:'+sc+'22;color:'+sc+';padding:2px 10px;border-radius:20px;font-weight:600;font-size:11px">'+o.status+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb"><span>Service</span><span>'+(o.service||'—')+'</span></div>'+
+      (o.vendor?'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb"><span>Technician</span><span>'+(o.vendor.name||'Assigned')+'</span></div>':'')+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0"><span>Total</span><strong>'+(o.totalAmount?fmtCur(o.totalAmount):'—')+'</strong></div>'+
+    '</div>';
+    document.getElementById('track-result').innerHTML=html;
+    document.getElementById('track-result').style.display='';
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+init();
+</script>
+</body>
+</html>

@@ -37,6 +37,7 @@
     <div class="topbar-left"><h1>Orders</h1><p>Booking and order management</p></div>
     <div class="topbar-right">
       <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ New Order</button>
+      <button class="btn btn-outline btn-sm" onclick="exportOrders()">⬇ Export CSV</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
@@ -217,6 +218,7 @@ var allVendors = [];
 var selectedVendorId = null;
 var allServices = [];
 var allCities = [];
+var _ordersCache = [];
 
 var CHANNEL_COLORS = {
   WEBSITE: '#3b82f6', PHONE_CALL: '#22c55e', WHATSAPP: '#25d366',
@@ -275,6 +277,7 @@ function load() {
   if (ch) params += '&channel='+ch;
   document.getElementById('tbl').innerHTML='<div class="loading">Loading…</div>';
   api('GET','/admin/orders?'+params).then(function(orders) {
+    _ordersCache = orders || [];
     if (!orders||!orders.length) {
       document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">📦</div><h3>No orders found</h3><p>Create a new order or adjust filters.</p></div>';
       return;
@@ -541,6 +544,22 @@ function createOrder() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
+
+function exportOrders() {
+  downloadCsv(_ordersCache, [
+    { label: 'Order #', key: 'orderNumber' },
+    { label: 'Customer', key: 'customer.name' },
+    { label: 'Phone', key: 'guestPhone' },
+    { label: 'Service', key: 'service.name' },
+    { label: 'City', key: 'address.city' },
+    { label: 'Status', key: 'status' },
+    { label: 'Payment', key: 'paymentStatus' },
+    { label: 'Channel', key: 'channel' },
+    { label: 'Total (₹)', key: 'totalAmount' },
+    { label: 'Slot', key: 'slotStart' },
+    { label: 'Created', key: 'createdAt' },
+  ], 'orders-' + new Date().toISOString().slice(0,10) + '.csv');
+}
 
 loadStats();
 load();

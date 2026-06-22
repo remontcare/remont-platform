@@ -5,18 +5,34 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
+function assertRequiredEnv() {
+  const logger = new Logger('Bootstrap');
+  const required = ['JWT_SECRET', 'JWT_REFRESH_SECRET'];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) {
+    logger.error(`FATAL: Missing required env vars: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
+
 async function bootstrap() {
+  assertRequiredEnv();
+
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
+    rawBody: true,
   });
 
+  const allowedOrigins = [
+    'https://remontindia.com',
+    'https://www.remontindia.com',
+    'https://remontone.in',
+  ];
+  if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL);
+  if (process.env.NODE_ENV !== 'production') allowedOrigins.push('http://localhost:3000', 'http://localhost:3001');
+
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      'https://remontindia.com',
-      'https://www.remontindia.com',
-      'https://remontone.in',
-    ],
+    origin: allowedOrigins,
     credentials: true,
   });
 
