@@ -1238,7 +1238,7 @@ Return JSON with:
   async salesReport(opts: { from?: string; to?: string }) {
     const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
     const to = opts.to ? new Date(opts.to) : new Date();
-    const [orders, revenue, byStatus, topServices, topProducts] = await Promise.all([
+    const [orders, revenue, byStatus, topProducts, byChannel] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: from, lte: to } } }),
       this.prisma.order.aggregate({
         where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' },
@@ -1251,21 +1251,14 @@ Return JSON with:
         _sum: { totalAmount: true },
       }),
       this.prisma.orderItem.groupBy({
-        by: ['serviceId'],
-        where: { order: { createdAt: { gte: from, lte: to } }, serviceId: { not: null } },
-        _count: true,
-        _sum: { totalPrice: true },
-        orderBy: { _count: { serviceId: 'desc' } },
-        take: 10,
-      }),
-      this.prisma.orderItem.groupBy({
         by: ['productId'],
-        where: { order: { createdAt: { gte: from, lte: to } }, productId: { not: null } },
-        _count: true,
+        where: { order: { createdAt: { gte: from, lte: to } } },
+        _count: { id: true },
         _sum: { totalPrice: true },
-        orderBy: { _count: { productId: 'desc' } },
+        orderBy: { _count: { id: 'desc' } },
         take: 10,
       }),
+      this.prisma.order.groupBy({ by: ['channel'], where: { createdAt: { gte: from, lte: to } }, _count: true }),
     ]);
     return {
       period: { from, to },
@@ -1275,23 +1268,22 @@ Return JSON with:
         platformCommission: Number(revenue._sum.remontCommission || 0),
       },
       byStatus,
-      topServices,
       topProducts,
+      byChannel,
     };
   }
 
-  async ordersReport(opts: { from?: string; to?: string; status?: string; city?: string }) {
+  async ordersReport(opts: { from?: string; to?: string; status?: string }) {
     const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
     const to = opts.to ? new Date(opts.to) : new Date();
     const where: any = { createdAt: { gte: from, lte: to } };
     if (opts.status) where.status = opts.status;
-    if (opts.city) where.cityName = opts.city;
     const [orders, byStatus, byChannel, avgValue] = await Promise.all([
       this.prisma.order.findMany({
         where,
         select: {
           id: true, orderNumber: true, status: true, totalAmount: true,
-          paymentStatus: true, channel: true, cityName: true, createdAt: true,
+          paymentStatus: true, channel: true, createdAt: true,
           customer: { select: { name: true, phone: true } },
           vendor: { select: { fullName: true } },
         },
@@ -1316,14 +1308,14 @@ Return JSON with:
       this.prisma.serviceVendor.findMany({
         where: { status: 'ACTIVE' as any },
         select: {
-          id: true, fullName: true, rating: true, totalEarnings: true, totalJobsCompleted: true,
-          skills: true, currentCity: true, user: { select: { phone: true } },
+          id: true, fullName: true, rating: true, totalEarnings: true, completedJobs: true,
+          skills: true, baseCity: true, user: { select: { phone: true } },
         },
-        orderBy: { totalJobsCompleted: 'desc' },
+        orderBy: { completedJobs: 'desc' },
         take: 50,
       }),
-      this.prisma.serviceVendor.count({ where: { status: { in: ['PENDING', 'UNDER_REVIEW'] as any } } }),
-      this.prisma.serviceVendor.groupBy({ by: ['currentCity'], _count: true }),
+      this.prisma.serviceVendor.count({ where: { status: { in: ['PENDING', 'PENDING_VERIFICATION'] as any } } }),
+      this.prisma.serviceVendor.groupBy({ by: ['baseCity'], _count: true }),
     ]);
     return { topVendors, pendingApprovals, byCity };
   }
@@ -1379,7 +1371,6 @@ Return JSON with:
     const [transactions, total] = await Promise.all([
       this.prisma.paymentTransaction.findMany({
         where,
-        include: { order: { select: { orderNumber: true, status: true } } },
         orderBy: { createdAt: 'desc' },
         take: opts.limit || 100,
         skip: opts.offset || 0,
@@ -1416,7 +1407,7 @@ Return JSON with:
 
   // ─── Review approve ───────────────────────────────────────────────────
   async approveReview(id: string) {
-    return this.prisma.review.update({ where: { id }, data: { isApproved: true } }).catch(() => null);
+    return this.prisma.review.update({ where: { id }, data: { isApproved: true } as any }).catch(() => null);
   }
 }
 
@@ -1647,8 +1638,8 @@ export class AdminController {
   }
   @Get('reports/orders') reportOrders(
     @Query('from') from?: string, @Query('to') to?: string,
-    @Query('status') status?: string, @Query('city') city?: string,
-  ) { return this.admin.ordersReport({ from, to, status, city }); }
+    @Query('status') status?: string,
+  ) { return this.admin.ordersReport({ from, to, status }); }
   @Get('reports/vendors') reportVendors() { return this.admin.vendorReport(); }
   @Get('reports/financial') reportFinancial(@Query('from') from?: string, @Query('to') to?: string) {
     return this.admin.financialReport({ from, to });
