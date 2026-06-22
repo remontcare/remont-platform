@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Post, Body, UseGuards, BadRequestException, Logger, Headers, Req } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Body, UseGuards, BadRequestException, Logger, Headers, Req } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import * as crypto from 'crypto';
@@ -110,12 +110,21 @@ export class PaymentsService {
     if (expected !== signature) return { valid: false };
     return { valid: true };
   }
+
+  getConfig() {
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const isLive = !!this.razorpay;
+    return { keyId, isLive, currency: 'INR' };
+  }
 }
 
 @ApiTags('Payments')
 @Controller('payments')
 export class PaymentsController {
   constructor(private p: PaymentsService) {}
+
+  @Public() @Get('config')
+  config() { return this.p.getConfig(); }
 
   @UseGuards(JwtAuthGuard) @ApiBearerAuth() @Post('create-order')
   create(@CurrentUser() u: JwtPayload, @Body() b: { amount: number; orderId?: string; amcSubscriptionId?: string }) {

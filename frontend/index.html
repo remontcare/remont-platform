@@ -2433,10 +2433,9 @@
       <span class="label" id="currentCity">Mumbai</span>
       <span class="city-arrow">▼</span>
     </button>
-    <button class="icon-btn">
+    <button class="icon-btn" onclick="openMyOrdersModal()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span class="label">My Orders</span>
-      <span class="badge">2</span>
     </button>
     <button class="icon-btn cart-btn" onclick="openCart()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
@@ -4781,16 +4780,18 @@ function cartClear() {
 function cartCheckout() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) return;
-  // If first item is a service, open booking modal; otherwise scroll to booking form
   var first = cart[0];
   closeCart();
   if (first.type === 'service' && first.id && typeof openBookingModal === 'function') {
     setTimeout(function(){ openBookingModal(first.id, first.name, first.price); }, 400);
+    return;
+  }
+  // Products: require auth then show checkout modal
+  var token = localStorage.getItem('remont_token');
+  if (!token) {
+    openAuthModal(function() { setTimeout(openCheckoutModal, 300); });
   } else {
-    // Scroll to public booking form
-    var bookingSection = document.getElementById('book') || document.querySelector('.booking-section');
-    if (bookingSection) bookingSection.scrollIntoView({ behavior: 'smooth' });
-    else window.scrollTo({ top: 0, behavior: 'smooth' });
+    openCheckoutModal();
   }
 }
 
@@ -4801,6 +4802,492 @@ function cartCheckout() {
   var badge = document.getElementById('cartBadgeHeader');
   if (badge) badge.textContent = total || '';
 })();
+</script>
+
+<!-- ═══ OTP AUTH MODAL ═══ -->
+<div id="auth-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10100;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:16px;padding:32px;width:360px;max-width:94vw;position:relative">
+    <button onclick="closeAuthModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    <h3 style="font-size:20px;font-weight:700;margin-bottom:6px;color:#111">Login to Continue</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:20px">Enter your phone number to receive an OTP</p>
+    <div id="auth-step-phone">
+      <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px">Phone Number</label>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <span style="padding:10px 12px;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;color:#374151">+91</span>
+        <input id="auth-phone" type="tel" placeholder="9876543210" maxlength="10"
+          style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none"
+          onkeydown="if(event.key==='Enter')sendOtpAuth()" />
+      </div>
+      <button onclick="sendOtpAuth()" id="auth-send-btn"
+        style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">
+        Send OTP →
+      </button>
+    </div>
+    <div id="auth-step-otp" style="display:none">
+      <p style="font-size:13px;color:#374151;margin-bottom:12px">OTP sent to <strong id="auth-phone-display"></strong></p>
+      <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px">Enter OTP</label>
+      <input id="auth-otp" type="text" placeholder="4-digit OTP" maxlength="6"
+        style="width:100%;padding:12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:18px;letter-spacing:8px;text-align:center;outline:none;margin-bottom:16px"
+        onkeydown="if(event.key==='Enter')verifyOtpAuth()" />
+      <button onclick="verifyOtpAuth()" id="auth-verify-btn"
+        style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:10px">
+        Verify OTP →
+      </button>
+      <button onclick="document.getElementById('auth-step-phone').style.display='';document.getElementById('auth-step-otp').style.display='none'"
+        style="width:100%;padding:8px;background:none;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;cursor:pointer;color:#6b7280">
+        Change Number
+      </button>
+    </div>
+    <p id="auth-msg" style="margin-top:12px;font-size:13px;color:#ef4444;text-align:center;display:none"></p>
+  </div>
+</div>
+
+<!-- ═══ CHECKOUT MODAL ═══ -->
+<div id="checkout-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:0;width:480px;max-width:98vw;max-height:90vh;overflow:auto;position:relative">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="font-size:18px;font-weight:700;color:#111">Checkout</h3>
+      <button onclick="closeCheckoutModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <div style="padding:20px 24px">
+      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Order Summary</h4>
+      <div id="co-items" style="margin-bottom:16px"></div>
+      <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
+          <span>Subtotal</span><span id="co-subtotal">₹0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:8px">
+          <span>GST (18%)</span><span id="co-gst">₹0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#111;padding-top:8px;border-top:1px solid #e5e7eb">
+          <span>Total</span><span id="co-total" style="color:#c4601a">₹0</span>
+        </div>
+      </div>
+      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Delivery Address</h4>
+      <input id="co-name" type="text" placeholder="Full name"
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
+      <input id="co-phone" type="tel" placeholder="Phone number"
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
+      <textarea id="co-address" placeholder="Full delivery address (house no, street, landmark, city, pincode)"
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;height:80px;resize:none;outline:none;margin-bottom:10px"></textarea>
+      <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6"
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:20px;outline:none" />
+      <button onclick="submitCheckoutOrder()" id="co-submit-btn"
+        style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">
+        Place Order & Pay →
+      </button>
+      <p id="co-msg" style="margin-top:10px;font-size:13px;color:#ef4444;text-align:center;display:none"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ORDER SUCCESS MODAL ═══ -->
+<div id="order-success-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:32px 24px;width:400px;max-width:98vw;text-align:center">
+    <div style="width:60px;height:60px;background:#ecfdf5;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px">✅</div>
+    <h3 style="font-size:20px;font-weight:700;margin-bottom:8px;color:#111">Order Placed!</h3>
+    <p style="font-size:14px;color:#6b7280;margin-bottom:6px">Your order number is</p>
+    <p id="oss-order-num" style="font-size:18px;font-weight:700;color:#c4601a;margin-bottom:6px">—</p>
+    <p id="oss-total" style="font-size:14px;color:#374151;margin-bottom:20px">Amount paid: —</p>
+    <p id="oss-payment-note" style="font-size:12px;color:#6b7280;margin-bottom:20px;background:#f9fafb;padding:10px;border-radius:8px"></p>
+    <div style="display:flex;gap:10px">
+      <button onclick="closeOrderSuccessModal()" style="flex:1;padding:12px;background:#f3f4f6;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;color:#374151">Close</button>
+      <button onclick="closeOrderSuccessModal();openMyOrdersModal()" style="flex:1;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">View Orders →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MY ORDERS MODAL ═══ -->
+<div id="my-orders-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:0;width:560px;max-width:98vw;max-height:88vh;overflow:auto;position:relative">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="font-size:18px;font-weight:700;color:#111">My Orders</h3>
+      <button onclick="closeMyOrdersModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <div id="mo-body" style="padding:20px 24px;min-height:200px">
+      <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// CHECKOUT + PAYMENT + MY ORDERS — full flow
+// ═══════════════════════════════════════════════════════════════════
+
+var _authCallback = null;
+var _checkoutOrderId = null;
+
+// ── OTP Auth ────────────────────────────────────────────────────────
+
+function openAuthModal(callback) {
+  _authCallback = callback || null;
+  document.getElementById('auth-phone').value = '';
+  document.getElementById('auth-otp') && (document.getElementById('auth-otp').value = '');
+  document.getElementById('auth-step-phone').style.display = '';
+  document.getElementById('auth-step-otp').style.display = 'none';
+  document.getElementById('auth-msg').style.display = 'none';
+  document.getElementById('auth-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  setTimeout(function() { document.getElementById('auth-phone').focus(); }, 100);
+}
+
+function closeAuthModal() {
+  document.getElementById('auth-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  _authCallback = null;
+}
+
+function showAuthMsg(msg) {
+  var el = document.getElementById('auth-msg');
+  el.textContent = msg; el.style.display = '';
+}
+
+function sendOtpAuth() {
+  var raw = document.getElementById('auth-phone').value.replace(/\D/g,'');
+  if (raw.length !== 10) { showAuthMsg('Enter a valid 10-digit number'); return; }
+  var phone = '+91' + raw;
+  var btn = document.getElementById('auth-send-btn');
+  btn.textContent = 'Sending…'; btn.disabled = true;
+  document.getElementById('auth-msg').style.display = 'none';
+  fetch(API_BASE + '/api/v1/auth/send-otp', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ phone: phone })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    btn.textContent = 'Send OTP →'; btn.disabled = false;
+    document.getElementById('auth-phone-display').textContent = phone;
+    document.getElementById('auth-step-phone').style.display = 'none';
+    document.getElementById('auth-step-otp').style.display = '';
+    document.getElementById('auth-otp').focus();
+  }).catch(function(e) {
+    btn.textContent = 'Send OTP →'; btn.disabled = false;
+    showAuthMsg('Failed to send OTP. Try again.');
+  });
+}
+
+function verifyOtpAuth() {
+  var raw = document.getElementById('auth-phone').value.replace(/\D/g,'');
+  var phone = '+91' + raw;
+  var otp = document.getElementById('auth-otp').value.trim();
+  if (!otp) { showAuthMsg('Enter the OTP'); return; }
+  var btn = document.getElementById('auth-verify-btn');
+  btn.textContent = 'Verifying…'; btn.disabled = true;
+  document.getElementById('auth-msg').style.display = 'none';
+  fetch(API_BASE + '/api/v1/auth/verify-otp', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ phone: phone, otp: otp })
+  }).then(function(r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d) {
+    var token = d.accessToken || d.access_token || (d.data && d.data.accessToken);
+    if (!token) throw new Error('No token');
+    localStorage.setItem('remont_token', token);
+    btn.textContent = 'Verify OTP →'; btn.disabled = false;
+    closeAuthModal();
+    if (_authCallback) { var cb = _authCallback; _authCallback = null; cb(); }
+  }).catch(function() {
+    btn.textContent = 'Verify OTP →'; btn.disabled = false;
+    showAuthMsg('Invalid OTP. Check Railway logs for the code.');
+  });
+}
+
+// ── Checkout Modal ───────────────────────────────────────────────────
+
+function openCheckoutModal() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  if (!cart.length) { showToast('Cart is empty', 'error'); return; }
+
+  // Populate order summary
+  var subtotal = 0;
+  var html = '';
+  cart.forEach(function(item) {
+    var qty = item.qty || 1;
+    var lineTotal = (item.price || 0) * qty;
+    subtotal += lineTotal;
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
+      '<div><div style="font-size:14px;font-weight:500;color:#111">' + escHtml(item.name) + '</div>' +
+      '<div style="font-size:12px;color:#6b7280;margin-top:2px">Qty: ' + qty + ' × ₹' + Number(item.price||0).toLocaleString('en-IN') + '</div></div>' +
+      '<div style="font-size:14px;font-weight:600;color:#374151">₹' + lineTotal.toLocaleString('en-IN') + '</div></div>';
+  });
+
+  document.getElementById('co-items').innerHTML = html;
+  var gst = Math.round(subtotal * 0.18 * 100) / 100;
+  var total = subtotal + gst;
+  document.getElementById('co-subtotal').textContent = '₹' + subtotal.toLocaleString('en-IN');
+  document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+  document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
+
+  // Pre-fill phone from profile if stored
+  var storedUser = null;
+  try { storedUser = JSON.parse(localStorage.getItem('remont_user') || 'null'); } catch(e) {}
+  if (storedUser) {
+    if (storedUser.name) document.getElementById('co-name').value = storedUser.name;
+    if (storedUser.phone) document.getElementById('co-phone').value = storedUser.phone.replace('+91','');
+  }
+
+  document.getElementById('co-msg').style.display = 'none';
+  document.getElementById('co-submit-btn').textContent = 'Place Order & Pay →';
+  document.getElementById('co-submit-btn').disabled = false;
+  document.getElementById('checkout-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeCheckoutModal() {
+  document.getElementById('checkout-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function showCoMsg(msg) {
+  var el = document.getElementById('co-msg');
+  el.textContent = msg; el.style.display = '';
+}
+
+function submitCheckoutOrder() {
+  var name    = document.getElementById('co-name').value.trim();
+  var phoneRaw = document.getElementById('co-phone').value.replace(/\D/g,'');
+  var address = document.getElementById('co-address').value.trim();
+  var pincode = document.getElementById('co-pincode').value.trim();
+
+  if (!name)    { showCoMsg('Please enter your name'); return; }
+  if (phoneRaw.length < 10) { showCoMsg('Enter a valid 10-digit phone number'); return; }
+  if (!address) { showCoMsg('Please enter your delivery address'); return; }
+
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  if (!cart.length) { showCoMsg('Cart is empty'); return; }
+
+  var btn = document.getElementById('co-submit-btn');
+  btn.textContent = 'Creating order…'; btn.disabled = true;
+  document.getElementById('co-msg').style.display = 'none';
+
+  // Build order items (only products)
+  var items = cart.filter(function(i){ return i.type === 'product'; }).map(function(i){
+    return { productId: i.id, quantity: i.qty || 1 };
+  });
+
+  var payload = {
+    type: 'PRODUCT',
+    items: items,
+    channel: 'WEBSITE'
+  };
+
+  // Create order first
+  apiPost('/api/v1/orders', payload).then(function(order) {
+    var orderId = order.id || (order.data && order.data.id);
+    var totalAmount = Number(order.totalAmount || (order.data && order.data.totalAmount) || 0);
+    _checkoutOrderId = orderId;
+
+    // Now create Razorpay/dev payment order
+    btn.textContent = 'Initiating payment…';
+    return apiPost('/api/v1/payments/create-order', {
+      amount: totalAmount,
+      orderId: orderId
+    }).then(function(payment) {
+      if (payment._devMock) {
+        // DEV mode: auto-confirm
+        btn.textContent = 'Confirming order…';
+        return apiPost('/api/v1/orders/' + orderId + '/confirm-payment', {
+          paymentId: payment.gatewayOrderId
+        }).then(function() {
+          closeCheckoutModal();
+          localStorage.removeItem('remont_cart');
+          if (typeof updateCartBadge === 'function') updateCartBadge();
+          openOrderSuccessModal(order.orderNumber || (order.data && order.data.orderNumber), totalAmount,
+            'Payment simulated (test mode). Your order is confirmed and processing.');
+        });
+      } else {
+        // Real Razorpay
+        return launchRazorpay(payment, order, totalAmount, btn);
+      }
+    });
+  }).catch(function(err) {
+    btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+    showCoMsg('Error: ' + (err && err.message ? err.message : 'Order creation failed. Please try again.'));
+  });
+}
+
+function launchRazorpay(payment, order, totalAmount, btn) {
+  return new Promise(function(resolve, reject) {
+    function initRzp() {
+      var options = {
+        key: payment.keyId,
+        amount: Math.round(totalAmount * 100),
+        currency: 'INR',
+        name: 'Remont India',
+        description: 'Home Services',
+        order_id: payment.gatewayOrderId,
+        handler: function(response) {
+          btn.textContent = 'Verifying payment…'; btn.disabled = true;
+          apiPost('/api/v1/payments/verify', {
+            orderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature
+          }).then(function(v) {
+            if (!v.valid) { showCoMsg('Payment verification failed. Contact support.'); btn.textContent = 'Place Order & Pay →'; btn.disabled = false; return; }
+            return apiPost('/api/v1/orders/' + _checkoutOrderId + '/confirm-payment', {
+              paymentId: response.razorpay_payment_id
+            }).then(function() {
+              closeCheckoutModal();
+              localStorage.removeItem('remont_cart');
+              if (typeof updateCartBadge === 'function') updateCartBadge();
+              openOrderSuccessModal(order.orderNumber, totalAmount, 'Payment successful via Razorpay.');
+              resolve();
+            });
+          }).catch(function(e) {
+            showCoMsg('Payment recorded but verification failed. Contact support with payment ID: ' + response.razorpay_payment_id);
+            btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+          });
+        },
+        prefill: {
+          name: document.getElementById('co-name').value.trim(),
+          contact: '+91' + document.getElementById('co-phone').value.replace(/\D/g,'')
+        },
+        theme: { color: '#c4601a' },
+        modal: { ondismiss: function() { btn.textContent = 'Place Order & Pay →'; btn.disabled = false; } }
+      };
+      var rzp = new window.Razorpay(options);
+      rzp.open();
+    }
+
+    if (window.Razorpay) {
+      initRzp();
+    } else {
+      var s = document.createElement('script');
+      s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      s.onload = initRzp;
+      s.onerror = function() {
+        showCoMsg('Failed to load payment gateway. Please try again.');
+        btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+        reject(new Error('Razorpay SDK failed'));
+      };
+      document.head.appendChild(s);
+    }
+  });
+}
+
+// ── Order Success Modal ─────────────────────────────────────────────
+
+function openOrderSuccessModal(orderNum, total, note) {
+  document.getElementById('oss-order-num').textContent = orderNum || '—';
+  document.getElementById('oss-total').textContent = total ? 'Amount: ₹' + Number(total).toLocaleString('en-IN') : '';
+  document.getElementById('oss-payment-note').textContent = note || '';
+  document.getElementById('order-success-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOrderSuccessModal() {
+  document.getElementById('order-success-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// ── My Orders Modal ─────────────────────────────────────────────────
+
+var STATUS_LABELS_MO = {
+  PENDING_PAYMENT: 'Pending Payment', CONFIRMED: 'Confirmed',
+  VENDOR_ASSIGNED: 'Vendor Assigned', VENDOR_EN_ROUTE: 'En Route',
+  STARTED: 'Started', IN_PROGRESS: 'In Progress',
+  EXTRA_WORK_ADDED: 'Extra Work Added', COMPLETED: 'Completed',
+  INVOICED: 'Invoiced', CLOSED: 'Closed',
+  CANCELLED: 'Cancelled', REFUNDED: 'Refunded',
+};
+var STATUS_COLORS_MO = {
+  PENDING_PAYMENT: '#f59e0b', CONFIRMED: '#10b981', VENDOR_ASSIGNED: '#3b82f6',
+  VENDOR_EN_ROUTE: '#8b5cf6', STARTED: '#f97316', IN_PROGRESS: '#f97316',
+  EXTRA_WORK_ADDED: '#ef4444', COMPLETED: '#059669', INVOICED: '#374151',
+  CLOSED: '#9ca3af', CANCELLED: '#ef4444', REFUNDED: '#6b7280',
+};
+
+function openMyOrdersModal() {
+  var token = localStorage.getItem('remont_token');
+  if (!token) {
+    openAuthModal(function() { setTimeout(openMyOrdersModal, 300); });
+    return;
+  }
+  document.getElementById('my-orders-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  loadMyOrders();
+}
+
+function closeMyOrdersModal() {
+  document.getElementById('my-orders-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function loadMyOrders() {
+  var body = document.getElementById('mo-body');
+  body.innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading orders…</p>';
+  apiGet('/api/v1/orders/mine').then(function(res) {
+    var orders = Array.isArray(res) ? res : (res.data || []);
+    if (!orders.length) {
+      body.innerHTML = '<div style="text-align:center;padding:40px 0">' +
+        '<div style="font-size:40px;margin-bottom:12px">📦</div>' +
+        '<p style="color:#6b7280;font-size:14px">No orders yet.<br>Book a service or add products to cart!</p>' +
+        '</div>';
+      return;
+    }
+    var html = '';
+    orders.forEach(function(o) {
+      var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
+      var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
+      var date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
+      var total = o.totalAmount ? '₹' + Number(o.totalAmount).toLocaleString('en-IN') : '—';
+      var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
+      html += '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
+          '<div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(serviceName) + '</div>' +
+            '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + ' · ' + date + '</div></div>' +
+          '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center">' +
+          '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
+          (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + o.id + '\',' + Number(o.totalAmount||0) + ',\'' + (o.orderNumber||'') + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
+           o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
+        '</div>' +
+      '</div>';
+    });
+    body.innerHTML = html;
+  }).catch(function(e) {
+    body.innerHTML = '<p style="color:#ef4444;text-align:center;padding:40px 0">Failed to load orders. ' +
+      (e && e.message === '401' ? 'Please <button onclick="closeMyOrdersModal();openAuthModal(function(){setTimeout(openMyOrdersModal,300)})" style="background:none;border:none;color:#c4601a;font-weight:600;cursor:pointer;text-decoration:underline">login again</button>.' : 'Try again.') +
+      '</p>';
+  });
+}
+
+function retryPayment(orderId, totalAmount, orderNumber) {
+  _checkoutOrderId = orderId;
+  apiPost('/api/v1/payments/create-order', { amount: totalAmount, orderId: orderId }).then(function(payment) {
+    if (payment._devMock) {
+      return apiPost('/api/v1/orders/' + orderId + '/confirm-payment', { paymentId: payment.gatewayOrderId }).then(function() {
+        closeMyOrdersModal();
+        openOrderSuccessModal(orderNumber, totalAmount, 'Payment simulated (test mode). Order confirmed!');
+      });
+    } else {
+      var btn = { textContent: 'Pay', disabled: false };
+      return launchRazorpay(payment, { orderNumber: orderNumber }, totalAmount, btn);
+    }
+  }).catch(function(e) {
+    showToast('Payment initiation failed: ' + (e && e.message || 'unknown error'), 'error');
+  });
+}
+
+function cancelOrderFromList(orderId) {
+  if (!confirm('Cancel this order?')) return;
+  var token = localStorage.getItem('remont_token');
+  var headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  fetch(API_BASE + '/api/v1/orders/' + orderId + '/cancel', {
+    method: 'PATCH', headers: headers,
+    body: JSON.stringify({ reason: 'Customer requested cancellation' })
+  }).then(function(r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function() {
+    showToast('Order cancelled', 'success');
+    loadMyOrders();
+  }).catch(function() {
+    showToast('Could not cancel order', 'error');
+  });
+}
 </script>
 
 </body>
