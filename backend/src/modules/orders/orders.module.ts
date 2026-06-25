@@ -35,12 +35,22 @@ class OrderItemDto {
   @IsString() productId: string;
   @IsNumber() @Min(1) quantity: number;
 }
+
+class InlineAddressDto {
+  @IsOptional() @IsString() label?: string;
+  @IsString() fullAddress: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() state?: string;
+  @IsOptional() @IsString() pincode?: string;
+}
+
 class CreateOrderDto {
   @IsEnum(OrderType) type: OrderType;
   @IsOptional() @IsEnum(BookingChannel) channel?: BookingChannel;
   @IsOptional() @IsString() serviceId?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemDto) items?: OrderItemDto[];
   @IsOptional() @IsString() addressId?: string;
+  @IsOptional() @ValidateNested() @Type(() => InlineAddressDto) inlineAddress?: InlineAddressDto;
   @IsOptional() @IsDateString() slotStart?: string;
   @IsOptional() @IsDateString() slotEnd?: string;
   @IsOptional() @IsString() couponCode?: string;
@@ -48,6 +58,8 @@ class CreateOrderDto {
   @IsOptional() @IsString() aiSessionId?: string;
   @IsOptional() @IsString() leadId?: string;
   @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() guestName?: string;
+  @IsOptional() @IsString() guestPhone?: string;
 }
 
 // ─── Dispatch (smart vendor matching) ───
@@ -185,11 +197,29 @@ export class OrdersService {
     if (dto.items?.length) {
       for (const item of dto.items) {
         const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
-        if (!p) throw new NotFoundException();
+        if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
         const total = Number(p.price) * item.quantity;
         productsAmount += total;
         itemInputs.push({ productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: total });
       }
+    }
+
+    // Resolve addressId: if an inline address is provided and no addressId, create one
+    let resolvedAddressId = dto.addressId;
+    if (!resolvedAddressId && dto.inlineAddress) {
+      const addr = await this.prisma.address.create({
+        data: {
+          userId: customerId,
+          label: dto.inlineAddress.label || 'Delivery Address',
+          fullAddress: dto.inlineAddress.fullAddress,
+          city: dto.inlineAddress.city || '',
+          state: dto.inlineAddress.state || '',
+          pincode: dto.inlineAddress.pincode || '',
+          latitude: 0,
+          longitude: 0,
+        },
+      });
+      resolvedAddressId = addr.id;
     }
 
     let subtotal = serviceAmount + productsAmount;
@@ -219,7 +249,7 @@ export class OrdersService {
       data: {
         orderNumber, customerId,
         type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
-        serviceId: dto.serviceId, addressId: dto.addressId,
+        serviceId: dto.serviceId, addressId: resolvedAddressId,
         slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
         slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
         startOtp, status: OrderStatus.PENDING_PAYMENT,
@@ -227,6 +257,8 @@ export class OrdersService {
         couponCode: dto.couponCode, couponDiscount, membershipDiscount,
         walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
         aiSessionId: dto.aiSessionId, leadId: dto.leadId,
+        guestName: dto.guestName,
+        guestPhone: dto.guestPhone,
         items: itemInputs.length ? { create: itemInputs } : undefined,
       },
       include: { items: true, service: true, address: true },

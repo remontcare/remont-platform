@@ -31,7 +31,7 @@
     --ff-accent:"Bebas Neue", sans-serif;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: smooth; overflow-x: hidden; }
   body {
     font-family: var(--ff-body);
     background: var(--ivory);
@@ -383,13 +383,14 @@
     border-bottom: 1px solid var(--mist);
     padding: 0 48px;
     position: sticky; top: 76px; z-index: 850;
+    max-width: 100%;
     overflow-x: auto;
     scrollbar-width: none;
   }
   .cat-nav::-webkit-scrollbar { display: none; }
   .cat-nav-inner {
     display: flex; gap: 4px; align-items: center;
-    max-width: 1400px; margin: 0 auto;
+    width: max-content;
     padding: 8px 0;
   }
   .cat-link {
@@ -3850,8 +3851,8 @@
               </div>
               <div class="product-price">
                 <span class="now">₹${p.price}</span>
-                <span class="was">₹${p.was}</span>
-                <span class="off">${p.off} off</span>
+                ${p.was ? `<span class="was">₹${p.was}</span>` : ''}
+                ${p.off ? `<span class="off">${p.off} off</span>` : ''}
               </div>
               <button class="product-cta">Add to Cart</button>
             </div>
@@ -4344,7 +4345,9 @@
   var _lastBookedOrderNum = '';
 
   function updateCartBadge() {
-    var total = cart.reduce(function(s,i){ return s + (i.qty||1); }, 0);
+    var stored = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+    var total = stored.reduce(function(s,i){ return s + (i.qty||1); }, 0);
+    cart = stored; // keep module-scope in sync
     var badge = document.querySelector('.cart-btn .badge');
     if (badge) badge.textContent = total || '';
     var headerBadge = document.getElementById('cartBadgeHeader');
@@ -4352,11 +4355,12 @@
   }
 
   function addToCart(item) {
-    // item: { type, serviceId/productId, name, price, qty }
-    var existing = cart.find(function(c){ return c.id === item.id; });
-    if (existing) { existing.qty++; }
-    else { cart.push(Object.assign({ qty: 1 }, item)); }
-    localStorage.setItem('remont_cart', JSON.stringify(cart));
+    var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+    var existing = c.find(function(x){ return x.id === item.id; });
+    if (existing) { existing.qty = (existing.qty || 1) + 1; }
+    else { c.push(Object.assign({ qty: 1 }, item)); }
+    localStorage.setItem('remont_cart', JSON.stringify(c));
+    cart = c;
     updateCartBadge();
     showToast('Added to cart: ' + item.name, 'success');
   }
@@ -4379,8 +4383,8 @@
     var name = card.querySelector('.product-name');
     var price = card.querySelector('.product-price .now');
     var productId = card.getAttribute('data-product-id') || ('prod-' + Date.now());
-    var priceText = price ? price.textContent.replace(/[^0-9,]/g, '').replace(/,/g, '') : '0';
-    addToCart({ id: productId, name: name ? name.textContent.trim() : 'Product', price: priceText, type: 'product' });
+    var priceNum = price ? parseFloat(price.textContent.replace(/[^0-9.]/g, '').replace(/,/g, '')) || 0 : 0;
+    addToCart({ id: productId, name: name ? name.textContent.trim() : 'Product', price: priceNum, type: 'product' });
   });
 
   // Book service button handler — opens real booking form
@@ -4744,7 +4748,7 @@
 
 <!-- ═══ CART DRAWER ═══ -->
 <div id="cartOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;transition:opacity .3s" onclick="if(event.target===this)closeCart()"></div>
-<div id="cartDrawer" style="position:fixed;top:0;right:-420px;width:420px;max-width:100vw;height:100vh;background:#fff;z-index:9001;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.15);transition:right .35s cubic-bezier(.4,0,.2,1)">
+<div id="cartDrawer" style="position:fixed;top:0;right:0;width:420px;max-width:100vw;height:100vh;background:#fff;z-index:9001;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.15);transition:transform .35s cubic-bezier(.4,0,.2,1)">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;border-bottom:1px solid #f3f4f6">
     <div>
       <div style="font-size:18px;font-weight:700;color:#111">Your Cart</div>
@@ -4757,7 +4761,8 @@
 </div>
 
 <style>
-#cartDrawer.open { right: 0; }
+#cartDrawer { transform: translateX(100%); }
+#cartDrawer.open { transform: translateX(0); }
 .cart-item { display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #f9fafb }
 .cart-item:last-child { border-bottom:none }
 .cart-item-img { width:56px;height:56px;border-radius:8px;background:#f3f4f6;object-fit:cover;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px }
@@ -4775,10 +4780,10 @@
 
 <script>
 function openCart() {
-  renderCartDrawer();
   document.getElementById('cartOverlay').style.display = 'block';
-  setTimeout(function(){ document.getElementById('cartDrawer').classList.add('open'); }, 10);
   document.body.style.overflow = 'hidden';
+  setTimeout(function(){ document.getElementById('cartDrawer').classList.add('open'); }, 10);
+  try { renderCartDrawer(); } catch(e) { console.error('cart render error', e); }
 }
 
 function closeCart() {
@@ -4842,26 +4847,30 @@ function renderCartDrawer() {
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function cartQty(idx, delta) {
-  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
-  if (!cart[idx]) return;
-  cart[idx].qty = Math.max(1, (cart[idx].qty || 1) + delta);
-  localStorage.setItem('remont_cart', JSON.stringify(cart));
+  var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  if (!c[idx]) return;
+  c[idx].qty = Math.max(1, (c[idx].qty || 1) + delta);
+  localStorage.setItem('remont_cart', JSON.stringify(c));
+  cart = c;
   renderCartDrawer();
+  updateCartBadge();
 }
 
 function cartRemove(idx) {
-  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
-  cart.splice(idx, 1);
-  localStorage.setItem('remont_cart', JSON.stringify(cart));
+  var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  c.splice(idx, 1);
+  localStorage.setItem('remont_cart', JSON.stringify(c));
+  cart = c;
   renderCartDrawer();
-  if (typeof updateCartBadge === 'function') updateCartBadge();
+  updateCartBadge();
 }
 
 function cartClear() {
   if (!confirm('Clear all items from cart?')) return;
   localStorage.removeItem('remont_cart');
+  cart = [];
   renderCartDrawer();
-  if (typeof updateCartBadge === 'function') updateCartBadge();
+  updateCartBadge();
 }
 
 function cartCheckout() {
@@ -4884,10 +4893,7 @@ function cartCheckout() {
 
 // Sync badge on page load
 (function syncCartBadgeOnLoad() {
-  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
-  var total = cart.reduce(function(s,i){ return s + (i.qty||1); }, 0);
-  var badge = document.getElementById('cartBadgeHeader');
-  if (badge) badge.textContent = total || '';
+  if (typeof updateCartBadge === 'function') updateCartBadge();
 })();
 </script>
 
@@ -5005,6 +5011,9 @@ function cartCheckout() {
 var _authCallback = null;
 var _checkoutOrderId = null;
 
+var DEV_MODE = window.location.hostname === 'localhost';
+var TEST_OTP  = '1234';
+
 // ── OTP Auth ────────────────────────────────────────────────────────
 
 function openAuthModal(callback) {
@@ -5034,6 +5043,16 @@ function sendOtpAuth() {
   var raw = document.getElementById('auth-phone').value.replace(/\D/g,'');
   if (raw.length !== 10) { showAuthMsg('Enter a valid 10-digit number'); return; }
   var phone = '+91' + raw;
+
+  if (DEV_MODE) {
+    document.getElementById('auth-phone-display').textContent = phone;
+    document.getElementById('auth-step-phone').style.display = 'none';
+    document.getElementById('auth-step-otp').style.display = '';
+    document.getElementById('auth-otp').focus();
+    showAuthMsg('DEV mode: use OTP ' + TEST_OTP);
+    return;
+  }
+
   var btn = document.getElementById('auth-send-btn');
   btn.textContent = 'Sending…'; btn.disabled = true;
   document.getElementById('auth-msg').style.display = 'none';
@@ -5057,6 +5076,18 @@ function verifyOtpAuth() {
   var phone = '+91' + raw;
   var otp = document.getElementById('auth-otp').value.trim();
   if (!otp) { showAuthMsg('Enter the OTP'); return; }
+
+  if (DEV_MODE) {
+    if (otp === TEST_OTP) {
+      localStorage.setItem('remont_token', 'dev-token-' + Date.now());
+      closeAuthModal();
+      if (_authCallback) { var cb = _authCallback; _authCallback = null; cb(); }
+    } else {
+      showAuthMsg('Invalid OTP (dev: use ' + TEST_OTP + ')');
+    }
+    return;
+  }
+
   var btn = document.getElementById('auth-verify-btn');
   btn.textContent = 'Verifying…'; btn.disabled = true;
   document.getElementById('auth-msg').style.display = 'none';
@@ -5155,7 +5186,16 @@ function submitCheckoutOrder() {
   var payload = {
     type: 'PRODUCT',
     items: items,
-    channel: 'WEBSITE'
+    channel: 'WEBSITE',
+    guestName: name,
+    guestPhone: '+91' + phoneRaw,
+    inlineAddress: {
+      label: 'Delivery Address',
+      fullAddress: address + (pincode ? ', ' + pincode : ''),
+      city: '',
+      state: '',
+      pincode: pincode
+    }
   };
 
   // Create order first
@@ -5376,6 +5416,7 @@ function cancelOrderFromList(orderId) {
   });
 }
 </script>
+
 
 </body>
 </html>
