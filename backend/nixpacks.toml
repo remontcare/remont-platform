@@ -1,2 +1,5 @@
 [phases.setup]
 nixPkgs = ["openssl"]
+
+[start]
+cmd = "npx prisma migrate deploy && node dist/main.js"
