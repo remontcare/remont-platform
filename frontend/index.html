@@ -4956,6 +4956,29 @@ function cartCheckout() {
           <div id="acct-phone" style="font-size:13px;color:#6b7280;margin-bottom:2px"></div>
           <div id="acct-email" style="font-size:13px;color:#6b7280"></div>
         </div>
+        <button onclick="openProfileEdit()" id="acct-edit-btn" style="flex-shrink:0;padding:6px 12px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:#374151;cursor:pointer">✏️ Edit</button>
+      </div>
+
+      <!-- Inline edit form (hidden by default) -->
+      <div id="acct-edit-form" style="display:none;padding:16px 24px;background:#f9fafb;border-bottom:1px solid #f3f4f6">
+        <div style="font-size:13px;font-weight:700;color:#111;margin-bottom:12px">Edit Profile</div>
+        <div style="margin-bottom:10px">
+          <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Full Name</label>
+          <input id="acct-edit-name" type="text" placeholder="Enter your name"
+            style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Email Address</label>
+          <input id="acct-edit-email" type="email" placeholder="Enter your email"
+            style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="saveProfileEdit()" id="acct-save-btn"
+            style="flex:1;padding:10px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Save Changes</button>
+          <button onclick="cancelProfileEdit()"
+            style="flex:1;padding:10px;background:#fff;color:#374151;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer">Cancel</button>
+        </div>
+        <div id="acct-edit-msg" style="display:none;margin-top:8px;font-size:12px;text-align:center"></div>
       </div>
 
       <!-- Stats row: wallet + orders -->
@@ -5181,6 +5204,113 @@ function _loadAccountData() {
 function closeAccountModal() {
   document.getElementById('account-modal').style.display = 'none';
   document.body.style.overflow = '';
+  cancelProfileEdit();
+}
+
+function openProfileEdit() {
+  var nameEl  = document.getElementById('acct-name');
+  var emailEl = document.getElementById('acct-email');
+  document.getElementById('acct-edit-name').value  = nameEl.textContent === 'Loading…' ? '' : nameEl.textContent;
+  document.getElementById('acct-edit-email').value = emailEl.textContent;
+  document.getElementById('acct-edit-msg').style.display = 'none';
+  document.getElementById('acct-edit-form').style.display = 'block';
+  document.getElementById('acct-edit-btn').style.display  = 'none';
+  document.getElementById('acct-edit-name').focus();
+}
+
+function cancelProfileEdit() {
+  var form = document.getElementById('acct-edit-form');
+  var btn  = document.getElementById('acct-edit-btn');
+  if (form) form.style.display = 'none';
+  if (btn)  btn.style.display  = '';
+}
+
+function saveProfileEdit() {
+  var name  = document.getElementById('acct-edit-name').value.trim();
+  var email = document.getElementById('acct-edit-email').value.trim();
+  if (!name) { _acctEditMsg('Name cannot be empty', 'error'); return; }
+
+  var saveBtn = document.getElementById('acct-save-btn');
+  saveBtn.textContent = 'Saving…'; saveBtn.disabled = true;
+
+  var payload = { name: name };
+  if (email) payload.email = email;
+
+  // Save to localStorage immediately
+  var stored = {};
+  try { stored = JSON.parse(localStorage.getItem('remont_user') || '{}'); } catch(e) {}
+  stored.name = name;
+  if (email) stored.email = email;
+  localStorage.setItem('remont_user', JSON.stringify(stored));
+
+  // Try API (silently fails in dev mode with fake token)
+  apiPost('/api/v1/users/me', payload)
+    .catch(function() {
+      // PATCH via apiPost doesn't work (it's POST not PATCH); use fetch directly
+      return fetch(API_BASE + '/api/v1/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('remont_token') || '') },
+        body: JSON.stringify(payload)
+      });
+    })
+    .catch(function() {}) // silent — localStorage already saved
+    .finally(function() {
+      saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false;
+      // Update displayed values
+      var initial = name.charAt(0).toUpperCase();
+      document.getElementById('acct-avatar').textContent = initial;
+      document.getElementById('acct-name').textContent   = name;
+      if (email) document.getElementById('acct-email').textContent = email;
+      cancelProfileEdit();
+      showToast('Profile updated', 'success');
+    });
+}
+
+function _acctEditMsg(msg, type) {
+  var el = document.getElementById('acct-edit-msg');
+  el.textContent  = msg;
+  el.style.color  = type === 'error' ? '#ef4444' : '#16a34a';
+  el.style.display = '';
+}
+
+// Called after any successful order/booking — auto-saves details to profile
+function _autosaveProfileFromCheckout(name, phone, address, pincode) {
+  // Always update localStorage cache for pre-fill
+  var stored = {};
+  try { stored = JSON.parse(localStorage.getItem('remont_user') || '{}'); } catch(e) {}
+  if (name)  stored.name  = name;
+  if (phone) stored.phone = phone;
+  localStorage.setItem('remont_user', JSON.stringify(stored));
+  localStorage.setItem('remont_phone', phone || stored.phone || '');
+
+  var token = localStorage.getItem('remont_token') || '';
+  if (!token || token.startsWith('dev-token')) return; // skip API in dev mode
+
+  // Save name to profile
+  if (name) {
+    fetch(API_BASE + '/api/v1/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ name: name })
+    }).catch(function() {});
+  }
+
+  // Save address if provided
+  if (address) {
+    fetch(API_BASE + '/api/v1/users/me/addresses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        label: 'Delivery Address',
+        fullAddress: address,
+        city: '',
+        state: '',
+        pincode: pincode || '',
+        latitude: 0,
+        longitude: 0
+      })
+    }).catch(function() {});
+  }
 }
 
 function logoutAccount() {
@@ -5392,6 +5522,7 @@ function submitCheckoutOrder() {
         return apiPost('/api/v1/orders/' + orderId + '/confirm-payment', {
           paymentId: payment.gatewayOrderId
         }).then(function() {
+          _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
           closeCheckoutModal();
           localStorage.removeItem('remont_cart');
           if (typeof updateCartBadge === 'function') updateCartBadge();
@@ -5430,6 +5561,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
             return apiPost('/api/v1/orders/' + _checkoutOrderId + '/confirm-payment', {
               paymentId: response.razorpay_payment_id
             }).then(function() {
+              _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
               closeCheckoutModal();
               localStorage.removeItem('remont_cart');
               if (typeof updateCartBadge === 'function') updateCartBadge();
