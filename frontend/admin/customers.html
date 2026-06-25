@@ -101,19 +101,27 @@
     <button onclick="closeDrawer()" style="margin-left:auto;border:none;background:none;cursor:pointer;font-size:20px;color:#9ca3af">✕</button>
   </div>
   <div class="drawer-body">
+    <!-- Contact -->
     <div class="drawer-section">
       <div class="drawer-section-title">Contact Info</div>
       <div class="info-row"><div class="label">Phone</div><div class="val" id="d-info-phone">—</div></div>
       <div class="info-row"><div class="label">Email</div><div class="val" id="d-info-email">—</div></div>
-      <div class="info-row"><div class="label">City</div><div class="val" id="d-info-city">—</div></div>
       <div class="info-row"><div class="label">Joined</div><div class="val" id="d-info-joined">—</div></div>
+      <div class="info-row"><div class="label">Role</div><div class="val" id="d-info-role">—</div></div>
     </div>
+    <!-- Financials -->
     <div class="drawer-section">
       <div class="drawer-section-title">Financials</div>
       <div class="info-row"><div class="label">Wallet Balance</div><div class="val" id="d-wallet">—</div></div>
       <div class="info-row"><div class="label">Total Orders</div><div class="val" id="d-total-orders">—</div></div>
       <div class="info-row"><div class="label">Status</div><div class="val" id="d-status">—</div></div>
     </div>
+    <!-- Wallet Transactions -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Last 5 Wallet Transactions</div>
+      <div id="d-wallet-txns" style="font-size:12px;color:#374151">—</div>
+    </div>
+    <!-- Quick Actions -->
     <div class="drawer-section">
       <div class="drawer-section-title">Quick Actions</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -122,12 +130,14 @@
         <button class="btn btn-outline btn-sm" onclick="viewOrders()">📦 View Orders</button>
       </div>
     </div>
+    <!-- Recent Orders -->
     <div class="drawer-section">
-      <div class="drawer-section-title">Recent Orders</div>
+      <div class="drawer-section-title">Recent Orders (last 10)</div>
       <div id="d-orders">Loading…</div>
     </div>
+    <!-- Addresses -->
     <div class="drawer-section">
-      <div class="drawer-section-title">Addresses</div>
+      <div class="drawer-section-title">Saved Addresses</div>
       <div id="d-addresses" style="font-size:13px;color:#374151">—</div>
     </div>
   </div>
@@ -220,18 +230,35 @@ function avatarBg(id) { var n = 0; for(var i=0; i<id.length; i++) n += id.charCo
 function openCustomer(id) {
   api('GET', '/admin/customers/' + id).then(function(c) {
     currentCustomer = c;
+    var initial = ((c.name || c.phone || 'U')[0]).toUpperCase();
     document.getElementById('d-name').textContent = c.name || 'New User';
     document.getElementById('d-phone').textContent = c.phone || '—';
-    document.getElementById('d-avatar').textContent = ((c.name || c.phone || 'U')[0]).toUpperCase();
+    document.getElementById('d-avatar').textContent = initial;
     document.getElementById('d-avatar').style.background = avatarBg(c.id);
     document.getElementById('d-info-phone').textContent = c.phone || '—';
     document.getElementById('d-info-email').textContent = c.email || '—';
-    document.getElementById('d-info-city').textContent = c.cityId || '—';
     document.getElementById('d-info-joined').textContent = fmtDateShort(c.createdAt);
-    document.getElementById('d-wallet').textContent = fmtCur(c.walletBalance);
-    document.getElementById('d-total-orders').textContent = (c.orders || []).length + ' recent';
+    document.getElementById('d-info-role').textContent = c.role || '—';
+    document.getElementById('d-wallet').innerHTML = '<span class="wallet-badge">₹' + Number(c.walletBalance || 0).toLocaleString('en-IN') + '</span>';
+    var totalOrders = (c._count && c._count.orders != null) ? c._count.orders : (c.orders || []).length;
+    document.getElementById('d-total-orders').textContent = totalOrders + ' orders';
     document.getElementById('d-status').innerHTML = c.isBlocked ? badge('Blocked', 'red') : badge('Active', 'green');
     document.getElementById('block-btn').textContent = c.isBlocked ? '✓ Unblock' : '🚫 Block';
+
+    // Wallet transactions
+    var txnsEl = document.getElementById('d-wallet-txns');
+    var txns = c.walletTransactions || [];
+    if (!txns.length) { txnsEl.innerHTML = '<div style="color:#9ca3af">No transactions</div>'; }
+    else {
+      txnsEl.innerHTML = txns.map(function(t) {
+        var sign = t.type === 'CREDIT' ? '+' : '-';
+        var color = t.type === 'CREDIT' ? '#16a34a' : '#dc2626';
+        return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6">' +
+          '<span style="color:#374151">' + escape(t.description || t.type) + '</span>' +
+          '<span style="font-weight:600;color:' + color + '">' + sign + '₹' + Number(t.amount).toLocaleString('en-IN') + '</span>' +
+          '</div>';
+      }).join('');
+    }
 
     // Orders
     var ordersEl = document.getElementById('d-orders');
@@ -248,15 +275,16 @@ function openCustomer(id) {
       }).join('');
     }
 
-    // Addresses
+    // Addresses (schema: label, fullAddress, city, state, pincode)
     var addrsEl = document.getElementById('d-addresses');
     var addrs = c.addresses || [];
     if (!addrs.length) addrsEl.innerHTML = '<div style="color:#9ca3af">No saved addresses</div>';
     else {
       addrsEl.innerHTML = addrs.map(function(a) {
-        return '<div style="padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:6px;font-size:12px">' +
-          '<strong>' + escape(a.label || a.type || 'Address') + '</strong><br>' +
-          escape([a.addressLine1, a.addressLine2, a.city, a.state, a.pincode].filter(Boolean).join(', ')) +
+        var parts = [a.fullAddress, a.city, a.state, a.pincode].filter(Boolean);
+        return '<div style="padding:8px 10px;background:#f9fafb;border-radius:6px;margin-bottom:6px;font-size:12px">' +
+          '<span style="font-weight:600;margin-right:6px;color:#374151">' + escape(a.label || 'Address') + '</span>' +
+          '<span style="color:#6b7280">' + escape(parts.join(', ')) + '</span>' +
           '</div>';
       }).join('');
     }

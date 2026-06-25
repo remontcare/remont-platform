@@ -1230,6 +1230,7 @@ Return JSON with:
         },
         addresses: true,
         walletTransactions: { orderBy: { createdAt: 'desc' }, take: 5 },
+        _count: { select: { orders: true } },
       },
     });
   }
