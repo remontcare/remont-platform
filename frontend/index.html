@@ -5535,30 +5535,31 @@ function submitCheckoutOrder() {
     });
   })
   .then(function(result) {
-    var orderNumber = result.orderNumber;
-    var totalAmount = Number(result.totalAmount || 0);
-    _checkoutOrderId = result.orderId;
+    var d = result.data || result; // NestJS wraps response in { data: {...} }
+    var orderNumber = d.orderNumber;
+    var totalAmount = Number(d.totalAmount || 0);
+    _checkoutOrderId = d.orderId;
 
-    if (result.isCOD || result._devMock) {
+    if (d.isCOD || d._devMock) {
       _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
       closeCheckoutModal();
       localStorage.removeItem('remont_cart');
       if (typeof updateCartBadge === 'function') updateCartBadge();
-      var note = result.isCOD
+      var note = d.isCOD
         ? 'Cash on Delivery — please keep exact change ready at the time of delivery.'
         : 'Payment simulated (test mode). Your order is confirmed and processing.';
       openOrderSuccessModal(orderNumber, totalAmount, note);
       return;
     }
 
-    if (result.requiresPayment) {
+    if (d.requiresPayment) {
       btn.textContent = 'Initiating payment…';
       var fakeOrder = { orderNumber: orderNumber };
       var fakePayment = {
-        gatewayOrderId: result.orderId,
+        gatewayOrderId: d.orderId,
         amount: totalAmount,
         currency: 'INR',
-        keyId: result.razorpayKeyId
+        keyId: d.razorpayKeyId
       };
       launchRazorpay(fakePayment, fakeOrder, totalAmount, btn).catch(function() {
         btn.textContent = 'Pay Online →'; btn.disabled = false;
