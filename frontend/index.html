@@ -5011,7 +5011,7 @@ function cartCheckout() {
 var _authCallback = null;
 var _checkoutOrderId = null;
 
-var DEV_MODE = window.location.hostname === 'localhost';
+var DEV_MODE = true; // temporary: real SMS API nahi hai, OTP fixed 1234
 var TEST_OTP  = '1234';
 
 // ── OTP Auth ────────────────────────────────────────────────────────
