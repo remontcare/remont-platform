@@ -346,12 +346,30 @@ function openDetail(orderId) {
     var a = o.address || {};
     var addr = a.fullAddress ? (a.fullAddress + (a.city ? ', ' + a.city : '') + (a.pincode ? ' - ' + a.pincode : '')) : '—';
     var hasCoords = a.latitude && a.longitude && Math.abs(a.latitude) > 0.01 && Math.abs(a.longitude) > 0.01;
-    var locSource = a.locationSource ? (' <small style="color:#9ca3af;font-size:10px">[' + a.locationSource + (a.accuracy ? ' ±' + Math.round(a.accuracy) + 'm' : '') + ']</small>') : '';
-    var navBtn = hasCoords ? ' <button id="nav-btn" style="margin-left:8px;padding:4px 10px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🗺 Navigate</button>' : '';
-    document.getElementById('detail-address').innerHTML = escape(addr) + locSource + navBtn;
-    if (hasCoords) {
+    var locSource = hasCoords
+      ? (' <small style="color:#22c55e;font-size:10px">📡 GPS' + (a.accuracy ? ' ±' + Math.round(a.accuracy) + 'm' : '') + '</small>')
+      : '';
+    // Navigate always visible: GPS coords if available, otherwise address text search
+    var navUrl = hasCoords
+      ? 'https://www.google.com/maps/dir/?api=1&destination=' + a.latitude + ',' + a.longitude + '&travelmode=driving'
+      : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr);
+    var hasAddr = addr && addr !== '—';
+    var navBtn = hasAddr
+      ? ' <button id="nav-btn" style="margin-left:8px;padding:4px 10px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🗺 Navigate</button>'
+      : '';
+    // OSM map embed when GPS coords are known
+    var mapEmbed = hasCoords
+      ? '<div style="margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb">' +
+        '<iframe src="https://www.openstreetmap.org/export/embed.html?bbox=' +
+          (a.longitude - 0.005) + ',' + (a.latitude - 0.005) + ',' +
+          (a.longitude + 0.005) + ',' + (a.latitude + 0.005) +
+          '&layer=mapnik&marker=' + a.latitude + ',' + a.longitude +
+          '" width="100%" height="180" frameborder="0" loading="lazy" style="display:block"></iframe></div>'
+      : '';
+    document.getElementById('detail-address').innerHTML = escape(addr) + locSource + navBtn + mapEmbed;
+    if (hasAddr) {
       document.getElementById('nav-btn').addEventListener('click', function() {
-        window.open('https://www.google.com/maps/dir/?api=1&destination=' + a.latitude + ',' + a.longitude + '&travelmode=driving', '_blank');
+        window.open(navUrl, '_blank');
       });
     }
 

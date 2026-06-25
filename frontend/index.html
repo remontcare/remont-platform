@@ -3801,6 +3801,14 @@
         <input id="loc-landmark" type="text" placeholder="Near school / temple / metro station">
       </div>
 
+      <!-- OSM map preview (shows after GPS capture or address lookup) -->
+      <div id="loc-map-preview" style="display:none;margin-bottom:14px;border-radius:10px;overflow:hidden;border:1.5px solid #e5e7eb">
+        <div style="background:#f9fafb;padding:6px 10px;font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px">
+          <span>🗺</span><span>Map Preview · <a href="#" id="loc-map-full-link" target="_blank" rel="noopener" style="color:#c4601a;text-decoration:none">Open in Maps ↗</a></span>
+        </div>
+        <iframe id="loc-map-iframe" src="" width="100%" height="200" frameborder="0" loading="lazy" style="display:block"></iframe>
+      </div>
+
       <p id="loc-modal-msg" style="color:#ef4444;font-size:13px;margin-bottom:8px;display:none"></p>
       <button class="loc-save-btn" onclick="locSaveManual()">Save Location</button>
     </div>
@@ -4442,15 +4450,15 @@
           if (geo) {
             var saved = Object.assign({}, loc, geo);
             LocationService.save(saved);
-            // Fill modal fields with geocoded data
             _fillLocModal(saved);
             if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '✅'; msg.textContent = 'Location detected! Accuracy: ~' + loc.accuracy + 'm'; }
           } else {
             LocationService.save(loc);
             if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '✅'; msg.textContent = 'GPS location captured (no address — please fill details)'; }
           }
+          // Show OSM map preview in modal
+          _locShowMapPreview(loc.latitude, loc.longitude);
           if (!fromModal) {
-            // Auto-saved from banner, no modal needed
             _locShowToast('📍 Location saved (' + (geo && geo.city ? geo.city : 'GPS') + ')');
           }
         });
@@ -4470,7 +4478,17 @@
   function openLocModal() {
     locDismissBanner();
     var existing = LocationService.get();
-    if (existing) _fillLocModal(existing);
+    if (existing) {
+      _fillLocModal(existing);
+      // Show map if we have GPS coords already
+      if (existing.latitude && existing.longitude &&
+          Math.abs(existing.latitude) > 0.01 && Math.abs(existing.longitude) > 0.01) {
+        _locShowMapPreview(existing.latitude, existing.longitude);
+      } else {
+        var mp = document.getElementById('loc-map-preview');
+        if (mp) mp.style.display = 'none';
+      }
+    }
     document.getElementById('loc-modal-overlay').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -4488,6 +4506,21 @@
     setVal('loc-area',     data.area     || '');
     setVal('loc-address',  data.fullAddress || '');
     setVal('loc-landmark', data.landmark || '');
+  }
+
+  function _locShowMapPreview(lat, lng) {
+    var preview   = document.getElementById('loc-map-preview');
+    var iframe    = document.getElementById('loc-map-iframe');
+    var fullLink  = document.getElementById('loc-map-full-link');
+    if (!preview || !iframe) return;
+    var delta = 0.004;
+    var osmSrc = 'https://www.openstreetmap.org/export/embed.html?bbox=' +
+      (lng - delta) + ',' + (lat - delta) + ',' +
+      (lng + delta) + ',' + (lat + delta) +
+      '&layer=mapnik&marker=' + lat + ',' + lng;
+    iframe.src = osmSrc;
+    if (fullLink) fullLink.href = 'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lng + '#map=16/' + lat + '/' + lng;
+    preview.style.display = '';
   }
 
   function locPincodeInput(val) {
