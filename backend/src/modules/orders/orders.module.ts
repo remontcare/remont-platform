@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { OrderStatus, OrderType, BookingChannel, UserRole } from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, Min, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
@@ -14,6 +14,22 @@ import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
+
+// ─── Public Product Checkout DTO ───
+class PublicCheckoutItemDto {
+  @IsString() productId: string;
+  @IsNumber() @Min(1) quantity: number;
+}
+
+class PublicProductCheckoutDto {
+  @IsString() name: string;
+  @IsString() phone: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsArray() @ValidateNested({ each: true }) @Type(() => PublicCheckoutItemDto) items: PublicCheckoutItemDto[];
+  @IsString() fullAddress: string;
+  @IsOptional() @IsString() pincode?: string;
+  @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
+}
 
 // ─── Guest Booking DTO ───
 class GuestBookingDto {
@@ -536,6 +552,86 @@ export class GuestBookingService {
     };
   }
 
+  async publicProductCheckout(dto: PublicProductCheckoutDto) {
+    // Find or create customer by phone
+    let user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: { phone: dto.phone, name: dto.name, email: dto.email || undefined, role: UserRole.CUSTOMER, isVerified: true },
+      });
+    } else if (dto.name && !user.name) {
+      await this.prisma.user.update({ where: { id: user.id }, data: { name: dto.name } });
+    }
+
+    if (!dto.items?.length) throw new BadRequestException('No items in order');
+
+    let productsAmount = 0;
+    const itemInputs: any[] = [];
+    for (const item of dto.items) {
+      const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
+      if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
+      const lineTotal = Number(p.price) * item.quantity;
+      productsAmount += lineTotal;
+      itemInputs.push({ productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: lineTotal });
+    }
+
+    const gstAmount = Math.round(productsAmount * 0.18 * 100) / 100;
+    const totalAmount = productsAmount + gstAmount;
+
+    const address = await this.prisma.address.create({
+      data: {
+        userId: user.id, label: 'Delivery Address',
+        fullAddress: dto.fullAddress, city: '', state: '',
+        pincode: dto.pincode || '', latitude: 0, longitude: 0,
+      },
+    });
+
+    const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const isCOD = dto.paymentMethod === 'COD';
+
+    const order = await this.prisma.order.create({
+      data: {
+        orderNumber, customerId: user.id, type: OrderType.PRODUCT,
+        channel: BookingChannel.WEBSITE, addressId: address.id,
+        guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,
+        productsAmount, subtotal: productsAmount, gstAmount, totalAmount,
+        startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
+        remontCommission: 0, vendorPayout: 0,
+        status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
+        paymentStatus: 'PENDING',
+        adminNotes: isCOD ? 'COD order' : null,
+        items: { create: itemInputs },
+      },
+    });
+
+    if (isCOD) {
+      return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'COD', isCOD: true };
+    }
+
+    // ONLINE: if no Razorpay configured, auto-confirm with dev mock
+    if (!process.env.RAZORPAY_KEY_ID) {
+      const mockPaymentId = `pay_dev_${Date.now()}`;
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'PAID', status: OrderStatus.CONFIRMED, paymentId: mockPaymentId },
+      });
+      await this.prisma.paymentTransaction.create({
+        data: {
+          orderId: order.id, userId: user.id, amount: totalAmount,
+          status: 'PAID', gateway: 'DEV_MOCK', gatewayOrderId: mockPaymentId, gatewayPaymentId: mockPaymentId,
+        },
+      });
+      return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'ONLINE', isCOD: false, _devMock: true };
+    }
+
+    // ONLINE with real Razorpay: return order for frontend payment flow
+    return {
+      orderNumber: order.orderNumber, orderId: order.id, totalAmount,
+      paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+      razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+    };
+  }
+
   async trackOrder(orderNumber: string, phone: string) {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
@@ -604,6 +700,7 @@ export class PublicBookingController {
   constructor(private guest: GuestBookingService) {}
 
   @Post('book') book(@Body() dto: GuestBookingDto) { return this.guest.book(dto); }
+  @Post('checkout') checkout(@Body() dto: PublicProductCheckoutDto) { return this.guest.publicProductCheckout(dto); }
   @Get('track/:orderNumber') track(@Param('orderNumber') num: string, @Query('phone') phone: string) {
     return this.guest.trackOrder(num, phone);
   }

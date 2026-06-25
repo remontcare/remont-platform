@@ -5044,10 +5044,21 @@ function cartCheckout() {
       <textarea id="co-address" placeholder="Full delivery address (house no, street, landmark, city, pincode)"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;height:80px;resize:none;outline:none;margin-bottom:10px"></textarea>
       <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6"
-        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:20px;outline:none" />
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:16px;outline:none" />
+      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:10px">Payment Method</h4>
+      <div style="display:flex;gap:8px;margin-bottom:20px">
+        <label class="co-payment-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+          <input type="radio" name="co-payment" value="ONLINE" checked onchange="updatePaymentUI()">
+          <div><div style="font-size:13px;font-weight:600">💳 Pay Online</div><div style="font-size:11px;color:#6b7280">UPI, Card, Net Banking</div></div>
+        </label>
+        <label class="co-payment-label" style="flex:1;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+          <input type="radio" name="co-payment" value="COD" onchange="updatePaymentUI()">
+          <div><div style="font-size:13px;font-weight:600">🚗 Cash on Delivery</div><div style="font-size:11px;color:#6b7280">Pay when delivered</div></div>
+        </label>
+      </div>
       <button onclick="submitCheckoutOrder()" id="co-submit-btn"
         style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">
-        Place Order & Pay →
+        Pay Online →
       </button>
       <p id="co-msg" style="margin-top:10px;font-size:13px;color:#ef4444;text-align:center;display:none"></p>
     </div>
@@ -5451,7 +5462,7 @@ function openCheckoutModal() {
   }
 
   document.getElementById('co-msg').style.display = 'none';
-  document.getElementById('co-submit-btn').textContent = 'Place Order & Pay →';
+  updatePaymentUI();
   document.getElementById('co-submit-btn').disabled = false;
   document.getElementById('checkout-modal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
@@ -5467,11 +5478,22 @@ function showCoMsg(msg) {
   el.textContent = msg; el.style.display = '';
 }
 
+function updatePaymentUI() {
+  var sel = document.querySelector('input[name="co-payment"]:checked');
+  var isCOD = sel && sel.value === 'COD';
+  var btn = document.getElementById('co-submit-btn');
+  if (btn) btn.textContent = isCOD ? 'Place Order (COD) →' : 'Pay Online →';
+  document.querySelectorAll('.co-payment-label').forEach(function(l) {
+    var inp = l.querySelector('input[type="radio"]');
+    l.style.borderColor = (inp && inp.checked) ? '#c4601a' : '#e5e7eb';
+  });
+}
+
 function submitCheckoutOrder() {
-  var name    = document.getElementById('co-name').value.trim();
+  var name     = document.getElementById('co-name').value.trim();
   var phoneRaw = document.getElementById('co-phone').value.replace(/\D/g,'');
-  var address = document.getElementById('co-address').value.trim();
-  var pincode = document.getElementById('co-pincode').value.trim();
+  var address  = document.getElementById('co-address').value.trim();
+  var pincode  = document.getElementById('co-pincode').value.trim();
 
   if (!name)    { showCoMsg('Please enter your name'); return; }
   if (phoneRaw.length < 10) { showCoMsg('Enter a valid 10-digit phone number'); return; }
@@ -5480,62 +5502,72 @@ function submitCheckoutOrder() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showCoMsg('Cart is empty'); return; }
 
+  var paymentEl = document.querySelector('input[name="co-payment"]:checked');
+  var paymentMethod = paymentEl ? paymentEl.value : 'ONLINE';
+
   var btn = document.getElementById('co-submit-btn');
-  btn.textContent = 'Creating order…'; btn.disabled = true;
+  btn.textContent = paymentMethod === 'COD' ? 'Placing order…' : 'Creating order…';
+  btn.disabled = true;
   document.getElementById('co-msg').style.display = 'none';
 
-  // Build order items (only products)
   var items = cart.filter(function(i){ return i.type === 'product'; }).map(function(i){
     return { productId: i.id, quantity: i.qty || 1 };
   });
 
   var payload = {
-    type: 'PRODUCT',
+    name: name,
+    phone: '+91' + phoneRaw,
     items: items,
-    channel: 'WEBSITE',
-    guestName: name,
-    guestPhone: '+91' + phoneRaw,
-    inlineAddress: {
-      label: 'Delivery Address',
-      fullAddress: address + (pincode ? ', ' + pincode : ''),
-      city: '',
-      state: '',
-      pincode: pincode
-    }
+    fullAddress: address + (pincode ? ', ' + pincode : ''),
+    pincode: pincode || undefined,
+    paymentMethod: paymentMethod
   };
 
-  // Create order first
-  apiPost('/api/v1/orders', payload).then(function(order) {
-    var orderId = order.id || (order.data && order.data.id);
-    var totalAmount = Number(order.totalAmount || (order.data && order.data.totalAmount) || 0);
-    _checkoutOrderId = orderId;
-
-    // Now create Razorpay/dev payment order
-    btn.textContent = 'Initiating payment…';
-    return apiPost('/api/v1/payments/create-order', {
-      amount: totalAmount,
-      orderId: orderId
-    }).then(function(payment) {
-      if (payment._devMock) {
-        // DEV mode: auto-confirm
-        btn.textContent = 'Confirming order…';
-        return apiPost('/api/v1/orders/' + orderId + '/confirm-payment', {
-          paymentId: payment.gatewayOrderId
-        }).then(function() {
-          _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
-          closeCheckoutModal();
-          localStorage.removeItem('remont_cart');
-          if (typeof updateCartBadge === 'function') updateCartBadge();
-          openOrderSuccessModal(order.orderNumber || (order.data && order.data.orderNumber), totalAmount,
-            'Payment simulated (test mode). Your order is confirmed and processing.');
-        });
-      } else {
-        // Real Razorpay
-        return launchRazorpay(payment, order, totalAmount, btn);
-      }
+  fetch((API_BASE || '') + '/api/v1/orders/public/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error(d.message || 'Order placement failed');
+      return d;
     });
-  }).catch(function(err) {
-    btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+  })
+  .then(function(result) {
+    var orderNumber = result.orderNumber;
+    var totalAmount = Number(result.totalAmount || 0);
+    _checkoutOrderId = result.orderId;
+
+    if (result.isCOD || result._devMock) {
+      _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
+      closeCheckoutModal();
+      localStorage.removeItem('remont_cart');
+      if (typeof updateCartBadge === 'function') updateCartBadge();
+      var note = result.isCOD
+        ? 'Cash on Delivery — please keep exact change ready at the time of delivery.'
+        : 'Payment simulated (test mode). Your order is confirmed and processing.';
+      openOrderSuccessModal(orderNumber, totalAmount, note);
+      return;
+    }
+
+    if (result.requiresPayment) {
+      btn.textContent = 'Initiating payment…';
+      var fakeOrder = { orderNumber: orderNumber };
+      var fakePayment = {
+        gatewayOrderId: result.orderId,
+        amount: totalAmount,
+        currency: 'INR',
+        keyId: result.razorpayKeyId
+      };
+      launchRazorpay(fakePayment, fakeOrder, totalAmount, btn).catch(function() {
+        btn.textContent = 'Pay Online →'; btn.disabled = false;
+      });
+    }
+  })
+  .catch(function(err) {
+    btn.textContent = paymentMethod === 'COD' ? 'Place Order (COD) →' : 'Pay Online →';
+    btn.disabled = false;
     showCoMsg('Error: ' + (err && err.message ? err.message : 'Order creation failed. Please try again.'));
   });
 }
@@ -5557,7 +5589,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
             paymentId: response.razorpay_payment_id,
             signature: response.razorpay_signature
           }).then(function(v) {
-            if (!v.valid) { showCoMsg('Payment verification failed. Contact support.'); btn.textContent = 'Place Order & Pay →'; btn.disabled = false; return; }
+            if (!v.valid) { showCoMsg('Payment verification failed. Contact support.'); btn.textContent = 'Pay Online →'; btn.disabled = false; return; }
             return apiPost('/api/v1/orders/' + _checkoutOrderId + '/confirm-payment', {
               paymentId: response.razorpay_payment_id
             }).then(function() {
@@ -5570,7 +5602,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
             });
           }).catch(function(e) {
             showCoMsg('Payment recorded but verification failed. Contact support with payment ID: ' + response.razorpay_payment_id);
-            btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+            btn.textContent = 'Pay Online →'; btn.disabled = false;
           });
         },
         prefill: {
@@ -5578,7 +5610,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
           contact: '+91' + document.getElementById('co-phone').value.replace(/\D/g,'')
         },
         theme: { color: '#c4601a' },
-        modal: { ondismiss: function() { btn.textContent = 'Place Order & Pay →'; btn.disabled = false; } }
+        modal: { ondismiss: function() { btn.textContent = 'Pay Online →'; btn.disabled = false; } }
       };
       var rzp = new window.Razorpay(options);
       rzp.open();
@@ -5592,7 +5624,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
       s.onload = initRzp;
       s.onerror = function() {
         showCoMsg('Failed to load payment gateway. Please try again.');
-        btn.textContent = 'Place Order & Pay →'; btn.disabled = false;
+        btn.textContent = 'Pay Online →'; btn.disabled = false;
         reject(new Error('Razorpay SDK failed'));
       };
       document.head.appendChild(s);
