@@ -34,7 +34,29 @@ export class UsersService {
     if (data.isDefault) {
       await this.prisma.address.updateMany({ where: { userId }, data: { isDefault: false } });
     }
-    return this.prisma.address.create({ data: { ...data, userId } });
+    // Validate coords if provided; reject 0,0 placeholder
+    const lat = parseFloat(data.latitude) || 0;
+    const lng = parseFloat(data.longitude) || 0;
+    const validCoords = lat !== 0 && lng !== 0 && lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
+    return this.prisma.address.create({
+      data: {
+        userId,
+        label:          data.label          || 'Home',
+        fullAddress:    data.fullAddress     || '',
+        area:           data.area            || '',
+        landmark:       data.landmark        || '',
+        city:           data.city            || '',
+        state:          data.state           || '',
+        country:        data.country         || 'India',
+        pincode:        data.pincode         || '',
+        latitude:       validCoords ? lat : 0,
+        longitude:      validCoords ? lng : 0,
+        accuracy:       data.accuracy        || null,
+        locationSource: data.locationSource  || 'MANUAL',
+        capturedAt:     data.capturedAt ? new Date(data.capturedAt) : null,
+        isDefault:      data.isDefault       || false,
+      },
+    });
   }
 
   async listAddresses(userId: string) {

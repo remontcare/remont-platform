@@ -342,9 +342,18 @@ function openDetail(orderId) {
     // Slot
     document.getElementById('detail-slot').textContent = o.slotStart ? fmtDate(o.slotStart) + (o.slotEnd?' → '+fmtDate(o.slotEnd):'') : 'Not scheduled';
 
-    // Address
-    var addr = o.address ? (o.address.fullAddress+', '+o.address.city) : '—';
-    document.getElementById('detail-address').textContent = addr;
+    // Address + Navigate button
+    var a = o.address || {};
+    var addr = a.fullAddress ? (a.fullAddress + (a.city ? ', ' + a.city : '') + (a.pincode ? ' - ' + a.pincode : '')) : '—';
+    var hasCoords = a.latitude && a.longitude && Math.abs(a.latitude) > 0.01 && Math.abs(a.longitude) > 0.01;
+    var locSource = a.locationSource ? (' <small style="color:#9ca3af;font-size:10px">[' + a.locationSource + (a.accuracy ? ' ±' + Math.round(a.accuracy) + 'm' : '') + ']</small>') : '';
+    var navBtn = hasCoords ? ' <button id="nav-btn" style="margin-left:8px;padding:4px 10px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🗺 Navigate</button>' : '';
+    document.getElementById('detail-address').innerHTML = escape(addr) + locSource + navBtn;
+    if (hasCoords) {
+      document.getElementById('nav-btn').addEventListener('click', function() {
+        window.open('https://www.google.com/maps/dir/?api=1&destination=' + a.latitude + ',' + a.longitude + '&travelmode=driving', '_blank');
+      });
+    }
 
     // Amount
     document.getElementById('detail-amount').innerHTML = fmtCur(o.totalAmount)+

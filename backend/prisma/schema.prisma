@@ -235,22 +235,29 @@ model User {
 }
 
 model Address {
-  id           String   @id @default(cuid())
-  userId       String
-  label        String
-  fullAddress  String
-  city         String
-  state        String
-  pincode      String
-  latitude     Float
-  longitude    Float
-  isDefault    Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  id             String    @id @default(cuid())
+  userId         String
+  label          String    @default("Home")
+  fullAddress    String
+  area           String    @default("")   // locality / suburb
+  landmark       String    @default("")
+  city           String
+  state          String
+  country        String    @default("India")
+  pincode        String
+  latitude       Float     @default(0)
+  longitude      Float     @default(0)
+  accuracy       Float?                  // GPS accuracy in metres
+  locationSource String    @default("MANUAL")  // GPS | MANUAL
+  capturedAt     DateTime?               // when GPS was captured
+  isDefault      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders Order[]
 
   @@index([userId])
+  @@index([locationSource])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

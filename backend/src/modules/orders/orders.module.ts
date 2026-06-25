@@ -27,7 +27,16 @@ class PublicProductCheckoutDto {
   @IsOptional() @IsEmail() email?: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => PublicCheckoutItemDto) items: PublicCheckoutItemDto[];
   @IsString() fullAddress: string;
+  @IsOptional() @IsString() area?: string;
+  @IsOptional() @IsString() landmark?: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() state?: string;
   @IsOptional() @IsString() pincode?: string;
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsNumber() accuracy?: number;
+  @IsOptional() @IsString() locationSource?: string;
+  @IsOptional() @IsString() capturedAt?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -578,11 +587,21 @@ export class GuestBookingService {
     const gstAmount = Math.round(productsAmount * 0.18 * 100) / 100;
     const totalAmount = productsAmount + gstAmount;
 
+    const lat = dto.latitude || 0;
+    const lng = dto.longitude || 0;
+    const validCoords = lat !== 0 && lng !== 0 && lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
     const address = await this.prisma.address.create({
       data: {
         userId: user.id, label: 'Delivery Address',
-        fullAddress: dto.fullAddress, city: '', state: '',
-        pincode: dto.pincode || '', latitude: 0, longitude: 0,
+        fullAddress: dto.fullAddress,
+        area: dto.area || '', landmark: dto.landmark || '',
+        city: dto.city || '', state: dto.state || '', country: 'India',
+        pincode: dto.pincode || '',
+        latitude:  validCoords ? lat : 0,
+        longitude: validCoords ? lng : 0,
+        accuracy:  dto.accuracy || null,
+        locationSource: dto.locationSource || 'MANUAL',
+        capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : null,
       },
     });
 

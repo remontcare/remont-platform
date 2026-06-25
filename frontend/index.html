@@ -2348,6 +2348,85 @@
     .floating-actions { bottom: 16px; right: 16px; }
     .fab { width: 50px; height: 50px; font-size: 20px; }
   }
+
+  /* ─── LOCATION SYSTEM ─────────────────────────────────────────────── */
+  #loc-banner {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 8000;
+    background: #1f2937; color: #fff;
+    padding: 12px 20px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    transform: translateY(100%); transition: transform .35s ease;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.2);
+  }
+  #loc-banner.show { transform: translateY(0); }
+  #loc-banner .loc-icon { font-size: 22px; flex-shrink: 0; }
+  #loc-banner .loc-text { flex: 1; font-size: 13px; line-height: 1.4; min-width: 200px; }
+  #loc-banner .loc-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  #loc-banner .loc-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .loc-btn-allow {
+    padding: 8px 16px; border: none; border-radius: 8px;
+    background: #c4601a; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .loc-btn-manual {
+    padding: 8px 14px; border: 1.5px solid rgba(255,255,255,.3); border-radius: 8px;
+    background: transparent; color: #fff; font-size: 13px; cursor: pointer;
+  }
+  .loc-btn-dismiss {
+    padding: 6px 10px; border: none; background: none; color: rgba(255,255,255,.5);
+    font-size: 18px; cursor: pointer; line-height: 1;
+  }
+
+  /* Location indicator in header */
+  #loc-indicator {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: #6b7280; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px;
+    transition: background .2s;
+  }
+  #loc-indicator:hover { background: #f3f4f6; }
+  #loc-indicator .loc-dot { width: 7px; height: 7px; border-radius: 50%; background: #9ca3af; flex-shrink: 0; }
+  #loc-indicator .loc-dot.gps { background: #22c55e; }
+  #loc-indicator .loc-dot.manual { background: #f59e0b; }
+
+  /* Manual location modal */
+  #loc-modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 10500;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  #loc-modal-overlay.open { display: flex; }
+  .loc-modal {
+    background: #fff; border-radius: 16px; width: 480px; max-width: 100%;
+    max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  }
+  .loc-modal-head {
+    padding: 18px 20px 14px; border-bottom: 1px solid #f3f4f6;
+    display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; background: #fff; z-index: 1;
+  }
+  .loc-modal-head h3 { font-size: 17px; font-weight: 700; color: #111; margin: 0; }
+  .loc-modal-body { padding: 20px; }
+  .loc-field { margin-bottom: 14px; }
+  .loc-field label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+  .loc-field input, .loc-field textarea, .loc-field select {
+    width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb;
+    border-radius: 8px; font-size: 14px; font-family: inherit; outline: none;
+    transition: border-color .2s;
+  }
+  .loc-field input:focus, .loc-field textarea:focus { border-color: #c4601a; }
+  .loc-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .loc-gps-strip {
+    background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px; font-size: 13px; color: #166534;
+  }
+  .loc-gps-strip.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+  .loc-gps-strip.loading { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+  .loc-save-btn {
+    width: 100%; padding: 13px; background: #c4601a; color: #fff; border: none;
+    border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+    margin-top: 6px;
+  }
+  .loc-save-btn:disabled { background: #d1d5db; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -2429,6 +2508,10 @@
   </div>
 
   <div class="header-right">
+    <div id="loc-indicator" onclick="openLocModal()" title="Your location — click to update" style="display:none">
+      <span class="loc-dot" id="loc-dot"></span>
+      <span id="loc-indicator-text" style="font-size:11px;color:#6b7280;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Set location</span>
+    </div>
     <button class="icon-btn city-selector" onclick="openCityModal()" title="Change your city">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
       <span class="label" id="currentCity">Mumbai</span>
@@ -3648,6 +3731,82 @@
   </a>
 </div>
 
+<!-- ═══ LOCATION SYSTEM ═══ -->
+
+<!-- Location Permission Banner (bottom bar) -->
+<div id="loc-banner">
+  <span class="loc-icon">📍</span>
+  <div class="loc-text">
+    <strong>Enable location for better service</strong>
+    We use your location to show nearest vendors, accurate ETAs, and auto-fill your address.
+  </div>
+  <div class="loc-actions">
+    <button class="loc-btn-allow" onclick="locRequestGPS()">Allow GPS</button>
+    <button class="loc-btn-manual" onclick="openLocModal()">Enter Manually</button>
+    <button class="loc-btn-dismiss" onclick="locDismissBanner()" title="Dismiss">✕</button>
+  </div>
+</div>
+
+<!-- Manual Location Modal -->
+<div id="loc-modal-overlay">
+  <div class="loc-modal">
+    <div class="loc-modal-head">
+      <h3>📍 Set Your Location</h3>
+      <button onclick="closeLocModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1">✕</button>
+    </div>
+    <div class="loc-modal-body">
+      <!-- GPS quick capture -->
+      <div id="loc-gps-strip" class="loc-gps-strip loading" style="display:none">
+        <span id="loc-gps-icon">⏳</span>
+        <span id="loc-gps-msg">Detecting your location…</span>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button onclick="locRequestGPS(true)" style="flex:1;padding:10px;border:1.5px solid #c4601a;border-radius:8px;background:#fff7f3;color:#c4601a;font-size:13px;font-weight:600;cursor:pointer">
+          📡 Use My GPS Location
+        </button>
+      </div>
+
+      <div style="text-align:center;color:#9ca3af;font-size:12px;margin-bottom:14px">— or enter manually —</div>
+
+      <div class="loc-field">
+        <label>PIN Code *</label>
+        <input id="loc-pincode" type="tel" maxlength="6" placeholder="e.g. 462023" oninput="locPincodeInput(this.value)">
+        <div id="loc-pincode-msg" style="font-size:11px;color:#22c55e;margin-top:3px;display:none"></div>
+      </div>
+
+      <div class="loc-field-row">
+        <div class="loc-field">
+          <label>City *</label>
+          <input id="loc-city" type="text" placeholder="Bhopal">
+        </div>
+        <div class="loc-field">
+          <label>State</label>
+          <input id="loc-state" type="text" placeholder="Madhya Pradesh">
+        </div>
+      </div>
+
+      <div class="loc-field">
+        <label>Area / Locality</label>
+        <input id="loc-area" type="text" placeholder="e.g. Arera Colony, Kolar Road">
+      </div>
+
+      <div class="loc-field">
+        <label>Full Address</label>
+        <textarea id="loc-address" rows="2" placeholder="House No, Street, Building name…"></textarea>
+      </div>
+
+      <div class="loc-field">
+        <label>Landmark</label>
+        <input id="loc-landmark" type="text" placeholder="Near school / temple / metro station">
+      </div>
+
+      <p id="loc-modal-msg" style="color:#ef4444;font-size:13px;margin-bottom:8px;display:none"></p>
+      <button class="loc-save-btn" onclick="locSaveManual()">Save Location</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ REMI AI CHAT MODAL ═══ -->
 <div id="remi-chat-modal" style="display:none;position:fixed;bottom:80px;right:20px;width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 100px);background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.25);z-index:9500;flex-direction:column;overflow:hidden">
   <div style="background:linear-gradient(135deg,#c4601a,#f59e0b);padding:14px 16px;display:flex;align-items:center;gap:12px;color:#fff;flex-shrink:0">
@@ -4136,9 +4295,281 @@
   // BACKEND API CONNECTION
   // Dev:  window.location.hostname === 'localhost' → calls http://localhost:3001
   // Prod: empty API_BASE → relative URL, Vercel rewrite proxies /api/* to Railway
-  // Verified routes from backend/src/modules/ai-agent/ai-agent.module.ts
   // ═══════════════════════════════════════════════════════════════════════════
   var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LOCATION SERVICE — future-ready, swap provider by changing internals only
+  // Current providers: HTML5 GPS + Nominatim (reverse) + PostalPincode.in (pin)
+  // Future: swap reverseGeocode() / lookupPincode() for Google Maps API calls
+  // ══════════════════════════════════════════════════════════════════════════
+  var LocationService = (function() {
+    var STORAGE_KEY = 'remont_location_v2';
+    var BANNER_KEY  = 'remont_loc_banner_dismissed';
+    var TTL_MS      = 24 * 60 * 60 * 1000; // 24-hour cache
+
+    // India bounding box — basic validation, swap with Google validation later
+    function isValidCoords(lat, lng) {
+      return typeof lat === 'number' && typeof lng === 'number' &&
+             lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
+    }
+
+    function get() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        var data = JSON.parse(raw);
+        if (Date.now() - (data._savedAt || 0) > TTL_MS) return null;
+        return data;
+      } catch(e) { return null; }
+    }
+
+    function save(data) {
+      data._savedAt = Date.now();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      _updateLocationIndicator(data);
+      window.dispatchEvent(new CustomEvent('remont:locationChanged', { detail: data }));
+    }
+
+    // Request GPS — uses browser HTML5 Geolocation API
+    function requestGPS(onSuccess, onDenied) {
+      if (!navigator.geolocation) {
+        if (onDenied) onDenied('GPS not available on this browser');
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          var loc = {
+            latitude:   pos.coords.latitude,
+            longitude:  pos.coords.longitude,
+            accuracy:   Math.round(pos.coords.accuracy),
+            source:     'GPS',
+            capturedAt: new Date().toISOString(),
+          };
+          if (onSuccess) onSuccess(loc);
+        },
+        function(err) {
+          var msg = err.code === 1 ? 'Location permission denied. Please allow in browser settings.' :
+                    err.code === 2 ? 'Location unavailable. Please enter manually.' :
+                                     'Location request timed out. Please try again.';
+          if (onDenied) onDenied(msg);
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 }
+      );
+    }
+
+    // Reverse geocode via Nominatim proxy on our backend — swap body for Google later
+    function reverseGeocode(lat, lng, callback) {
+      fetch(API_BASE + '/api/v1/location/reverse-geocode?lat=' + lat + '&lng=' + lng)
+        .then(function(r) { return r.json(); })
+        .then(function(res) { callback(null, res.data || res); })
+        .catch(function(e)  { callback(e, null); });
+    }
+
+    // Pincode lookup via free Indian API proxy — swap for Google Places later
+    function lookupPincode(pin, callback) {
+      if (!pin || !/^\d{6}$/.test(pin)) { callback(new Error('Enter valid 6-digit PIN')); return; }
+      fetch(API_BASE + '/api/v1/location/pincode/' + pin)
+        .then(function(r) { return r.json(); })
+        .then(function(res) { callback(null, res.data || res); })
+        .catch(function(e)  { callback(e, null); });
+    }
+
+    // Open Google Maps navigation — uses standard URL, NO API key
+    function openNavigation(lat, lng) {
+      if (!isValidCoords(lat, lng)) { alert('Invalid location coordinates'); return; }
+      window.open('https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lng + '&travelmode=driving', '_blank');
+    }
+
+    return { get: get, save: save, requestGPS: requestGPS, reverseGeocode: reverseGeocode,
+             lookupPincode: lookupPincode, openNavigation: openNavigation, isValidCoords: isValidCoords,
+             BANNER_KEY: BANNER_KEY };
+  })();
+
+  // ── Location indicator in header ──────────────────────────────────────────
+  function _updateLocationIndicator(data) {
+    var el   = document.getElementById('loc-indicator');
+    var dot  = document.getElementById('loc-dot');
+    var text = document.getElementById('loc-indicator-text');
+    if (!el) return;
+    el.style.display = 'flex';
+    if (data && data.source === 'GPS') {
+      dot.className  = 'loc-dot gps';
+      text.textContent = data.area || data.city || 'GPS location';
+    } else if (data) {
+      dot.className  = 'loc-dot manual';
+      text.textContent = data.area || data.city || 'Saved location';
+    } else {
+      dot.className  = 'loc-dot';
+      text.textContent = 'Set location';
+    }
+  }
+
+  // ── Location banner logic ─────────────────────────────────────────────────
+  function _showLocBanner() {
+    var dismissed = sessionStorage.getItem(LocationService.BANNER_KEY);
+    if (dismissed) return;
+    var saved = LocationService.get();
+    if (saved && (saved.city || (saved.latitude && saved.longitude))) return; // already have location
+    setTimeout(function() {
+      var el = document.getElementById('loc-banner');
+      if (el) el.classList.add('show');
+    }, 2000);
+  }
+
+  function locDismissBanner() {
+    sessionStorage.setItem(LocationService.BANNER_KEY, '1');
+    var el = document.getElementById('loc-banner');
+    if (el) el.classList.remove('show');
+  }
+
+  function locRequestGPS(fromModal) {
+    locDismissBanner();
+    var strip = document.getElementById('loc-gps-strip');
+    var icon  = document.getElementById('loc-gps-icon');
+    var msg   = document.getElementById('loc-gps-msg');
+    if (fromModal && strip) {
+      strip.style.display = 'flex';
+      strip.className = 'loc-gps-strip loading';
+      icon.textContent = '⏳'; msg.textContent = 'Detecting your GPS location…';
+    }
+
+    LocationService.requestGPS(
+      function(loc) {
+        // Got coords — reverse geocode
+        if (strip) { strip.className = 'loc-gps-strip loading'; msg.textContent = 'Getting address…'; }
+        LocationService.reverseGeocode(loc.latitude, loc.longitude, function(err, geo) {
+          if (geo) {
+            var saved = Object.assign({}, loc, geo);
+            LocationService.save(saved);
+            // Fill modal fields with geocoded data
+            _fillLocModal(saved);
+            if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '✅'; msg.textContent = 'Location detected! Accuracy: ~' + loc.accuracy + 'm'; }
+          } else {
+            LocationService.save(loc);
+            if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '✅'; msg.textContent = 'GPS location captured (no address — please fill details)'; }
+          }
+          if (!fromModal) {
+            // Auto-saved from banner, no modal needed
+            _locShowToast('📍 Location saved (' + (geo && geo.city ? geo.city : 'GPS') + ')');
+          }
+        });
+      },
+      function(errMsg) {
+        if (fromModal && strip) {
+          strip.className = 'loc-gps-strip error'; icon.textContent = '❌'; msg.textContent = errMsg;
+          strip.style.display = 'flex';
+        } else {
+          openLocModal();
+        }
+      }
+    );
+  }
+
+  // ── Manual location modal ──────────────────────────────────────────────────
+  function openLocModal() {
+    locDismissBanner();
+    var existing = LocationService.get();
+    if (existing) _fillLocModal(existing);
+    document.getElementById('loc-modal-overlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLocModal() {
+    document.getElementById('loc-modal-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  function _fillLocModal(data) {
+    var setVal = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ''; };
+    setVal('loc-pincode',  data.pincode  || '');
+    setVal('loc-city',     data.city     || '');
+    setVal('loc-state',    data.state    || '');
+    setVal('loc-area',     data.area     || '');
+    setVal('loc-address',  data.fullAddress || '');
+    setVal('loc-landmark', data.landmark || '');
+  }
+
+  function locPincodeInput(val) {
+    if (val.length === 6) {
+      var msg = document.getElementById('loc-pincode-msg');
+      if (msg) { msg.style.display = ''; msg.textContent = 'Looking up…'; msg.style.color = '#6b7280'; }
+      LocationService.lookupPincode(val, function(err, data) {
+        if (data) {
+          var setVal = function(id, v) { var el = document.getElementById(id); if (el && !el.value) el.value = v || ''; };
+          // Only auto-fill if field is empty
+          document.getElementById('loc-city').value  = data.city  || '';
+          document.getElementById('loc-state').value = data.state || '';
+          if (!document.getElementById('loc-area').value) document.getElementById('loc-area').value = data.area || '';
+          if (msg) { msg.style.display = ''; msg.style.color = '#22c55e'; msg.textContent = '✓ ' + (data.city || '') + ', ' + (data.state || ''); }
+        } else {
+          if (msg) { msg.style.display = ''; msg.style.color = '#ef4444'; msg.textContent = 'Pincode not found'; }
+        }
+      });
+    }
+  }
+
+  function locSaveManual() {
+    var city    = (document.getElementById('loc-city').value    || '').trim();
+    var pincode = (document.getElementById('loc-pincode').value || '').trim();
+    var address = (document.getElementById('loc-address').value || '').trim();
+    var area    = (document.getElementById('loc-area').value    || '').trim();
+    var msg     = document.getElementById('loc-modal-msg');
+
+    if (!city) { msg.style.display = ''; msg.textContent = 'Please enter your city'; return; }
+    if (msg) msg.style.display = 'none';
+
+    var existing = LocationService.get() || {};
+    var data = {
+      fullAddress:    address || existing.fullAddress || '',
+      area:           area    || existing.area        || '',
+      landmark:       (document.getElementById('loc-landmark').value || '').trim(),
+      city:           city,
+      state:          (document.getElementById('loc-state').value  || '').trim(),
+      country:        'India',
+      pincode:        pincode,
+      latitude:       existing.latitude  || 0,
+      longitude:      existing.longitude || 0,
+      accuracy:       existing.accuracy  || null,
+      source:         existing.source === 'GPS' ? 'GPS' : 'MANUAL',
+      capturedAt:     existing.capturedAt || new Date().toISOString(),
+    };
+
+    LocationService.save(data);
+
+    // If logged in with real token, save to user addresses
+    var token = localStorage.getItem('remont_token') || '';
+    if (token && !token.startsWith('dev-token') && address) {
+      fetch(API_BASE + '/api/v1/users/me/addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ ...data, label: 'Primary', locationSource: data.source, isDefault: true }),
+      }).catch(function() {}); // silent — location already saved to localStorage
+    }
+
+    closeLocModal();
+    _locShowToast('📍 Location saved — ' + city);
+  }
+
+  function _locShowToast(msg) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:99999;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.2)';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function() { t.remove(); }, 3000);
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('loc-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeLocModal();
+  });
+
+  // Init on page load
+  (function initLocation() {
+    var saved = LocationService.get();
+    if (saved) _updateLocationIndicator(saved);
+    _showLocBanner();
+  })();
 
   function apiPost(path, body) {
     var token = localStorage.getItem('remont_token');
@@ -5567,12 +5998,38 @@ function openCheckoutModal() {
   document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
   document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
 
-  // Pre-fill phone from profile if stored
+  // Pre-fill contact from saved profile
   var storedUser = null;
   try { storedUser = JSON.parse(localStorage.getItem('remont_user') || 'null'); } catch(e) {}
   if (storedUser) {
-    if (storedUser.name) document.getElementById('co-name').value = storedUser.name;
+    if (storedUser.name)  document.getElementById('co-name').value  = storedUser.name;
     if (storedUser.phone) document.getElementById('co-phone').value = storedUser.phone.replace('+91','');
+  }
+
+  // Pre-fill address from saved LocationService data
+  var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
+  if (savedLoc) {
+    var addrParts = [savedLoc.fullAddress, savedLoc.area, savedLoc.city].filter(Boolean);
+    var addrStr = addrParts.join(', ');
+    var coAddr = document.getElementById('co-address');
+    var coPin  = document.getElementById('co-pincode');
+    if (coAddr && !coAddr.value && addrStr) coAddr.value = addrStr;
+    if (coPin  && !coPin.value  && savedLoc.pincode) coPin.value = savedLoc.pincode;
+
+    // Show a subtle "location in use" hint
+    var locHint = document.getElementById('co-loc-hint');
+    if (!locHint) {
+      locHint = document.createElement('div');
+      locHint.id = 'co-loc-hint';
+      locHint.style.cssText = 'font-size:11px;color:#22c55e;margin-top:-6px;margin-bottom:6px;display:flex;align-items:center;gap:4px';
+      locHint.innerHTML = '<span>📍</span><span>' +
+        (savedLoc.source === 'GPS' ? 'GPS location detected' : 'Saved location') +
+        ' — <a href="#" onclick="openLocModal();return false" style="color:#c4601a;text-decoration:underline">change</a></span>';
+      var coAddrEl = document.getElementById('co-address');
+      if (coAddrEl && coAddrEl.parentNode) coAddrEl.parentNode.insertBefore(locHint, coAddrEl.nextSibling);
+    } else {
+      locHint.style.display = 'flex';
+    }
   }
 
   document.getElementById('co-msg').style.display = 'none';
@@ -5628,12 +6085,23 @@ function submitCheckoutOrder() {
     return { productId: i.id, quantity: i.qty || 1 };
   });
 
+  // Merge saved GPS/location data into payload
+  var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
   var payload = {
-    name: name,
-    phone: '+91' + phoneRaw,
-    items: items,
-    fullAddress: address + (pincode ? ', ' + pincode : ''),
-    pincode: pincode || undefined,
+    name:          name,
+    phone:         '+91' + phoneRaw,
+    items:         items,
+    fullAddress:   address + (pincode ? ', ' + pincode : ''),
+    area:          savedLoc ? (savedLoc.area    || '') : '',
+    landmark:      savedLoc ? (savedLoc.landmark || '') : '',
+    city:          savedLoc ? (savedLoc.city     || '') : '',
+    state:         savedLoc ? (savedLoc.state    || '') : '',
+    pincode:       pincode  || (savedLoc ? savedLoc.pincode : '') || undefined,
+    latitude:      savedLoc ? (savedLoc.latitude  || 0) : 0,
+    longitude:     savedLoc ? (savedLoc.longitude || 0) : 0,
+    accuracy:      savedLoc ? (savedLoc.accuracy  || null) : null,
+    locationSource: savedLoc ? (savedLoc.source || 'MANUAL') : 'MANUAL',
+    capturedAt:    savedLoc ? (savedLoc.capturedAt || null) : null,
     paymentMethod: paymentMethod
   };
 

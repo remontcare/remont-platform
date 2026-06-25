@@ -29,6 +29,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthModule } from './modules/health/health.module';
+import { LocationModule } from './modules/location/location.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { HealthModule } from './modules/health/health.module';
     CmsModule,
     ReviewsModule,
     HealthModule,
+    LocationModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
