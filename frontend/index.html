@@ -4200,8 +4200,8 @@
     modal.style.display = 'flex';
     var msgs = document.getElementById('remi-messages');
     if (!msgs.children.length) {
-      remiAddBubble('assistant', 'Namaste! 👋 Main Remi hun — Remont ki AI assistant. Kya problem hai ghar mein? AC, plumbing, electrical, carpenter — kuch bhi batao, main abhi book kar deti hun!');
-      remiRenderSuggestions(['AC not cooling 🥵', 'Tap leaking 💧', 'Need electrician ⚡', 'Pest control 🪲']);
+      remiAddBubble('assistant', 'Namaste! 👋 Main Remi hun — Remont India ki Senior Sales Consultant.\n\n🏠 Customers: Koi bhi ghar ki service book karun — AC, plumbing, electrical, cleaning, renovation.\n\n🤝 Vendors: Product ya service add karna ho, ya Remont pe partner banna ho — sab guide karti hun!\n\nAaj kya help kar sakti hun?');
+      remiRenderSuggestions(['Book a service 🏠', 'Join as vendor 🤝', 'Add product/service 📦', 'AMC plans 📅']);
     }
     setTimeout(function() { document.getElementById('remi-input').focus(); }, 100);
   }

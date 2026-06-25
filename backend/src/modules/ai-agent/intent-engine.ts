@@ -12,6 +12,7 @@ export type Intent =
   | 'AC' | 'PLUMBING' | 'ELECTRICAL' | 'APPLIANCE'
   | 'INTERIOR' | 'RENOVATION' | 'CONSTRUCTION' | 'CLEANING'
   | 'AMC' | 'CORPORATE' | 'PRICING' | 'TRACK_ORDER'
+  | 'VENDOR_JOIN' | 'ADD_PRODUCT' | 'ADD_SERVICE'
   | 'GREETING' | 'UNKNOWN';
 
 const KEYWORDS: Record<Intent, string[]> = {
@@ -70,6 +71,23 @@ const KEYWORDS: Record<Intent, string[]> = {
   TRACK_ORDER: [
     'track', 'status', 'where', 'kahan hai', 'kab aayega', 'eta',
     'order number', 'booking', 'pending',
+  ],
+  VENDOR_JOIN: [
+    'vendor', 'partner', 'become partner', 'join remont', 'register vendor',
+    'service provider', 'technician register', 'worker register', 'freelancer',
+    'apna kaam', 'kaam chahiye', 'kamai', 'income', 'earn', 'join as',
+    'how to register', 'register karna', 'partner banana', 'empanel',
+    'become a vendor', 'sign up vendor', 'vendor registration', 'partner registration',
+  ],
+  ADD_PRODUCT: [
+    'add product', 'list product', 'sell product', 'upload product', 'product add',
+    'product list karna', 'product sell karna', 'apna product', 'mera product',
+    'product catalog', 'inventory add', 'product upload', 'new product',
+  ],
+  ADD_SERVICE: [
+    'add service', 'list service', 'offer service', 'service add karna',
+    'apni service', 'meri service', 'service offer', 'new service',
+    'service list', 'service catalog', 'service register', 'service dena',
   ],
   GREETING: [
     'hi', 'hello', 'hey', 'namaste', 'namaskar', 'good morning',
@@ -199,10 +217,31 @@ const REPLIES: Record<Intent, Record<Language, string>> = {
     [Language.TA]: '', [Language.TE]: '', [Language.KN]: '', [Language.ML]: '',
     [Language.MR]: '', [Language.BN]: '', [Language.GU]: '',
   },
+  VENDOR_JOIN: {
+    [Language.EN]: '🤝 Great decision! Joining Remont as a vendor gives you: ✅ Verified leads daily ✅ Instant payment ✅ GST invoicing support ✅ App + WhatsApp job alerts. To get started, I need: 1) Your full name 2) City 3) Skills/trade (AC, plumbing, electrical, etc.) 4) Mobile number. Share these and our Partner Team will call you within 2 hours!',
+    [Language.HI]: '🤝 Bahut accha decision! Remont vendor banne ke fayde: ✅ Roz verified leads ✅ Turant payment ✅ GST invoice support ✅ App + WhatsApp job alerts. Shuru karne ke liye chahiye: 1) Pura naam 2) City 3) Skill (AC, plumbing, electrical, etc.) 4) Mobile number. Share karo — Partner Team 2 ghante mein call karegi!',
+    [Language.MIXED]: '🤝 Great decision! Remont pe vendor bano: ✅ Daily verified leads ✅ Instant payment ✅ GST support ✅ App alerts. Batao: naam, city, skill (AC/plumbing/electrical), mobile number — Partner Team 2 hours mein call karegi!',
+    [Language.TA]: '', [Language.TE]: '', [Language.KN]: '', [Language.ML]: '',
+    [Language.MR]: '', [Language.BN]: '', [Language.GU]: '',
+  },
+  ADD_PRODUCT: {
+    [Language.EN]: '📦 To add a product on Remont: 1) Login to your Vendor Dashboard → Products → Add New Product. 2) Fill: product name, category, price, stock, images, description. 3) Submit for admin approval (approved within 24 hours). Need help? Share what product you want to list — I will guide you step by step or connect you with our Vendor Support team!',
+    [Language.HI]: '📦 Remont pe product add karne ke liye: 1) Vendor Dashboard login karein → Products → Add New Product. 2) Bharo: naam, category, price, stock, images, description. 3) Admin approval ke liye submit karein (24 hours mein approve). Help chahiye? Product ka detail batayein — step-by-step guide karti hun ya Vendor Support se connect karti hun!',
+    [Language.MIXED]: '📦 Product add karna hai? Steps: 1) Vendor Dashboard → Products → Add New Product. 2) Naam, category, price, stock, images fill karo. 3) Submit → 24 hours mein admin approve karega. Help chahiye toh product detail batao — guide karta hun ya support se connect karta hun!',
+    [Language.TA]: '', [Language.TE]: '', [Language.KN]: '', [Language.ML]: '',
+    [Language.MR]: '', [Language.BN]: '', [Language.GU]: '',
+  },
+  ADD_SERVICE: {
+    [Language.EN]: '🛠️ To add a service on Remont: 1) Login to Vendor Dashboard → Services → Add New Service. 2) Fill: service name, category, base price, duration, city availability, description. 3) Submit for admin review (approved within 24 hours). 💡 Tip: Services with good photos and clear descriptions get 3x more bookings! Need help with any step?',
+    [Language.HI]: '🛠️ Service add karne ke steps: 1) Vendor Dashboard login → Services → Add New Service. 2) Bharo: naam, category, base price, duration, city, description. 3) Admin review ke liye submit (24 hours mein approve). 💡 Tip: Acchi photos aur clear description wali services ko 3x zyada bookings milti hain! Kisi step mein help chahiye?',
+    [Language.MIXED]: '🛠️ Service add karo: 1) Vendor Dashboard → Services → Add New Service. 2) Naam, category, price, duration, city, description bharo. 3) Submit → 24 hrs mein approve. 💡 Tip: Good photos + clear description = 3x zyada bookings! Kisi step mein help chahiye?',
+    [Language.TA]: '', [Language.TE]: '', [Language.KN]: '', [Language.ML]: '',
+    [Language.MR]: '', [Language.BN]: '', [Language.GU]: '',
+  },
   GREETING: {
-    [Language.EN]: 'Namaste! 👋 I am Remi, your personal Home Services Consultant at Remont India. I am here to understand your needs, recommend the best solution, and get it booked for you — instantly! What home issue can I solve for you today?',
-    [Language.HI]: 'Namaste! 👋 Main Remi hun — aapki personal Home Services Consultant at Remont India. Main aapki zaroorat samjhungi, best solution recommend karungi, aur booking confirm kar dungi — abhi! Aaj kya solve kar sakti hun?',
-    [Language.MIXED]: 'Namaste! 👋 Main Remi — Remont India mein aapki personal consultant. Aapki zaroorat samajhna, best solution suggest karna, aur booking confirm karna — yahi mera kaam hai! Aaj kya problem hai ghar mein?',
+    [Language.EN]: 'Namaste! 👋 I am Remi, your personal Home Services Consultant at Remont India. I help customers book services AND help vendors grow their business. What can I help you with today — book a service, or join as a vendor?',
+    [Language.HI]: 'Namaste! 👋 Main Remi hun — Remont India ki personal consultant. Customers ko service book karti hun aur vendors ko business badhane mein help karti hun. Aaj kya help kar sakti hun — service book karni hai ya vendor banna hai?',
+    [Language.MIXED]: 'Namaste! 👋 Main Remi — Remont consultant. Customers ke liye service booking, vendors ke liye business growth. Aaj kya chahiye — service book karni hai ya vendor join karna hai?',
     [Language.TA]: '', [Language.TE]: '', [Language.KN]: '', [Language.ML]: '',
     [Language.MR]: '', [Language.BN]: '', [Language.GU]: '',
   },
@@ -233,8 +272,11 @@ const SUGGESTIONS: Record<Intent, string[]> = {
   CORPORATE: ['Book demo call', 'Get corporate quote', 'Bulk AMC pricing', 'Talk to sales'],
   PRICING: ['AC pricing', 'Plumbing pricing', 'Cleaning pricing', 'All service prices'],
   TRACK_ORDER: ['Track by order number', 'Track by phone', 'Reschedule appointment', 'Rate my service'],
-  GREETING: ['Book AC service 🌡️', 'Plumbing issue 🚿', 'Deep cleaning 🧹', 'See AMC plans 📅'],
-  UNKNOWN: ['AC repair', 'Plumbing fix', 'Deep cleaning', 'AMC plans'],
+  VENDOR_JOIN: ['Register as vendor', 'View vendor benefits', 'How much can I earn?', 'Talk to partner team'],
+  ADD_PRODUCT: ['How to add product', 'Product approval process', 'Talk to vendor support', 'Product listing tips'],
+  ADD_SERVICE: ['How to add service', 'Service approval process', 'Improve my listing', 'Talk to vendor support'],
+  GREETING: ['Book a service 🏠', 'Join as vendor 🤝', 'Deep cleaning 🧹', 'AMC plans 📅'],
+  UNKNOWN: ['Book a service', 'Join as vendor', 'Deep cleaning', 'AMC plans'],
 };
 
 export function getSuggestions(intent: Intent): string[] {
