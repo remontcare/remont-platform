@@ -315,7 +315,34 @@ export class OrdersService {
     return order;
   }
 
-  async confirmPayment(orderId: string, paymentId: string) {
+  async confirmPayment(orderId: string, paymentId: string, gatewayOrderId?: string, signature?: string) {
+    if (gatewayOrderId && signature) {
+      // Re-verify HMAC on every confirm call — cannot be faked without RAZORPAY_KEY_SECRET
+      if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
+      const expected = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(`${gatewayOrderId}|${paymentId}`)
+        .digest('hex');
+      if (expected !== signature) throw new BadRequestException('Invalid payment signature');
+
+      // Ensure this gatewayOrderId is actually linked to this DB order (prevents reusing another order's payment)
+      const linkedTx = await this.prisma.paymentTransaction.findFirst({
+        where: { gatewayOrderId, orderId },
+      });
+      if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
+    } else {
+      // Fallback: require a pre-verified PaymentTransaction (set by webhook or /payments/verify)
+      const tx = await this.prisma.paymentTransaction.findFirst({ where: { orderId, status: 'PAID' } });
+      if (!tx) throw new BadRequestException('Payment not verified. Contact support.');
+    }
+
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!existing) throw new NotFoundException('Order not found');
+    if (existing.paymentStatus === 'PAID') return existing; // Idempotent
+    if (existing.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException('Order cannot be confirmed in its current state');
+    }
+
     const order = await this.prisma.order.update({
       where: { id: orderId },
       data: { paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED },
@@ -628,24 +655,8 @@ export class GuestBookingService {
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
 
-    // ONLINE: create Razorpay order (handles both real and dev-mock internally)
+    // Create Razorpay order — throws BadRequestException if gateway not configured
     const rzpOrder = await this.payments.createOrder(user.id, totalAmount, order.id);
-
-    if (rzpOrder._devMock) {
-      // Razorpay not configured — auto-confirm only in non-production
-      if (process.env.NODE_ENV === 'production') {
-        throw new BadRequestException(
-          'Online payment gateway is not configured. Please choose Cash on Delivery or contact support.'
-        );
-      }
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: { paymentStatus: 'PAID', status: OrderStatus.CONFIRMED, paymentId: rzpOrder.gatewayOrderId },
-      });
-      return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'ONLINE', isCOD: false, _devMock: true };
-    }
-
-    // Real Razorpay order created — send to frontend
     return {
       orderNumber: order.orderNumber, orderId: order.id, totalAmount,
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
@@ -695,7 +706,7 @@ export class OrdersController {
   constructor(private orders: OrdersService, private extras: ExtraWorkService) {}
 
   @Post() create(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.create(u.sub, dto); }
-  @Post(':id/confirm-payment') pay(@Param('id') id: string, @Body() b: { paymentId: string }) { return this.orders.confirmPayment(id, b.paymentId); }
+  @Post(':id/confirm-payment') pay(@Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
   @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
   @Patch(':id/cancel') cancel(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) {
@@ -720,10 +731,17 @@ export class OrdersController {
 @ApiTags('Booking')
 @Controller('orders/public')
 export class PublicBookingController {
-  constructor(private guest: GuestBookingService) {}
+  constructor(private guest: GuestBookingService, private orders: OrdersService) {}
 
   @Post('book') book(@Body() dto: GuestBookingDto) { return this.guest.book(dto); }
   @Post('checkout') checkout(@Body() dto: PublicProductCheckoutDto) { return this.guest.publicProductCheckout(dto); }
+
+  // Atomic verify+confirm for guest checkout — HMAC signature is the proof of payment (no JWT needed)
+  @Post('confirm-payment')
+  confirmPayment(@Body() b: { dbOrderId: string; gatewayOrderId: string; paymentId: string; signature: string }) {
+    return this.orders.confirmPayment(b.dbOrderId, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
   @Get('track/:orderNumber') track(@Param('orderNumber') num: string, @Query('phone') phone: string) {
     return this.guest.trackOrder(num, phone);
   }
