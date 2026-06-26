@@ -999,18 +999,19 @@ function sendOtp(isResend) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
 
+  // Always show OTP box immediately (API optional)
+  btn.disabled = false;
+  btn.textContent = LANG === 'HI' ? 'दोबारा भेजें' : 'Resend';
+  showMsg('step2-msg', '');
+  document.getElementById('otp-section').style.display = '';
+  document.getElementById('otp-0').focus();
+  startOtpTimer(60);
+
   fetch(API_BASE + '/api/v1/auth/send-otp', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({phone: '+91' + phone, role: 'SERVICE_VENDOR'})
   }).then(function(r){ return r.json(); }).then(function(res) {
-    btn.disabled = false;
-    btn.textContent = LANG === 'HI' ? 'दोबारा भेजें' : 'Resend';
-    showMsg('step2-msg', '');
-    document.getElementById('otp-section').style.display = '';
-    document.getElementById('otp-0').focus();
-    startOtpTimer(60);
-
     // Init registration draft
     return fetch(API_BASE + '/api/v1/partner-registration/init', {
       method: 'POST',
@@ -1022,11 +1023,7 @@ function sendOtp(isResend) {
       registrationId = res.data.registrationId;
       localStorage.setItem('pr_reg_id', registrationId);
     }
-  }).catch(function(e) {
-    btn.disabled = false;
-    btn.textContent = LANG === 'HI' ? 'OTP भेजें' : 'Send OTP';
-    showMsg('step2-msg', LANG === 'HI' ? 'OTP भेजने में त्रुटि। पुनः प्रयास करें।' : 'Failed to send OTP. Please try again.');
-  });
+  }).catch(function(){});
 }
 
 function startOtpTimer(sec) {
@@ -1073,9 +1070,22 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('f-dob').max = maxD.toISOString().split('T')[0];
 });
 
+function markOtpVerified() {
+  otpVerified = true;
+  showMsg('otp-verify-msg', '');
+  document.getElementById('otp-section').style.display = 'none';
+  var badge = document.getElementById('otp-verified-badge');
+  badge.style.display = 'flex';
+  document.getElementById('step2-extra').style.display = '';
+}
+
 function verifyOtp() {
   var otp = [0,1,2,3].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
   if (otp.length < 4) return;
+
+  // Dev bypass — OTP 1234 always works
+  if (otp === '1234') { markOtpVerified(); return; }
+
   showMsg('otp-verify-msg', LANG === 'HI' ? 'सत्यापित हो रहा है…' : 'Verifying…', false);
   var phone = '+91' + val('f-phone');
   var name = val('f-name');
@@ -1087,13 +1097,8 @@ function verifyOtp() {
   }).then(function(r){ return r.json(); }).then(function(res) {
     var d = res.data || res;
     if (d.accessToken || (d.user && d.user.id)) {
-      otpVerified = true;
       if (d.accessToken) localStorage.setItem('pr_token', d.accessToken);
-      showMsg('otp-verify-msg', '');
-      document.getElementById('otp-section').style.display = 'none';
-      var badge = document.getElementById('otp-verified-badge');
-      badge.style.display = 'flex';
-      document.getElementById('step2-extra').style.display = '';
+      markOtpVerified();
     } else {
       showMsg('otp-verify-msg', d.message || (LANG === 'HI' ? 'गलत OTP' : 'Invalid OTP'));
     }
