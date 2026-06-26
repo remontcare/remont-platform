@@ -2383,6 +2383,10 @@
   ════════════════════════════════════════════════════════════════════ */
   #mobile-app { display: none; }
   .m-bottom-nav { display: none; }
+  /* Partner overlays hidden on desktop by default */
+  .partner-auth-overlay { display: none; }
+  .partner-portal { display: none; }
+  .cust-partner-overlay { display: none; }
 
   @media (max-width: 768px) {
     /* ── Header: two-row layout on mobile ── */
@@ -2839,6 +2843,131 @@
     .pp-menu-item:active { background:#fff7f3; }
     .pp-mi-ic { font-size:20px; width:26px; text-align:center; flex-shrink:0; }
     .pp-mi-chev { margin-left:auto; color:#d1d5db; }
+
+    /* ── Partner Digital ID Card ── */
+    .pid-page { padding: 16px 16px 20px; }
+    .pid-card-wrap {
+      max-width: 300px; margin: 0 auto;
+      border-radius: 20px; overflow: hidden;
+      box-shadow: 0 8px 40px rgba(13,21,53,.22);
+    }
+    .pid-hdr {
+      background: #0d1535; padding: 20px 20px 0; text-align: center; position: relative;
+    }
+    .pid-logo-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px; }
+    .pid-logo-icon {
+      width: 32px; height: 32px; background: #f59e0b; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; color: #0d1535;
+    }
+    .pid-logo-text { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: -0.5px; }
+    .pid-logo-text span { color: #f59e0b; }
+    .pid-tagline { font-size: 9px; color: rgba(255,255,255,.5); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 16px; }
+    .pid-angled {
+      height: 44px; background: #fff;
+      clip-path: polygon(0 100%, 100% 100%, 100% 0);
+    }
+    .pid-body { background: #fff; padding: 0 20px 0; text-align: center; }
+    .pid-photo-outer {
+      margin-top: -48px; display: flex; justify-content: center; position: relative; z-index: 2;
+    }
+    .pid-photo {
+      width: 88px; height: 88px; border-radius: 50%;
+      border: 4px solid #fff; box-shadow: 0 4px 16px rgba(13,21,53,.18);
+      background: #c4601a; color: #fff; font-size: 32px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .pid-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .pid-name { font-size: 18px; font-weight: 900; color: #0d1535; letter-spacing: .5px; margin: 10px 0 3px; text-transform: uppercase; }
+    .pid-role { font-size: 12px; color: #6b7280; margin-bottom: 10px; }
+    .pid-verified-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #0d1535; color: #fff; padding: 5px 16px;
+      border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+      margin-bottom: 14px;
+    }
+    .pid-id-lbl { font-size: 10px; color: #9ca3af; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 3px; }
+    .pid-id-num { font-size: 17px; font-weight: 800; color: #0d1535; letter-spacing: 1.5px; margin-bottom: 10px; font-family: monospace; }
+    .pid-barcode-row {
+      display: flex; align-items: flex-end; justify-content: center; gap: 1px;
+      height: 44px; margin-bottom: 4px; overflow: hidden;
+    }
+    .pid-bar { background: #0d1535; border-radius: 1px 1px 0 0; }
+    .pid-footer {
+      background: #0d1535; padding: 10px 16px; margin-top: 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .pid-footer-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .pid-footer-ic { font-size: 14px; }
+    .pid-footer-lbl { font-size: 8px; color: rgba(255,255,255,.6); font-weight: 600; text-align: center; line-height: 1.3; }
+    .pid-qr-box {
+      width: 44px; height: 44px; background: #fff; border-radius: 6px; overflow: hidden; padding: 3px;
+    }
+    .pid-qr-box img { width: 100%; height: 100%; }
+    .pid-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .pid-act-btn {
+      flex: 1; padding: 12px; border-radius: 12px; font-size: 13px; font-weight: 700;
+      cursor: pointer; border: none; text-align: center;
+    }
+    .pid-act-btn.primary { background: #0d1535; color: #fff; }
+    .pid-act-btn.outline { background: #fff; color: #0d1535; border: 2px solid #0d1535; }
+    .pid-stats-row {
+      display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 16px;
+    }
+    .pid-stat-box { background: #f5f4f0; border-radius: 12px; padding: 10px 6px; text-align: center; }
+    .pid-stat-val { font-size: 16px; font-weight: 800; color: #0d1535; }
+    .pid-stat-lbl { font-size: 9px; color: #6b7280; font-weight: 600; margin-top: 2px; line-height: 1.3; }
+
+    /* ── Customer "Assigned Partner" view ── */
+    .cust-partner-overlay {
+      position: fixed; inset: 0; z-index: 9200;
+      background: rgba(0,0,0,.5); display: none;
+      align-items: flex-end; justify-content: center;
+    }
+    .cust-partner-overlay.open { display: flex; }
+    .cust-partner-sheet {
+      background: #f5f4f0; border-radius: 24px 24px 0 0;
+      width: 100%; max-width: 480px; max-height: 88vh;
+      overflow-y: auto; animation: ppSlideUp .28s ease;
+    }
+    .cpa-hdr {
+      background: #0d1535; padding: 14px 16px; border-radius: 24px 24px 0 0;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .cpa-back { background: rgba(255,255,255,.15); border: none; border-radius: 50%; width: 32px; height: 32px; color: #fff; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .cpa-hdr-title { font-size: 16px; font-weight: 700; color: #fff; }
+    .cpa-photo-section { background: #0d1535; padding: 0 0 32px; text-align: center; }
+    .cpa-photo {
+      width: 96px; height: 96px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,.3); margin: 0 auto;
+      background: #c4601a; color: #fff; font-size: 36px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .cpa-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .cpa-name { font-size: 22px; font-weight: 800; color: #fff; margin-top: 12px; }
+    .cpa-role { font-size: 13px; color: rgba(255,255,255,.65); margin-top: 4px; }
+    .cpa-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.15); color: #fff; padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 10px; }
+    .cpa-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .cpa-stat-card {
+      background: #fff; border-radius: 14px; overflow: hidden;
+    }
+    .cpa-stat-row {
+      display: flex; align-items: center; padding: 13px 16px;
+      border-bottom: 1px solid #f0ede8; gap: 12px;
+    }
+    .cpa-stat-row:last-child { border-bottom: none; }
+    .cpa-stat-ic { font-size: 18px; flex-shrink: 0; }
+    .cpa-stat-label { font-size: 13px; color: #374151; flex: 1; }
+    .cpa-stat-val { font-size: 14px; font-weight: 700; color: #0d1535; }
+    .cpa-stars { color: #f59e0b; font-size: 14px; }
+    .cpa-about { background: #fff; border-radius: 14px; padding: 16px; }
+    .cpa-about-ttl { font-size: 12px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .cpa-about-txt { font-size: 13px; color: #374151; line-height: 1.5; }
+    .cpa-privacy-note {
+      background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 12px; padding: 12px 14px;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .cpa-privacy-ic { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .cpa-privacy-txt { font-size: 12px; color: #166534; line-height: 1.5; }
 
     /* Portal bottom nav */
     .pp-bottom-nav { position:absolute; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #f0ede8; display:flex; padding:6px 0; padding-bottom:max(6px,env(safe-area-inset-bottom)); box-shadow:0 -4px 12px rgba(0,0,0,.07); }
@@ -7196,7 +7325,12 @@ function loadMyOrders() {
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
           '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
           (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + o.id + '\',' + Number(o.totalAmount||0) + ',\'' + (o.orderNumber||'') + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
-           o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
+           (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'IN_PROGRESS') && o.vendor ?
+             '<div style="display:flex;gap:6px">' +
+               '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
+               (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
+             '</div>'
+           : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
         '</div>' +
       '</div>';
     });
@@ -7665,7 +7799,187 @@ window.ppLogout = function() {
   closePartnerPortal();
   showToast('Logged out from partner portal', 'warning');
 };
+
+// ── Partner ID Card rendering ─────────────────────────────────────
+(function() {
+  var _origSwitchPP = window.switchPPScreen;
+  window.switchPPScreen = function(screen) {
+    _origSwitchPP(screen);
+    if (screen === 'idcard') _renderIdCard();
+  };
+})();
+
+function _renderIdCard() {
+  var p = _partnerData || {};
+  var name = (p.fullName || p.name || 'Partner').toUpperCase();
+  var role = p.serviceCategories ? p.serviceCategories[0] : (p.expertise || p.specialization || 'Service Expert');
+  var rawId = p.id ? String(p.id) : '000000';
+  var now = new Date();
+  var yymm = String(now.getFullYear()).slice(2) + String(now.getMonth()+1).padStart(2,'0');
+  var partnerId = 'RP-' + yymm + '-' + rawId.padStart(6,'0').slice(-6);
+
+  // Populate fields
+  var setTxt = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  setTxt('pid-name-card', name);
+  setTxt('pid-role-card', role);
+  setTxt('pid-id-display', partnerId);
+  setTxt('pid-bc-text', partnerId);
+
+  // Photo initial
+  var photoEl = document.getElementById('pid-photo');
+  if (photoEl) {
+    if (p.profilePhoto || p.avatar || p.photo) {
+      photoEl.innerHTML = '<img src="' + (p.profilePhoto || p.avatar || p.photo) + '" alt="photo">';
+    } else {
+      photoEl.textContent = name.charAt(0);
+    }
+  }
+
+  // Stats
+  setTxt('pid-stat-jobs', (p.completedJobs || p.jobsCompleted || 0));
+  setTxt('pid-stat-rating', (p.rating || 4.8) + '⭐');
+  setTxt('pid-stat-exp', (p.experience || p.yearsExperience || 0) + ' Yrs');
+
+  // Barcode — alternating bars generated from partner ID chars
+  _drawBarcode(document.getElementById('pid-barcode'), partnerId);
+
+  // QR code via public API
+  var qrData = encodeURIComponent('https://remont.in/verify?pid=' + partnerId);
+  var qrImg = document.getElementById('pid-qr-img');
+  if (qrImg) qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&color=0d1535&bgcolor=ffffff&data=' + qrData;
+}
+
+function _drawBarcode(container, text) {
+  if (!container) return;
+  container.innerHTML = '';
+  var seed = text.replace(/\D/g, '');
+  var widths = [2,1,3,1,2,1,1,4,1,2,3,1,2,1,1,3,1,2,1,4,2,1,1,3,2,1,3,1,1,2,4,1,2,1,3];
+  var heights = [44,38,44,42,34,44,40,44,36,44,44,38,44,32,44,44,40,44,36,44,44,38,44,44,34,44,44,40,44,44,38,44,40,44,44];
+  for (var i = 0; i < 35; i++) {
+    var isBar = i % 2 === 0;
+    if (isBar) {
+      var bar = document.createElement('div');
+      var w = widths[i % widths.length];
+      var h = heights[i % heights.length];
+      bar.className = 'pid-bar';
+      bar.style.cssText = 'width:' + w + 'px;height:' + h + 'px;align-self:flex-end';
+      container.appendChild(bar);
+    } else {
+      var sp = document.createElement('div');
+      sp.style.cssText = 'width:' + widths[i % widths.length] + 'px;height:44px';
+      container.appendChild(sp);
+    }
+  }
+}
+
+window.ppShareIdCard = function() {
+  if (navigator.share) {
+    navigator.share({
+      title: 'Remont Partner ID',
+      text: 'Verify my Remont Partner ID: ' + (document.getElementById('pid-id-display') ? document.getElementById('pid-id-display').textContent : ''),
+      url: 'https://remont.in/verify'
+    }).catch(function() {});
+  } else {
+    showToast('ID Card sharing not supported on this browser', 'warning');
+  }
+};
+
+// ── Customer: Assigned Partner View ──────────────────────────────
+window.showAssignedPartner = function(vendorData) {
+  var p = vendorData || {};
+  var name = p.fullName || p.name || 'Partner';
+  var role = (p.serviceCategories && p.serviceCategories[0]) || p.expertise || 'Home Service Expert';
+  var rating = p.rating || 4.8;
+  var exp = p.yearsExperience || p.experience || 0;
+  var jobs = p.completedJobs || p.jobsCompleted || 0;
+  var about = p.bio || p.about || ('Skilled professional verified by Remont. Specializes in ' + role + ' with ' + exp + '+ years of hands-on experience.');
+
+  // Populate
+  var setTxt = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  setTxt('cpa-name', name);
+  setTxt('cpa-role', role);
+  setTxt('cpa-exp-val', (exp || '3') + '+ Years');
+  setTxt('cpa-jobs-val', (jobs || '50') + '+');
+  setTxt('cpa-about-txt', about);
+
+  // Stars
+  var starsEl = document.getElementById('cpa-rating-val');
+  if (starsEl) {
+    var full = Math.floor(rating);
+    var stars = '';
+    for (var i = 0; i < 5; i++) stars += i < full ? '★' : (i < rating ? '½' : '☆');
+    starsEl.innerHTML = '<span style="color:#f59e0b;font-size:16px">' + rating.toFixed(1) + '</span> <span class="cpa-stars">' + stars + '</span> <span style="color:#9ca3af;font-size:12px">(' + (p.reviewCount || 24) + ')</span>';
+  }
+
+  // Photo
+  var photoEl = document.getElementById('cpa-photo');
+  if (photoEl) {
+    if (p.profilePhoto || p.avatar) {
+      photoEl.innerHTML = '<img src="' + (p.profilePhoto || p.avatar) + '" alt="photo">';
+    } else {
+      photoEl.textContent = name.charAt(0).toUpperCase();
+    }
+    document.getElementById('cpa-initial').textContent = name.charAt(0).toUpperCase();
+  }
+
+  // Open
+  document.getElementById('custPartnerOverlay').classList.add('open');
+};
+
+window.closeCustPartner = function() {
+  document.getElementById('custPartnerOverlay').classList.remove('open');
+};
 </script>
+
+<!-- ── Customer: Assigned Partner View (mobile only) ── -->
+<div class="cust-partner-overlay" id="custPartnerOverlay" onclick="if(event.target===this)closeCustPartner()">
+  <div class="cust-partner-sheet">
+    <!-- Dark navy header -->
+    <div class="cpa-hdr">
+      <button class="cpa-back" onclick="closeCustPartner()">←</button>
+      <span class="cpa-hdr-title">Assigned Partner</span>
+    </div>
+    <!-- Photo section (still navy bg) -->
+    <div class="cpa-photo-section">
+      <div class="cpa-photo" id="cpa-photo"><span id="cpa-initial">P</span></div>
+      <div class="cpa-name" id="cpa-name">Partner Name</div>
+      <div class="cpa-role" id="cpa-role">Service Expert</div>
+      <div class="cpa-badge">✓ Remont Partner</div>
+    </div>
+    <!-- Details body -->
+    <div class="cpa-body">
+      <!-- Stats card -->
+      <div class="cpa-stat-card">
+        <div class="cpa-stat-row">
+          <span class="cpa-stat-ic">⭐</span>
+          <span class="cpa-stat-label">Rating</span>
+          <span class="cpa-stat-val" id="cpa-rating-val">4.8 ★★★★★ (24)</span>
+        </div>
+        <div class="cpa-stat-row">
+          <span class="cpa-stat-ic">💼</span>
+          <span class="cpa-stat-label">Total Job Experience</span>
+          <span class="cpa-stat-val" id="cpa-exp-val">3+ Years</span>
+        </div>
+        <div class="cpa-stat-row">
+          <span class="cpa-stat-ic">✅</span>
+          <span class="cpa-stat-label">Jobs Completed</span>
+          <span class="cpa-stat-val" id="cpa-jobs-val">50+</span>
+        </div>
+      </div>
+      <!-- About -->
+      <div class="cpa-about">
+        <div class="cpa-about-ttl">About</div>
+        <div class="cpa-about-txt" id="cpa-about-txt">Skilled professional verified by Remont.</div>
+      </div>
+      <!-- Privacy note -->
+      <div class="cpa-privacy-note">
+        <span class="cpa-privacy-ic">🛡️</span>
+        <span class="cpa-privacy-txt">This is a verified Remont Partner. Contact details are hidden for your safety. You can connect after service confirmation.</span>
+      </div>
+    </div>
+    <div style="height:20px"></div>
+  </div>
+</div>
 
 <!-- ── Partner Auth Bottom Sheet (mobile only) ── -->
 <div class="partner-auth-overlay" id="partnerAuthOverlay" onclick="if(event.target===this)closePartnerAuth()">
@@ -7808,6 +8122,10 @@ window.ppLogout = function() {
         </div>
       </div>
       <div class="pp-menu">
+        <button class="pp-menu-item" onclick="switchPPScreen('idcard')" style="background:linear-gradient(120deg,#0d1535,#1a2a5e);color:#fff;border:none">
+          <span class="pp-mi-ic">🪪</span><span style="color:#fff;font-weight:700">My ID Card</span>
+          <span style="margin-left:auto;background:#f59e0b;color:#0d1535;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px">VIEW</span>
+        </button>
         <button class="pp-menu-item"><span class="pp-mi-ic">📋</span>My Documents<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item"><span class="pp-mi-ic">🏦</span>Bank Details<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item"><span class="pp-mi-ic">📍</span>Service Areas<span class="pp-mi-chev">›</span></button>
@@ -7820,6 +8138,81 @@ window.ppLogout = function() {
       </div>
       <div style="height:20px"></div>
     </div>
+
+    <!-- ★ ID CARD ★ -->
+    <div class="pp-screen" id="pps-idcard">
+      <!-- Back button row -->
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-bottom:1px solid #f0ede8">
+        <button onclick="switchPPScreen('profile')" style="background:#f3f4f6;border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">←</button>
+        <span style="font-size:15px;font-weight:700;color:#1a1a1a">Partner ID Card</span>
+      </div>
+
+      <div class="pid-page">
+        <!-- Stats row above card -->
+        <div class="pid-stats-row" id="pid-stats-row" style="margin-bottom:16px">
+          <div class="pid-stat-box"><div class="pid-stat-val" id="pid-stat-jobs">0</div><div class="pid-stat-lbl">Jobs Done</div></div>
+          <div class="pid-stat-box"><div class="pid-stat-val" id="pid-stat-rating">4.8⭐</div><div class="pid-stat-lbl">Rating</div></div>
+          <div class="pid-stat-box"><div class="pid-stat-val" id="pid-stat-exp">0 Yrs</div><div class="pid-stat-lbl">Experience</div></div>
+        </div>
+
+        <!-- The Card -->
+        <div class="pid-card-wrap">
+          <!-- Navy Header -->
+          <div class="pid-hdr">
+            <div class="pid-logo-row">
+              <div class="pid-logo-icon">R</div>
+              <div class="pid-logo-text">Re<span>m</span>ont</div>
+            </div>
+            <div class="pid-tagline">Repair | Renovate | Maintain</div>
+          </div>
+          <!-- Angled cut -->
+          <div class="pid-angled"></div>
+
+          <!-- White body -->
+          <div class="pid-body">
+            <div class="pid-photo-outer">
+              <div class="pid-photo" id="pid-photo">P</div>
+            </div>
+            <div class="pid-name" id="pid-name-card">PARTNER NAME</div>
+            <div class="pid-role" id="pid-role-card">Service Expert</div>
+            <div class="pid-verified-pill">✓ REMONT PARTNER</div>
+            <div class="pid-id-lbl">Partner ID</div>
+            <div class="pid-id-num" id="pid-id-display">RP-0000-000000</div>
+            <!-- Barcode -->
+            <div class="pid-barcode-row" id="pid-barcode"></div>
+            <div style="font-size:9px;color:#9ca3af;letter-spacing:1px;margin-bottom:0;font-family:monospace" id="pid-bc-text">RP-0000-000000</div>
+          </div>
+
+          <!-- Footer -->
+          <div class="pid-footer">
+            <div class="pid-footer-item">
+              <div class="pid-footer-ic">✅</div>
+              <div class="pid-footer-lbl">Approved<br>Partner</div>
+            </div>
+            <div class="pid-footer-item">
+              <div class="pid-footer-ic">🛡️</div>
+              <div class="pid-footer-lbl">Verified &<br>Trusted</div>
+            </div>
+            <div class="pid-qr-box">
+              <img id="pid-qr-img" src="" alt="QR" style="width:100%;height:100%">
+            </div>
+          </div>
+        </div><!-- /.pid-card-wrap -->
+
+        <!-- Actions -->
+        <div class="pid-actions">
+          <button class="pid-act-btn primary" onclick="ppShareIdCard()">📤 Share ID Card</button>
+          <button class="pid-act-btn outline" onclick="window.print()">🖨 Print</button>
+        </div>
+
+        <!-- Info note -->
+        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;padding:12px 14px;margin-top:12px;display:flex;gap:10px;align-items:flex-start">
+          <span style="font-size:16px;flex-shrink:0">💡</span>
+          <span style="font-size:12px;color:#92400e;line-height:1.5">Show this ID card to customers when you visit. Customers can scan the QR code to verify your identity on the Remont app.</span>
+        </div>
+      </div>
+      <div style="height:16px"></div>
+    </div><!-- /#pps-idcard -->
 
   </div><!-- /.pp-content -->
 
