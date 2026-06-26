@@ -7170,14 +7170,14 @@ function submitCheckoutOrder() {
 
     if (d.requiresPayment) {
       btn.textContent = 'Initiating payment…';
-      var fakeOrder = { orderNumber: orderNumber };
-      var fakePayment = {
-        gatewayOrderId: d.orderId,
+      var rzpOrder = { orderNumber: orderNumber };
+      var rzpPayment = {
+        gatewayOrderId: d.gatewayOrderId,  // Razorpay order_id (order_xxx), NOT the DB UUID
         amount: totalAmount,
         currency: 'INR',
         keyId: d.razorpayKeyId
       };
-      launchRazorpay(fakePayment, fakeOrder, totalAmount, btn).catch(function() {
+      launchRazorpay(rzpPayment, rzpOrder, totalAmount, btn).catch(function() {
         btn.textContent = 'Pay Online →'; btn.disabled = false;
       });
     }

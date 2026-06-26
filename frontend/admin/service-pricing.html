@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Service Pricing — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Service Pricing</h1><p>Manage service rates and pricing tiers</p></div>
+    <div class="topbar-right">
+      <div class="tb-user">
+        <div class="tb-avatar" id="tb-avatar-initial">A</div>
+        <div><div class="tb-uname" id="tb-uname">Admin</div></div>
+      </div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Service Pricing List</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:220px" placeholder="Search service…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="openAdd()">+ Add Pricing</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Pricing Modal -->
+<div id="edit-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">Add Pricing</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Service *</label>
+      <select id="f-service" class="form-control"></select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Base Price (₹) *</label>
+        <input id="f-price" type="number" class="form-control" placeholder="599">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Discounted Price (₹)</label>
+        <input id="f-dprice" type="number" class="form-control" placeholder="499">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Min Duration (min)</label>
+        <input id="f-duration" type="number" class="form-control" placeholder="60">
+      </div>
+      <div class="form-group">
+        <label class="form-label">City</label>
+        <select id="f-city" class="form-control">
+          <option value="">All Cities</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pricing Tier</label>
+      <select id="f-tier" class="form-control">
+        <option value="STANDARD">Standard</option>
+        <option value="PREMIUM">Premium</option>
+        <option value="ECONOMY">Economy</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Save Pricing</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('service-pricing');
+requireAuth();
+
+var editId = null;
+var allServices = [];
+var allCities = [];
+
+Promise.all([
+  api('GET','/services').catch(function(){ return []; }),
+  api('GET','/cities').catch(function(){ return []; })
+]).then(function(res) {
+  allServices = Array.isArray(res[0]) ? res[0] : (res[0] && res[0].data ? res[0].data : []);
+  allCities = Array.isArray(res[1]) ? res[1] : (res[1] && res[1].data ? res[1].data : []);
+  var sSel = document.getElementById('f-service');
+  allServices.forEach(function(s) { sSel.innerHTML += '<option value="' + s.id + '">' + escape(s.name) + '</option>'; });
+  var cSel = document.getElementById('f-city');
+  allCities.forEach(function(c) { cSel.innerHTML += '<option value="' + c.id + '">' + escape(c.name) + '</option>'; });
+  load();
+}).catch(function() { load(); });
+
+function load() {
+  var q = document.getElementById('filter-q').value.trim();
+  api('GET','/admin/service-pricing' + (q ? '?q='+encodeURIComponent(q) : ''))
+    .then(render)
+    .catch(function(e) {
+      // Fallback: show services from catalog with pricing fields
+      renderFallback();
+    });
+}
+
+function renderFallback() {
+  if (!allServices.length) {
+    document.getElementById('tbl').innerHTML = '<div class="empty-state">No services found. <a href="/admin/services.html">Add services first</a>.</div>';
+    return;
+  }
+  var rows = allServices.map(function(s) {
+    return '<tr><td><strong>' + escape(s.name||'') + '</strong></td>' +
+      '<td>' + escape(s.category && s.category.name ? s.category.name : (s.categoryName||'—')) + '</td>' +
+      '<td>' + fmtCur(s.price||s.basePrice||0) + '</td>' +
+      '<td>' + fmtCur(s.discountedPrice||s.salePrice||'—') + '</td>' +
+      '<td>' + (s.duration||'—') + ' min</td>' +
+      '<td>All Cities</td>' +
+      '<td><button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(s).replace(/"/g, '&quot;') + ')">✏️ Edit</button></td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Service</th><th>Category</th><th>Base Price</th><th>Discounted</th><th>Duration</th><th>City</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function render(data) {
+  if (!data || !data.length) { renderFallback(); return; }
+  var rows = data.map(function(p) {
+    return '<tr><td><strong>' + escape(p.service && p.service.name ? p.service.name : (p.serviceName||'—')) + '</strong></td>' +
+      '<td>' + fmtCur(p.basePrice||0) + '</td>' +
+      '<td>' + fmtCur(p.discountedPrice||'—') + '</td>' +
+      '<td>' + (p.duration||'—') + ' min</td>' +
+      '<td>' + escape(p.city && p.city.name ? p.city.name : 'All Cities') + '</td>' +
+      '<td>' + (p.tier ? badge(p.tier, 'blue') : '—') + '</td>' +
+      '<td><div style="display:flex;gap:4px">' +
+        '<button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(p).replace(/"/g,'&quot;') + ')">✏️</button>' +
+        '<button class="btn btn-xs" style="background:#fee2e2;color:#ef4444" onclick="del(\''+p.id+'\')">🗑</button>' +
+      '</div></td></tr>';
+  }).join('');
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Service</th><th>Base Price</th><th>Discounted</th><th>Duration</th><th>City</th><th>Tier</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function openAdd() {
+  editId = null;
+  document.getElementById('edit-title').textContent = 'Add Service Pricing';
+  document.getElementById('f-price').value = '';
+  document.getElementById('f-dprice').value = '';
+  document.getElementById('f-duration').value = '';
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+
+function openEdit(p) {
+  editId = p.id;
+  document.getElementById('edit-title').textContent = 'Edit Service Pricing';
+  document.getElementById('f-price').value = p.basePrice || p.price || '';
+  document.getElementById('f-dprice').value = p.discountedPrice || p.salePrice || '';
+  document.getElementById('f-duration').value = p.duration || '';
+  if (p.serviceId) document.getElementById('f-service').value = p.serviceId;
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+
+function save() {
+  var data = {
+    serviceId: document.getElementById('f-service').value,
+    basePrice: Number(document.getElementById('f-price').value),
+    discountedPrice: Number(document.getElementById('f-dprice').value) || undefined,
+    duration: Number(document.getElementById('f-duration').value) || undefined,
+    cityId: document.getElementById('f-city').value || undefined,
+    tier: document.getElementById('f-tier').value
+  };
+  if (!data.serviceId) { toast('Select a service', 'error'); return; }
+  if (!data.basePrice) { toast('Enter base price', 'error'); return; }
+  var call = editId ? api('PATCH','/admin/service-pricing/'+editId, data) : api('POST','/admin/service-pricing', data);
+  call.then(function() { toast('Saved!', 'success'); closeModal('edit-overlay'); load(); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
+
+function del(id) {
+  if (!confirm('Delete this pricing?')) return;
+  api('DELETE', '/admin/service-pricing/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message,'error'); });
+}
+</script>
+</body>
+</html>

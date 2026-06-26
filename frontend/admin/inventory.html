@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inventory — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.stock-bar-wrap{background:#f1f5f9;border-radius:4px;height:6px;width:80px;overflow:hidden;display:inline-block;vertical-align:middle}
+.stock-bar{height:6px;border-radius:4px;transition:width .3s}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Inventory</h1><p>Stock management and alerts</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportInv()">⬇ Export</button>
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Summary cards -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px" id="inv-stats">
+      <div class="card"><div style="font-size:12px;color:#6b7280">Total Products</div><div style="font-size:24px;font-weight:800;color:#1e293b" id="inv-total">—</div></div>
+      <div class="card"><div style="font-size:12px;color:#6b7280">In Stock</div><div style="font-size:24px;font-weight:800;color:#22c55e" id="inv-instock">—</div></div>
+      <div class="card"><div style="font-size:12px;color:#6b7280">Low Stock</div><div style="font-size:24px;font-weight:800;color:#f59e0b" id="inv-low">—</div></div>
+      <div class="card"><div style="font-size:12px;color:#6b7280">Out of Stock</div><div style="font-size:24px;font-weight:800;color:#ef4444" id="inv-out">—</div></div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Inventory List</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search product…" oninput="load()">
+          <select id="filter-stock" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Stock Levels</option>
+            <option value="low">Low Stock (&lt;10)</option>
+            <option value="out">Out of Stock</option>
+            <option value="ok">In Stock</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Update Stock Modal -->
+<div id="stock-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Update Stock</span>
+      <button class="modal-close" onclick="closeModal('stock-overlay')">×</button>
+    </div>
+    <div style="margin-bottom:12px;padding:10px;background:#f9fafb;border-radius:8px">
+      <div style="font-weight:600" id="su-name">Product</div>
+      <div style="font-size:12px;color:#6b7280">Current stock: <strong id="su-current">0</strong></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Adjustment Type</label>
+      <select id="su-type" class="form-control">
+        <option value="set">Set Absolute</option>
+        <option value="add">Add Stock (+)</option>
+        <option value="sub">Remove Stock (-)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Quantity *</label>
+      <input id="su-qty" type="number" class="form-control" min="0" placeholder="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Reason / Note</label>
+      <input id="su-note" class="form-control" placeholder="e.g. Purchase order received">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('stock-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="updateStock()">Update Stock</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('inventory');
+requireAuth();
+var editProductId = null, currentStock = 0;
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var s = document.getElementById('filter-stock').value;
+  var params = [];
+  if (q) params.push('q=' + encodeURIComponent(q));
+  if (s === 'low') params.push('stockMax=9&stockMin=1');
+  if (s === 'out') params.push('stockMax=0');
+  if (s === 'ok') params.push('stockMin=10');
+  api('GET', '/admin/products?' + params.join('&') + '&limit=100')
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      // Update summary
+      document.getElementById('inv-total').textContent = arr.length;
+      document.getElementById('inv-instock').textContent = arr.filter(function(p){ return (p.stock||p.stockQuantity||0) >= 10; }).length;
+      document.getElementById('inv-low').textContent = arr.filter(function(p){ var st=p.stock||p.stockQuantity||0; return st>0&&st<10; }).length;
+      document.getElementById('inv-out').textContent = arr.filter(function(p){ return (p.stock||p.stockQuantity||0) <= 0; }).length;
+
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No products found.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock Level</th><th>Price</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(p) {
+          var st = p.stock || p.stockQuantity || 0;
+          var pct = Math.min(100, st / 50 * 100);
+          var color = st <= 0 ? '#ef4444' : st < 10 ? '#f59e0b' : '#22c55e';
+          var img = p.images && p.images[0] ? '<img src="'+p.images[0]+'" style="width:32px;height:32px;object-fit:cover;border-radius:4px;margin-right:6px;vertical-align:middle">' : '<span style="margin-right:6px">📦</span>';
+          return '<tr>' +
+            '<td>' + img + '<strong>' + escape(p.name||'') + '</strong></td>' +
+            '<td style="font-size:11px;color:#6b7280">' + escape(p.sku||'—') + '</td>' +
+            '<td>' + escape(p.category&&p.category.name ? p.category.name : (p.categoryName||'—')) + '</td>' +
+            '<td><div style="display:flex;align-items:center;gap:8px">' +
+              '<strong style="color:'+color+';min-width:28px;font-size:13px">' + st + '</strong>' +
+              '<div class="stock-bar-wrap"><div class="stock-bar" style="width:'+pct+'%;background:'+color+'"></div></div>' +
+              badge(st<=0?'OUT OF STOCK':st<10?'LOW STOCK':'IN STOCK', st<=0?'red':st<10?'yellow':'green') +
+            '</div></td>' +
+            '<td>' + fmtCur(p.price||p.salePrice||0) + '</td>' +
+            '<td>' + badge(p.isActive||p.active?'ACTIVE':'INACTIVE', p.isActive||p.active?'green':'gray') + '</td>' +
+            '<td><button class="btn btn-xs btn-primary" onclick="openStockUpdate(\'' + p.id + '\',\'' + escape(p.name) + '\',' + st + ')">📦 Update Stock</button></td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function openStockUpdate(id, name, current) {
+  editProductId = id; currentStock = current;
+  document.getElementById('su-name').textContent = name;
+  document.getElementById('su-current').textContent = current;
+  document.getElementById('su-qty').value = '';
+  document.getElementById('su-note').value = '';
+  document.getElementById('su-type').value = 'set';
+  document.getElementById('stock-overlay').style.display = 'flex';
+}
+
+function updateStock() {
+  var type = document.getElementById('su-type').value;
+  var qty = parseInt(document.getElementById('su-qty').value);
+  if (isNaN(qty) || qty < 0) { toast('Enter valid quantity', 'error'); return; }
+  var newStock = type === 'set' ? qty : type === 'add' ? currentStock + qty : Math.max(0, currentStock - qty);
+  var note = document.getElementById('su-note').value;
+  api('PATCH', '/admin/products/' + editProductId, { stock: newStock, stockQuantity: newStock, stockNote: note })
+    .then(function() { toast('Stock updated to ' + newStock, 'success'); closeModal('stock-overlay'); load(); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
+
+function exportInv() {
+  api('GET', '/admin/products?limit=1000').then(function(data) {
+    var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+    downloadCsv(arr, [
+      { key: 'name', label: 'Product' }, { key: 'sku', label: 'SKU' },
+      { key: 'stock', label: 'Stock' }, { key: 'price', label: 'Price' },
+    ], 'inventory.csv');
+  });
+}
+
+load();
+</script>
+</body>
+</html>

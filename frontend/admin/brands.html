@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brands — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Brands</h1><p>Product brands management</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Brands</span>
+        <div style="display:flex;gap:8px">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search brands…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺</button>
+          <button class="btn btn-primary btn-sm" onclick="openAdd()">+ Add Brand</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="edit-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">Add Brand</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Brand Name *</label>
+      <input id="f-name" class="form-control" placeholder="e.g. Samsung">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Slug</label>
+      <input id="f-slug" class="form-control" placeholder="samsung">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Logo URL / Base64</label>
+      <input id="f-logo" class="form-control" placeholder="https://…">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea id="f-desc" class="form-control" rows="2"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Active</label>
+      <select id="f-active" class="form-control"><option value="true">Yes</option><option value="false">No</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Save Brand</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('brands');
+requireAuth();
+var editId = null;
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  api('GET', '/admin/brands' + (q ? '?q='+encodeURIComponent(q) : ''))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No brands yet. Add your first brand.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Logo</th><th>Name</th><th>Slug</th><th>Products</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(b) {
+          return '<tr>' +
+            '<td>' + (b.logo ? '<img src="'+b.logo+'" style="width:36px;height:36px;object-fit:contain;border-radius:4px;border:1px solid #e5e7eb">' : '<div style="width:36px;height:36px;background:#f1f5f9;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:18px">🏷️</div>') + '</td>' +
+            '<td><strong>' + escape(b.name) + '</strong></td>' +
+            '<td style="font-size:11px;color:#6b7280">' + escape(b.slug||'') + '</td>' +
+            '<td>' + (b._count && b._count.products ? b._count.products : (b.productCount||0)) + '</td>' +
+            '<td>' + badge(b.isActive || b.active ? 'ACTIVE' : 'INACTIVE', b.isActive || b.active ? 'green' : 'gray') + '</td>' +
+            '<td><div style="display:flex;gap:4px">' +
+              '<button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(b).replace(/"/g,'&quot;') + ')">✏️</button>' +
+              '<button class="btn btn-xs" style="background:#fee2e2;color:#ef4444" onclick="del(\''+b.id+'\')">🗑</button>' +
+            '</div></td></tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function openAdd() {
+  editId = null; document.getElementById('edit-title').textContent = 'Add Brand';
+  ['f-name','f-slug','f-logo','f-desc'].forEach(function(id){ document.getElementById(id).value = ''; });
+  document.getElementById('f-active').value = 'true';
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+function openEdit(b) {
+  editId = b.id; document.getElementById('edit-title').textContent = 'Edit Brand';
+  document.getElementById('f-name').value = b.name||'';
+  document.getElementById('f-slug').value = b.slug||'';
+  document.getElementById('f-logo').value = b.logo||'';
+  document.getElementById('f-desc').value = b.description||b.desc||'';
+  document.getElementById('f-active').value = (b.isActive !== false && b.active !== false) ? 'true' : 'false';
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+function save() {
+  var name = document.getElementById('f-name').value.trim();
+  if (!name) { toast('Brand name required', 'error'); return; }
+  var data = { name: name, slug: document.getElementById('f-slug').value.trim()||name.toLowerCase().replace(/\s+/g,'-'), logo: document.getElementById('f-logo').value.trim()||undefined, description: document.getElementById('f-desc').value.trim()||undefined, isActive: document.getElementById('f-active').value === 'true' };
+  var call = editId ? api('PATCH','/admin/brands/'+editId, data) : api('POST','/admin/brands', data);
+  call.then(function(){ toast('Brand saved!','success'); closeModal('edit-overlay'); load(); }).catch(function(e){ toast(e.message,'error'); });
+}
+function del(id) {
+  if (!confirm('Delete this brand?')) return;
+  api('DELETE','/admin/brands/'+id).then(function(){ toast('Deleted','warning'); load(); }).catch(function(e){ toast(e.message,'error'); });
+}
+load();
+</script>
+</body>
+</html>

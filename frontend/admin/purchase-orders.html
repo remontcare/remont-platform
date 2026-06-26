@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Purchase Orders — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Purchase Orders</h1><p>Manage supplier purchase orders</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openAdd()">+ Create PO</button>
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Summary -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">DRAFT</div><div style="font-size:22px;font-weight:800;color:#6b7280" id="po-draft">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PENDING</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="po-pending">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">RECEIVED</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="po-received">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL VALUE</div><div style="font-size:22px;font-weight:800;color:#f97316" id="po-value">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Purchase Orders</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-status" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Statuses</option>
+            <option value="DRAFT">Draft</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="ORDERED">Ordered</option>
+            <option value="PARTIALLY_RECEIVED">Partial Received</option>
+            <option value="RECEIVED">Received</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Create PO Modal -->
+<div id="edit-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">Create Purchase Order</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Supplier *</label>
+      <select id="f-supplier" class="form-control"></select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Expected Delivery</label>
+        <input id="f-delivery" type="date" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select id="f-status" class="form-control">
+          <option value="DRAFT">Draft</option>
+          <option value="PENDING">Pending</option>
+          <option value="APPROVED">Approved</option>
+          <option value="ORDERED">Ordered</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea id="f-notes" class="form-control" rows="2"></textarea>
+    </div>
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px">PO Items</div>
+    <div id="po-items" style="display:flex;flex-direction:column;gap:8px"></div>
+    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px" onclick="addItem()">+ Add Item</button>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Create Purchase Order</button>
+    </div>
+  </div>
+</div>
+
+<!-- PO Detail Modal -->
+<div id="detail-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:620px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="detail-po-num">PO #</span>
+      <button class="modal-close" onclick="closeModal('detail-overlay')">×</button>
+    </div>
+    <div id="detail-body" style="padding:4px"></div>
+    <div class="modal-footer" id="detail-footer"></div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('purchase-orders');
+requireAuth();
+var editId = null;
+var allProducts = [];
+var poItems = [];
+
+api('GET','/admin/suppliers').then(function(data) {
+  var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+  var sel = document.getElementById('f-supplier');
+  if (!arr.length) { sel.innerHTML = '<option value="">No suppliers found — <a href="/admin/suppliers.html">add suppliers first</a></option>'; return; }
+  sel.innerHTML = '<option value="">Select Supplier…</option>' + arr.map(function(s){ return '<option value="'+s.id+'">'+escape(s.name||s.companyName||'')+'</option>'; }).join('');
+}).catch(function(){});
+
+api('GET','/admin/products?limit=200').then(function(data) {
+  allProducts = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+}).catch(function(){});
+
+function load() {
+  var status = document.getElementById('filter-status').value;
+  api('GET','/admin/purchase-orders'+(status?'?status='+status:''))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      // Update summary
+      document.getElementById('po-draft').textContent = arr.filter(function(p){return p.status==='DRAFT';}).length;
+      document.getElementById('po-pending').textContent = arr.filter(function(p){return p.status==='PENDING'||p.status==='APPROVED'||p.status==='ORDERED';}).length;
+      document.getElementById('po-received').textContent = arr.filter(function(p){return p.status==='RECEIVED';}).length;
+      var total = arr.reduce(function(s,p){return s+(p.totalAmount||0);},0);
+      document.getElementById('po-value').textContent = fmtCur(total);
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No purchase orders yet.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>PO #</th><th>Supplier</th><th>Items</th><th>Amount</th><th>Delivery Date</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(p) {
+          return '<tr>' +
+            '<td><strong>' + escape('#'+(p.poNumber||p.id||'').slice(-8).toUpperCase()) + '</strong></td>' +
+            '<td>' + escape(p.supplier&&p.supplier.name?p.supplier.name:(p.supplierName||'—')) + '</td>' +
+            '<td>' + (p.items&&p.items.length?p.items.length:p.itemCount||'—') + '</td>' +
+            '<td><strong>' + fmtCur(p.totalAmount||0) + '</strong></td>' +
+            '<td>' + fmtDateShort(p.expectedDelivery||p.deliveryDate) + '</td>' +
+            '<td>' + statusBadge(p.status||'DRAFT') + '</td>' +
+            '<td><button class="btn btn-xs btn-primary" onclick="viewDetail(\''+p.id+'\')">👁 View</button></td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function addItem() {
+  var idx = poItems.length;
+  poItems.push({ productId: '', qty: 1, unitPrice: 0 });
+  var div = document.createElement('div');
+  div.style.cssText = 'display:grid;grid-template-columns:2fr 80px 100px 32px;gap:8px;align-items:end';
+  div.innerHTML = '<div class="form-group" style="margin:0"><select class="form-control" id="pi-prod-'+idx+'" onchange="fillPrice('+idx+')"><option value="">Select Product…</option>'+allProducts.map(function(p){return '<option value="'+p.id+'" data-price="'+(p.costPrice||p.price||0)+'">'+escape(p.name||'')+'</option>';}).join('')+'</select></div>' +
+    '<div class="form-group" style="margin:0"><label style="font-size:11px;color:#6b7280">Qty</label><input type="number" class="form-control" id="pi-qty-'+idx+'" value="1" min="1"></div>' +
+    '<div class="form-group" style="margin:0"><label style="font-size:11px;color:#6b7280">Unit Price (₹)</label><input type="number" class="form-control" id="pi-price-'+idx+'" value="0"></div>' +
+    '<button type="button" onclick="this.closest(\'div\').remove()" style="height:36px;background:#fee2e2;color:#ef4444;border:none;border-radius:6px;cursor:pointer;font-size:16px">×</button>';
+  document.getElementById('po-items').appendChild(div);
+}
+
+function fillPrice(idx) {
+  var sel = document.getElementById('pi-prod-'+idx);
+  var opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.price) document.getElementById('pi-price-'+idx).value = opt.dataset.price;
+}
+
+function openAdd() {
+  editId = null;
+  document.getElementById('edit-title').textContent = 'Create Purchase Order';
+  document.getElementById('f-notes').value = '';
+  document.getElementById('f-status').value = 'DRAFT';
+  document.getElementById('po-items').innerHTML = '';
+  poItems = [];
+  addItem();
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+
+function save() {
+  var supplierId = document.getElementById('f-supplier').value;
+  if (!supplierId) { toast('Select supplier','error'); return; }
+  var items = [];
+  document.querySelectorAll('#po-items > div').forEach(function(row, i) {
+    var pidSel = row.querySelector('[id^="pi-prod-"]');
+    var qtySel = row.querySelector('[id^="pi-qty-"]');
+    var priceSel = row.querySelector('[id^="pi-price-"]');
+    if (pidSel && pidSel.value && qtySel && priceSel) {
+      items.push({ productId: pidSel.value, quantity: parseInt(qtySel.value)||1, unitPrice: parseFloat(priceSel.value)||0 });
+    }
+  });
+  if (!items.length) { toast('Add at least one item','error'); return; }
+  var data = { supplierId: supplierId, items: items, notes: document.getElementById('f-notes').value.trim()||undefined, expectedDelivery: document.getElementById('f-delivery').value||undefined, status: document.getElementById('f-status').value };
+  api('POST','/admin/purchase-orders',data)
+    .then(function(){ toast('Purchase order created!','success'); closeModal('edit-overlay'); load(); })
+    .catch(function(e){ toast(e.message,'error'); });
+}
+
+function viewDetail(id) {
+  document.getElementById('detail-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('detail-overlay').style.display = 'flex';
+  api('GET','/admin/purchase-orders/'+id).then(function(p) {
+    document.getElementById('detail-po-num').textContent = 'PO #' + (p.poNumber||p.id||'').slice(-8).toUpperCase();
+    var items = (p.items||[]).map(function(item) {
+      return '<tr><td>'+escape(item.product&&item.product.name?item.product.name:item.productName||'—')+'</td><td>'+item.quantity+'</td><td>'+fmtCur(item.unitPrice)+'</td><td>'+fmtCur((item.quantity||0)*(item.unitPrice||0))+'</td></tr>';
+    }).join('');
+    document.getElementById('detail-body').innerHTML =
+      '<div class="detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">'+
+        '<div class="detail-box"><label>Supplier</label><div class="val">'+escape(p.supplier&&p.supplier.name?p.supplier.name:'—')+'</div></div>'+
+        '<div class="detail-box"><label>Status</label><div class="val">'+statusBadge(p.status||'DRAFT')+'</div></div>'+
+        '<div class="detail-box"><label>Expected Delivery</label><div class="val">'+fmtDateShort(p.expectedDelivery||p.deliveryDate)+'</div></div>'+
+        '<div class="detail-box"><label>Total Amount</label><div class="val" style="color:#f97316;font-weight:700">'+fmtCur(p.totalAmount||0)+'</div></div>'+
+      '</div>'+
+      '<table><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>'+items+'</tbody></table>'+
+      (p.notes ? '<div style="margin-top:12px;padding:10px;background:#f9fafb;border-radius:6px;font-size:12px;color:#374151"><strong>Notes:</strong> '+escape(p.notes)+'</div>' : '');
+    var btnHtml = '';
+    if (p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED') {
+      btnHtml += '<button class="btn btn-primary" onclick="markReceived(\''+p.id+'\')">✓ Mark as Received</button>';
+    }
+    if (p.status === 'DRAFT') {
+      btnHtml += '<button class="btn btn-primary" onclick="updatePoStatus(\''+p.id+'\',\'PENDING\')">Submit for Approval</button>';
+    }
+    if (p.status === 'PENDING') {
+      btnHtml += '<button class="btn btn-primary" onclick="updatePoStatus(\''+p.id+'\',\'APPROVED\')">Approve PO</button>';
+    }
+    document.getElementById('detail-footer').innerHTML = '<button class="btn btn-outline" onclick="closeModal(\'detail-overlay\')">Close</button>' + btnHtml;
+  }).catch(function(e){ document.getElementById('detail-body').innerHTML = '<div class="empty-state">'+escape(e.message)+'</div>'; });
+}
+
+function updatePoStatus(id, status) {
+  api('PATCH','/admin/purchase-orders/'+id,{status:status}).then(function(){ toast('Status updated','success'); closeModal('detail-overlay'); load(); }).catch(function(e){toast(e.message,'error');});
+}
+function markReceived(id) {
+  api('PATCH','/admin/purchase-orders/'+id,{status:'RECEIVED'}).then(function(){ toast('Marked as received!','success'); closeModal('detail-overlay'); load(); }).catch(function(e){toast(e.message,'error');});
+}
+
+load();
+</script>
+</body>
+</html>

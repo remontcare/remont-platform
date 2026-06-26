@@ -375,6 +375,18 @@ document.addEventListener('DOMContentLoaded', function() {
   if (!requireAuth()) return;
   renderSidebar('reports');
   applyQuick('30');
+  // Apply ?type= URL param from sidebar links
+  var urlType = new URLSearchParams(window.location.search).get('type');
+  var tabMap = { sales:'sales', revenue:'financial', service:'sales', product:'sales', partner:'vendors', customer:'sales' };
+  if (urlType && tabMap[urlType]) {
+    var targetTab = tabMap[urlType];
+    var btns = document.querySelectorAll('.report-tab');
+    btns.forEach(function(btn) {
+      if (btn.getAttribute('onclick') && btn.getAttribute('onclick').indexOf("'"+targetTab+"'") !== -1) {
+        btn.click();
+      }
+    });
+  }
 });
 </script>
 </body>

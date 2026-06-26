@@ -178,6 +178,12 @@ function confirmReject() {
 
 loadPending(); loadAll();
 loadRegistrations(true); // load count for badge
+// Apply ?tab= URL param on load
+(function(){
+  var p = new URLSearchParams(window.location.search);
+  var t = p.get('tab');
+  if (t === 'pending' || t === 'registrations') switchTab('registrations');
+})();
 
 // ── TABS ──
 function switchTab(tab) {

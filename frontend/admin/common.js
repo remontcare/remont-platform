@@ -1,4 +1,4 @@
-/* Remont Admin — shared auth + API helper */
+/* Remont Admin — Shared Auth + API + Sidebar */
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 
 function getToken() { return localStorage.getItem('remont_admin_token'); }
@@ -15,6 +15,10 @@ function requireAuth() {
   }
   var el = document.getElementById('admin-name');
   if (el) el.textContent = user.name || user.phone || 'Admin';
+  var el2 = document.getElementById('tb-uname');
+  if (el2) el2.textContent = user.name || user.phone || 'Admin';
+  var el3 = document.getElementById('tb-avatar-initial');
+  if (el3) el3.textContent = (user.name || 'A').charAt(0).toUpperCase();
   return true;
 }
 
@@ -39,9 +43,10 @@ function api(method, path, body) {
 
 function toast(msg, type) {
   var t = document.createElement('div');
-  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 20px;border-radius:8px;color:#fff;font-size:14px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.15);transition:opacity .3s;max-width:340px;';
+  t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 20px;border-radius:10px;color:#fff;font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.2);transition:opacity .3s;max-width:340px;display:flex;align-items:center;gap:10px';
+  var icons = { success: '✓', error: '✕', warning: '⚠' };
   t.style.background = type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#22c55e';
-  t.textContent = msg;
+  t.innerHTML = '<span style="font-size:16px">' + (icons[type]||'ℹ') + '</span>' + msg;
   document.body.appendChild(t);
   setTimeout(function() { t.style.opacity = '0'; setTimeout(function(){ t.remove(); }, 300); }, 3200);
 }
@@ -56,7 +61,6 @@ function fmtDateShort(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
-
 function fmtCur(n) {
   if (n === null || n === undefined || n === '') return '—';
   return '₹' + Number(n).toLocaleString('en-IN');
@@ -83,84 +87,125 @@ function escape(s) {
 }
 
 function badge(text, color) {
-  var colors = { green: '#22c55e', blue: '#3b82f6', yellow: '#f59e0b', red: '#ef4444', gray: '#6b7280', purple: '#8b5cf6', orange: '#f97316' };
+  var colors = { green:'#22c55e', blue:'#3b82f6', yellow:'#f59e0b', red:'#ef4444', gray:'#6b7280', purple:'#8b5cf6', orange:'#f97316', teal:'#14b8a6' };
   var bg = colors[color] || colors.gray;
   return '<span style="display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:' + bg + '22;color:' + bg + ';white-space:nowrap">' + escape(String(text)) + '</span>';
 }
 
 var STATUS_COLORS = {
-  PENDING: 'yellow', PENDING_PAYMENT: 'yellow', CONFIRMED: 'blue',
-  VENDOR_ASSIGNED: 'blue', VENDOR_EN_ROUTE: 'purple', EN_ROUTE: 'purple',
-  STARTED: 'purple', IN_PROGRESS: 'purple', EXTRA_WORK_ADDED: 'orange',
-  COMPLETED: 'green', INVOICED: 'green', CLOSED: 'gray',
-  CANCELLED: 'red', REFUNDED: 'orange',
-  ACTIVE: 'green', SUSPENDED: 'red', REJECTED: 'red', PENDING_VERIFICATION: 'yellow',
-  PAID: 'green', UNPAID: 'yellow', FAILED: 'red', PARTIAL: 'orange',
-  NEW: 'blue', CONTACTED: 'purple', QUALIFIED: 'green', CONVERTED: 'green',
-  LOST: 'red', ON_HOLD: 'yellow',
+  PENDING:'yellow', PENDING_PAYMENT:'yellow', CONFIRMED:'blue',
+  VENDOR_ASSIGNED:'blue', VENDOR_EN_ROUTE:'purple', EN_ROUTE:'purple',
+  STARTED:'purple', IN_PROGRESS:'purple', EXTRA_WORK_ADDED:'orange',
+  COMPLETED:'green', INVOICED:'green', CLOSED:'gray',
+  CANCELLED:'red', REFUNDED:'orange',
+  ACTIVE:'green', SUSPENDED:'red', REJECTED:'red', PENDING_VERIFICATION:'yellow',
+  PAID:'green', UNPAID:'yellow', FAILED:'red', PARTIAL:'orange',
+  NEW:'blue', CONTACTED:'purple', QUALIFIED:'green', CONVERTED:'green',
+  LOST:'red', ON_HOLD:'yellow',
 };
 function statusBadge(s) { return badge(s, STATUS_COLORS[s] || 'gray'); }
 
-var SIDEBAR_HTML = '<div class="sidebar">' +
-  '<div class="sidebar-brand"><div class="logo">Remont <span>ADMIN</span></div><div class="tagline">Platform Management</div></div>' +
-  '<div class="nav-group"><div class="nav-label">Overview</div>' +
-    '<a class="nav-item" href="/admin/dashboard.html" data-page="dashboard"><span class="nav-icon">📊</span> Dashboard</a>' +
-    '<a class="nav-item" href="/admin/reports.html" data-page="reports"><span class="nav-icon">📈</span> Reports</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">People</div>' +
-    '<a class="nav-item" href="/admin/customers.html" data-page="customers"><span class="nav-icon">👥</span> Customers</a>' +
-    '<a class="nav-item" href="/admin/users.html" data-page="users"><span class="nav-icon">👤</span> All Users</a>' +
-    '<a class="nav-item" href="/admin/vendors.html" data-page="vendors"><span class="nav-icon">🏪</span> Service Men</a>' +
-    '<a class="nav-item" href="/admin/membership.html" data-page="membership"><span class="nav-icon">💎</span> Membership</a>' +
-    '<a class="nav-item" href="/admin/corporate.html" data-page="corporate"><span class="nav-icon">🏢</span> Corporate</a>' +
-    '<a class="nav-item" href="/admin/newsletters.html" data-page="newsletters"><span class="nav-icon">✉️</span> Newsletters</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">Commerce</div>' +
-    '<a class="nav-item" href="/admin/orders.html" data-page="orders"><span class="nav-icon">📦</span> Orders</a>' +
-    '<a class="nav-item" href="/admin/payments.html" data-page="payments"><span class="nav-icon">💳</span> Payments</a>' +
-    '<a class="nav-item" href="/admin/invoices.html" data-page="invoices"><span class="nav-icon">🧾</span> Invoices</a>' +
-    '<a class="nav-item" href="/admin/wallet.html" data-page="wallet"><span class="nav-icon">💰</span> Wallet</a>' +
-    '<a class="nav-item" href="/admin/amc.html" data-page="amc"><span class="nav-icon">🔒</span> AMC Plans</a>' +
-    '<a class="nav-item" href="/admin/coupons.html" data-page="coupons"><span class="nav-icon">🏷</span> Coupons</a>' +
-    '<a class="nav-item" href="/admin/taxes.html" data-page="taxes"><span class="nav-icon">📊</span> Taxes</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">CRM</div>' +
-    '<a class="nav-item" href="/admin/leads.html" data-page="leads"><span class="nav-icon">🎯</span> Leads</a>' +
-    '<a class="nav-item" href="/admin/reviews.html" data-page="reviews"><span class="nav-icon">⭐</span> Reviews</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">Catalog</div>' +
-    '<a class="nav-item" href="/admin/services.html" data-page="services"><span class="nav-icon">🔧</span> Services</a>' +
-    '<a class="nav-item" href="/admin/products.html" data-page="products"><span class="nav-icon">🛍</span> Products</a>' +
-    '<a class="nav-item" href="/admin/cities.html" data-page="cities"><span class="nav-icon">🏙</span> Cities</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">Content</div>' +
-    '<a class="nav-item" href="/admin/banners.html" data-page="banners"><span class="nav-icon">🖼</span> Front Slider</a>' +
-    '<a class="nav-item" href="/admin/ads.html" data-page="ads"><span class="nav-icon">📢</span> Seasonal Ads</a>' +
-    '<a class="nav-item" href="/admin/blogs.html" data-page="blogs"><span class="nav-icon">📝</span> Blog</a>' +
-    '<a class="nav-item" href="/admin/faqs.html" data-page="faqs"><span class="nav-icon">❓</span> FAQs</a>' +
-  '</div>' +
-  '<div class="nav-group"><div class="nav-label">Platform</div>' +
-    '<a class="nav-item" href="/admin/ai-tools.html" data-page="ai-tools"><span class="nav-icon">🤖</span> AI Tools</a>' +
-    '<a class="nav-item" href="/admin/integrations.html" data-page="integrations"><span class="nav-icon">🔌</span> Integrations</a>' +
-    '<a class="nav-item" href="/admin/settings.html" data-page="settings"><span class="nav-icon">⚙️</span> Settings</a>' +
-    '<a class="nav-item" href="/admin/staff.html" data-page="staff"><span class="nav-icon">👔</span> Staff</a>' +
-  '</div>' +
-  '<div class="sidebar-footer">Remont India © 2025</div>' +
-'</div>';
+// ── SIDEBAR ──────────────────────────────────────────────────────
+
+var SIDEBAR_NAV = [
+  { section: '📊 DASHBOARD', items: [
+    { key:'dashboard', label:'Dashboard', icon:'🏠', href:'/admin/dashboard.html' },
+  ]},
+  { section: '📦 ORDERS', items: [
+    { key:'orders', label:'All Orders', icon:'📋', href:'/admin/orders.html' },
+    { key:'orders-new', label:'New Orders', icon:'🔵', href:'/admin/orders.html?status=PENDING', badge:'new' },
+    { key:'orders-active', label:'Active Orders', icon:'🟡', href:'/admin/orders.html?status=IN_PROGRESS', badge:'active' },
+    { key:'orders-done', label:'Completed Orders', icon:'🟢', href:'/admin/orders.html?status=COMPLETED', badge:'completed' },
+    { key:'orders-cancelled', label:'Cancelled Orders', icon:'🔴', href:'/admin/orders.html?status=CANCELLED', badge:'cancelled' },
+    { key:'returns', label:'Returns & Refunds', icon:'↩️', href:'/admin/orders.html?status=REFUNDED' },
+  ]},
+  { section: '🛠 SERVICES', items: [
+    { key:'services', label:'Service Management', icon:'🔧', href:'/admin/services.html' },
+    { key:'service-pricing', label:'Service Pricing', icon:'💲', href:'/admin/service-pricing.html' },
+  ]},
+  { section: '🛒 PRODUCTS', items: [
+    { key:'products', label:'Products', icon:'📦', href:'/admin/products.html' },
+    { key:'inventory', label:'Inventory', icon:'🏭', href:'/admin/inventory.html' },
+    { key:'brands', label:'Brands', icon:'🏷️', href:'/admin/brands.html' },
+  ]},
+  { section: '👨‍🔧 PARTNERS', items: [
+    { key:'vendors', label:'All Partners', icon:'👷', href:'/admin/vendors.html' },
+    { key:'vendors-pending', label:'Partner Applications', icon:'📩', href:'/admin/vendors.html?tab=pending', badge:'partners' },
+    { key:'partner-ratings', label:'Partner Ratings', icon:'⭐', href:'/admin/reviews.html' },
+    { key:'partner-earnings', label:'Partner Earnings', icon:'💰', href:'/admin/partner-earnings.html' },
+    { key:'partner-id-cards', label:'Partner ID Cards', icon:'🪪', href:'/admin/partner-id-cards.html' },
+  ]},
+  { section: '🚚 SUPPLIERS', items: [
+    { key:'suppliers', label:'Suppliers', icon:'🏭', href:'/admin/suppliers.html' },
+    { key:'purchase-orders', label:'Purchase Orders', icon:'📄', href:'/admin/purchase-orders.html' },
+  ]},
+  { section: '👥 CUSTOMERS', items: [
+    { key:'customers', label:'Customers', icon:'👥', href:'/admin/customers.html' },
+    { key:'corporate', label:'Corporate Customers', icon:'🏢', href:'/admin/corporate.html' },
+    { key:'membership', label:'Membership', icon:'💎', href:'/admin/membership.html' },
+  ]},
+  { section: '💰 FINANCE', items: [
+    { key:'payments', label:'Payments', icon:'💳', href:'/admin/payments.html' },
+    { key:'wallet', label:'Wallet', icon:'👛', href:'/admin/wallet.html' },
+    { key:'invoices', label:'Invoices', icon:'🧾', href:'/admin/invoices.html' },
+    { key:'coupons', label:'Coupons', icon:'🏷', href:'/admin/coupons.html' },
+    { key:'taxes', label:'Taxes', icon:'📊', href:'/admin/taxes.html' },
+  ]},
+  { section: '📢 MARKETING', items: [
+    { key:'banners', label:'Front Slider', icon:'🖼', href:'/admin/banners.html' },
+    { key:'ads', label:'Seasonal Ads', icon:'📢', href:'/admin/ads.html' },
+    { key:'offers', label:'Offers', icon:'🎁', href:'/admin/offers.html' },
+    { key:'blogs', label:'Blog', icon:'📝', href:'/admin/blogs.html' },
+    { key:'newsletters', label:'Newsletter', icon:'✉️', href:'/admin/newsletters.html' },
+    { key:'faqs', label:'FAQs', icon:'❓', href:'/admin/faqs.html' },
+  ]},
+  { section: '📈 REPORTS', items: [
+    { key:'reports', label:'Sales Report', icon:'📈', href:'/admin/reports.html?type=sales' },
+    { key:'reports-revenue', label:'Revenue Report', icon:'💹', href:'/admin/reports.html?type=revenue' },
+    { key:'reports-service', label:'Service Report', icon:'🔧', href:'/admin/reports.html?type=service' },
+    { key:'reports-product', label:'Product Report', icon:'📦', href:'/admin/reports.html?type=product' },
+    { key:'reports-partner', label:'Partner Report', icon:'👷', href:'/admin/reports.html?type=partner' },
+    { key:'reports-customer', label:'Customer Report', icon:'👥', href:'/admin/reports.html?type=customer' },
+  ]},
+  { section: '⚙ SETTINGS', items: [
+    { key:'cities', label:'Cities', icon:'🏙', href:'/admin/cities.html' },
+    { key:'users', label:'Users & Roles', icon:'👤', href:'/admin/users.html' },
+    { key:'settings', label:'Website Settings', icon:'🌐', href:'/admin/settings.html' },
+    { key:'ai-tools', label:'AI Chat Settings', icon:'🤖', href:'/admin/ai-tools.html' },
+    { key:'staff', label:'System Settings', icon:'⚙️', href:'/admin/staff.html' },
+  ]},
+];
 
 function renderSidebar(page) {
   var el = document.getElementById('sidebar-mount');
-  if (el) {
-    el.innerHTML = SIDEBAR_HTML;
-    document.querySelectorAll('.nav-item').forEach(function(a) {
-      a.classList.toggle('active', a.getAttribute('data-page') === page);
+  if (!el) return;
+
+  var html = '<div class="sidebar">';
+  html += '<div class="sidebar-brand">';
+  html += '<div class="sb-logo-circle">R</div>';
+  html += '<div class="sb-brand-text"><div class="sb-name">REMONT INDIA</div><div class="sb-sub">Admin Panel</div></div>';
+  html += '</div>';
+
+  SIDEBAR_NAV.forEach(function(section) {
+    html += '<div class="nav-section">';
+    html += '<div class="nav-section-label">' + section.section + '</div>';
+    section.items.forEach(function(item) {
+      var isActive = item.key === page;
+      html += '<a class="nav-item' + (isActive ? ' active' : '') + '" href="' + item.href + '" data-page="' + item.key + '">';
+      html += '<span class="nav-icon">' + item.icon + '</span>';
+      html += '<span>' + item.label + '</span>';
+      html += '</a>';
     });
-  }
+    html += '</div>';
+  });
+
+  html += '<div class="sidebar-footer">Remont India © 2025</div>';
+  html += '</div>';
+
+  el.innerHTML = html;
 }
 
-// ── IMAGE COMPRESSION ────────────────────────────────────────────────
-// Canvas-based client-side compression. Quality 0.88 = visually lossless for web.
-// cb(dataUrl, origKB, compKB)
+// ── IMAGE COMPRESSION ─────────────────────────────────────────────
 function compressImage(file, cb, maxDim, quality) {
   maxDim = maxDim || 1600;
   quality = quality || 0.88;
@@ -182,9 +227,6 @@ function compressImage(file, cb, maxDim, quality) {
   reader.readAsDataURL(file);
 }
 
-// Attach "📷 Upload" button next to any image URL text input.
-// After picking a file it compresses, fills the input, and shows a preview.
-// opts: { maxDim, quality, previewW, previewH }
 function attachImageUpload(inputId, opts) {
   var input = document.getElementById(inputId);
   if (!input) return;
@@ -223,7 +265,6 @@ function attachImageUpload(inputId, opts) {
     }, maxDim, quality);
   };
 
-  // Hide stale preview when admin manually types a URL
   input.addEventListener('input', function() {
     if (input.value && !input.value.startsWith('data:')) {
       thumb.style.display = 'none'; info.style.display = 'none';
@@ -241,8 +282,6 @@ function attachImageUpload(inputId, opts) {
   p.insertBefore(thumb, row.nextSibling);
 }
 
-// Attach a "📷" upload button for multi-image gallery/chip inputs.
-// After compression it sets the input value and calls addFn() to push to the array.
 function attachGalleryUpload(inputId, addFn, opts) {
   var input = document.getElementById(inputId);
   if (!input) return;
@@ -256,7 +295,6 @@ function attachGalleryUpload(inputId, addFn, opts) {
   var btn = document.createElement('button');
   btn.type = 'button'; btn.className = 'btn btn-outline btn-sm';
   btn.style.cssText = 'font-size:12px;white-space:nowrap;';
-  btn.title = 'Upload & compress image';
   btn.innerHTML = '📷 Upload';
   btn.onclick = function() { fileInp.click(); };
 
@@ -272,7 +310,6 @@ function attachGalleryUpload(inputId, addFn, opts) {
     }, maxDim, quality);
   };
 
-  // Insert right after the existing "Add" button
   var addBtn = input.nextElementSibling;
   var ref = addBtn ? addBtn.nextSibling : input.nextSibling;
   input.parentNode.insertBefore(fileInp, ref);

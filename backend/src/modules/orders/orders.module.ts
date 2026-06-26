@@ -14,6 +14,7 @@ import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
+import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -450,7 +451,7 @@ export class OrdersService {
 @Injectable()
 export class GuestBookingService {
   private readonly logger = new Logger(GuestBookingService.name);
-  constructor(private prisma: PrismaService, private dispatch: DispatchService) {}
+  constructor(private prisma: PrismaService, private dispatch: DispatchService, private payments: PaymentsService) {}
 
   async book(dto: GuestBookingDto) {
     // Find or create customer by phone
@@ -643,11 +644,14 @@ export class GuestBookingService {
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'ONLINE', isCOD: false, _devMock: true };
     }
 
-    // ONLINE with real Razorpay: return order for frontend payment flow
+    // ONLINE with real Razorpay: create Razorpay order then return to frontend
+    const rzpOrder = await this.payments.createOrder(user.id, totalAmount, order.id);
     return {
       orderNumber: order.orderNumber, orderId: order.id, totalAmount,
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
-      razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+      gatewayOrderId: rzpOrder.gatewayOrderId,
+      razorpayKeyId: rzpOrder.keyId,
+      txId: rzpOrder.txId,
     };
   }
 
@@ -726,7 +730,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, ExtraWorkService, GuestBookingService],
   exports: [OrdersService],

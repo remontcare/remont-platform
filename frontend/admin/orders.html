@@ -589,7 +589,16 @@ function exportOrders() {
 }
 
 loadStats();
-load();
+// Apply ?status= URL param filter on load
+(function(){
+  var p = new URLSearchParams(window.location.search);
+  var s = p.get('status');
+  if (s) {
+    setStatusFilter(s);
+  } else {
+    load();
+  }
+})();
 </script>
 </body>
 </html>

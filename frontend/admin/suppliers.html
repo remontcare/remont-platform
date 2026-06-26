@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Suppliers — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Suppliers</h1><p>Supplier and vendor management</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Suppliers</span>
+        <div style="display:flex;gap:8px">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search supplier…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺</button>
+          <button class="btn btn-primary btn-sm" onclick="openAdd()">+ Add Supplier</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="edit-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">Add Supplier</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Supplier / Company Name *</label>
+        <input id="f-name" class="form-control" placeholder="ABC Traders">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Person</label>
+        <input id="f-contact" class="form-control" placeholder="Mr. Sharma">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone</label>
+        <input id="f-phone" class="form-control" placeholder="9876543210">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input id="f-email" type="email" class="form-control" placeholder="supplier@example.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">GST Number</label>
+        <input id="f-gst" class="form-control" placeholder="27AAAAA0000A1Z5">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Address</label>
+        <textarea id="f-addr" class="form-control" rows="2" placeholder="Full address…"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment Terms</label>
+        <select id="f-terms" class="form-control">
+          <option value="IMMEDIATE">Immediate</option>
+          <option value="NET_7">Net 7 Days</option>
+          <option value="NET_15">Net 15 Days</option>
+          <option value="NET_30">Net 30 Days</option>
+          <option value="NET_60">Net 60 Days</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select id="f-status" class="form-control">
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+          <option value="BLACKLISTED">Blacklisted</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Notes</label>
+        <textarea id="f-notes" class="form-control" rows="2"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Save Supplier</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('suppliers');
+requireAuth();
+var editId = null;
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  api('GET', '/admin/suppliers' + (q ? '?q='+encodeURIComponent(q) : ''))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No suppliers yet. Add your first supplier.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GST</th><th>Terms</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(s) {
+          return '<tr>' +
+            '<td><strong>' + escape(s.name||s.companyName||'') + '</strong></td>' +
+            '<td>' + escape(s.contactPerson||s.contact||'—') + '</td>' +
+            '<td>' + escape(s.phone||'—') + '</td>' +
+            '<td style="font-size:11px;font-family:monospace">' + escape(s.gstNumber||s.gst||'—') + '</td>' +
+            '<td>' + badge(s.paymentTerms||s.terms||'IMMEDIATE','blue') + '</td>' +
+            '<td>' + statusBadge(s.status||'ACTIVE') + '</td>' +
+            '<td><div style="display:flex;gap:4px">' +
+              '<button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(s).replace(/"/g,'&quot;') + ')">✏️</button>' +
+              '<button class="btn btn-xs" style="background:#fee2e2;color:#ef4444" onclick="del(\''+s.id+'\')">🗑</button>' +
+            '</div></td></tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function openAdd() {
+  editId = null; document.getElementById('edit-title').textContent = 'Add Supplier';
+  ['f-name','f-contact','f-phone','f-email','f-gst','f-addr','f-notes'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('f-terms').value = 'NET_30';
+  document.getElementById('f-status').value = 'ACTIVE';
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+function openEdit(s) {
+  editId = s.id; document.getElementById('edit-title').textContent = 'Edit Supplier';
+  document.getElementById('f-name').value = s.name||s.companyName||'';
+  document.getElementById('f-contact').value = s.contactPerson||s.contact||'';
+  document.getElementById('f-phone').value = s.phone||'';
+  document.getElementById('f-email').value = s.email||'';
+  document.getElementById('f-gst').value = s.gstNumber||s.gst||'';
+  document.getElementById('f-addr').value = s.address||'';
+  document.getElementById('f-notes').value = s.notes||'';
+  document.getElementById('f-terms').value = s.paymentTerms||s.terms||'NET_30';
+  document.getElementById('f-status').value = s.status||'ACTIVE';
+  document.getElementById('edit-overlay').style.display = 'flex';
+}
+function save() {
+  var name = document.getElementById('f-name').value.trim();
+  if (!name) { toast('Supplier name required','error'); return; }
+  var data = { name:name, contactPerson:document.getElementById('f-contact').value.trim(), phone:document.getElementById('f-phone').value.trim(), email:document.getElementById('f-email').value.trim()||undefined, gstNumber:document.getElementById('f-gst').value.trim()||undefined, address:document.getElementById('f-addr').value.trim()||undefined, notes:document.getElementById('f-notes').value.trim()||undefined, paymentTerms:document.getElementById('f-terms').value, status:document.getElementById('f-status').value };
+  var call = editId ? api('PATCH','/admin/suppliers/'+editId,data) : api('POST','/admin/suppliers',data);
+  call.then(function(){ toast('Supplier saved!','success'); closeModal('edit-overlay'); load(); }).catch(function(e){ toast(e.message,'error'); });
+}
+function del(id) {
+  if (!confirm('Delete this supplier?')) return;
+  api('DELETE','/admin/suppliers/'+id).then(function(){ toast('Deleted','warning'); load(); }).catch(function(e){ toast(e.message,'error'); });
+}
+load();
+</script>
+</body>
+</html>

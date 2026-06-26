@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Partner ID Cards — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.id-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px}
+.id-card{border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.1);cursor:pointer;transition:transform .2s,box-shadow .2s}
+.id-card:hover{transform:translateY(-4px);box-shadow:0 8px 30px rgba(0,0,0,.15)}
+.idc-header{background:linear-gradient(135deg,#151c2c,#1e2d45);padding:18px;position:relative;overflow:hidden}
+.idc-header::after{content:'';position:absolute;right:-30px;top:-30px;width:100px;height:100px;border-radius:50%;background:rgba(249,115,22,.12)}
+.idc-logo-row{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.idc-r{width:28px;height:28px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px}
+.idc-brand{color:#fff;font-size:12px;font-weight:700;letter-spacing:1px}
+.idc-photo-row{display:flex;align-items:center;gap:12px}
+.idc-photo{width:52px;height:52px;border-radius:50%;border:2.5px solid #f97316;object-fit:cover;background:#1e2d45;display:flex;align-items:center;justify-content:center;color:#f97316;font-size:22px;font-weight:800;flex-shrink:0}
+.idc-photo img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.idc-name{color:#fff;font-size:15px;font-weight:800;letter-spacing:.5px}
+.idc-role{color:#f97316;font-size:10px;font-weight:600;letter-spacing:.8px;margin-top:2px}
+.idc-body{background:#fff;padding:14px 18px}
+.idc-id{font-size:11px;font-family:monospace;letter-spacing:1px;color:#374151;font-weight:600;background:#f8fafc;padding:4px 10px;border-radius:6px;border:1px solid #e2e8f0;display:inline-block}
+.idc-skills{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.idc-skill{background:#fff7ed;color:#f97316;border:1px solid #fed7aa;border-radius:12px;font-size:10px;font-weight:600;padding:2px 8px}
+.idc-footer{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9}
+.idc-approved{color:#22c55e;font-size:11px;font-weight:600}
+.idc-actions{display:flex;gap:6px}
+.idc-actions button{border:none;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer}
+.idc-print{background:#f1f5f9;color:#374151}
+.idc-revoke{background:#fee2e2;color:#ef4444}
+.filter-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
+.filter-bar h2{font-size:16px;font-weight:700;color:#1e293b;flex:1}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Partner ID Cards</h1><p>View and manage partner digital ID cards</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL PARTNERS</div><div style="font-size:22px;font-weight:800;color:#1e293b" id="ic-total">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">ID CARDS ISSUED</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="ic-issued">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PENDING APPROVAL</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="ic-pending">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">ACTIVE VERIFIED</div><div style="font-size:22px;font-weight:800;color:#f97316" id="ic-verified">—</div></div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <h2>Partner ID Cards</h2>
+      <input id="filter-q" class="form-control" style="width:200px" placeholder="Search partner…" oninput="load()">
+      <select id="filter-status" class="form-control" style="width:160px" onchange="load()">
+        <option value="">All Partners</option>
+        <option value="ACTIVE">Active (ID Issued)</option>
+        <option value="PENDING_VERIFICATION">Pending</option>
+        <option value="SUSPENDED">Suspended</option>
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+    </div>
+
+    <!-- Cards grid -->
+    <div id="cards-grid" class="loading">Loading…</div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div id="detail-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Partner ID Card Detail</span>
+      <button class="modal-close" onclick="closeModal('detail-overlay')">×</button>
+    </div>
+    <div id="detail-body"></div>
+    <div class="modal-footer" id="detail-footer"></div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('partner-id-cards');
+requireAuth();
+
+function generatePartnerId(vendor) {
+  var date = new Date(vendor.approvedAt || vendor.createdAt || Date.now());
+  var yy = String(date.getFullYear()).slice(2);
+  var mm = String(date.getMonth()+1).padStart(2,'0');
+  var suffix = (vendor.id||'').slice(-6).toUpperCase();
+  return 'RP-' + yy + mm + '-' + suffix;
+}
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var status = document.getElementById('filter-status').value || 'ACTIVE';
+  var params = ['limit=100'];
+  if (q) params.push('q='+encodeURIComponent(q));
+  if (status) params.push('status='+status);
+  api('GET','/admin/vendors?'+params.join('&'))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      document.getElementById('ic-total').textContent = arr.length;
+      document.getElementById('ic-issued').textContent = arr.filter(function(v){return v.status==='ACTIVE'||v.approvalStatus==='APPROVED';}).length;
+      document.getElementById('ic-pending').textContent = arr.filter(function(v){return v.status==='PENDING_VERIFICATION'||v.approvalStatus==='PENDING';}).length;
+      document.getElementById('ic-verified').textContent = arr.filter(function(v){return v.status==='ACTIVE'&&v.isVerified;}).length;
+
+      if (!arr.length) { document.getElementById('cards-grid').innerHTML = '<div class="empty-state">No partners found matching filters.</div>'; return; }
+
+      document.getElementById('cards-grid').innerHTML = '<div class="id-card-grid">' +
+        arr.map(function(v) {
+          var pid = generatePartnerId(v);
+          var skills = (v.skills||v.specializations||[]).slice(0,3);
+          var photoEl = v.profilePhoto || v.photo ? '<img src="'+(v.profilePhoto||v.photo)+'" alt="photo">' : (v.fullName||'?').charAt(0).toUpperCase();
+          var isApproved = v.status === 'ACTIVE' || v.approvalStatus === 'APPROVED';
+          return '<div class="id-card" onclick="viewDetail(\''+v.id+'\')">' +
+            '<div class="idc-header">' +
+              '<div class="idc-logo-row"><div class="idc-r">R</div><div class="idc-brand">REMONT INDIA</div></div>' +
+              '<div class="idc-photo-row">' +
+                '<div class="idc-photo">' + photoEl + '</div>' +
+                '<div><div class="idc-name">' + escape((v.fullName||v.name||'PARTNER').toUpperCase()) + '</div>' +
+                '<div class="idc-role">' + escape(v.specialization||'SERVICE PARTNER') + '</div></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="idc-body">' +
+              '<div class="idc-id">' + pid + '</div>' +
+              (skills.length ? '<div class="idc-skills">' + skills.map(function(s){return '<span class="idc-skill">'+escape(s)+'</span>';}).join('') + '</div>' : '') +
+              '<div class="idc-footer">' +
+                '<span class="'+(isApproved?'idc-approved':'')+'">'+
+                  (isApproved ? '✓ VERIFIED & APPROVED' : statusBadge(v.status||v.approvalStatus||'PENDING')) +
+                '</span>' +
+                '<div class="idc-actions">' +
+                  '<button class="idc-print" onclick="event.stopPropagation();printCard(\''+v.id+'\')">🖨 Print</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+            '</div>';
+        }).join('') + '</div>';
+    })
+    .catch(function(e){ document.getElementById('cards-grid').innerHTML = '<div class="empty-state">'+escape(e.message)+'</div>'; });
+}
+
+function viewDetail(id) {
+  document.getElementById('detail-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('detail-overlay').style.display = 'flex';
+  api('GET','/admin/vendors/'+id).then(function(v) {
+    var pid = generatePartnerId(v);
+    var skills = (v.skills||v.specializations||[]);
+    var isApproved = v.status === 'ACTIVE' || v.approvalStatus === 'APPROVED';
+    document.getElementById('detail-body').innerHTML =
+      '<div style="background:linear-gradient(135deg,#151c2c,#1e2d45);border-radius:12px;padding:20px;margin-bottom:16px">' +
+        '<div style="display:flex;align-items:center;gap:12px">' +
+          '<div style="width:64px;height:64px;border-radius:50%;border:3px solid #f97316;background:#1e2d45;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#f97316;font-size:26px;font-weight:800;flex-shrink:0">' + (v.profilePhoto||v.photo ? '<img src="'+(v.profilePhoto||v.photo)+'" style="width:100%;height:100%;object-fit:cover">' : (v.fullName||'P').charAt(0).toUpperCase()) + '</div>' +
+          '<div><div style="color:#fff;font-size:16px;font-weight:800">' + escape((v.fullName||v.name||'').toUpperCase()) + '</div>' +
+          '<div style="color:#f97316;font-size:11px;font-weight:600">' + escape(v.specialization||'SERVICE PARTNER') + '</div>' +
+          '<div style="color:#94a3b8;font-size:11px;margin-top:4px">ID: <span style="font-family:monospace;color:#f97316">' + pid + '</span></div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">' +
+        '<div class="detail-box"><label>Phone</label><div class="val">' + escape((v.user&&v.user.phone)||v.phone||'—') + '</div></div>' +
+        '<div class="detail-box"><label>City</label><div class="val">' + escape(v.city||v.currentCity||'—') + '</div></div>' +
+        '<div class="detail-box"><label>Status</label><div class="val">' + statusBadge(v.status||v.approvalStatus||'—') + '</div></div>' +
+        '<div class="detail-box"><label>Rating</label><div class="val">⭐ ' + (v.rating||v.avgRating||'—') + '</div></div>' +
+        '<div class="detail-box"><label>Total Jobs</label><div class="val">' + (v.completedOrders||v.jobsCompleted||0) + '</div></div>' +
+        '<div class="detail-box"><label>Joined</label><div class="val">' + fmtDateShort(v.createdAt) + '</div></div>' +
+      '</div>' +
+      (skills.length ? '<div style="margin-bottom:12px"><div style="font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px">SKILLS</div><div style="display:flex;gap:6px;flex-wrap:wrap">' + skills.map(function(s){return '<span class="idc-skill">'+escape(s)+'</span>';}).join('') + '</div></div>' : '') +
+      (v.experience ? '<div class="form-group"><div style="font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px">EXPERIENCE</div><div style="font-size:13px">' + escape(v.experience) + ' years</div></div>' : '');
+
+    document.getElementById('detail-footer').innerHTML =
+      '<button class="btn btn-outline" onclick="closeModal(\'detail-overlay\')">Close</button>' +
+      '<button class="btn btn-primary" onclick="printCard(\''+id+'\')">🖨 Print ID Card</button>' +
+      (!isApproved ? '<button class="btn btn-primary" onclick="approvePartner(\''+id+'\')">✓ Approve Partner</button>' : '<button class="btn btn-outline" style="color:#ef4444;border-color:#ef4444" onclick="suspendPartner(\''+id+'\')">⚠ Suspend</button>');
+  }).catch(function(e){document.getElementById('detail-body').innerHTML='<div class="empty-state">'+escape(e.message)+'</div>';});
+}
+
+function approvePartner(id) {
+  api('PATCH','/admin/vendors/'+id+'/approve').then(function(){ toast('Partner approved!','success'); closeModal('detail-overlay'); load(); }).catch(function(e){toast(e.message,'error');});
+}
+function suspendPartner(id) {
+  if (!confirm('Suspend this partner?')) return;
+  api('PATCH','/admin/vendors/'+id+'/suspend').then(function(){ toast('Partner suspended','warning'); closeModal('detail-overlay'); load(); }).catch(function(e){toast(e.message,'error');});
+}
+function printCard(id) {
+  toast('Opening print view…','success');
+  window.open('/admin/vendors.html#' + id, '_blank');
+}
+
+load();
+</script>
+</body>
+</html>

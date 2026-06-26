@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Partner Earnings — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Partner Earnings</h1><p>Earnings, commissions, and payouts</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportData()">⬇ Export</button>
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <!-- Summary -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL EARNED</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="e-total">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PENDING PAYOUT</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="e-pending">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PAID OUT</div><div style="font-size:22px;font-weight:800;color:#3b82f6" id="e-paid">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PLATFORM COMMISSION</div><div style="font-size:22px;font-weight:800;color:#f97316" id="e-commission">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Partner Earnings</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search partner name…" oninput="load()">
+          <select id="filter-status" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Statuses</option>
+            <option value="PENDING">Pending Payout</option>
+            <option value="PAID">Paid</option>
+            <option value="PROCESSING">Processing</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Payout Modal -->
+<div id="payout-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Process Payout</span>
+      <button class="modal-close" onclick="closeModal('payout-overlay')">×</button>
+    </div>
+    <div style="margin-bottom:12px;padding:10px;background:#f9fafb;border-radius:8px">
+      <div style="font-weight:600" id="po-name">Partner</div>
+      <div style="font-size:12px;color:#6b7280">Pending amount: <strong style="color:#f97316" id="po-amount">₹0</strong></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payout Amount (₹) *</label>
+      <input id="po-pay-amount" type="number" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payment Method</label>
+      <select id="po-method" class="form-control">
+        <option value="BANK_TRANSFER">Bank Transfer</option>
+        <option value="UPI">UPI</option>
+        <option value="CASH">Cash</option>
+        <option value="CHEQUE">Cheque</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Transaction Ref / UTR</label>
+      <input id="po-ref" class="form-control" placeholder="UTR or reference number">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input id="po-notes" class="form-control" placeholder="Any notes…">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('payout-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="processPayout()">Process Payout</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('partner-earnings');
+requireAuth();
+var payoutVendorId = null;
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var status = document.getElementById('filter-status').value;
+  var params = [];
+  if (q) params.push('q=' + encodeURIComponent(q));
+  if (status) params.push('payoutStatus=' + status);
+  api('GET','/admin/vendor-earnings?' + params.join('&'))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      var totalEarned = arr.reduce(function(s,e){return s+(e.totalEarnings||e.earned||0);},0);
+      var totalPending = arr.reduce(function(s,e){return s+(e.pendingPayout||e.pending||0);},0);
+      var totalPaid = arr.reduce(function(s,e){return s+(e.totalPaid||e.paid||0);},0);
+      var totalComm = arr.reduce(function(s,e){return s+(e.commission||e.platformCommission||0);},0);
+      document.getElementById('e-total').textContent = fmtCur(totalEarned);
+      document.getElementById('e-pending').textContent = fmtCur(totalPending);
+      document.getElementById('e-paid').textContent = fmtCur(totalPaid);
+      document.getElementById('e-commission').textContent = fmtCur(totalComm);
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No partner earnings data yet.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Partner</th><th>Total Earned</th><th>Pending Payout</th><th>Paid Out</th><th>Commission</th><th>Jobs Done</th><th>Rating</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(e) {
+          var v = e.vendor || e;
+          var name = v.fullName || v.name || e.vendorName || '—';
+          var pending = e.pendingPayout || e.pending || 0;
+          return '<tr>' +
+            '<td><strong>' + escape(name) + '</strong><br><small style="color:#6b7280">' + escape(v.city||e.city||'') + '</small></td>' +
+            '<td><strong style="color:#22c55e">' + fmtCur(e.totalEarnings||e.earned||0) + '</strong></td>' +
+            '<td><strong style="color:#f59e0b">' + fmtCur(pending) + '</strong></td>' +
+            '<td>' + fmtCur(e.totalPaid||e.paid||0) + '</td>' +
+            '<td style="color:#f97316">' + fmtCur(e.commission||e.platformCommission||0) + '</td>' +
+            '<td>' + (e.jobsCompleted||e.completedOrders||0) + '</td>' +
+            '<td>' + (e.rating||e.avgRating ? '⭐ '+(e.rating||e.avgRating) : '—') + '</td>' +
+            '<td>' + (pending > 0 ? '<button class="btn btn-xs btn-primary" onclick="openPayout(\''+e.vendorId+'\',\''+escape(name)+'\','+pending+')">💳 Pay</button>' : '<span style="color:#22c55e;font-size:12px">✓ Settled</span>') + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function openPayout(vendorId, name, amount) {
+  payoutVendorId = vendorId;
+  document.getElementById('po-name').textContent = name;
+  document.getElementById('po-amount').textContent = fmtCur(amount);
+  document.getElementById('po-pay-amount').value = amount;
+  document.getElementById('po-ref').value = '';
+  document.getElementById('po-notes').value = '';
+  document.getElementById('payout-overlay').style.display = 'flex';
+}
+
+function processPayout() {
+  var amount = Number(document.getElementById('po-pay-amount').value);
+  if (!amount || amount <= 0) { toast('Enter valid amount', 'error'); return; }
+  var data = { vendorId: payoutVendorId, amount: amount, method: document.getElementById('po-method').value, transactionRef: document.getElementById('po-ref').value.trim()||undefined, notes: document.getElementById('po-notes').value.trim()||undefined };
+  api('POST','/admin/vendor-payouts',data)
+    .then(function(){ toast('Payout processed!','success'); closeModal('payout-overlay'); load(); })
+    .catch(function(e){ toast(e.message,'error'); });
+}
+
+function exportData() {
+  api('GET','/admin/vendor-earnings?limit=1000').then(function(data) {
+    var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+    downloadCsv(arr.map(function(e){ return { name:(e.vendor&&e.vendor.fullName)||e.vendorName||'', earned:e.totalEarnings||0, pending:e.pendingPayout||0, paid:e.totalPaid||0, commission:e.commission||0, jobs:e.jobsCompleted||0 }; }), [
+      {key:'name',label:'Partner'},{key:'earned',label:'Total Earned'},{key:'pending',label:'Pending'},{key:'paid',label:'Paid'},{key:'commission',label:'Commission'},{key:'jobs',label:'Jobs'}
+    ], 'partner-earnings.csv');
+  });
+}
+
+load();
+</script>
+</body>
+</html>

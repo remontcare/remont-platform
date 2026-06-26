@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offers — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Offers & Deals</h1><p>Manage promotional offers and deals</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" onclick="openAdd()">+ New Offer</button>
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <!-- Summary -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL OFFERS</div><div style="font-size:22px;font-weight:800;color:#1e293b" id="o-total">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">ACTIVE</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="o-active">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">EXPIRED</div><div style="font-size:22px;font-weight:800;color:#ef4444" id="o-expired">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">DRAFT</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="o-draft">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Offers List</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-type" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Types</option>
+            <option value="SERVICE">Service</option>
+            <option value="PRODUCT">Product</option>
+            <option value="COMBO">Combo</option>
+            <option value="SEASONAL">Seasonal</option>
+            <option value="FLASH">Flash Sale</option>
+          </select>
+          <select id="filter-status" class="form-control" style="width:130px" onchange="load()">
+            <option value="">All Status</option>
+            <option value="ACTIVE">Active</option>
+            <option value="DRAFT">Draft</option>
+            <option value="EXPIRED">Expired</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="edit-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:580px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">New Offer</span>
+      <button class="modal-close" onclick="closeModal('edit-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Offer Title *</label>
+      <input id="f-title" class="form-control" placeholder="e.g. Summer AC Service Offer">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea id="f-desc" class="form-control" rows="2"></textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Offer Type</label>
+        <select id="f-type" class="form-control">
+          <option value="SERVICE">Service</option>
+          <option value="PRODUCT">Product</option>
+          <option value="COMBO">Combo</option>
+          <option value="SEASONAL">Seasonal</option>
+          <option value="FLASH">Flash Sale</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Discount Type</label>
+        <select id="f-discount-type" class="form-control">
+          <option value="PERCENTAGE">Percentage (%)</option>
+          <option value="FLAT">Flat Amount (₹)</option>
+          <option value="FREE">Free Service</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Discount Value</label>
+        <input id="f-discount" type="number" class="form-control" placeholder="20">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Min Order Amount (₹)</label>
+        <input id="f-min-order" type="number" class="form-control" placeholder="999">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Start Date</label>
+        <input id="f-start" type="date" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">End Date</label>
+        <input id="f-end" type="date" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max Uses (Total)</label>
+        <input id="f-max-uses" type="number" class="form-control" placeholder="100">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max Uses (Per User)</label>
+        <input id="f-max-per-user" type="number" class="form-control" placeholder="1">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Banner Image URL</label>
+      <input id="f-image" class="form-control" placeholder="https://…">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status</label>
+      <select id="f-status" class="form-control">
+        <option value="DRAFT">Draft</option>
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Save Offer</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('offers');
+requireAuth();
+var editId = null;
+
+function load() {
+  var type = document.getElementById('filter-type').value;
+  var status = document.getElementById('filter-status').value;
+  var params = [];
+  if (type) params.push('type='+type);
+  if (status) params.push('status='+status);
+  api('GET','/admin/offers'+(params.length?'?'+params.join('&'):''))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      var now = new Date();
+      document.getElementById('o-total').textContent = arr.length;
+      document.getElementById('o-active').textContent = arr.filter(function(o){return o.status==='ACTIVE';}).length;
+      document.getElementById('o-expired').textContent = arr.filter(function(o){return o.status==='EXPIRED'||(o.endDate&&new Date(o.endDate)<now);}).length;
+      document.getElementById('o-draft').textContent = arr.filter(function(o){return o.status==='DRAFT';}).length;
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No offers yet. Create your first promotional offer.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Title</th><th>Type</th><th>Discount</th><th>Valid Period</th><th>Uses</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(o) {
+          var disc = o.discountType==='PERCENTAGE' ? (o.discountValue||o.discount||0)+'%' : o.discountType==='FLAT' ? '₹'+(o.discountValue||o.discount||0) : 'Free';
+          return '<tr>' +
+            '<td><strong>' + escape(o.title||o.name||'') + '</strong>' + (o.description ? '<br><small style="color:#6b7280">'+escape(o.description).slice(0,60)+'…</small>' : '') + '</td>' +
+            '<td>' + badge(o.type||o.offerType||'SERVICE','blue') + '</td>' +
+            '<td><strong style="color:#f97316">' + disc + '</strong>' + (o.minOrderAmount ? '<br><small>Min ₹'+o.minOrderAmount+'</small>' : '') + '</td>' +
+            '<td style="font-size:11px">' + (o.startDate?fmtDateShort(o.startDate):'—') + '<br>to ' + (o.endDate?fmtDateShort(o.endDate):'—') + '</td>' +
+            '<td style="font-size:12px">' + (o.usedCount||0) + ' / ' + (o.maxUses||'∞') + '</td>' +
+            '<td>' + statusBadge(o.status||'DRAFT') + '</td>' +
+            '<td><div style="display:flex;gap:4px">' +
+              '<button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(o).replace(/"/g,'&quot;') + ')">✏️</button>' +
+              '<button class="btn btn-xs" style="background:#fee2e2;color:#ef4444" onclick="del(\''+o.id+'\')">🗑</button>' +
+            '</div></td></tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e){ document.getElementById('tbl').innerHTML = '<div class="empty-state">'+escape(e.message)+'</div>'; });
+}
+
+function clearForm() {
+  ['f-title','f-desc','f-discount','f-min-order','f-max-uses','f-max-per-user','f-image'].forEach(function(id){document.getElementById(id).value='';});
+  document.getElementById('f-type').value='SERVICE';
+  document.getElementById('f-discount-type').value='PERCENTAGE';
+  document.getElementById('f-status').value='DRAFT';
+  document.getElementById('f-start').value = new Date().toISOString().slice(0,10);
+  document.getElementById('f-end').value = new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+}
+function openAdd() { editId=null; document.getElementById('edit-title').textContent='New Offer'; clearForm(); document.getElementById('edit-overlay').style.display='flex'; }
+function openEdit(o) {
+  editId=o.id; document.getElementById('edit-title').textContent='Edit Offer';
+  document.getElementById('f-title').value=o.title||o.name||'';
+  document.getElementById('f-desc').value=o.description||'';
+  document.getElementById('f-type').value=o.type||o.offerType||'SERVICE';
+  document.getElementById('f-discount-type').value=o.discountType||'PERCENTAGE';
+  document.getElementById('f-discount').value=o.discountValue||o.discount||'';
+  document.getElementById('f-min-order').value=o.minOrderAmount||'';
+  document.getElementById('f-max-uses').value=o.maxUses||'';
+  document.getElementById('f-max-per-user').value=o.maxUsesPerUser||'';
+  document.getElementById('f-image').value=o.image||o.bannerImage||'';
+  document.getElementById('f-status').value=o.status||'DRAFT';
+  document.getElementById('f-start').value=(o.startDate?o.startDate.slice(0,10):'');
+  document.getElementById('f-end').value=(o.endDate?o.endDate.slice(0,10):'');
+  document.getElementById('edit-overlay').style.display='flex';
+}
+function save() {
+  var title=document.getElementById('f-title').value.trim();
+  if (!title) { toast('Offer title required','error'); return; }
+  var data = { title:title, description:document.getElementById('f-desc').value.trim()||undefined, type:document.getElementById('f-type').value, discountType:document.getElementById('f-discount-type').value, discountValue:Number(document.getElementById('f-discount').value)||0, minOrderAmount:Number(document.getElementById('f-min-order').value)||undefined, maxUses:Number(document.getElementById('f-max-uses').value)||undefined, maxUsesPerUser:Number(document.getElementById('f-max-per-user').value)||undefined, image:document.getElementById('f-image').value.trim()||undefined, status:document.getElementById('f-status').value, startDate:document.getElementById('f-start').value||undefined, endDate:document.getElementById('f-end').value||undefined };
+  var call = editId ? api('PATCH','/admin/offers/'+editId,data) : api('POST','/admin/offers',data);
+  call.then(function(){toast('Offer saved!','success');closeModal('edit-overlay');load();}).catch(function(e){toast(e.message,'error');});
+}
+function del(id) {
+  if (!confirm('Delete this offer?')) return;
+  api('DELETE','/admin/offers/'+id).then(function(){toast('Deleted','warning');load();}).catch(function(e){toast(e.message,'error');});
+}
+load();
+</script>
+</body>
+</html>
