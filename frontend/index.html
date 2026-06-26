@@ -199,6 +199,33 @@
   }
   .header-search .search-btn-icon:hover { background: #a84f14; }
 
+  /* Search dropdown */
+  .search-dropdown {
+    position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 2000;
+    background: #fff; border: 1.5px solid #e8e3da; border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(26,26,26,.14);
+    overflow: hidden; display: none;
+  }
+  .search-dropdown.open { display: block; }
+  .sd-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 18px; cursor: pointer; transition: background .15s;
+    border-bottom: 1px solid #f3f0eb;
+  }
+  .sd-item:last-child { border-bottom: none; }
+  .sd-item:hover { background: #fff7f3; }
+  .sd-icon {
+    width: 38px; height: 38px; border-radius: 10px;
+    background: #fdf0e8; display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .sd-info { flex: 1; min-width: 0; }
+  .sd-name { font-size: 14px; font-weight: 600; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sd-meta { font-size: 11px; color: #9ca3af; margin-top: 1px; }
+  .sd-price { font-size: 13px; font-weight: 700; color: #C4601A; flex-shrink: 0; }
+  .sd-empty { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
+  .sd-loading { padding: 16px; text-align: center; color: #9ca3af; font-size: 13px; }
+
   .header-right { display: flex; align-items: center; gap: 14px; }
   .icon-btn {
     position: relative;
@@ -2502,9 +2529,10 @@
     <button class="ai-mic-btn" aria-label="Voice search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
     </button>
-    <button class="search-btn-icon" aria-label="Search">
+    <button class="search-btn-icon" aria-label="Search" onclick="runSearch(document.getElementById('headerSearchInput').value)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     </button>
+    <div class="search-dropdown" id="searchDropdown"></div>
   </div>
 
   <div class="header-right">
@@ -4765,25 +4793,104 @@
   });
 
   // ── Header Search ────────────────────────────────────────────────────────────
-  // Route: GET /api/v1/services/search?q=  (Public — query string, not POST body)
-  var headerInput   = document.getElementById('headerSearchInput');
-  var headerSrchBtn = document.querySelector('.search-btn-icon');
+  var headerInput  = document.getElementById('headerSearchInput');
+  var searchDropEl = document.getElementById('searchDropdown');
+  var searchTimer  = null;
+
+  var CAT_ICONS = {
+    AC_SERVICE:'❄️', PLUMBING:'🔧', ELECTRICAL:'⚡', APPLIANCE:'🔌',
+    CLEANING:'🧹', INTERIOR:'🏠', RENOVATION:'🏗️', CONSTRUCTION:'🏗️',
+    PEST:'🐛', PAINTING:'🎨', CARPENTRY:'🪚', DEFAULT:'🔨'
+  };
+
+  function openSearchDrop(html) {
+    searchDropEl.innerHTML = html;
+    searchDropEl.classList.add('open');
+  }
+  function closeSearchDrop() {
+    searchDropEl.classList.remove('open');
+    searchDropEl.innerHTML = '';
+  }
+
+  function renderSearchResults(results, query) {
+    if (!results || !results.length) {
+      openSearchDrop('<div class="sd-empty">🔍 No results for "<strong>' + query + '</strong>"<br><span style="font-size:11px">Try AC, plumbing, cleaning…</span></div>');
+      return;
+    }
+    var html = results.slice(0, 8).map(function(s) {
+      var catKey = (s.category && s.category.key) ? s.category.key : 'DEFAULT';
+      var icon = CAT_ICONS[catKey] || CAT_ICONS.DEFAULT;
+      var cat  = (s.category && s.category.name) ? s.category.name : '';
+      var price = s.basePrice ? '₹' + Number(s.basePrice).toLocaleString('en-IN') : '';
+      var svcId = s.id || '';
+      var svcName = (s.name || '').replace(/'/g, "\\'");
+      return '<div class="sd-item" onclick="closeSearchDrop();openBookingModal(\'' + svcId + '\',\'' + svcName + '\',\'' + price + '\')">' +
+        '<div class="sd-icon">' + icon + '</div>' +
+        '<div class="sd-info"><div class="sd-name">' + (s.name || '') + '</div><div class="sd-meta">' + cat + '</div></div>' +
+        (price ? '<div class="sd-price">' + price + '</div>' : '') +
+        '</div>';
+    }).join('');
+    openSearchDrop(html);
+  }
+
+  // Local fallback — search already-loaded serviceData
+  function localSearch(query) {
+    var q = query.toLowerCase();
+    var hits = [];
+    Object.keys(serviceData).forEach(function(key) {
+      var d = serviceData[key];
+      if (!d) return;
+      var title = (d.title || '').toLowerCase();
+      if (title.indexOf(q) !== -1) {
+        hits.push({ id: d.id || '', name: d.title, category: { name: key, key: key.toUpperCase() }, basePrice: null });
+      }
+      // Also search sub-services
+      if (d.services) {
+        d.services.forEach(function(s) {
+          if ((s.name || '').toLowerCase().indexOf(q) !== -1) {
+            hits.push({ id: s.id || '', name: s.name, category: { name: d.title, key: key.toUpperCase() }, basePrice: s.price || null });
+          }
+        });
+      }
+    });
+    return hits;
+  }
 
   function runSearch(query) {
-    if (!query || !query.trim()) return;
-    apiGet('/api/v1/services/search?q=' + encodeURIComponent(query.trim()))
-      .then(function(data) {
-        console.info('[Remont Search]', data);
+    query = (query || '').trim();
+    if (!query) { closeSearchDrop(); return; }
+
+    openSearchDrop('<div class="sd-loading">🔍 Searching…</div>');
+
+    apiGet('/api/v1/services/search?q=' + encodeURIComponent(query))
+      .then(function(res) {
+        var data = res && res.data ? res.data : (Array.isArray(res) ? res : []);
+        if (!data.length) data = localSearch(query);
+        renderSearchResults(data, query);
       })
-      .catch(function() { /* silent — no results UI yet */ });
+      .catch(function() {
+        renderSearchResults(localSearch(query), query);
+      });
   }
 
-  if (headerSrchBtn && headerInput) {
-    headerSrchBtn.addEventListener('click', function() { runSearch(headerInput.value); });
+  // Live search with 350ms debounce
+  if (headerInput) {
+    headerInput.addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      var q = headerInput.value.trim();
+      if (!q) { closeSearchDrop(); return; }
+      searchTimer = setTimeout(function() { runSearch(q); }, 350);
+    });
     headerInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') runSearch(headerInput.value);
+      if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(headerInput.value); }
+      if (e.key === 'Escape') closeSearchDrop();
     });
   }
+
+  // Close dropdown on outside click
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.header-search')) closeSearchDrop();
+  });
 
   // ══════════════════════════════════════════════════════════════════
   // DYNAMIC DATA LOADING — replaces hardcoded static content
