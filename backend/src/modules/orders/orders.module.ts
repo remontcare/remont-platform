@@ -628,24 +628,24 @@ export class GuestBookingService {
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
 
-    // ONLINE: if no Razorpay configured, auto-confirm with dev mock
-    if (!process.env.RAZORPAY_KEY_ID) {
-      const mockPaymentId = `pay_dev_${Date.now()}`;
+    // ONLINE: create Razorpay order (handles both real and dev-mock internally)
+    const rzpOrder = await this.payments.createOrder(user.id, totalAmount, order.id);
+
+    if (rzpOrder._devMock) {
+      // Razorpay not configured — auto-confirm only in non-production
+      if (process.env.NODE_ENV === 'production') {
+        throw new BadRequestException(
+          'Online payment gateway is not configured. Please choose Cash on Delivery or contact support.'
+        );
+      }
       await this.prisma.order.update({
         where: { id: order.id },
-        data: { paymentStatus: 'PAID', status: OrderStatus.CONFIRMED, paymentId: mockPaymentId },
-      });
-      await this.prisma.paymentTransaction.create({
-        data: {
-          orderId: order.id, userId: user.id, amount: totalAmount,
-          status: 'PAID', gateway: 'DEV_MOCK', gatewayOrderId: mockPaymentId, gatewayPaymentId: mockPaymentId,
-        },
+        data: { paymentStatus: 'PAID', status: OrderStatus.CONFIRMED, paymentId: rzpOrder.gatewayOrderId },
       });
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'ONLINE', isCOD: false, _devMock: true };
     }
 
-    // ONLINE with real Razorpay: create Razorpay order then return to frontend
-    const rzpOrder = await this.payments.createOrder(user.id, totalAmount, order.id);
+    // Real Razorpay order created — send to frontend
     return {
       orderNumber: order.orderNumber, orderId: order.id, totalAmount,
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,

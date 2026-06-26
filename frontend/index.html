@@ -3060,6 +3060,8 @@
   }
   .loc-save-btn:disabled { background: #d1d5db; cursor: not-allowed; }
 </style>
+<!-- Razorpay SDK — preloaded so payment popup opens instantly -->
+<script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
 </head>
 <body>
 
@@ -7189,62 +7191,136 @@ function submitCheckoutOrder() {
   });
 }
 
+// Cached Razorpay key fetched from backend config
+var _rzpKeyId = null;
+function _getRzpKey(cb) {
+  if (_rzpKeyId) { cb(_rzpKeyId); return; }
+  fetch((API_BASE || '') + '/api/v1/payments/config')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var cfg = d.data || d;
+      _rzpKeyId = cfg.keyId || '';
+      cb(_rzpKeyId);
+    })
+    .catch(function() { cb(''); });
+}
+
 function launchRazorpay(payment, order, totalAmount, btn) {
   return new Promise(function(resolve, reject) {
-    function initRzp() {
+    // Resolve key: prefer what came from order response, fallback to config endpoint
+    var resolvedKey = (payment.keyId && payment.keyId !== 'dev') ? payment.keyId : null;
+
+    function doOpen(keyId) {
+      if (!keyId || keyId === 'dev') {
+        var errMsg = 'Payment gateway not configured. Please contact support or select Cash on Delivery.';
+        if (typeof showCoMsg === 'function') showCoMsg(errMsg);
+        else if (typeof showToast === 'function') showToast(errMsg, 'error');
+        btn.textContent = 'Pay Online →'; btn.disabled = false;
+        reject(new Error(errMsg));
+        return;
+      }
+
+      var prefillName = '', prefillPhone = '';
+      var nameEl = document.getElementById('co-name');
+      var phoneEl = document.getElementById('co-phone');
+      if (nameEl) prefillName = nameEl.value.trim();
+      if (phoneEl) prefillPhone = '+91' + phoneEl.value.replace(/\D/g, '');
+
       var options = {
-        key: payment.keyId,
+        key: keyId,
         amount: Math.round(totalAmount * 100),
         currency: 'INR',
         name: 'Remont India',
-        description: 'Home Services',
+        description: 'Home Services Payment',
+        image: '/admin/logo.png',
         order_id: payment.gatewayOrderId,
         handler: function(response) {
-          btn.textContent = 'Verifying payment…'; btn.disabled = true;
+          btn.textContent = 'Verifying…'; btn.disabled = true;
           apiPost('/api/v1/payments/verify', {
             orderId: response.razorpay_order_id,
             paymentId: response.razorpay_payment_id,
             signature: response.razorpay_signature
           }).then(function(v) {
-            if (!v.valid) { showCoMsg('Payment verification failed. Contact support.'); btn.textContent = 'Pay Online →'; btn.disabled = false; return; }
+            var isValid = v && (v.valid || (v.data && v.data.valid));
+            if (!isValid) {
+              var msg = 'Payment verification failed. Contact support with ID: ' + response.razorpay_payment_id;
+              if (typeof showCoMsg === 'function') showCoMsg(msg);
+              else if (typeof showToast === 'function') showToast(msg, 'error');
+              btn.textContent = 'Pay Online →'; btn.disabled = false;
+              return;
+            }
             return apiPost('/api/v1/orders/' + _checkoutOrderId + '/confirm-payment', {
               paymentId: response.razorpay_payment_id
             }).then(function() {
-              _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
-              closeCheckoutModal();
+              if (typeof _autosaveProfileFromCheckout === 'function') {
+                var n = document.getElementById('co-name'); var p = document.getElementById('co-phone');
+                var a = document.getElementById('co-address'); var z = document.getElementById('co-pincode');
+                if (n && p && a) _autosaveProfileFromCheckout(n.value.trim(), '+91' + p.value.replace(/\D/g,''), a.value.trim(), z ? z.value.trim() : '');
+              }
+              if (typeof closeCheckoutModal === 'function') closeCheckoutModal();
               localStorage.removeItem('remont_cart');
               if (typeof updateCartBadge === 'function') updateCartBadge();
-              openOrderSuccessModal(order.orderNumber, totalAmount, 'Payment successful via Razorpay.');
+              openOrderSuccessModal(order.orderNumber, totalAmount, '✅ Payment successful! Order confirmed.');
               resolve();
             });
           }).catch(function(e) {
-            showCoMsg('Payment recorded but verification failed. Contact support with payment ID: ' + response.razorpay_payment_id);
+            var msg = 'Payment recorded. Contact support with ID: ' + response.razorpay_payment_id;
+            if (typeof showCoMsg === 'function') showCoMsg(msg);
+            else if (typeof showToast === 'function') showToast(msg, 'warning');
             btn.textContent = 'Pay Online →'; btn.disabled = false;
           });
         },
-        prefill: {
-          name: document.getElementById('co-name').value.trim(),
-          contact: '+91' + document.getElementById('co-phone').value.replace(/\D/g,'')
-        },
+        prefill: { name: prefillName, contact: prefillPhone },
+        notes: { orderId: _checkoutOrderId },
         theme: { color: '#c4601a' },
-        modal: { ondismiss: function() { btn.textContent = 'Pay Online →'; btn.disabled = false; } }
+        modal: {
+          ondismiss: function() { btn.textContent = 'Pay Online →'; btn.disabled = false; reject(new Error('dismissed')); }
+        }
       };
-      var rzp = new window.Razorpay(options);
-      rzp.open();
+
+      function tryOpen() {
+        if (!window.Razorpay) {
+          btn.textContent = 'Pay Online →'; btn.disabled = false;
+          var errMsg = 'Payment gateway failed to load. Check internet and try again.';
+          if (typeof showCoMsg === 'function') showCoMsg(errMsg);
+          reject(new Error('Razorpay SDK not available'));
+          return;
+        }
+        try {
+          var rzp = new window.Razorpay(options);
+          rzp.on('payment.failed', function(resp) {
+            var msg = 'Payment failed: ' + (resp.error && resp.error.description || 'Unknown error');
+            if (typeof showCoMsg === 'function') showCoMsg(msg);
+            else if (typeof showToast === 'function') showToast(msg, 'error');
+            btn.textContent = 'Pay Online →'; btn.disabled = false;
+          });
+          rzp.open();
+        } catch(e) {
+          btn.textContent = 'Pay Online →'; btn.disabled = false;
+          if (typeof showCoMsg === 'function') showCoMsg('Payment gateway error: ' + e.message);
+          reject(e);
+        }
+      }
+
+      if (window.Razorpay) {
+        tryOpen();
+      } else {
+        var s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = tryOpen;
+        s.onerror = function() {
+          if (typeof showCoMsg === 'function') showCoMsg('Failed to load payment gateway. Check internet connection.');
+          btn.textContent = 'Pay Online →'; btn.disabled = false;
+          reject(new Error('Razorpay SDK load failed'));
+        };
+        document.head.appendChild(s);
+      }
     }
 
-    if (window.Razorpay) {
-      initRzp();
+    if (resolvedKey) {
+      doOpen(resolvedKey);
     } else {
-      var s = document.createElement('script');
-      s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      s.onload = initRzp;
-      s.onerror = function() {
-        showCoMsg('Failed to load payment gateway. Please try again.');
-        btn.textContent = 'Pay Online →'; btn.disabled = false;
-        reject(new Error('Razorpay SDK failed'));
-      };
-      document.head.appendChild(s);
+      _getRzpKey(doOpen);
     }
   });
 }
