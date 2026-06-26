@@ -1,11 +1,11 @@
 {
   "version": 2,
   "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://remont-platform-production.up.railway.app/api/:path*"
-    }
+    { "source": "/api/:path*", "destination": "https://remont-platform-production.up.railway.app/api/:path*" },
+    { "source": "/partner-register", "destination": "/partner-register.html" },
+    { "source": "/booking", "destination": "/booking.html" }
   ],
   "headers": [
     {
