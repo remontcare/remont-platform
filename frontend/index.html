@@ -2376,6 +2376,263 @@
     .fab { width: 50px; height: 50px; font-size: 20px; }
   }
 
+  /* ═══════════════════════════════════════════════════════════════════
+     MOBILE APP UI — max-width 768px ONLY
+     Desktop HTML/CSS/JS is 100% untouched.
+     All new elements are inside #mobile-app and .m-bottom-nav.
+  ════════════════════════════════════════════════════════════════════ */
+  #mobile-app { display: none; }
+  .m-bottom-nav { display: none; }
+
+  @media (max-width: 768px) {
+    /* ── Header: two-row layout on mobile ── */
+    header {
+      flex-wrap: wrap; height: auto;
+      padding: 10px 16px 8px; gap: 0;
+      position: sticky; top: 0; z-index: 300;
+    }
+    .logo { order: 1; flex-shrink: 0; }
+    .header-right { order: 2; margin-left: auto; }
+    /* City selector visible on mobile */
+    .icon-btn.city-selector { display: flex !important; }
+    .icon-btn.city-selector .label, .city-arrow { display: none; }
+    /* Show search in header row 2 (full width) */
+    .header-search {
+      display: flex !important; order: 3;
+      width: 100%; max-width: 100%; margin: 8px 0 0; flex-basis: 100%;
+    }
+    .header-search .cat-select { display: none; }
+    .header-search .search-dropdown { top: calc(100% + 4px); }
+
+    /* ── Hide desktop sections (mobile tab UI replaces them) ── */
+    .cat-nav, .hero, .booking-channels, .shop-section,
+    #premium, #three-click, .promo-ticker, #dispatch,
+    #estimator, #deals, #amc, #corporate, #trust,
+    #vendor, #cities, #faq, #app-cta { display: none !important; }
+    .floating-actions { display: none !important; }
+
+    /* ── Show mobile app ── */
+    #mobile-app { display: block; padding-bottom: 72px; }
+
+    /* ── Location bar ── */
+    .m-loc-bar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 16px; font-size: 12px; color: #374151;
+      background: #fff; border-bottom: 1px solid #f0ede8;
+    }
+    .m-loc-bar strong { color: #1a1a1a; font-weight: 600; }
+    .m-loc-change { margin-left: auto; color: var(--sienna); font-size: 12px; font-weight: 600; background: none; border: none; cursor: pointer; }
+
+    /* ── Three tabs ── */
+    .m-tabs {
+      display: flex; background: #fff;
+      border-bottom: 2px solid #f0ede8;
+      position: sticky; top: 102px; z-index: 200;
+    }
+    .m-tab {
+      flex: 1; padding: 12px 4px;
+      font-size: 13px; font-weight: 600; color: #6b7280;
+      background: none; border: none; border-bottom: 2.5px solid transparent;
+      margin-bottom: -2px; display: flex; align-items: center;
+      justify-content: center; gap: 5px; cursor: pointer; transition: color .2s;
+    }
+    .m-tab.active { color: var(--sienna); border-bottom-color: var(--sienna); }
+
+    /* ── Section heading ── */
+    .m-section { padding: 18px 16px 0; }
+    .m-sec-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 15px; font-weight: 700; color: #1a1a1a; margin-bottom: 14px;
+    }
+    .m-sec-hd a { font-size: 12px; font-weight: 600; color: var(--sienna); cursor: pointer; }
+
+    /* ── Service Category Grid (4 cols) ── */
+    .m-cat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+    .m-cat-item {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 10px 4px; border-radius: 12px;
+      background: #fff; border: 1.5px solid #f0ede8;
+      cursor: pointer; transition: all .18s; -webkit-tap-highlight-color: transparent;
+    }
+    .m-cat-item:active { background: #fff7f3; border-color: var(--sienna); transform: scale(.96); }
+    .m-cat-icon {
+      width: 46px; height: 46px; border-radius: 12px;
+      background: #fdf0e8; display: flex; align-items: center;
+      justify-content: center; font-size: 22px;
+    }
+    .m-cat-name { font-size: 10px; font-weight: 600; color: #374151; text-align: center; line-height: 1.2; }
+
+    /* ── Popular Services horizontal scroll ── */
+    .m-svc-scroll {
+      display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .m-svc-scroll::-webkit-scrollbar { display: none; }
+    .m-svc-card {
+      flex-shrink: 0; width: 148px; background: #fff;
+      border-radius: 14px; overflow: hidden;
+      border: 1.5px solid #f0ede8; cursor: pointer;
+    }
+    .m-svc-img {
+      width: 100%; height: 88px;
+      background: linear-gradient(135deg,#fdf0e8,#f5e8d8);
+      display: flex; align-items: center; justify-content: center; font-size: 38px;
+    }
+    .m-svc-body { padding: 8px 10px; }
+    .m-svc-name { font-size: 12px; font-weight: 700; color: #1a1a1a; margin-bottom: 2px; }
+    .m-svc-stars { font-size: 10px; color: #6b7280; margin-bottom: 2px; }
+    .m-svc-price { font-size: 11px; color: var(--sienna); font-weight: 600; margin-bottom: 6px; }
+    .m-svc-btn {
+      width: 100%; padding: 6px; background: var(--sienna); color: #fff;
+      border: none; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 6px;
+    }
+
+    /* ── Promo banner ── */
+    .m-promo {
+      margin: 16px; border-radius: 16px; overflow: hidden;
+      background: linear-gradient(120deg,#1a1a2e 60%,#2d1f3d);
+      display: flex; min-height: 140px; position: relative;
+    }
+    .m-promo-body {
+      flex: 1; padding: 20px; display: flex;
+      flex-direction: column; justify-content: center; z-index: 1;
+    }
+    .m-promo-tag { font-size: 10px; font-weight: 700; color: var(--amber); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+    .m-promo-title { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 4px; line-height: 1.2; }
+    .m-promo-sub { font-size: 12px; color: rgba(255,255,255,.65); margin-bottom: 14px; }
+    .m-promo-btn {
+      display: inline-block; padding: 8px 20px; background: #fff; color: #1a1a2e;
+      border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; align-self: flex-start;
+    }
+    .m-promo-img-wrap {
+      position: absolute; right: -10px; bottom: 0; top: 0;
+      width: 130px; overflow: hidden; opacity: .18;
+      font-size: 80px; display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── Products horizontal mini-scroll (used inside Services tab) ── */
+    .m-prod-scroll {
+      display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .m-prod-scroll::-webkit-scrollbar { display: none; }
+    .m-prod-card {
+      flex-shrink: 0; width: 152px; background: #fff;
+      border-radius: 14px; border: 1.5px solid #f0ede8; overflow: hidden; cursor: pointer;
+    }
+    .m-prod-card.grid-card { flex-shrink: unset; width: 100%; }
+    .m-prod-img {
+      width: 100%; height: 112px; background: #f8f7f4;
+      display: flex; align-items: center; justify-content: center; font-size: 44px;
+    }
+    .m-prod-body { padding: 8px 10px 10px; }
+    .m-prod-name { font-size: 12px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; line-height: 1.3; }
+    .m-prod-stars { font-size: 10px; color: #f59e0b; margin-bottom: 4px; }
+    .m-prod-prices { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+    .m-prod-price { font-size: 15px; font-weight: 800; color: #1a1a1a; }
+    .m-prod-mrp { font-size: 11px; color: #9ca3af; text-decoration: line-through; }
+    .m-prod-cart-btn {
+      width: 100%; padding: 7px; background: var(--sienna); color: #fff;
+      border: none; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+
+    /* ── Products tab: 2-col grid ── */
+    .m-prod-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px;
+    }
+
+    /* ── Product category chips (horizontal) ── */
+    .m-prod-cats {
+      display: flex; gap: 14px; overflow-x: auto; padding: 0 16px 4px;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .m-prod-cats::-webkit-scrollbar { display: none; }
+    .m-pcat {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      flex-shrink: 0; cursor: pointer;
+    }
+    .m-pcat-icon {
+      width: 64px; height: 64px; border-radius: 16px;
+      background: #f5f0e8; border: 1.5px solid #f0ede8;
+      display: flex; align-items: center; justify-content: center; font-size: 30px;
+    }
+    .m-pcat-name { font-size: 11px; font-weight: 600; color: #374151; text-align: center; }
+
+    /* ── Products promo blue strip ── */
+    .m-prod-promo {
+      margin: 16px; border-radius: 14px; padding: 16px 20px;
+      background: linear-gradient(120deg,#1a1a2e,#0f3460);
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .m-prod-promo-text .t1 { font-size: 18px; font-weight: 800; color: #fff; }
+    .m-prod-promo-text .t2 { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 2px; }
+    .m-prod-promo-btn {
+      padding: 9px 16px; background: #fff; color: #0f3460;
+      border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0;
+    }
+
+    /* ── Trust row ── */
+    .m-why-buy { padding: 0 16px 4px; }
+    .m-trust-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+    .m-trust-item {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: #fff; border-radius: 10px; padding: 12px 4px;
+      border: 1.5px solid #f0ede8; text-align: center;
+    }
+    .m-trust-item .ti-icon { font-size: 20px; }
+    .m-trust-item .ti-lbl { font-size: 9px; font-weight: 600; color: #374151; line-height: 1.3; }
+
+    /* ── AMC cards ── */
+    .m-amc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px; }
+    .m-amc-card {
+      background: #fff; border-radius: 14px; padding: 14px 12px;
+      border: 1.5px solid #f0ede8; display: flex; flex-direction: column; gap: 6px;
+    }
+    .m-amc-card.amc-featured { border-color: var(--sienna); background: linear-gradient(160deg,#fff7f3,#fff); grid-column: span 2; }
+    .m-amc-name { font-size: 12px; font-weight: 700; color: #1a1a1a; }
+    .m-amc-price { font-size: 20px; font-weight: 800; color: var(--sienna); line-height: 1; }
+    .m-amc-price small { font-size: 11px; color: #6b7280; font-weight: 400; }
+    .m-amc-card ul { list-style: none; padding: 0; margin: 2px 0; }
+    .m-amc-card li { font-size: 10px; color: #374151; padding: 2px 0; }
+    .m-amc-cta {
+      margin-top: auto; padding: 8px; background: var(--sienna); color: #fff;
+      border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .m-amc-help {
+      margin: 4px 16px 16px; background: #1a1a2e; border-radius: 12px; padding: 14px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .m-amc-help-txt { font-size: 12px; font-weight: 600; color: #fff; flex: 1; line-height: 1.4; }
+    .m-amc-help-btn {
+      padding: 8px 14px; background: var(--sienna); color: #fff;
+      border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0;
+    }
+
+    /* ── Bottom Navigation ── */
+    .m-bottom-nav {
+      display: flex !important; position: fixed;
+      bottom: 0; left: 0; right: 0; z-index: 500;
+      background: #fff; border-top: 1px solid #f0ede8;
+      padding: 6px 0; padding-bottom: max(6px, env(safe-area-inset-bottom));
+      box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+    }
+    .m-nav-item {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 2px; background: none; border: none; cursor: pointer;
+      font-size: 10px; font-weight: 600; color: #9ca3af; transition: color .2s;
+    }
+    .m-nav-item .m-nav-ic { font-size: 22px; line-height: 1.2; }
+    .m-nav-item.active, .m-nav-item:active { color: var(--sienna); }
+    .m-nav-chat .m-nav-ic {
+      width: 46px; height: 46px; border-radius: 50%;
+      background: var(--sienna); color: #fff; font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: -18px; box-shadow: 0 4px 12px rgba(196,96,26,.4);
+    }
+    .m-nav-chat { color: var(--sienna); }
+    .m-nav-chat:active .m-nav-ic { background: #a84f14; }
+  }
+
   /* ─── LOCATION SYSTEM ─────────────────────────────────────────────── */
   #loc-banner {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 8000;
@@ -2563,6 +2820,196 @@
     </button>
   </div>
 </header>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MOBILE APP UI — shown only on max-width:768px
+     Desktop: #mobile-app display:none (default above)
+════════════════════════════════════════════════════════════ -->
+<div id="mobile-app">
+
+  <!-- Location bar -->
+  <div class="m-loc-bar">
+    <span>📍</span>
+    <span>Delivering to: <strong id="m-loc-display">Set your location</strong></span>
+    <button class="m-loc-change" onclick="openLocModal()">Change</button>
+  </div>
+
+  <!-- Three Tabs -->
+  <div class="m-tabs">
+    <button class="m-tab active" onclick="switchMTab('services',this)">🔧 Services</button>
+    <button class="m-tab" onclick="switchMTab('products',this)">🛒 Products</button>
+    <button class="m-tab" onclick="switchMTab('amc',this)">🛡 AMC Plans</button>
+  </div>
+
+  <!-- ══ SERVICES TAB ══ -->
+  <div id="mtp-services">
+
+    <!-- Service Categories -->
+    <div class="m-section">
+      <div class="m-sec-hd"><span>Service Categories</span><a onclick="document.querySelector('.cat-nav') && window.scrollTo(0,0)">View all</a></div>
+      <div class="m-cat-grid" id="m-cat-grid">
+        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=ac]'));closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name">AC Repair</div></div>
+        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=plumbing]'))"><div class="m-cat-icon">🔧</div><div class="m-cat-name">Plumbing</div></div>
+        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=electrical]'))"><div class="m-cat-icon">⚡</div><div class="m-cat-name">Electrical</div></div>
+        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=cleaning]'))"><div class="m-cat-icon">🧹</div><div class="m-cat-name">Cleaning</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','Pest Control','₹499')"><div class="m-cat-icon">🐛</div><div class="m-cat-name">Pest Control</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','Painting','₹1999')"><div class="m-cat-icon">🎨</div><div class="m-cat-name">Painting</div></div>
+        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=appliance]'))"><div class="m-cat-icon">🔌</div><div class="m-cat-name">Appliance Repair</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','More Services','')"><div class="m-cat-icon" style="background:#f0ede8">➕</div><div class="m-cat-name">More</div></div>
+      </div>
+    </div>
+
+    <!-- Popular Services -->
+    <div class="m-section">
+      <div class="m-sec-hd"><span>Popular Services</span><a>View all</a></div>
+      <div class="m-svc-scroll" id="m-svc-scroll">
+        <div class="m-svc-card" onclick="openBookingModal('','AC Service & Repair','₹399')">
+          <div class="m-svc-img">❄️</div>
+          <div class="m-svc-body"><div class="m-svc-name">AC Repair</div><div class="m-svc-stars">⭐ 4.7 (12K+)</div><div class="m-svc-price">Starts at ₹399</div><button class="m-svc-btn">Book Now</button></div>
+        </div>
+        <div class="m-svc-card" onclick="openBookingModal('','Plumbing','₹299')">
+          <div class="m-svc-img">🔧</div>
+          <div class="m-svc-body"><div class="m-svc-name">Plumbing</div><div class="m-svc-stars">⭐ 4.6 (8K+)</div><div class="m-svc-price">Starts at ₹299</div><button class="m-svc-btn">Book Now</button></div>
+        </div>
+        <div class="m-svc-card" onclick="openBookingModal('','Electrical Work','₹249')">
+          <div class="m-svc-img">⚡</div>
+          <div class="m-svc-body"><div class="m-svc-name">Electrical Repair</div><div class="m-svc-stars">⭐ 4.6 (7K+)</div><div class="m-svc-price">Starts at ₹249</div><button class="m-svc-btn">Book Now</button></div>
+        </div>
+        <div class="m-svc-card" onclick="openBookingModal('','Deep Cleaning','₹699')">
+          <div class="m-svc-img">🧹</div>
+          <div class="m-svc-body"><div class="m-svc-name">Deep Cleaning</div><div class="m-svc-stars">⭐ 4.5 (5K+)</div><div class="m-svc-price">Starts at ₹699</div><button class="m-svc-btn">Book Now</button></div>
+        </div>
+        <div class="m-svc-card" onclick="openBookingModal('','Pest Control','₹499')">
+          <div class="m-svc-img">🐛</div>
+          <div class="m-svc-body"><div class="m-svc-name">Pest Control</div><div class="m-svc-stars">⭐ 4.8 (3K+)</div><div class="m-svc-price">Starts at ₹499</div><button class="m-svc-btn">Book Now</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Promo Banner -->
+    <div class="m-promo">
+      <div class="m-promo-body">
+        <div class="m-promo-tag">SUMMER OFFER</div>
+        <div class="m-promo-title">AC Service<br>Starting ₹399</div>
+        <div class="m-promo-sub">Expert Technicians | 60 Min Service</div>
+        <button class="m-promo-btn" onclick="openBookingModal('','AC Service & Repair','₹399')">Book Now</button>
+      </div>
+      <div class="m-promo-img-wrap">❄️</div>
+    </div>
+
+    <!-- Top Selling Products (mini scroll, inside services tab) -->
+    <div class="m-section">
+      <div class="m-sec-hd"><span>Top Selling Products</span><a onclick="switchMTab('products',null)">View all</a></div>
+      <div class="m-prod-scroll" id="m-prod-scroll-svc"></div>
+    </div>
+    <div style="height:16px"></div>
+  </div>
+
+  <!-- ══ PRODUCTS TAB ══ -->
+  <div id="mtp-products" style="display:none">
+
+    <!-- Product Categories -->
+    <div class="m-section">
+      <div class="m-sec-hd"><span>Top Categories</span><a>View all</a></div>
+      <div class="m-prod-cats">
+        <div class="m-pcat"><div class="m-pcat-icon">❄️</div><div class="m-pcat-name">AC</div></div>
+        <div class="m-pcat"><div class="m-pcat-icon">🫧</div><div class="m-pcat-name">Water Purifier</div></div>
+        <div class="m-pcat"><div class="m-pcat-icon">🌀</div><div class="m-pcat-name">Fans</div></div>
+        <div class="m-pcat"><div class="m-pcat-icon">💡</div><div class="m-pcat-name">Lights</div></div>
+        <div class="m-pcat"><div class="m-pcat-icon">🔌</div><div class="m-pcat-name">Switches</div></div>
+        <div class="m-pcat"><div class="m-pcat-icon">🧹</div><div class="m-pcat-name">Cleaning</div></div>
+      </div>
+    </div>
+
+    <!-- Top Selling Products grid -->
+    <div class="m-section">
+      <div class="m-sec-hd"><span>Top Selling Products</span><a>View all</a></div>
+    </div>
+    <div class="m-prod-grid" id="m-prod-grid"></div>
+
+    <!-- Products Promo -->
+    <div class="m-prod-promo">
+      <div class="m-prod-promo-text"><div class="t1">Up to 40% OFF</div><div class="t2">On Home Appliances — Limited Time Offer</div></div>
+      <button class="m-prod-promo-btn" onclick="switchMTab('products',null)">Shop Now</button>
+    </div>
+
+    <!-- Why Buy -->
+    <div class="m-why-buy">
+      <div class="m-sec-hd" style="margin-bottom:12px"><span>Why Buy from Remont?</span></div>
+      <div class="m-trust-row">
+        <div class="m-trust-item"><span class="ti-icon">✅</span><span class="ti-lbl">Genuine Products</span></div>
+        <div class="m-trust-item"><span class="ti-icon">🔒</span><span class="ti-lbl">1 Year Warranty</span></div>
+        <div class="m-trust-item"><span class="ti-icon">🚀</span><span class="ti-lbl">Fast Delivery</span></div>
+        <div class="m-trust-item"><span class="ti-icon">↩️</span><span class="ti-lbl">Easy Returns</span></div>
+      </div>
+    </div>
+    <div style="height:16px"></div>
+  </div>
+
+  <!-- ══ AMC TAB ══ -->
+  <div id="mtp-amc" style="display:none">
+    <div class="m-section">
+      <div class="m-sec-hd"><span>AMC Plans for Your Home</span><a>View all</a></div>
+    </div>
+    <div class="m-amc-grid">
+      <div class="m-amc-card">
+        <div class="m-amc-name">AC AMC Plan</div>
+        <div class="m-amc-price">₹999 <small>/ Year</small></div>
+        <ul><li>✓ 2 Free Services</li><li>✓ Priority Support</li><li>✓ 10% Off on Repairs</li></ul>
+        <button class="m-amc-cta" onclick="openBookingModal('','AC AMC Plan','₹999/yr')">Buy Now</button>
+      </div>
+      <div class="m-amc-card">
+        <div class="m-amc-name">Plumbing AMC</div>
+        <div class="m-amc-price">₹799 <small>/ Year</small></div>
+        <ul><li>✓ 2 Free Services</li><li>✓ 24x7 Support</li><li>✓ No Visit Charges</li></ul>
+        <button class="m-amc-cta" onclick="openBookingModal('','Plumbing AMC','₹799/yr')">Buy Now</button>
+      </div>
+      <div class="m-amc-card amc-featured">
+        <div class="m-amc-name">🌟 Home Care Plan</div>
+        <div class="m-amc-price">₹1,499 <small>/ Year</small></div>
+        <ul><li>✓ All Services Included</li><li>✓ Priority Support</li><li>✓ 15% Off on Repairs</li><li>✓ Free Annual Inspection</li></ul>
+        <button class="m-amc-cta" onclick="openBookingModal('','Home Care AMC Plan','₹1499/yr')">Buy Now</button>
+      </div>
+      <div class="m-amc-card">
+        <div class="m-amc-name">Electrical AMC</div>
+        <div class="m-amc-price">₹699 <small>/ Year</small></div>
+        <ul><li>✓ 1 Free Service</li><li>✓ Emergency Support</li><li>✓ 10% Off on Repairs</li></ul>
+        <button class="m-amc-cta" onclick="openBookingModal('','Electrical AMC','₹699/yr')">Buy Now</button>
+      </div>
+      <div class="m-amc-card">
+        <div class="m-amc-name">Cleaning AMC</div>
+        <div class="m-amc-price">₹599 <small>/ Year</small></div>
+        <ul><li>✓ 2 Deep Cleans/Year</li><li>✓ Priority Booking</li><li>✓ Pest Spray Free</li></ul>
+        <button class="m-amc-cta" onclick="openBookingModal('','Cleaning AMC','₹599/yr')">Buy Now</button>
+      </div>
+    </div>
+    <div class="m-amc-help">
+      <span class="m-amc-help-txt">Need Help Choosing a Plan? Chat with our expert</span>
+      <button class="m-amc-help-btn" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()">Chat Now</button>
+    </div>
+    <div style="height:16px"></div>
+  </div>
+
+</div><!-- /#mobile-app -->
+
+<!-- Mobile Bottom Navigation (hidden on desktop via CSS) -->
+<nav class="m-bottom-nav">
+  <button class="m-nav-item active" id="m-nav-home" onclick="mNavActive(this);window.scrollTo({top:0,behavior:'smooth'})">
+    <span class="m-nav-ic">🏠</span><span>Home</span>
+  </button>
+  <button class="m-nav-item" onclick="mNavActive(this);openMyOrdersModal()">
+    <span class="m-nav-ic">📋</span><span>Orders</span>
+  </button>
+  <button class="m-nav-item m-nav-chat" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()">
+    <span class="m-nav-ic">💬</span><span>Chat</span>
+  </button>
+  <button class="m-nav-item" onclick="mNavActive(this);openCart()">
+    <span class="m-nav-ic">🏷️</span><span>Offers</span>
+  </button>
+  <button class="m-nav-item" onclick="mNavActive(this);openAccountSection()">
+    <span class="m-nav-ic">👤</span><span>Account</span>
+  </button>
+</nav>
 
 <!-- ═══ CATEGORY NAV ═══ -->
 <div class="cat-nav">
@@ -6560,6 +7007,114 @@ function cancelOrderFromList(orderId) {
     showToast('Could not cancel order', 'error');
   });
 }
+
+// ══════════════════════════════════════════════════════════════════
+// MOBILE APP JS — only active on mobile, no effect on desktop
+// ══════════════════════════════════════════════════════════════════
+(function() {
+  if (window.innerWidth > 768) return; // guard — desktop untouched
+
+  // ── Tab switcher ──────────────────────────────────────────────
+  window.switchMTab = function(tab, btn) {
+    ['services','products','amc'].forEach(function(t) {
+      var panel = document.getElementById('mtp-' + t);
+      if (panel) panel.style.display = t === tab ? '' : 'none';
+    });
+    document.querySelectorAll('.m-tab').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    else {
+      document.querySelectorAll('.m-tab').forEach(function(b) {
+        if (b.textContent.toLowerCase().indexOf(tab) !== -1) b.classList.add('active');
+      });
+    }
+  };
+
+  // ── Bottom nav active state ────────────────────────────────────
+  window.mNavActive = function(btn) {
+    document.querySelectorAll('.m-nav-item').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+  };
+
+  // ── Sync location to mobile location bar ──────────────────────
+  function syncMobileLocation() {
+    var cityEl = document.getElementById('currentCity');
+    var locEl  = document.getElementById('m-loc-display');
+    if (locEl && cityEl) locEl.textContent = cityEl.textContent || 'Set location';
+  }
+  // Poll every 2s for location update (lightweight)
+  setInterval(syncMobileLocation, 2000);
+  syncMobileLocation();
+
+  // ── Build product cards for mobile ────────────────────────────
+  var M_PRODUCTS = [
+    { name:'Voltas 1.5 Ton Inverter AC', price:'₹32,999', mrp:'₹40,990', rating:'⭐ 4.5 (2K+)', icon:'❄️' },
+    { name:'Kent Grand+ RO Water Purifier', price:'₹11,499', mrp:'₹14,999', rating:'⭐ 4.4 (1K+)', icon:'🫧' },
+    { name:'Crompton Ceiling Fan 1200mm', price:'₹1,299', mrp:'₹2,100', rating:'⭐ 4.3 (980+)', icon:'🌀' },
+    { name:'Philips LED Bulb 9W (Pack of 10)', price:'₹599', mrp:'₹999', rating:'⭐ 4.6 (3K+)', icon:'💡' },
+    { name:'Havells RO+UV Purifier', price:'₹9,999', mrp:'₹14,999', rating:'⭐ 4.4 (760+)', icon:'🫧' },
+    { name:'Orient Electric Fan 1200mm', price:'₹1,199', mrp:'₹1,899', rating:'⭐ 4.3 (650+)', icon:'🌀' },
+  ];
+
+  function makeProdCard(p, isGrid) {
+    var el = document.createElement('div');
+    el.className = 'm-prod-card' + (isGrid ? ' grid-card' : '');
+    el.innerHTML =
+      '<div class="m-prod-img">' + p.icon + '</div>' +
+      '<div class="m-prod-body">' +
+        '<div class="m-prod-name">' + p.name + '</div>' +
+        '<div class="m-prod-stars">' + p.rating + '</div>' +
+        '<div class="m-prod-prices"><span class="m-prod-price">' + p.price + '</span><span class="m-prod-mrp">' + p.mrp + '</span></div>' +
+        '<button class="m-prod-cart-btn" onclick="showToast(\'Added to cart\',\'success\')">Add to Cart</button>' +
+      '</div>';
+    return el;
+  }
+
+  // Services tab — product mini scroll
+  var svcProdScroll = document.getElementById('m-prod-scroll-svc');
+  if (svcProdScroll) {
+    M_PRODUCTS.forEach(function(p) { svcProdScroll.appendChild(makeProdCard(p, false)); });
+  }
+
+  // Products tab — 2-col grid
+  var prodGrid = document.getElementById('m-prod-grid');
+  if (prodGrid) {
+    M_PRODUCTS.forEach(function(p) { prodGrid.appendChild(makeProdCard(p, true)); });
+  }
+
+  // ── Wire mobile search to existing runSearch() ─────────────────
+  // The header search is now visible on mobile (full-width second row)
+  // so no extra wiring needed — existing logic handles it.
+
+  // ── Cart badge sync ───────────────────────────────────────────
+  // Cart badge on header already works. No extra action needed.
+
+  // ── Try to load real products from API ────────────────────────
+  fetch(API_BASE + '/api/v1/products?take=6').then(function(r){return r.json();}).then(function(res){
+    var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+    if (!list || list.length < 2) return; // fallback data is fine
+    [svcProdScroll, prodGrid].forEach(function(container, isGrid) {
+      if (!container) return;
+      container.innerHTML = '';
+      list.slice(0,6).forEach(function(p) {
+        var icon = p.images && p.images[0] ? '' : '📦';
+        var imgHtml = (p.images && p.images[0])
+          ? '<img src="' + p.images[0] + '" style="width:100%;height:112px;object-fit:cover">'
+          : '<div class="m-prod-img">' + icon + '</div>';
+        var card = document.createElement('div');
+        card.className = 'm-prod-card' + (isGrid ? ' grid-card' : '');
+        card.innerHTML = imgHtml +
+          '<div class="m-prod-body">' +
+            '<div class="m-prod-name">' + (p.name||'') + '</div>' +
+            '<div class="m-prod-prices"><span class="m-prod-price">₹' + Number(p.price||0).toLocaleString('en-IN') + '</span>' +
+            (p.mrp ? '<span class="m-prod-mrp">₹' + Number(p.mrp).toLocaleString('en-IN') + '</span>' : '') + '</div>' +
+            '<button class="m-prod-cart-btn" onclick="showToast(\'Added to cart\',\'success\')">Add to Cart</button>' +
+          '</div>';
+        container.appendChild(card);
+      });
+    });
+  }).catch(function(){});
+
+})();
 </script>
 
 
