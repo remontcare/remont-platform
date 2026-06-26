@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join as Partner – Remont India</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sienna:#C4601A; --amber:#E8A650; --ivory:#FDFAF5; --cream:#F5F0E8;
+  --charcoal:#1A1A1A; --mist:#E8E3DA; --white:#fff; --sage:#6B7C5E;
+  --success:#22c55e; --error:#ef4444; --blue:#3b82f6;
+  --radius:12px; --radius-lg:20px;
+  --shadow:0 6px 28px rgba(26,26,26,.08); --shadow-lg:0 16px 60px rgba(26,26,26,.14);
+  --ff-body:"DM Sans",sans-serif; --ff-display:"Cormorant Garamond",Georgia,serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--ff-body);background:var(--ivory);color:var(--charcoal);min-height:100vh}
+button{cursor:pointer;font-family:var(--ff-body);border:none;outline:none;background:none}
+input,textarea,select{font-family:var(--ff-body)}
+input:focus,textarea:focus,select:focus{outline:none}
+
+/* ── TOP HEADER ── */
+.pr-header{
+  position:sticky;top:0;z-index:1000;background:var(--white);
+  border-bottom:1px solid var(--mist);padding:0 24px;
+  display:flex;align-items:center;gap:16px;min-height:64px;
+  box-shadow:0 2px 12px rgba(0,0,0,.06);
+}
+.pr-logo{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0}
+.pr-logo-icon{width:36px;height:36px;background:var(--sienna);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700}
+.pr-logo-text{font-family:var(--ff-display);font-size:20px;font-weight:700;color:var(--charcoal)}
+.pr-logo-text span{color:var(--sienna)}
+.pr-header-mid{flex:1}
+.lang-toggle{display:flex;background:var(--cream);border-radius:8px;padding:3px;gap:2px;flex-shrink:0}
+.lang-btn{padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;color:#6b7280;transition:all .2s}
+.lang-btn.active{background:var(--sienna);color:#fff}
+.pr-back-btn{padding:8px 14px;border:1.5px solid var(--mist);border-radius:8px;font-size:13px;color:#6b7280;display:flex;align-items:center;gap:6px;transition:all .2s}
+.pr-back-btn:hover{border-color:var(--sienna);color:var(--sienna)}
+
+/* ── PROGRESS BAR ── */
+.progress-wrap{background:var(--white);border-bottom:1px solid var(--mist);padding:16px 24px}
+.progress-steps{display:flex;align-items:center;justify-content:center;gap:0;max-width:700px;margin:0 auto}
+.ps-item{display:flex;align-items:center;flex:1}
+.ps-circle{
+  width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;flex-shrink:0;transition:all .3s;
+  border:2px solid var(--mist);background:var(--cream);color:#9ca3af;cursor:default;
+}
+.ps-circle.active{border-color:var(--sienna);background:var(--sienna);color:#fff;box-shadow:0 0 0 4px rgba(196,96,26,.15)}
+.ps-circle.done{border-color:var(--success);background:var(--success);color:#fff}
+.ps-line{flex:1;height:2px;background:var(--mist);transition:background .3s}
+.ps-line.done{background:var(--success)}
+.ps-label{font-size:10px;color:#9ca3af;text-align:center;margin-top:4px;white-space:nowrap}
+.ps-label.active{color:var(--sienna);font-weight:600}
+.ps-label.done{color:var(--success)}
+.ps-col{display:flex;flex-direction:column;align-items:center;flex:1;min-width:0}
+.ps-col:first-child{flex:0 0 auto}
+.ps-col:last-child{flex:0 0 auto}
+@media(max-width:600px){.ps-label{display:none}.ps-circle{width:26px;height:26px;font-size:11px}}
+
+/* ── MAIN CONTENT ── */
+.pr-body{max-width:720px;margin:0 auto;padding:32px 20px 80px}
+
+/* ── STEP CARD ── */
+.step-card{
+  background:var(--white);border-radius:var(--radius-lg);
+  box-shadow:var(--shadow);padding:36px 40px;
+  animation:slideIn .35s ease;
+}
+@keyframes slideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.step-card{padding:24px 18px}}
+.step-tag{font-size:11px;font-weight:700;color:var(--sienna);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px}
+.step-title{font-family:var(--ff-display);font-size:28px;font-weight:700;color:var(--charcoal);margin-bottom:6px;line-height:1.2}
+.step-sub{font-size:14px;color:#6b7280;margin-bottom:28px;line-height:1.5}
+
+/* ── FORM FIELDS ── */
+.field{margin-bottom:18px}
+.field label{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+.field label span.req{color:var(--sienna)}
+.field input,.field textarea,.field select{
+  width:100%;padding:13px 16px;border:1.5px solid var(--mist);
+  border-radius:10px;font-size:15px;color:var(--charcoal);
+  background:var(--ivory);transition:border-color .2s,box-shadow .2s;
+}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--sienna);box-shadow:0 0 0 3px rgba(196,96,26,.1);background:#fff}
+.field input.error,.field textarea.error,.field select.error{border-color:var(--error)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:500px){.field-row{grid-template-columns:1fr}}
+.field-hint{font-size:11px;color:#9ca3af;margin-top:4px}
+.field-success{font-size:11px;color:var(--success);margin-top:4px}
+.field-error{font-size:11px;color:var(--error);margin-top:4px}
+
+/* ── OTP INPUT ── */
+.otp-row{display:flex;gap:10px;justify-content:center;margin:16px 0}
+.otp-digit{
+  width:54px;height:60px;border:2px solid var(--mist);border-radius:12px;
+  text-align:center;font-size:24px;font-weight:700;color:var(--charcoal);
+  background:var(--ivory);transition:all .2s;
+}
+.otp-digit:focus{border-color:var(--sienna);background:#fff;box-shadow:0 0 0 3px rgba(196,96,26,.1)}
+.otp-digit.filled{border-color:var(--sienna);background:#fff7f3}
+
+/* ── CARD SELECTOR (gender, experience etc) ── */
+.card-grid{display:grid;gap:10px;margin-bottom:4px}
+.card-grid.cols-2{grid-template-columns:1fr 1fr}
+.card-grid.cols-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:500px){.card-grid.cols-3{grid-template-columns:1fr 1fr}.card-grid.cols-2{grid-template-columns:1fr 1fr}}
+.sel-card{
+  padding:14px 16px;border:2px solid var(--mist);border-radius:12px;
+  text-align:center;cursor:pointer;transition:all .2s;background:var(--ivory);
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+}
+.sel-card:hover{border-color:var(--amber);background:#fffbf7}
+.sel-card.selected{border-color:var(--sienna);background:#fff7f3;box-shadow:0 0 0 3px rgba(196,96,26,.1)}
+.sel-card .sc-icon{font-size:24px;line-height:1}
+.sel-card .sc-label{font-size:13px;font-weight:600;color:var(--charcoal)}
+.sel-card .sc-sub{font-size:11px;color:#6b7280}
+
+/* ── CATEGORY GRID ── */
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.cat-card{
+  padding:14px 10px;border:2px solid var(--mist);border-radius:12px;
+  text-align:center;cursor:pointer;transition:all .2s;background:var(--ivory);
+  display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;
+}
+.cat-card:hover{border-color:var(--amber);background:#fffbf7;transform:translateY(-1px)}
+.cat-card.selected{border-color:var(--sienna);background:#fff7f3}
+.cat-card .cc-icon{font-size:26px;line-height:1}
+.cat-card .cc-name{font-size:12px;font-weight:600;color:var(--charcoal);line-height:1.3}
+.cat-card .cc-check{
+  position:absolute;top:6px;right:6px;width:18px;height:18px;border-radius:50%;
+  background:var(--sienna);color:#fff;font-size:10px;display:none;align-items:center;justify-content:center;
+}
+.cat-card.selected .cc-check{display:flex}
+@media(max-width:500px){.cat-grid{grid-template-columns:repeat(3,1fr)}}
+
+/* ── FILE UPLOAD ── */
+.upload-area{
+  border:2px dashed var(--mist);border-radius:12px;padding:24px;
+  text-align:center;cursor:pointer;transition:all .2s;background:var(--ivory);
+  position:relative;overflow:hidden;
+}
+.upload-area:hover,.upload-area.dragover{border-color:var(--sienna);background:#fff7f3}
+.upload-area input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-area .ua-icon{font-size:28px;margin-bottom:8px}
+.upload-area .ua-text{font-size:13px;font-weight:600;color:#374151}
+.upload-area .ua-sub{font-size:11px;color:#9ca3af;margin-top:2px}
+.upload-preview{
+  display:none;padding:12px;background:#f0fdf4;border:1.5px solid #bbf7d0;
+  border-radius:10px;align-items:center;gap:12px;margin-top:8px;
+}
+.upload-preview.show{display:flex}
+.up-thumb{width:48px;height:48px;border-radius:8px;object-fit:cover;background:var(--mist);flex-shrink:0}
+.up-thumb.pdf-icon{display:flex;align-items:center;justify-content:center;font-size:22px;background:#fee2e2}
+.up-info{flex:1;min-width:0}
+.up-name{font-size:12px;font-weight:600;color:#166534;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.up-size{font-size:11px;color:#6b7280}
+.up-remove{color:#ef4444;font-size:18px;cursor:pointer;flex-shrink:0;background:none;border:none;padding:2px 6px}
+
+/* ── TOGGLE SWITCH ── */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6}
+.toggle-row:last-child{border-bottom:none}
+.toggle-info .tl{font-size:14px;font-weight:600;color:var(--charcoal)}
+.toggle-info .ts{font-size:12px;color:#6b7280;margin-top:2px}
+.toggle-sw{position:relative;width:46px;height:26px;flex-shrink:0}
+.toggle-sw input{opacity:0;width:0;height:0;position:absolute}
+.toggle-thumb{
+  position:absolute;inset:0;background:#d1d5db;border-radius:13px;cursor:pointer;transition:all .3s;
+}
+.toggle-thumb::before{
+  content:'';position:absolute;width:20px;height:20px;border-radius:50%;
+  background:#fff;top:3px;left:3px;transition:transform .3s;box-shadow:0 1px 4px rgba(0,0,0,.2);
+}
+.toggle-sw input:checked+.toggle-thumb{background:var(--sienna)}
+.toggle-sw input:checked+.toggle-thumb::before{transform:translateX(20px)}
+
+/* ── AGREEMENT CHECKBOXES ── */
+.agree-item{
+  display:flex;align-items:flex-start;gap:14px;padding:16px;
+  border:1.5px solid var(--mist);border-radius:12px;margin-bottom:10px;
+  cursor:pointer;transition:all .2s;
+}
+.agree-item:hover{border-color:var(--amber)}
+.agree-item.checked{border-color:var(--sienna);background:#fff7f3}
+.agree-checkbox{
+  width:22px;height:22px;border:2px solid var(--mist);border-radius:6px;
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  background:#fff;transition:all .2s;margin-top:1px;
+}
+.agree-item.checked .agree-checkbox{background:var(--sienna);border-color:var(--sienna);color:#fff;font-size:13px}
+.agree-text .at{font-size:14px;font-weight:600;color:var(--charcoal)}
+.agree-text .as{font-size:12px;color:#6b7280;margin-top:2px;line-height:1.4}
+
+/* ── BUTTONS ── */
+.btn-primary{
+  width:100%;padding:15px 24px;background:var(--sienna);color:#fff;
+  border-radius:12px;font-size:16px;font-weight:700;
+  transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-primary:hover{background:#b05518;transform:translateY(-1px);box-shadow:0 6px 20px rgba(196,96,26,.3)}
+.btn-primary:disabled{background:#d1d5db;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-outline{
+  padding:13px 20px;border:2px solid var(--mist);border-radius:12px;
+  font-size:15px;font-weight:600;color:#374151;transition:all .2s;background:#fff;
+}
+.btn-outline:hover{border-color:var(--sienna);color:var(--sienna)}
+.btn-row{display:flex;gap:12px;margin-top:28px}
+.btn-row .btn-primary{flex:2}
+.btn-row .btn-outline{flex:1}
+
+/* ── GPS STRIP ── */
+.gps-strip{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;
+  background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;
+  font-size:13px;color:#1e40af;margin-bottom:14px;
+}
+.gps-strip.success{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.gps-strip.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.gps-btn{
+  padding:8px 16px;background:var(--sienna);color:#fff;border-radius:8px;
+  font-size:13px;font-weight:600;flex-shrink:0;transition:all .2s;
+}
+.gps-btn:hover{background:#b05518}
+
+/* ── AI ASSISTANT FAB ── */
+.ai-fab{
+  position:fixed;bottom:24px;right:24px;z-index:9000;
+  width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(135deg,var(--sienna),var(--amber));
+  color:#fff;font-size:24px;
+  box-shadow:0 6px 24px rgba(196,96,26,.4);
+  display:flex;align-items:center;justify-content:center;
+  border:3px solid #fff;transition:all .3s;
+}
+.ai-fab:hover{transform:scale(1.1)}
+.ai-fab-pulse{
+  position:absolute;inset:-4px;border-radius:50%;
+  background:rgba(196,96,26,.3);animation:pulse 2.5s infinite;
+}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:.8}50%{transform:scale(1.3);opacity:0}}
+.ai-panel{
+  position:fixed;bottom:90px;right:24px;z-index:9001;
+  width:340px;max-height:500px;background:#fff;border-radius:20px;
+  box-shadow:0 12px 48px rgba(0,0,0,.2);
+  display:none;flex-direction:column;overflow:hidden;
+  animation:slideUp .3s ease;
+}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.ai-panel.open{display:flex}
+.ai-panel-head{
+  background:linear-gradient(135deg,var(--sienna),var(--amber));
+  padding:14px 16px;display:flex;align-items:center;gap:10px;color:#fff;
+}
+.ai-panel-head .ai-avatar{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
+.ai-panel-head .ai-name{font-weight:700;font-size:14px}
+.ai-panel-head .ai-status{font-size:11px;opacity:.85}
+.ai-panel-close{margin-left:auto;background:rgba(255,255,255,.2);border:none;color:#fff;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ai-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:200px}
+.ai-bubble{max-width:85%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.5}
+.ai-bubble.bot{background:var(--cream);color:var(--charcoal);align-self:flex-start;border-bottom-left-radius:4px}
+.ai-bubble.user{background:var(--sienna);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.ai-quick{padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--mist)}
+.ai-quick button{padding:5px 10px;border:1.5px solid var(--mist);border-radius:20px;font-size:11px;font-weight:600;color:var(--charcoal);background:#fff;transition:all .2s;white-space:nowrap}
+.ai-quick button:hover{border-color:var(--sienna);color:var(--sienna)}
+.ai-input-row{padding:10px 12px;border-top:1px solid var(--mist);display:flex;gap:8px;background:#fff}
+.ai-input-row input{flex:1;padding:8px 12px;border:1.5px solid var(--mist);border-radius:8px;font-size:13px;font-family:var(--ff-body)}
+.ai-input-row input:focus{border-color:var(--sienna);outline:none}
+.ai-input-row button{width:36px;height:36px;background:var(--sienna);border:none;border-radius:8px;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+/* ── SUCCESS SCREEN ── */
+.success-screen{display:none;text-align:center;padding:48px 24px}
+.success-screen.show{display:block}
+.success-icon{width:80px;height:80px;background:#f0fdf4;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 24px}
+.success-screen h2{font-family:var(--ff-display);font-size:32px;color:var(--charcoal);margin-bottom:12px}
+.success-screen p{font-size:15px;color:#6b7280;line-height:1.6;max-width:400px;margin:0 auto 24px}
+.reg-id-box{
+  display:inline-block;background:var(--cream);border:2px dashed var(--sienna);
+  border-radius:12px;padding:16px 32px;margin:0 auto 28px;
+}
+.reg-id-box .rid-label{font-size:12px;color:#6b7280;margin-bottom:4px}
+.reg-id-box .rid-val{font-size:24px;font-weight:700;color:var(--sienna);letter-spacing:2px;font-family:monospace}
+.steps-timeline{text-align:left;max-width:360px;margin:0 auto}
+.st-item{display:flex;gap:14px;align-items:flex-start;padding:10px 0;border-left:2px solid var(--mist);padding-left:16px;position:relative}
+.st-item::before{content:'';position:absolute;left:-5px;top:14px;width:8px;height:8px;border-radius:50%;background:var(--mist)}
+.st-item.done::before{background:var(--success)}
+.st-item .si-text{font-size:13px;color:#374151}
+
+/* ── LOADING SPINNER ── */
+.spinner{width:20px;height:20px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── LANGUAGE BANNER ── */
+.lang-select-screen{padding:20px 0}
+.lang-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:24px 0}
+.lang-card{
+  padding:28px 20px;border:2.5px solid var(--mist);border-radius:16px;
+  text-align:center;cursor:pointer;transition:all .25s;background:var(--ivory);
+}
+.lang-card:hover{border-color:var(--amber);transform:translateY(-2px);box-shadow:var(--shadow)}
+.lang-card.selected{border-color:var(--sienna);background:#fff7f3;box-shadow:0 0 0 4px rgba(196,96,26,.12)}
+.lang-card .lc-flag{font-size:40px;margin-bottom:10px}
+.lang-card .lc-name{font-size:20px;font-weight:700;color:var(--charcoal)}
+.lang-card .lc-native{font-size:14px;color:#6b7280;margin-top:4px}
+
+/* ── MAP PREVIEW ── */
+.map-wrap{border-radius:12px;overflow:hidden;border:1.5px solid var(--mist);margin-top:10px;display:none}
+.map-wrap.show{display:block}
+.map-wrap iframe{display:block;width:100%;height:160px;border:none}
+</style>
+</head>
+<body>
+
+<!-- TOP HEADER -->
+<header class="pr-header">
+  <a href="/" class="pr-logo">
+    <div class="pr-logo-icon">R</div>
+    <span class="pr-logo-text">Remont<span> India</span></span>
+  </a>
+  <div class="pr-header-mid"></div>
+  <div class="lang-toggle">
+    <button class="lang-btn active" id="btn-en" onclick="setLang('EN')">EN</button>
+    <button class="lang-btn" id="btn-hi" onclick="setLang('HI')">हिन्दी</button>
+  </div>
+</header>
+
+<!-- PROGRESS BAR -->
+<div class="progress-wrap" id="progress-wrap" style="display:none">
+  <div class="progress-steps" id="progress-steps"></div>
+</div>
+
+<!-- MAIN BODY -->
+<div class="pr-body">
+
+  <!-- STEP 1: LANGUAGE -->
+  <div id="step-1" class="step-card">
+    <div class="step-tag" data-en="Welcome" data-hi="स्वागत">Welcome</div>
+    <div class="step-title" data-en="Choose Your Language" data-hi="अपनी भाषा चुनें">Choose Your Language</div>
+    <div class="step-sub" data-en="We'll guide you through registration in your preferred language." data-hi="हम आपकी पसंदीदा भाषा में पंजीकरण में मार्गदर्शन करेंगे।">We'll guide you through registration in your preferred language.</div>
+    <div class="lang-cards">
+      <div class="lang-card selected" id="lc-en" onclick="pickLang('EN')">
+        <div class="lc-flag">🇬🇧</div>
+        <div class="lc-name">English</div>
+        <div class="lc-native">Continue in English</div>
+      </div>
+      <div class="lang-card" id="lc-hi" onclick="pickLang('HI')">
+        <div class="lc-flag">🇮🇳</div>
+        <div class="lc-name">हिन्दी</div>
+        <div class="lc-native">हिंदी में जारी रखें</div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="goStep(2)">
+      <span data-en="Get Started →" data-hi="शुरू करें →">Get Started →</span>
+    </button>
+  </div>
+
+  <!-- STEP 2: BASIC INFO -->
+  <div id="step-2" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 1 of 7" data-hi="चरण 1 / 7">Step 1 of 7</div>
+    <div class="step-title" data-en="Basic Information" data-hi="बुनियादी जानकारी">Basic Information</div>
+    <div class="step-sub" data-en="Tell us about yourself to get started." data-hi="शुरू करने के लिए अपने बारे में बताएं।">Tell us about yourself to get started.</div>
+
+    <div class="field">
+      <label><span data-en="Full Name" data-hi="पूरा नाम">Full Name</span> <span class="req">*</span></label>
+      <input type="text" id="f-name" placeholder="e.g. Ramesh Kumar" autocomplete="name">
+    </div>
+
+    <!-- Phone + OTP -->
+    <div class="field">
+      <label><span data-en="Mobile Number" data-hi="मोबाइल नंबर">Mobile Number</span> <span class="req">*</span></label>
+      <div style="display:flex;gap:8px">
+        <input type="tel" id="f-phone" placeholder="10-digit mobile number" maxlength="10" style="flex:1" oninput="this.value=this.value.replace(/\D/g,'')">
+        <button id="otp-send-btn" class="gps-btn" onclick="sendOtp()" style="padding:0 18px;height:100%;min-height:50px">
+          <span data-en="Send OTP" data-hi="OTP भेजें">Send OTP</span>
+        </button>
+      </div>
+      <div id="otp-phone-hint" class="field-hint" data-en="OTP will be sent via WhatsApp" data-hi="OTP WhatsApp पर भेजा जाएगा">OTP will be sent via WhatsApp</div>
+    </div>
+
+    <!-- OTP verification box -->
+    <div id="otp-section" style="display:none">
+      <div class="field">
+        <label><span data-en="Enter OTP" data-hi="OTP दर्ज करें">Enter OTP</span> <span class="req">*</span></label>
+        <div class="otp-row">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-0">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-1">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-2">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-3">
+        </div>
+        <div id="otp-msg" style="text-align:center;font-size:13px;color:#6b7280">
+          <span data-en="Didn't receive? " data-hi="OTP नहीं आया? ">Didn't receive? </span>
+          <button id="resend-btn" style="color:var(--sienna);font-weight:600;font-size:13px" onclick="sendOtp(true)">
+            <span data-en="Resend OTP" data-hi="OTP दोबारा भेजें">Resend OTP</span>
+          </button>
+          <span id="otp-timer" style="color:#9ca3af"></span>
+        </div>
+        <div id="otp-verify-msg" class="field-error" style="text-align:center"></div>
+      </div>
+    </div>
+
+    <div id="otp-verified-badge" style="display:none;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:12px 16px;display:none;align-items:center;gap:10px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600">
+      ✅ <span data-en="Mobile verified!" data-hi="मोबाइल सत्यापित!">Mobile verified!</span>
+    </div>
+
+    <div id="step2-extra" style="display:none">
+      <div class="field">
+        <label><span data-en="Email ID" data-hi="ईमेल आईडी">Email ID</span></label>
+        <input type="email" id="f-email" placeholder="yourname@email.com" autocomplete="email">
+      </div>
+
+      <div class="field">
+        <label><span data-en="Gender" data-hi="लिंग">Gender</span> <span class="req">*</span></label>
+        <div class="card-grid cols-3">
+          <div class="sel-card" data-val="MALE" onclick="selectCard(this,'gender')"><div class="sc-icon">👨</div><div class="sc-label" data-en="Male" data-hi="पुरुष">Male</div></div>
+          <div class="sel-card" data-val="FEMALE" onclick="selectCard(this,'gender')"><div class="sc-icon">👩</div><div class="sc-label" data-en="Female" data-hi="महिला">Female</div></div>
+          <div class="sel-card" data-val="OTHER" onclick="selectCard(this,'gender')"><div class="sc-icon">⚧</div><div class="sc-label" data-en="Other" data-hi="अन्य">Other</div></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label><span data-en="Date of Birth" data-hi="जन्म तिथि">Date of Birth</span> <span class="req">*</span></label>
+        <input type="date" id="f-dob" max="">
+      </div>
+
+      <!-- Address section -->
+      <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+        <div style="font-size:13px;font-weight:700;color:var(--charcoal);margin-bottom:14px" data-en="📍 Your Home Address" data-hi="📍 आपका घर का पता">📍 Your Home Address</div>
+
+        <div id="gps-strip-2" class="gps-strip" style="display:none"></div>
+
+        <button onclick="captureGPS()" class="btn-outline" style="width:100%;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px">
+          <span>📡</span><span data-en="Capture Current Location" data-hi="वर्तमान स्थान कैप्चर करें">Capture Current Location</span>
+        </button>
+        <div id="map-preview-2" class="map-wrap"><iframe id="map-iframe-2" src="" loading="lazy"></iframe></div>
+
+        <div class="field" style="margin-bottom:14px;margin-top:14px">
+          <label><span data-en="Full Address" data-hi="पूरा पता">Full Address</span></label>
+          <textarea id="f-address" rows="2" placeholder="House No, Street, Colony…"></textarea>
+        </div>
+        <div class="field-row">
+          <div class="field"><label><span data-en="PIN Code" data-hi="पिन कोड">PIN Code</span></label><input type="tel" id="f-pincode" maxlength="6" placeholder="462023" oninput="onPinInput(this.value)"><div id="pin-msg" class="field-success" style="display:none"></div></div>
+          <div class="field"><label><span data-en="City" data-hi="शहर">City</span> <span class="req">*</span></label><input type="text" id="f-city" placeholder="Bhopal"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label><span data-en="Area" data-hi="क्षेत्र">Area</span></label><input type="text" id="f-area" placeholder="Colony / Locality"></div>
+          <div class="field"><label><span data-en="State" data-hi="राज्य">State</span></label><input type="text" id="f-state" placeholder="Madhya Pradesh"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="step2-msg" class="field-error" style="margin-bottom:12px"></div>
+    <button class="btn-primary" id="step2-btn" onclick="handleStep2()">
+      <span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span>
+    </button>
+  </div>
+
+  <!-- STEP 3: CATEGORIES -->
+  <div id="step-3" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 2 of 7" data-hi="चरण 2 / 7">Step 2 of 7</div>
+    <div class="step-title" data-en="Your Skills" data-hi="आपका कौशल">Your Skills</div>
+    <div class="step-sub" data-en="Select all services you can provide. You can select multiple." data-hi="वे सभी सेवाएं चुनें जो आप दे सकते हैं। आप कई सेवाएं चुन सकते हैं।">Select all services you can provide. You can select multiple.</div>
+    <div class="cat-grid" id="cat-grid"></div>
+    <div class="field">
+      <label><span data-en="Other (please specify)" data-hi="अन्य (कृपया बताएं)">Other (please specify)</span></label>
+      <input type="text" id="f-cat-other" placeholder="e.g. Geyser Repair, Inverter Install…">
+    </div>
+    <div id="step3-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(2)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" onclick="handleStep3()"><span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span></button>
+    </div>
+  </div>
+
+  <!-- STEP 4: EXPERIENCE -->
+  <div id="step-4" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 3 of 7" data-hi="चरण 3 / 7">Step 3 of 7</div>
+    <div class="step-title" data-en="Experience & Availability" data-hi="अनुभव और उपलब्धता">Experience & Availability</div>
+    <div class="step-sub" data-en="Tell us about your work experience." data-hi="अपने कार्य अनुभव के बारे में बताएं।">Tell us about your work experience.</div>
+
+    <div class="field">
+      <label><span data-en="Total Experience" data-hi="कुल अनुभव">Total Experience</span> <span class="req">*</span></label>
+      <div class="card-grid cols-3" style="grid-template-columns:repeat(auto-fill,minmax(110px,1fr))">
+        <div class="sel-card" data-val="FRESHER" onclick="selectCard(this,'exp')"><div class="sc-icon">🌱</div><div class="sc-label" data-en="Fresher" data-hi="नया">Fresher</div></div>
+        <div class="sel-card" data-val="1-3" onclick="selectCard(this,'exp')"><div class="sc-icon">📅</div><div class="sc-label">1–3 <span data-en="Yrs" data-hi="साल">Yrs</span></div></div>
+        <div class="sel-card" data-val="3-5" onclick="selectCard(this,'exp')"><div class="sc-icon">📅</div><div class="sc-label">3–5 <span data-en="Yrs" data-hi="साल">Yrs</span></div></div>
+        <div class="sel-card" data-val="5-10" onclick="selectCard(this,'exp')"><div class="sc-icon">⭐</div><div class="sc-label">5–10 <span data-en="Yrs" data-hi="साल">Yrs</span></div></div>
+        <div class="sel-card" data-val="10+" onclick="selectCard(this,'exp')"><div class="sc-icon">🏆</div><div class="sc-label">10+ <span data-en="Yrs" data-hi="साल">Yrs</span></div></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label><span data-en="Previous Company / Employer" data-hi="पिछली कंपनी / नियोक्ता">Previous Company / Employer</span></label>
+      <input type="text" id="f-prev-company" placeholder="e.g. Indore Electric Works (optional)">
+    </div>
+
+    <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px" data-en="Work Details" data-hi="कार्य विवरण">Work Details</div>
+      <div class="toggle-row">
+        <div class="toggle-info"><div class="tl" data-en="Own Team" data-hi="अपनी टीम">Own Team</div><div class="ts" data-en="Do you have workers/helpers?" data-hi="क्या आपके पास कामगार हैं?">Do you have workers/helpers?</div></div>
+        <label class="toggle-sw"><input type="checkbox" id="t-own-team" onchange="toggleTeamSize()"><span class="toggle-thumb"></span></label>
+      </div>
+      <div id="team-size-row" class="toggle-row" style="display:none">
+        <div class="toggle-info"><div class="tl" data-en="Number of Workers" data-hi="कामगारों की संख्या">Number of Workers</div></div>
+        <input type="number" id="f-team-size" min="1" max="50" placeholder="e.g. 3" style="width:80px;padding:8px;border:1.5px solid var(--mist);border-radius:8px;font-family:var(--ff-body);font-size:14px">
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info"><div class="tl" data-en="Own Vehicle" data-hi="अपना वाहन">Own Vehicle</div><div class="ts" data-en="Bike / auto for commuting to jobs" data-hi="काम पर जाने के लिए बाइक / ऑटो">Bike / auto for commuting to jobs</div></div>
+        <label class="toggle-sw"><input type="checkbox" id="t-vehicle"><span class="toggle-thumb"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info"><div class="tl" data-en="Available Full Time" data-hi="पूर्णकालिक उपलब्ध">Available Full Time</div><div class="ts" data-en="Ready to take jobs through the day" data-hi="पूरे दिन काम के लिए तैयार">Ready to take jobs through the day</div></div>
+        <label class="toggle-sw"><input type="checkbox" id="t-fulltime"><span class="toggle-thumb"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info"><div class="tl" data-en="Available for Emergency Jobs" data-hi="आपातकालीन कामों के लिए उपलब्ध">Available for Emergency Jobs</div><div class="ts" data-en="Night / holiday urgent calls" data-hi="रात / छुट्टी के तत्काल कॉल">Night / holiday urgent calls</div></div>
+        <label class="toggle-sw"><input type="checkbox" id="t-emergency"><span class="toggle-thumb"></span></label>
+      </div>
+    </div>
+
+    <div id="step4-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(3)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" onclick="handleStep4()"><span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span></button>
+    </div>
+  </div>
+
+  <!-- STEP 5: DOCUMENTS -->
+  <div id="step-5" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 4 of 7" data-hi="चरण 4 / 7">Step 4 of 7</div>
+    <div class="step-title" data-en="Documents" data-hi="दस्तावेज़">Documents</div>
+    <div class="step-sub" data-en="Upload clear photos/scans. Max 5MB per file. JPG, PNG, PDF accepted." data-hi="स्पष्ट फोटो/स्कैन अपलोड करें। प्रत्येक फ़ाइल अधिकतम 5MB। JPG, PNG, PDF स्वीकार्य।">Upload clear photos/scans. Max 5MB per file. JPG, PNG, PDF accepted.</div>
+
+    <!-- ID Proof -->
+    <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px" data-en="🪪 Identity Proof" data-hi="🪪 पहचान प्रमाण">🪪 Identity Proof</div>
+      <div class="field">
+        <label><span data-en="Document Type" data-hi="दस्तावेज़ प्रकार">Document Type</span> <span class="req">*</span></label>
+        <div class="card-grid cols-2">
+          <div class="sel-card" data-val="AADHAAR" onclick="selectCard(this,'id-type')"><div class="sc-icon">🪪</div><div class="sc-label" data-en="Aadhaar Card" data-hi="आधार कार्ड">Aadhaar Card</div></div>
+          <div class="sel-card" data-val="DL" onclick="selectCard(this,'id-type')"><div class="sc-icon">🚗</div><div class="sc-label" data-en="Driving License" data-hi="ड्राइविंग लाइसेंस">Driving License</div></div>
+          <div class="sel-card" data-val="PASSPORT" onclick="selectCard(this,'id-type')"><div class="sc-icon">📗</div><div class="sc-label" data-en="Passport" data-hi="पासपोर्ट">Passport</div></div>
+          <div class="sel-card" data-val="VOTER_ID" onclick="selectCard(this,'id-type')"><div class="sc-icon">🗳️</div><div class="sc-label" data-en="Voter ID" data-hi="वोटर आईडी">Voter ID</div></div>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label><span data-en="Front Side" data-hi="आगे की तरफ">Front Side</span> <span class="req">*</span></label>
+          <div class="upload-area" id="ua-id-front" onclick="triggerUpload('id-front')">
+            <input type="file" id="file-id-front" accept="image/*,.pdf" onchange="handleFile(this,'id-front')">
+            <div class="ua-icon">📤</div>
+            <div class="ua-text" data-en="Tap to upload" data-hi="अपलोड करें">Tap to upload</div>
+            <div class="ua-sub">JPG / PNG / PDF</div>
+          </div>
+          <div class="upload-preview" id="up-id-front"></div>
+        </div>
+        <div class="field">
+          <label><span data-en="Back Side" data-hi="पीछे की तरफ">Back Side</span></label>
+          <div class="upload-area" id="ua-id-back" onclick="triggerUpload('id-back')">
+            <input type="file" id="file-id-back" accept="image/*,.pdf" onchange="handleFile(this,'id-back')">
+            <div class="ua-icon">📤</div>
+            <div class="ua-text" data-en="Tap to upload" data-hi="अपलोड करें">Tap to upload</div>
+            <div class="ua-sub">JPG / PNG / PDF</div>
+          </div>
+          <div class="upload-preview" id="up-id-back"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAN Card -->
+    <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px" data-en="💳 PAN Card" data-hi="💳 पैन कार्ड">💳 PAN Card</div>
+      <div class="field">
+        <label><span data-en="PAN Number" data-hi="पैन नंबर">PAN Number</span></label>
+        <input type="text" id="f-pan" placeholder="ABCDE1234F" maxlength="10" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+        <div class="field-hint" data-en="Optional — required for earnings above ₹50,000/year" data-hi="वैकल्पिक — ₹50,000/वर्ष से अधिक आय के लिए आवश्यक">Optional — required for earnings above ₹50,000/year</div>
+      </div>
+      <div class="field">
+        <label><span data-en="PAN Card Upload" data-hi="पैन कार्ड अपलोड">PAN Card Upload</span></label>
+        <div class="upload-area" onclick="triggerUpload('pan')">
+          <input type="file" id="file-pan" accept="image/*,.pdf" onchange="handleFile(this,'pan')">
+          <div class="ua-icon">📤</div>
+          <div class="ua-text" data-en="Tap to upload PAN" data-hi="पैन अपलोड करें">Tap to upload PAN</div>
+          <div class="ua-sub">JPG / PNG / PDF</div>
+        </div>
+        <div class="upload-preview" id="up-pan"></div>
+      </div>
+    </div>
+
+    <!-- Profile Photo -->
+    <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px" data-en="🤳 Profile Photo" data-hi="🤳 प्रोफाइल फोटो">🤳 Profile Photo</div>
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <div id="photo-thumb" style="width:80px;height:80px;border-radius:50%;background:var(--mist);display:flex;align-items:center;justify-content:center;font-size:32px;flex-shrink:0;overflow:hidden">👤</div>
+        <div style="flex:1">
+          <div class="upload-area" onclick="triggerUpload('photo')">
+            <input type="file" id="file-photo" accept="image/*" onchange="handleFile(this,'photo')">
+            <div class="ua-icon">📸</div>
+            <div class="ua-text" data-en="Upload Passport Size Photo" data-hi="पासपोर्ट साइज फोटो अपलोड करें">Upload Passport Size Photo</div>
+            <div class="ua-sub" data-en="Clear face photo on white background" data-hi="सफेद पृष्ठभूमि पर स्पष्ट चेहरे की फोटो">Clear face photo on white background</div>
+          </div>
+          <div class="upload-preview" id="up-photo"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skill Certificate & Police -->
+    <div style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px" data-en="📜 Other Documents" data-hi="📜 अन्य दस्तावेज़">📜 Other Documents</div>
+      <div class="field">
+        <label><span data-en="Skill Certificate" data-hi="कौशल प्रमाणपत्र">Skill Certificate</span> <span style="color:#9ca3af;font-weight:400" data-en="(Optional)" data-hi="(वैकल्पिक)">(Optional)</span></label>
+        <div class="upload-area" onclick="triggerUpload('skill-cert')">
+          <input type="file" id="file-skill-cert" accept="image/*,.pdf" onchange="handleFile(this,'skill-cert')">
+          <div class="ua-icon">🏅</div>
+          <div class="ua-text" data-en="Upload Skill / Training Certificate" data-hi="कौशल / प्रशिक्षण प्रमाणपत्र अपलोड करें">Upload Skill / Training Certificate</div>
+          <div class="ua-sub">JPG / PNG / PDF</div>
+        </div>
+        <div class="upload-preview" id="up-skill-cert"></div>
+      </div>
+      <div class="field">
+        <label><span data-en="Police Verification" data-hi="पुलिस सत्यापन">Police Verification</span></label>
+        <div class="card-grid cols-2" style="margin-bottom:10px">
+          <div class="sel-card" data-val="AVAILABLE" onclick="selectCard(this,'police');togglePoliceUpload(true)"><div class="sc-icon">✅</div><div class="sc-label" data-en="Already have it" data-hi="पहले से है">Already have it</div></div>
+          <div class="sel-card" data-val="NEED_HELP" onclick="selectCard(this,'police');togglePoliceUpload(false)"><div class="sc-icon">🤝</div><div class="sc-label" data-en="Need assistance" data-hi="सहायता चाहिए">Need assistance</div></div>
+        </div>
+        <div id="police-upload-area" style="display:none">
+          <div class="upload-area" onclick="triggerUpload('police')">
+            <input type="file" id="file-police" accept="image/*,.pdf" onchange="handleFile(this,'police')">
+            <div class="ua-icon">📋</div>
+            <div class="ua-text" data-en="Upload Police Verification Certificate" data-hi="पुलिस सत्यापन प्रमाणपत्र अपलोड करें">Upload Police Verification Certificate</div>
+            <div class="ua-sub">JPG / PNG / PDF</div>
+          </div>
+          <div class="upload-preview" id="up-police"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="step5-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(4)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" onclick="handleStep5()"><span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span></button>
+    </div>
+  </div>
+
+  <!-- STEP 6: BANK DETAILS -->
+  <div id="step-6" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 5 of 7" data-hi="चरण 5 / 7">Step 5 of 7</div>
+    <div class="step-title" data-en="Bank Details" data-hi="बैंक विवरण">Bank Details</div>
+    <div class="step-sub" data-en="Your earnings will be credited to this account." data-hi="आपकी कमाई इस खाते में जमा होगी।">Your earnings will be credited to this account.</div>
+
+    <div class="field">
+      <label><span data-en="Account Holder Name" data-hi="खाताधारक का नाम">Account Holder Name</span> <span class="req">*</span></label>
+      <input type="text" id="f-bank-name" placeholder="As per bank records">
+    </div>
+    <div class="field">
+      <label><span data-en="Account Number" data-hi="खाता नंबर">Account Number</span> <span class="req">*</span></label>
+      <input type="tel" id="f-acc-num" placeholder="Enter account number">
+    </div>
+    <div class="field">
+      <label><span data-en="Confirm Account Number" data-hi="खाता नंबर की पुष्टि">Confirm Account Number</span> <span class="req">*</span></label>
+      <input type="tel" id="f-acc-num2" placeholder="Re-enter account number">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label><span data-en="IFSC Code" data-hi="IFSC कोड">IFSC Code</span> <span class="req">*</span></label>
+        <input type="text" id="f-ifsc" placeholder="SBIN0001234" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase();lookupIFSC(this.value)">
+        <div id="ifsc-msg" class="field-success" style="display:none"></div>
+      </div>
+      <div class="field">
+        <label><span data-en="Bank Name" data-hi="बैंक का नाम">Bank Name</span></label>
+        <input type="text" id="f-bank" placeholder="Auto-filled from IFSC">
+      </div>
+    </div>
+    <div class="field">
+      <label><span data-en="Branch" data-hi="शाखा">Branch</span></label>
+      <input type="text" id="f-branch" placeholder="Auto-filled from IFSC">
+    </div>
+    <div class="field">
+      <label><span data-en="UPI ID" data-hi="UPI आईडी">UPI ID</span> <span style="color:#9ca3af;font-weight:400" data-en="(Optional)" data-hi="(वैकल्पिक)">(Optional)</span></label>
+      <input type="text" id="f-upi" placeholder="yourname@upi">
+    </div>
+    <div class="field">
+      <label><span data-en="Cancelled Cheque" data-hi="रद्द किया हुआ चेक">Cancelled Cheque</span></label>
+      <div class="upload-area" onclick="triggerUpload('cheque')">
+        <input type="file" id="file-cheque" accept="image/*,.pdf" onchange="handleFile(this,'cheque')">
+        <div class="ua-icon">🏦</div>
+        <div class="ua-text" data-en="Upload Cancelled Cheque" data-hi="रद्द किया हुआ चेक अपलोड करें">Upload Cancelled Cheque</div>
+        <div class="ua-sub" data-en="Shows account & IFSC details" data-hi="खाता और IFSC विवरण दिखाता है">Shows account & IFSC details</div>
+      </div>
+      <div class="upload-preview" id="up-cheque"></div>
+    </div>
+
+    <div id="step6-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(5)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" onclick="handleStep6()"><span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span></button>
+    </div>
+  </div>
+
+  <!-- STEP 7: EMERGENCY CONTACT -->
+  <div id="step-7" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 6 of 7" data-hi="चरण 6 / 7">Step 6 of 7</div>
+    <div class="step-title" data-en="Emergency Contact" data-hi="आपातकालीन संपर्क">Emergency Contact</div>
+    <div class="step-sub" data-en="We contact this person only in case of an emergency." data-hi="हम इस व्यक्ति को केवल आपात स्थिति में संपर्क करते हैं।">We contact this person only in case of an emergency.</div>
+
+    <div class="field">
+      <label><span data-en="Contact Name" data-hi="संपर्क का नाम">Contact Name</span> <span class="req">*</span></label>
+      <input type="text" id="f-em-name" placeholder="e.g. Sunita Devi">
+    </div>
+    <div class="field">
+      <label><span data-en="Relation" data-hi="संबंध">Relation</span> <span class="req">*</span></label>
+      <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(100px,1fr))">
+        <div class="sel-card" data-val="WIFE" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Wife" data-hi="पत्नी">Wife</div></div>
+        <div class="sel-card" data-val="HUSBAND" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Husband" data-hi="पति">Husband</div></div>
+        <div class="sel-card" data-val="FATHER" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Father" data-hi="पिता">Father</div></div>
+        <div class="sel-card" data-val="MOTHER" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Mother" data-hi="माँ">Mother</div></div>
+        <div class="sel-card" data-val="SIBLING" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Sibling" data-hi="भाई/बहन">Sibling</div></div>
+        <div class="sel-card" data-val="OTHER" onclick="selectCard(this,'relation')"><div class="sc-label" data-en="Other" data-hi="अन्य">Other</div></div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label><span data-en="Mobile Number" data-hi="मोबाइल नंबर">Mobile Number</span> <span class="req">*</span></label>
+        <input type="tel" id="f-em-phone" placeholder="10-digit" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')">
+      </div>
+      <div class="field">
+        <label><span data-en="Alternate Number" data-hi="वैकल्पिक नंबर">Alternate Number</span></label>
+        <input type="tel" id="f-em-alt" placeholder="Optional" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')">
+      </div>
+    </div>
+
+    <div id="step7-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(6)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" onclick="handleStep7()"><span data-en="Continue →" data-hi="आगे बढ़ें →">Continue →</span></button>
+    </div>
+  </div>
+
+  <!-- STEP 8: AGREEMENT & SUBMIT -->
+  <div id="step-8" class="step-card" style="display:none">
+    <div class="step-tag" data-en="Step 7 of 7 — Final" data-hi="चरण 7 / 7 — अंतिम">Step 7 of 7 — Final</div>
+    <div class="step-title" data-en="Review & Submit" data-hi="समीक्षा और जमा करें">Review & Submit</div>
+    <div class="step-sub" data-en="Please read and accept all agreements to complete your registration." data-hi="अपना पंजीकरण पूरा करने के लिए कृपया सभी समझौते पढ़ें और स्वीकार करें।">Please read and accept all agreements to complete your registration.</div>
+
+    <!-- Summary card -->
+    <div id="summary-card" style="background:var(--cream);border-radius:12px;padding:18px;margin-bottom:24px"></div>
+
+    <div class="agree-item" id="ag-terms" onclick="toggleAgree(this,'terms')">
+      <div class="agree-checkbox" id="chk-terms">✓</div>
+      <div class="agree-text"><div class="at" data-en="Terms & Conditions" data-hi="नियम और शर्तें">Terms & Conditions</div><div class="as" data-en="I agree to Remont India's Terms of Service and Partner Agreement." data-hi="मैं रेमोंट इंडिया की सेवा शर्तों और भागीदार समझौते से सहमत हूं।">I agree to Remont India's Terms of Service and Partner Agreement.</div></div>
+    </div>
+    <div class="agree-item" id="ag-bg" onclick="toggleAgree(this,'bg')">
+      <div class="agree-checkbox" id="chk-bg">✓</div>
+      <div class="agree-text"><div class="at" data-en="Background Verification" data-hi="पृष्ठभूमि सत्यापन">Background Verification</div><div class="as" data-en="I consent to background verification check before activation." data-hi="मैं सक्रियण से पहले पृष्ठभूमि सत्यापन जांच के लिए सहमति देता/देती हूं।">I consent to background verification check before activation.</div></div>
+    </div>
+    <div class="agree-item" id="ag-comm" onclick="toggleAgree(this,'comm')">
+      <div class="agree-checkbox" id="chk-comm">✓</div>
+      <div class="agree-text"><div class="at" data-en="Commission Policy" data-hi="कमीशन नीति">Commission Policy</div><div class="as" data-en="I understand and agree to the platform commission structure (15-20%)." data-hi="मैं प्लेटफ़ॉर्म कमीशन संरचना (15-20%) को समझता/समझती और सहमत हूं।">I understand and agree to the platform commission structure (15-20%).</div></div>
+    </div>
+    <div class="agree-item" id="ag-std" onclick="toggleAgree(this,'std')">
+      <div class="agree-checkbox" id="chk-std">✓</div>
+      <div class="agree-text"><div class="at" data-en="Service Standards" data-hi="सेवा मानक">Service Standards</div><div class="as" data-en="I commit to maintaining professional service quality and customer satisfaction." data-hi="मैं पेशेवर सेवा गुणवत्ता और ग्राहक संतुष्टि बनाए रखने के लिए प्रतिबद्ध हूं।">I commit to maintaining professional service quality and customer satisfaction.</div></div>
+    </div>
+
+    <div id="step8-msg" class="field-error" style="margin-bottom:12px;text-align:center"></div>
+    <div class="btn-row" style="margin-top:20px">
+      <button class="btn-outline" onclick="goStep(7)"><span data-en="← Back" data-hi="← पीछे">← Back</span></button>
+      <button class="btn-primary" id="submit-btn" onclick="submitRegistration()">
+        <span id="submit-label" data-en="Submit Application 🚀" data-hi="आवेदन जमा करें 🚀">Submit Application 🚀</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- SUCCESS SCREEN -->
+  <div id="success-screen" class="step-card success-screen">
+    <div class="success-icon">🎉</div>
+    <h2 data-en="Application Submitted!" data-hi="आवेदन जमा हो गया!">Application Submitted!</h2>
+    <p data-en="Our team will review your profile and contact you within 24-48 hours for the next steps." data-hi="हमारी टीम आपकी प्रोफ़ाइल की समीक्षा करेगी और अगले चरणों के लिए 24-48 घंटों में आपसे संपर्क करेगी।">Our team will review your profile and contact you within 24-48 hours for the next steps.</p>
+    <div class="reg-id-box">
+      <div class="rid-label" data-en="Your Registration ID" data-hi="आपका पंजीकरण ID">Your Registration ID</div>
+      <div class="rid-val" id="success-reg-id">PR-00000000-0000</div>
+    </div>
+    <div class="steps-timeline">
+      <div class="st-item done"><div class="si-text" data-en="✅ Registration submitted" data-hi="✅ पंजीकरण जमा">✅ Registration submitted</div></div>
+      <div class="st-item"><div class="si-text" data-en="⏳ Document review (1-2 days)" data-hi="⏳ दस्तावेज़ समीक्षा (1-2 दिन)">⏳ Document review (1-2 days)</div></div>
+      <div class="st-item"><div class="si-text" data-en="📞 Call from our onboarding team" data-hi="📞 हमारी टीम का फ़ोन">📞 Call from our onboarding team</div></div>
+      <div class="st-item"><div class="si-text" data-en="🚀 Profile activated — start earning!" data-hi="🚀 प्रोफाइल सक्रिय — कमाई शुरू करें!">🚀 Profile activated — start earning!</div></div>
+    </div>
+    <div style="margin-top:28px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a href="/" class="btn-primary" style="text-decoration:none;padding:14px 24px">← Back to Home</a>
+      <button class="btn-outline" onclick="shareResult()">📤 Share</button>
+    </div>
+  </div>
+
+</div><!-- /pr-body -->
+
+<!-- AI ASSISTANT FAB -->
+<button class="ai-fab" id="ai-fab" onclick="toggleAI()" aria-label="AI Help">
+  <div class="ai-fab-pulse"></div>
+  <span style="position:relative;z-index:1">🤖</span>
+</button>
+<div class="ai-panel" id="ai-panel">
+  <div class="ai-panel-head">
+    <div class="ai-avatar">🤖</div>
+    <div><div class="ai-name">Remi AI</div><div class="ai-status" data-en="● Onboarding Assistant" data-hi="● ऑनबोर्डिंग सहायक">● Onboarding Assistant</div></div>
+    <button class="ai-panel-close" onclick="toggleAI()">✕</button>
+  </div>
+  <div class="ai-msgs" id="ai-msgs"></div>
+  <div class="ai-quick" id="ai-quick">
+    <button onclick="aiAsk('How to upload Aadhaar?')">📄 Aadhaar upload?</button>
+    <button onclick="aiAsk('How to get police verification?')">👮 Police cert?</button>
+    <button onclick="aiAsk('Which category to choose?')">🔧 Category help</button>
+    <button onclick="aiAsk('Can I register without PAN?')">💳 No PAN?</button>
+  </div>
+  <div class="ai-input-row">
+    <input type="text" id="ai-input" placeholder="Ask anything about registration…" onkeydown="if(event.key==='Enter')aiSend()">
+    <button onclick="aiSend()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+var LANG = 'EN';
+var currentStep = 1;
+var registrationId = localStorage.getItem('pr_reg_id') || null;
+var otpVerified = false;
+var selections = { gender: null, exp: null, 'id-type': null, police: null, relation: null };
+var files = {};
+var agreements = { terms: false, bg: false, comm: false, std: false };
+var locationData = {};
+
+// ── STEP LABELS ──
+var STEP_LABELS = {
+  EN: ['Language','Basic Info','Skills','Experience','Documents','Bank','Emergency','Submit'],
+  HI: ['भाषा','जानकारी','कौशल','अनुभव','दस्तावेज़','बैंक','संपर्क','जमा']
+};
+
+// ── CATEGORIES ──
+var CATS = [
+  {val:'ELECTRICIAN', icon:'⚡', en:'Electrician', hi:'इलेक्ट्रीशियन'},
+  {val:'PLUMBER', icon:'🔧', en:'Plumber', hi:'प्लंबर'},
+  {val:'CARPENTER', icon:'🪚', en:'Carpenter', hi:'बढ़ई'},
+  {val:'PAINTER', icon:'🎨', en:'Painter', hi:'पेंटर'},
+  {val:'CIVIL', icon:'🏗️', en:'Civil Contractor', hi:'सिविल ठेकेदार'},
+  {val:'INTERIOR', icon:'🏠', en:'Interior Designer', hi:'इंटीरियर डिज़ाइनर'},
+  {val:'MODULAR_KITCHEN', icon:'🍳', en:'Modular Kitchen', hi:'मॉड्यूलर किचन'},
+  {val:'WATERPROOFING', icon:'💧', en:'Waterproofing', hi:'वाटरप्रूफिंग'},
+  {val:'FALSE_CEILING', icon:'🏛️', en:'False Ceiling', hi:'फॉल्स सीलिंग'},
+  {val:'TILE_WORK', icon:'🪟', en:'Tile Work', hi:'टाइल वर्क'},
+  {val:'FABRICATION', icon:'⚙️', en:'Fabrication', hi:'फेब्रिकेशन'},
+  {val:'WELDER', icon:'🔩', en:'Welder', hi:'वेल्डर'},
+  {val:'CCTV', icon:'📷', en:'CCTV', hi:'CCTV'},
+  {val:'RO_TECH', icon:'🫧', en:'RO Technician', hi:'RO तकनीशियन'},
+  {val:'AC_TECH', icon:'❄️', en:'AC Technician', hi:'AC तकनीशियन'},
+  {val:'APPLIANCE', icon:'🔌', en:'Appliance Repair', hi:'उपकरण मरम्मत'},
+  {val:'SOLAR', icon:'☀️', en:'Solar', hi:'सोलर'},
+  {val:'PEST', icon:'🐛', en:'Pest Control', hi:'कीट नियंत्रण'},
+  {val:'CLEANING', icon:'🧹', en:'Cleaning', hi:'सफाई'},
+  {val:'HANDYMAN', icon:'🔨', en:'Handyman', hi:'हैंडीमैन'},
+  {val:'OTHER', icon:'➕', en:'Other', hi:'अन्य'},
+];
+var selectedCats = [];
+
+// ── LANGUAGE ──
+function setLang(l) {
+  LANG = l;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + l.toLowerCase()).classList.add('active');
+  document.querySelectorAll('[data-' + l.toLowerCase() + ']').forEach(el => {
+    el.textContent = el.getAttribute('data-' + l.toLowerCase());
+  });
+}
+function pickLang(l) {
+  LANG = l;
+  document.querySelectorAll('.lang-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('lc-' + l.toLowerCase()).classList.add('selected');
+  setLang(l);
+}
+
+// ── PROGRESS BAR ──
+function buildProgress(active) {
+  var labels = STEP_LABELS[LANG];
+  var steps = [1,2,3,4,5,6,7,8];
+  var html = '';
+  steps.forEach(function(s, i) {
+    var isDone = s < active;
+    var isActive = s === active;
+    var circleClass = isDone ? 'done' : (isActive ? 'active' : '');
+    var labelClass = isDone ? 'done' : (isActive ? 'active' : '');
+    html += '<div class="ps-col">';
+    html += '<div class="ps-circle ' + circleClass + '">' + (isDone ? '✓' : s) + '</div>';
+    html += '<div class="ps-label ' + labelClass + '">' + (labels[i] || '') + '</div>';
+    html += '</div>';
+    if (i < steps.length - 1) {
+      html += '<div class="ps-line' + (s < active ? ' done' : '') + '"></div>';
+    }
+  });
+  document.getElementById('progress-steps').innerHTML = html;
+}
+
+// ── STEP NAVIGATION ──
+function goStep(n) {
+  document.querySelectorAll('[id^="step-"]').forEach(function(el) { el.style.display = 'none'; });
+  document.getElementById('step-' + n).style.display = '';
+  document.getElementById('success-screen').style.display = 'none';
+  document.getElementById('progress-wrap').style.display = n > 1 ? '' : 'none';
+  currentStep = n;
+  buildProgress(n);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  autoSave(n);
+}
+
+// ── AUTO SAVE ──
+function autoSave(step) {
+  if (!registrationId) return;
+  var data = collectStepData(step);
+  fetch(API_BASE + '/api/v1/partner-registration/save-step', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: step, data: data})
+  }).catch(function(){});
+}
+
+function collectStepData(step) {
+  var d = {language: LANG};
+  if (step === 2 || step > 2) {
+    d.fullName = val('f-name');
+    d.email = val('f-email');
+    d.gender = selections.gender;
+    d.dateOfBirth = val('f-dob');
+    d.fullAddress = val('f-address');
+    d.city = val('f-city');
+    d.area = val('f-area');
+    d.state = val('f-state');
+    d.pincode = val('f-pincode');
+    if (locationData.latitude) { d.latitude = locationData.latitude; d.longitude = locationData.longitude; d.locationSource = locationData.source; }
+  }
+  if (step === 3 || step > 3) {
+    d.categories = selectedCats;
+    d.categoryOther = val('f-cat-other');
+  }
+  if (step === 4 || step > 4) {
+    d.experienceYears = selections.exp;
+    d.previousCompany = val('f-prev-company');
+    d.hasOwnTeam = document.getElementById('t-own-team').checked;
+    d.teamSize = val('f-team-size') ? parseInt(val('f-team-size')) : null;
+    d.hasOwnVehicle = document.getElementById('t-vehicle').checked;
+    d.availableFullTime = document.getElementById('t-fulltime').checked;
+    d.availableEmergency = document.getElementById('t-emergency').checked;
+  }
+  if (step === 5 || step > 5) {
+    d.idProofType = selections['id-type'];
+    d.panNumber = val('f-pan');
+    d.policeVerificationStatus = selections.police;
+    // files stored separately, large — skip in metadata autosave
+  }
+  if (step === 6 || step > 6) {
+    d.bankAccountName = val('f-bank-name');
+    d.bankAccountNumber = val('f-acc-num');
+    d.bankIfsc = val('f-ifsc');
+    d.bankName = val('f-bank');
+    d.bankBranch = val('f-branch');
+    d.upiId = val('f-upi');
+  }
+  if (step === 7 || step > 7) {
+    d.emergencyName = val('f-em-name');
+    d.emergencyRelation = selections.relation;
+    d.emergencyPhone = val('f-em-phone');
+    d.emergencyAltPhone = val('f-em-alt');
+  }
+  if (step === 8) {
+    d.agreedTerms = agreements.terms;
+    d.agreedBackground = agreements.bg;
+    d.agreedCommission = agreements.comm;
+    d.agreedStandards = agreements.std;
+  }
+  return d;
+}
+
+function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function showMsg(id, msg, isError) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError === false ? 'var(--success)' : 'var(--error)';
+  el.style.display = msg ? '' : 'none';
+}
+
+// ── OTP ──
+var otpTimer = null;
+var otpResendCooldown = 0;
+function sendOtp(isResend) {
+  var phone = val('f-phone');
+  if (phone.length !== 10) { showMsg('step2-msg', LANG === 'HI' ? 'सही 10 अंकों का मोबाइल नंबर दर्ज करें' : 'Enter a valid 10-digit mobile number'); return; }
+  var btn = document.getElementById('otp-send-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  fetch(API_BASE + '/api/v1/auth/send-otp', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({phone: '+91' + phone, role: 'SERVICE_VENDOR'})
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    btn.disabled = false;
+    btn.textContent = LANG === 'HI' ? 'दोबारा भेजें' : 'Resend';
+    showMsg('step2-msg', '');
+    document.getElementById('otp-section').style.display = '';
+    document.getElementById('otp-0').focus();
+    startOtpTimer(60);
+
+    // Init registration draft
+    return fetch(API_BASE + '/api/v1/partner-registration/init', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phone: '+91' + phone, language: LANG})
+    });
+  }).then(function(r){ if(r) return r.json(); }).then(function(res) {
+    if (res && res.data && res.data.registrationId) {
+      registrationId = res.data.registrationId;
+      localStorage.setItem('pr_reg_id', registrationId);
+    }
+  }).catch(function(e) {
+    btn.disabled = false;
+    btn.textContent = LANG === 'HI' ? 'OTP भेजें' : 'Send OTP';
+    showMsg('step2-msg', LANG === 'HI' ? 'OTP भेजने में त्रुटि। पुनः प्रयास करें।' : 'Failed to send OTP. Please try again.');
+  });
+}
+
+function startOtpTimer(sec) {
+  if (otpTimer) clearInterval(otpTimer);
+  otpResendCooldown = sec;
+  document.getElementById('resend-btn').style.display = 'none';
+  var timerEl = document.getElementById('otp-timer');
+  function tick() {
+    timerEl.textContent = ' (' + otpResendCooldown + 's)';
+    if (--otpResendCooldown <= 0) {
+      clearInterval(otpTimer);
+      document.getElementById('resend-btn').style.display = '';
+      timerEl.textContent = '';
+    }
+  }
+  tick();
+  otpTimer = setInterval(tick, 1000);
+}
+
+// OTP digit auto-advance
+document.addEventListener('DOMContentLoaded', function() {
+  for (var i = 0; i < 4; i++) {
+    (function(idx) {
+      var el = document.getElementById('otp-' + idx);
+      el.addEventListener('input', function() {
+        this.value = this.value.replace(/\D/g,'').slice(-1);
+        if (this.value && idx < 3) document.getElementById('otp-' + (idx+1)).focus();
+        el.classList.toggle('filled', !!this.value);
+        if ([0,1,2,3].every(function(j){ return document.getElementById('otp-'+j).value; })) verifyOtp();
+      });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && !this.value && idx > 0) document.getElementById('otp-' + (idx-1)).focus();
+      });
+    })(i);
+  }
+  // Build category grid
+  buildCatGrid();
+  // AI welcome
+  aiAddBubble(LANG === 'HI'
+    ? 'नमस्ते! 👋 मैं Remi हूं, Remont India का AI सहायक। पार्टनर पंजीकरण में मदद के लिए यहां हूं!'
+    : 'Hello! 👋 I\'m Remi, your AI onboarding assistant. Ask me anything about joining as a partner!', false);
+  // Set max DOB
+  var maxD = new Date(); maxD.setFullYear(maxD.getFullYear()-18);
+  document.getElementById('f-dob').max = maxD.toISOString().split('T')[0];
+});
+
+function verifyOtp() {
+  var otp = [0,1,2,3].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
+  if (otp.length < 4) return;
+  showMsg('otp-verify-msg', LANG === 'HI' ? 'सत्यापित हो रहा है…' : 'Verifying…', false);
+  var phone = '+91' + val('f-phone');
+  var name = val('f-name');
+
+  fetch(API_BASE + '/api/v1/auth/verify-otp', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({phone: phone, otp: otp, name: name || 'Partner', role: 'SERVICE_VENDOR'})
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    var d = res.data || res;
+    if (d.accessToken || (d.user && d.user.id)) {
+      otpVerified = true;
+      if (d.accessToken) localStorage.setItem('pr_token', d.accessToken);
+      showMsg('otp-verify-msg', '');
+      document.getElementById('otp-section').style.display = 'none';
+      var badge = document.getElementById('otp-verified-badge');
+      badge.style.display = 'flex';
+      document.getElementById('step2-extra').style.display = '';
+    } else {
+      showMsg('otp-verify-msg', d.message || (LANG === 'HI' ? 'गलत OTP' : 'Invalid OTP'));
+    }
+  }).catch(function() {
+    showMsg('otp-verify-msg', LANG === 'HI' ? 'सत्यापन त्रुटि। पुनः प्रयास करें।' : 'Verification error. Try again.');
+  });
+}
+
+// ── STEP HANDLERS ──
+function handleStep2() {
+  if (!otpVerified) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया मोबाइल नंबर सत्यापित करें।' : 'Please verify your mobile number first.'); return; }
+  if (!val('f-name')) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया अपना पूरा नाम दर्ज करें।' : 'Please enter your full name.'); return; }
+  if (!selections.gender) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया लिंग चुनें।' : 'Please select your gender.'); return; }
+  if (!val('f-city')) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया शहर दर्ज करें।' : 'Please enter your city.'); return; }
+  showMsg('step2-msg', '');
+  saveFilesForStep(2, function() { goStep(3); });
+}
+
+function handleStep3() {
+  if (!selectedCats.length) { showMsg('step3-msg', LANG === 'HI' ? 'कम से कम एक सेवा श्रेणी चुनें।' : 'Please select at least one service category.'); return; }
+  showMsg('step3-msg', '');
+  goStep(4);
+}
+
+function handleStep4() {
+  if (!selections.exp) { showMsg('step4-msg', LANG === 'HI' ? 'अनुभव स्तर चुनें।' : 'Please select your experience level.'); return; }
+  showMsg('step4-msg', '');
+  goStep(5);
+}
+
+function handleStep5() {
+  if (!selections['id-type']) { showMsg('step5-msg', LANG === 'HI' ? 'पहचान प्रमाण प्रकार चुनें।' : 'Please select an identity proof type.'); return; }
+  if (!files['id-front']) { showMsg('step5-msg', LANG === 'HI' ? 'पहचान प्रमाण की आगे की तस्वीर अपलोड करें।' : 'Please upload the front side of your identity proof.'); return; }
+  if (!files['photo']) { showMsg('step5-msg', LANG === 'HI' ? 'अपनी प्रोफाइल फोटो अपलोड करें।' : 'Please upload your profile photo.'); return; }
+  showMsg('step5-msg', '');
+  saveFilesForStep(5, function() { goStep(6); });
+}
+
+function handleStep6() {
+  if (!val('f-bank-name')) { showMsg('step6-msg', LANG === 'HI' ? 'खाताधारक का नाम दर्ज करें।' : 'Enter account holder name.'); return; }
+  if (!val('f-acc-num')) { showMsg('step6-msg', LANG === 'HI' ? 'खाता नंबर दर्ज करें।' : 'Enter account number.'); return; }
+  if (val('f-acc-num') !== val('f-acc-num2')) { showMsg('step6-msg', LANG === 'HI' ? 'खाता नंबर मेल नहीं खाते।' : 'Account numbers do not match.'); return; }
+  if (!val('f-ifsc') || val('f-ifsc').length < 11) { showMsg('step6-msg', LANG === 'HI' ? 'सही IFSC कोड दर्ज करें।' : 'Enter a valid IFSC code.'); return; }
+  showMsg('step6-msg', '');
+  saveFilesForStep(6, function() { goStep(7); });
+}
+
+function handleStep7() {
+  if (!val('f-em-name')) { showMsg('step7-msg', LANG === 'HI' ? 'आपातकालीन संपर्क का नाम दर्ज करें।' : 'Enter emergency contact name.'); return; }
+  if (!selections.relation) { showMsg('step7-msg', LANG === 'HI' ? 'संबंध चुनें।' : 'Select relation.'); return; }
+  if (!val('f-em-phone') || val('f-em-phone').length < 10) { showMsg('step7-msg', LANG === 'HI' ? 'आपातकालीन संपर्क नंबर दर्ज करें।' : 'Enter emergency contact number.'); return; }
+  showMsg('step7-msg', '');
+  buildSummary();
+  goStep(8);
+}
+
+function buildSummary() {
+  var box = document.getElementById('summary-card');
+  var name = val('f-name'); var city = val('f-city'); var cats = selectedCats.join(', ');
+  box.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+    sumItem(LANG==='HI'?'नाम':'Name', name) +
+    sumItem(LANG==='HI'?'मोबाइल':'Phone', '+91' + val('f-phone')) +
+    sumItem(LANG==='HI'?'शहर':'City', city) +
+    sumItem(LANG==='HI'?'अनुभव':'Experience', selections.exp || '—') +
+    '</div>' +
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--mist)">' +
+    '<span style="font-size:12px;color:#6b7280">' + (LANG==='HI'?'चुनी गई सेवाएं:':'Selected categories: ') + '</span>' +
+    '<span style="font-size:13px;font-weight:600">' + selectedCats.slice(0,5).join(', ') + (selectedCats.length > 5 ? ' +' + (selectedCats.length - 5) + ' more' : '') + '</span>' +
+    '</div>';
+}
+function sumItem(label, val) {
+  return '<div><div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.4px">' + label + '</div><div style="font-size:14px;font-weight:600;color:var(--charcoal);margin-top:2px">' + (val || '—') + '</div></div>';
+}
+
+// ── AGREEMENTS ──
+function toggleAgree(el, key) {
+  agreements[key] = !agreements[key];
+  el.classList.toggle('checked', agreements[key]);
+  document.getElementById('chk-' + (key==='bg'?'bg':key==='comm'?'comm':key==='std'?'std':'terms')).textContent = agreements[key] ? '✓' : '';
+}
+
+// ── SUBMIT ──
+function submitRegistration() {
+  if (!agreements.terms || !agreements.bg || !agreements.comm || !agreements.std) {
+    showMsg('step8-msg', LANG === 'HI' ? 'कृपया सभी समझौते स्वीकार करें।' : 'Please accept all agreements.'); return;
+  }
+  var btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> ' + (LANG === 'HI' ? 'जमा हो रहा है…' : 'Submitting…');
+
+  // Save final step data
+  var finalData = collectStepData(8);
+  fetch(API_BASE + '/api/v1/partner-registration/save-step', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: 8, data: finalData})
+  }).then(function() {
+    return fetch(API_BASE + '/api/v1/partner-registration/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({registrationId: registrationId})
+    });
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    var d = res.data || res;
+    document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
+    document.getElementById('progress-wrap').style.display = 'none';
+    document.getElementById('success-screen').style.display = '';
+    document.getElementById('success-screen').classList.add('show');
+    document.getElementById('success-reg-id').textContent = d.registrationId || registrationId;
+    localStorage.removeItem('pr_reg_id');
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  }).catch(function() {
+    btn.disabled = false;
+    btn.innerHTML = LANG === 'HI' ? 'आवेदन जमा करें 🚀' : 'Submit Application 🚀';
+    showMsg('step8-msg', LANG === 'HI' ? 'सबमिट करने में त्रुटि। पुनः प्रयास करें।' : 'Submission failed. Please try again.');
+  });
+}
+
+// ── CATEGORY GRID ──
+function buildCatGrid() {
+  var html = '';
+  CATS.forEach(function(c) {
+    html += '<div class="cat-card" data-val="' + c.val + '" onclick="toggleCat(this,\'' + c.val + '\')">' +
+      '<span class="cc-check">✓</span>' +
+      '<div class="cc-icon">' + c.icon + '</div>' +
+      '<div class="cc-name" data-en="' + c.en + '" data-hi="' + c.hi + '">' + (LANG === 'HI' ? c.hi : c.en) + '</div>' +
+      '</div>';
+  });
+  document.getElementById('cat-grid').innerHTML = html;
+}
+function toggleCat(el, val) {
+  var idx = selectedCats.indexOf(val);
+  if (idx === -1) { selectedCats.push(val); el.classList.add('selected'); }
+  else { selectedCats.splice(idx,1); el.classList.remove('selected'); }
+}
+
+// ── CARD SELECTOR (single-select) ──
+function selectCard(el, group) {
+  el.closest('.card-grid, .field').querySelectorAll('.sel-card').forEach(function(c){ c.classList.remove('selected'); });
+  el.classList.add('selected');
+  selections[group] = el.dataset.val;
+}
+
+// ── TOGGLE TEAM SIZE ──
+function toggleTeamSize() {
+  var show = document.getElementById('t-own-team').checked;
+  document.getElementById('team-size-row').style.display = show ? '' : 'none';
+}
+function togglePoliceUpload(show) {
+  document.getElementById('police-upload-area').style.display = show ? '' : 'none';
+}
+
+// ── FILE UPLOAD ──
+function triggerUpload(key) {
+  // Handled by input[type=file] click delegation
+}
+var MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+function handleFile(input, key) {
+  var file = input.files[0];
+  if (!file) return;
+  if (file.size > MAX_FILE_SIZE) {
+    alert(LANG === 'HI' ? 'फ़ाइल का आकार 5MB से कम होना चाहिए।' : 'File must be under 5MB.'); input.value = ''; return;
+  }
+  var allowed = ['image/jpeg','image/png','image/jpg','application/pdf'];
+  if (!allowed.includes(file.type)) {
+    alert(LANG === 'HI' ? 'केवल JPG, PNG या PDF फाइलें अनुमत हैं।' : 'Only JPG, PNG, or PDF files are allowed.'); input.value = ''; return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    files[key] = e.target.result;
+    showFilePreview(key, file, e.target.result);
+    // Save file to backend
+    if (registrationId) saveFileToBackend(key, e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+function showFilePreview(key, file, dataUrl) {
+  var previewEl = document.getElementById('up-' + key);
+  if (!previewEl) return;
+  var isPdf = file.type === 'application/pdf';
+  var thumb = isPdf
+    ? '<div class="up-thumb pdf-icon">📄</div>'
+    : '<img class="up-thumb" src="' + dataUrl + '" alt="preview">';
+  // Update profile photo thumb
+  if (key === 'photo') {
+    var photoThumb = document.getElementById('photo-thumb');
+    if (photoThumb && !isPdf) photoThumb.innerHTML = '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover">';
+  }
+  previewEl.innerHTML = thumb +
+    '<div class="up-info"><div class="up-name">' + file.name + '</div><div class="up-size">' + (file.size/1024).toFixed(0) + ' KB</div></div>' +
+    '<button class="up-remove" onclick="removeFile(\'' + key + '\')" title="Remove">🗑</button>';
+  previewEl.classList.add('show');
+}
+
+function removeFile(key) {
+  files[key] = null;
+  var prev = document.getElementById('up-' + key);
+  if (prev) { prev.innerHTML = ''; prev.classList.remove('show'); }
+  if (key === 'photo') {
+    var t = document.getElementById('photo-thumb');
+    if (t) t.innerHTML = '👤';
+  }
+  var inp = document.getElementById('file-' + key.replace(/-/g,'_').replace('_','_'));
+  // find input by pattern
+  document.querySelectorAll('input[type=file]').forEach(function(el) {
+    if (el.id.includes(key.replace('-','_')) || el.id.includes(key)) el.value = '';
+  });
+}
+
+function saveFilesForStep(step, cb) {
+  if (!registrationId) { cb(); return; }
+  var fileKeys = { 5: ['id-front','id-back','pan','photo','skill-cert','police'], 6: ['cheque'] };
+  var keys = fileKeys[step] || [];
+  var data = {};
+  var keyMap = {
+    'id-front':'idProofFront','id-back':'idProofBack','pan':'panCardUrl',
+    'photo':'profilePhotoUrl','skill-cert':'skillCertificateUrl',
+    'police':'policeVerificationUrl','cheque':'cancelledChequeUrl'
+  };
+  keys.forEach(function(k) { if (files[k]) data[keyMap[k]] = files[k]; });
+  if (!Object.keys(data).length) { cb(); return; }
+  fetch(API_BASE + '/api/v1/partner-registration/save-step', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: step, data: data})
+  }).then(function(){ cb(); }).catch(function(){ cb(); });
+}
+
+function saveFileToBackend(key, dataUrl) {
+  if (!registrationId) return;
+  var keyMap = {
+    'id-front':'idProofFront','id-back':'idProofBack','pan':'panCardUrl',
+    'photo':'profilePhotoUrl','skill-cert':'skillCertificateUrl',
+    'police':'policeVerificationUrl','cheque':'cancelledChequeUrl'
+  };
+  var field = keyMap[key];
+  if (!field) return;
+  var data = {}; data[field] = dataUrl;
+  fetch(API_BASE + '/api/v1/partner-registration/save-step', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: currentStep, data: data})
+  }).catch(function(){});
+}
+
+// ── GPS ──
+function captureGPS() {
+  var strip = document.getElementById('gps-strip-2');
+  strip.style.display = 'flex';
+  strip.className = 'gps-strip';
+  strip.innerHTML = '⏳ ' + (LANG === 'HI' ? 'आपकी लोकेशन खोजी जा रही है…' : 'Detecting your location…');
+  if (!navigator.geolocation) { strip.className = 'gps-strip'; strip.innerHTML = '❌ GPS not supported'; return; }
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    var lat = pos.coords.latitude, lng = pos.coords.longitude;
+    locationData = {latitude: lat, longitude: lng, accuracy: pos.coords.accuracy, source: 'GPS'};
+    strip.className = 'gps-strip success';
+    strip.innerHTML = '✅ ' + (LANG === 'HI' ? 'लोकेशन मिल गई — सटीकता: ~' + Math.round(pos.coords.accuracy) + 'm' : 'Location captured — accuracy: ~' + Math.round(pos.coords.accuracy) + 'm');
+    // Reverse geocode
+    fetch(API_BASE + '/api/v1/location/reverse-geocode?lat=' + lat + '&lng=' + lng)
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        var geo = res.data || res;
+        if (geo && geo.city) {
+          document.getElementById('f-city').value = geo.city;
+          document.getElementById('f-state').value = geo.state || '';
+          document.getElementById('f-area').value = geo.area || '';
+          document.getElementById('f-pincode').value = geo.pincode || '';
+        }
+      }).catch(function(){});
+    // Map preview
+    var mapDiv = document.getElementById('map-preview-2');
+    var mapIf = document.getElementById('map-iframe-2');
+    var d = 0.004;
+    mapIf.src = 'https://www.openstreetmap.org/export/embed.html?bbox=' + (lng-d)+','+(lat-d)+','+(lng+d)+','+(lat+d) + '&layer=mapnik&marker=' + lat + ',' + lng;
+    mapDiv.classList.add('show');
+  }, function(err) {
+    strip.className = 'gps-strip error';
+    strip.innerHTML = '❌ ' + (LANG === 'HI' ? 'लोकेशन अनुमति नहीं मिली। पता मैन्युअल दर्ज करें।' : 'Location denied. Please enter address manually.');
+  }, {enableHighAccuracy: true, timeout: 12000});
+}
+
+// ── PINCODE LOOKUP ──
+function onPinInput(v) {
+  if (v.length === 6) {
+    fetch(API_BASE + '/api/v1/location/pincode/' + v)
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        var d = res.data || res;
+        if (d && d.city) {
+          document.getElementById('f-city').value = d.city;
+          document.getElementById('f-state').value = d.state || '';
+          if (!document.getElementById('f-area').value) document.getElementById('f-area').value = d.area || '';
+          var pm = document.getElementById('pin-msg');
+          pm.style.display = ''; pm.textContent = '✓ ' + d.city + ', ' + d.state;
+        }
+      }).catch(function(){});
+  }
+}
+
+// ── IFSC LOOKUP ──
+function lookupIFSC(val) {
+  if (val.length !== 11) return;
+  fetch('https://ifsc.razorpay.com/' + val)
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d && d.BANK) {
+        document.getElementById('f-bank').value = d.BANK;
+        document.getElementById('f-branch').value = d.BRANCH || '';
+        var msg = document.getElementById('ifsc-msg');
+        msg.style.display = ''; msg.textContent = '✓ ' + d.BANK + ' — ' + (d.BRANCH || '');
+      }
+    }).catch(function(){});
+}
+
+// ── AI ASSISTANT ──
+var aiOpen = false;
+function toggleAI() {
+  aiOpen = !aiOpen;
+  document.getElementById('ai-panel').classList.toggle('open', aiOpen);
+  if (aiOpen) document.getElementById('ai-input').focus();
+}
+function aiAddBubble(text, isUser) {
+  var msgs = document.getElementById('ai-msgs');
+  var d = document.createElement('div');
+  d.className = 'ai-bubble ' + (isUser ? 'user' : 'bot');
+  d.textContent = text;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function aiSend() {
+  var inp = document.getElementById('ai-input');
+  var q = inp.value.trim();
+  if (!q) return;
+  inp.value = '';
+  aiAsk(q);
+}
+function aiAsk(q) {
+  if (!aiOpen) toggleAI();
+  aiAddBubble(q, true);
+  // Add typing indicator
+  var msgs = document.getElementById('ai-msgs');
+  var typing = document.createElement('div');
+  typing.className = 'ai-bubble bot';
+  typing.innerHTML = '<span style="opacity:.5">●●●</span>';
+  msgs.appendChild(typing);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  var sysPrompt = 'You are Remi, an AI onboarding assistant for Remont India. You ONLY answer questions about the partner registration process. Questions may be in Hindi or English. Keep answers concise, friendly, and helpful. If asked something unrelated to partner registration, politely redirect. Key facts: Registration takes 8 steps. OTP is sent via WhatsApp. Aadhaar/PAN upload should be clear photos. Police verification is optional at registration (can be arranged later). Bank details needed for payouts. Commission is 15-20%. Response language should match the question language.';
+
+  fetch(API_BASE + '/api/v1/ai/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: q, sessionId: 'partner-onboarding-' + Date.now(), systemPromptOverride: sysPrompt})
+  }).then(function(r){ return r.json(); })
+    .then(function(res) {
+      typing.remove();
+      var d = res.data || res;
+      aiAddBubble(d.reply || 'I can help with any registration questions!', false);
+    }).catch(function() {
+      typing.remove();
+      aiAddBubble(getFallbackAnswer(q), false);
+    });
+}
+
+function getFallbackAnswer(q) {
+  var lower = q.toLowerCase();
+  if (lower.includes('aadhaar') || lower.includes('aadhar') || lower.includes('आधार'))
+    return 'To upload Aadhaar: Take a clear photo of front and back. File must be JPG/PNG/PDF under 5MB. Make sure all text is readable.';
+  if (lower.includes('police') || lower.includes('पुलिस'))
+    return 'Police verification can be done at your nearest police station. Bring ID proof. Alternatively, our team can assist you after registration.';
+  if (lower.includes('pan') || lower.includes('पैन'))
+    return 'PAN card is optional at registration. It\'s required only if your annual earnings exceed ₹50,000. You can add it later.';
+  if (lower.includes('category') || lower.includes('श्रेणी') || lower.includes('skill'))
+    return 'Choose all services you can provide. You can select multiple categories. Start with your strongest skill.';
+  if (lower.includes('bank') || lower.includes('बैंक'))
+    return 'Enter your active bank account details. Use the correct IFSC code (11 characters). We auto-verify via IFSC lookup.';
+  return 'I\'m here to help with your partner registration. Please ask about specific steps like documents, bank details, or categories!';
+}
+
+// ── SHARE ──
+function shareResult() {
+  var regId = document.getElementById('success-reg-id').textContent;
+  var text = 'I\'ve applied as a Service Partner on Remont India! Registration ID: ' + regId + '. Join at https://remontindia.com/partner-register.html';
+  if (navigator.share) {
+    navigator.share({title: 'Remont India Partner', text: text, url: 'https://remontindia.com/partner-register.html'});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function(){ alert('Copied to clipboard!'); });
+  }
+}
+</script>
+</body>
+</html>

@@ -19,25 +19,68 @@
     </div>
   </div>
   <div class="content">
-    <div id="pending-section" class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b">
-      <div class="card-header"><span class="card-title">⚠️ Pending Approval</span></div>
-      <div class="table-wrap"><div id="pending-tbl" class="loading">Loading…</div></div>
+    <!-- TABS -->
+    <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #f3f4f6;padding-bottom:0">
+      <button id="tab-vendors" onclick="switchTab('vendors')" style="padding:10px 20px;border:none;border-bottom:3px solid #3b82f6;font-weight:700;font-size:14px;color:#3b82f6;background:none;cursor:pointer">Active Vendors</button>
+      <button id="tab-registrations" onclick="switchTab('registrations')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">🆕 Partner Registrations <span id="reg-badge" style="background:#ef4444;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none">0</span></button>
     </div>
-    <div class="card">
-      <div class="card-header" style="flex-wrap:wrap;gap:8px">
-        <span class="card-title">All Vendors</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <select id="filter-status" class="form-control" style="width:200px" onchange="loadAll()">
-            <option value="">All Statuses</option>
-            <option>ACTIVE</option><option>PENDING_VERIFICATION</option>
-            <option>SUSPENDED</option><option>REJECTED</option>
-          </select>
-          <input id="filter-q" class="form-control" style="width:160px" placeholder="Search name…" oninput="loadAll()">
-          <button class="btn btn-outline btn-sm" onclick="loadAll()">↺ Refresh</button>
-        </div>
+
+    <!-- VENDORS TAB -->
+    <div id="vendors-tab">
+      <div id="pending-section" class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b">
+        <div class="card-header"><span class="card-title">⚠️ Pending Approval</span></div>
+        <div class="table-wrap"><div id="pending-tbl" class="loading">Loading…</div></div>
       </div>
-      <div class="table-wrap"><div id="all-tbl" class="loading">Loading…</div></div>
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">All Vendors</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="filter-status" class="form-control" style="width:200px" onchange="loadAll()">
+              <option value="">All Statuses</option>
+              <option>ACTIVE</option><option>PENDING_VERIFICATION</option>
+              <option>SUSPENDED</option><option>REJECTED</option>
+            </select>
+            <input id="filter-q" class="form-control" style="width:160px" placeholder="Search name…" oninput="loadAll()">
+            <button class="btn btn-outline btn-sm" onclick="loadAll()">↺ Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="all-tbl" class="loading">Loading…</div></div>
+      </div>
     </div>
+
+    <!-- REGISTRATIONS TAB -->
+    <div id="registrations-tab" style="display:none">
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Partner Registration Applications</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="reg-filter-status" class="form-control" style="width:180px" onchange="loadRegistrations()">
+              <option value="">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="HOLD">On Hold</option>
+              <option value="MORE_DOCS">More Docs Needed</option>
+            </select>
+            <input id="reg-filter-q" class="form-control" style="width:160px" placeholder="Search name / phone…" oninput="loadRegistrations()">
+            <button class="btn btn-outline btn-sm" onclick="loadRegistrations()">↺ Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="reg-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REGISTRATION DETAIL MODAL -->
+<div id="reg-detail-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:800px;width:95vw;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title">Partner Registration Detail</span>
+      <button class="modal-close" onclick="closeModal('reg-detail-overlay')">×</button>
+    </div>
+    <div id="reg-detail-body" style="padding:16px"></div>
+    <div class="modal-footer" id="reg-detail-footer"></div>
   </div>
 </div>
 
@@ -134,6 +177,200 @@ function confirmReject() {
 }
 
 loadPending(); loadAll();
+loadRegistrations(true); // load count for badge
+
+// ── TABS ──
+function switchTab(tab) {
+  document.getElementById('vendors-tab').style.display = tab === 'vendors' ? '' : 'none';
+  document.getElementById('registrations-tab').style.display = tab === 'registrations' ? '' : 'none';
+  document.getElementById('tab-vendors').style.borderBottomColor = tab === 'vendors' ? '#3b82f6' : 'transparent';
+  document.getElementById('tab-vendors').style.color = tab === 'vendors' ? '#3b82f6' : '#6b7280';
+  document.getElementById('tab-registrations').style.borderBottomColor = tab === 'registrations' ? '#3b82f6' : 'transparent';
+  document.getElementById('tab-registrations').style.color = tab === 'registrations' ? '#3b82f6' : '#6b7280';
+  if (tab === 'registrations') loadRegistrations();
+}
+
+// ── PARTNER REGISTRATIONS ──
+function loadRegistrations(countOnly) {
+  var status = (document.getElementById('reg-filter-status') || {}).value || '';
+  var q = (document.getElementById('reg-filter-q') || {}).value || '';
+  var p = [];
+  if (status) p.push('status=' + encodeURIComponent(status));
+  if (q) p.push('q=' + encodeURIComponent(q));
+  var url = '/admin/partner-registrations' + (p.length ? '?' + p.join('&') : '');
+
+  api('GET', url).then(function(res) {
+    var items = res.items || res || [];
+    var total = res.total || items.length;
+
+    // Update badge
+    var badge = document.getElementById('reg-badge');
+    var pendingCount = items.filter(function(r){ return r.status === 'PENDING'; }).length;
+    if (pendingCount > 0) { badge.style.display = ''; badge.textContent = pendingCount; }
+    else badge.style.display = 'none';
+
+    if (countOnly) return;
+
+    if (!items.length) {
+      document.getElementById('reg-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h3>No registrations found</h3></div>';
+      return;
+    }
+
+    var rows = items.map(function(r) {
+      var statusColor = {PENDING:'#f59e0b',APPROVED:'#22c55e',REJECTED:'#ef4444',HOLD:'#8b5cf6',MORE_DOCS:'#3b82f6'}[r.status] || '#6b7280';
+      var cats = (r.categories || []).slice(0,3).join(', ') + (r.categories && r.categories.length > 3 ? ' +' + (r.categories.length-3) : '');
+      return '<tr>' +
+        '<td style="font-family:monospace;font-size:11px"><strong>' + escape(r.registrationId || '') + '</strong></td>' +
+        '<td><strong>' + escape(r.fullName || '—') + '</strong><br><small style="color:#6b7280">' + escape(r.phone || '') + '</small></td>' +
+        '<td>' + escape(r.city || '—') + '</td>' +
+        '<td style="font-size:12px">' + escape(cats || '—') + '</td>' +
+        '<td><span style="background:' + statusColor + '20;color:' + statusColor + ';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">' + r.status + '</span></td>' +
+        '<td style="font-size:11px;color:#6b7280">' + fmtDateShort(r.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" onclick="viewReg(\'' + r.id + '\')">View Details</button></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('reg-tbl').innerHTML = '<table><thead><tr><th>Reg ID</th><th>Name / Phone</th><th>City</th><th>Categories</th><th>Status</th><th>Applied</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) {
+    if (!countOnly) document.getElementById('reg-tbl').innerHTML = '<div class="empty-state"><small>' + escape(e.message) + '</small></div>';
+  });
+}
+
+var currentRegId = null;
+function viewReg(id) {
+  currentRegId = id;
+  document.getElementById('reg-detail-body').innerHTML = '<div class="loading" style="padding:32px;text-align:center">Loading…</div>';
+  document.getElementById('reg-detail-overlay').style.display = 'flex';
+  api('GET', '/admin/partner-registrations/' + id).then(function(reg) {
+    renderRegDetail(reg);
+  }).catch(function(e) {
+    document.getElementById('reg-detail-body').innerHTML = '<p style="color:#ef4444">' + escape(e.message) + '</p>';
+  });
+}
+
+function renderRegDetail(r) {
+  var statusColor = {PENDING:'#f59e0b',APPROVED:'#22c55e',REJECTED:'#ef4444',HOLD:'#8b5cf6',MORE_DOCS:'#3b82f6'}[r.status] || '#6b7280';
+  var cats = (r.categories || []).join(', ') || '—';
+  var hasCoords = r.latitude && r.longitude && Math.abs(r.latitude) > 0.01;
+
+  var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+  html += dItem('Registration ID', r.registrationId, true);
+  html += dItem('Status', '<span style="background:' + statusColor + '20;color:' + statusColor + ';padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">' + r.status + '</span>');
+  html += dItem('Full Name', r.fullName);
+  html += dItem('Phone', r.phone);
+  html += dItem('Email', r.email || '—');
+  html += dItem('Gender', r.gender || '—');
+  html += dItem('DOB', r.dateOfBirth || '—');
+  html += dItem('City', r.city || '—');
+  html += dItem('Area', r.area || '—');
+  html += dItem('State', r.state || '—');
+  html += dItem('PIN Code', r.pincode || '—');
+  html += dItem('Applied On', fmtDateShort(r.createdAt));
+  html += '</div>';
+
+  // Location
+  if (hasCoords) {
+    var navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + r.latitude + ',' + r.longitude;
+    html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📍 GPS Location</strong>' +
+      '<div style="margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb">' +
+      '<iframe src="https://www.openstreetmap.org/export/embed.html?bbox=' + (r.longitude-0.005)+','+(r.latitude-0.005)+','+(r.longitude+0.005)+','+(r.latitude+0.005) + '&layer=mapnik&marker=' + r.latitude + ',' + r.longitude + '" width="100%" height="160" frameborder="0" loading="lazy" style="display:block"></iframe></div>' +
+      '<a href="' + navUrl + '" target="_blank" style="display:inline-block;margin-top:6px;padding:4px 12px;background:#059669;color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none">🗺 Navigate</a></div>';
+  }
+
+  // Categories
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🔧 Service Categories</strong><div style="margin-top:6px">' +
+    (r.categories || []).map(function(c){ return '<span style="background:#eff6ff;color:#1d4ed8;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;margin:2px;display:inline-block">' + escape(c) + '</span>'; }).join('') + '</div></div>';
+
+  // Experience
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">💼 Experience</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Experience', r.experienceYears || '—') +
+    dItem('Previous Company', r.previousCompany || '—') +
+    dItem('Own Team', r.hasOwnTeam ? '✅ Yes (' + (r.teamSize || '?') + ' workers)' : 'No') +
+    dItem('Own Vehicle', r.hasOwnVehicle ? '✅ Yes' : 'No') +
+    dItem('Full Time', r.availableFullTime ? '✅ Yes' : 'No') +
+    dItem('Emergency Jobs', r.availableEmergency ? '✅ Yes' : 'No') +
+    '</div></div>';
+
+  // Documents
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📄 Documents</strong><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">';
+  var docs = [
+    {key:'profilePhotoUrl', label:'Profile Photo'},
+    {key:'idProofFront', label:'ID Front (' + (r.idProofType||'') + ')'},
+    {key:'idProofBack', label:'ID Back'},
+    {key:'panCardUrl', label:'PAN Card'},
+    {key:'skillCertificateUrl', label:'Skill Cert'},
+    {key:'policeVerificationUrl', label:'Police Cert'},
+    {key:'cancelledChequeUrl', label:'Cheque'},
+  ];
+  docs.forEach(function(doc) {
+    var val = r[doc.key];
+    if (!val || val === '[uploaded]') {
+      if (val) html += '<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#166534">' + doc.label + ' ✅</div>';
+    } else if (val.startsWith('data:image')) {
+      html += '<div style="text-align:center"><img src="' + val + '" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"><div style="font-size:11px;color:#6b7280;margin-top:4px">' + doc.label + '</div></div>';
+    } else if (val.startsWith('data:application/pdf')) {
+      html += '<div style="background:#fee2e2;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#991b1b">📄 ' + doc.label + '</div>';
+    }
+  });
+  html += '</div></div>';
+
+  // Bank
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🏦 Bank Details</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Account Name', r.bankAccountName || '—') +
+    dItem('Account No', r.bankAccountNumber ? '****' + r.bankAccountNumber.slice(-4) : '—') +
+    dItem('IFSC', r.bankIfsc || '—') +
+    dItem('Bank', r.bankName || '—') +
+    dItem('Branch', r.bankBranch || '—') +
+    dItem('UPI ID', r.upiId || '—') +
+    '</div></div>';
+
+  // Emergency
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🆘 Emergency Contact</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Name', r.emergencyName || '—') +
+    dItem('Relation', r.emergencyRelation || '—') +
+    dItem('Phone', r.emergencyPhone || '—') +
+    dItem('Alt Phone', r.emergencyAltPhone || '—') +
+    '</div></div>';
+
+  // Admin notes
+  html += '<div style="margin-bottom:8px"><label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">Internal Notes</label>' +
+    '<textarea id="reg-admin-notes" class="form-control" rows="2" style="margin-top:6px" placeholder="Add admin notes…">' + escape(r.adminNotes || '') + '</textarea></div>';
+
+  document.getElementById('reg-detail-body').innerHTML = html;
+
+  // Footer actions
+  document.getElementById('reg-detail-footer').innerHTML =
+    '<select id="reg-status-select" class="form-control" style="width:200px">' +
+    '<option value="PENDING"' + (r.status==='PENDING'?' selected':'') + '>Pending</option>' +
+    '<option value="APPROVED"' + (r.status==='APPROVED'?' selected':'') + '>✅ Approve</option>' +
+    '<option value="REJECTED"' + (r.status==='REJECTED'?' selected':'') + '>❌ Reject</option>' +
+    '<option value="HOLD"' + (r.status==='HOLD'?' selected':'') + '>⏸ Hold</option>' +
+    '<option value="MORE_DOCS"' + (r.status==='MORE_DOCS'?' selected':'') + '>📋 Request More Docs</option>' +
+    '</select>' +
+    '<button class="btn btn-primary" onclick="saveRegStatus()">Save Status</button>' +
+    '<button class="btn btn-outline" onclick="closeModal(\'reg-detail-overlay\')">Close</button>';
+}
+
+function dItem(label, val, mono) {
+  return '<div><div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.4px">' + label + '</div>' +
+    '<div style="font-size:14px;font-weight:600;color:#111;margin-top:3px' + (mono ? ';font-family:monospace' : '') + '">' + (val || '—') + '</div></div>';
+}
+
+function saveRegStatus() {
+  var status = document.getElementById('reg-status-select').value;
+  var notes = document.getElementById('reg-admin-notes').value.trim();
+  api('PATCH', '/admin/partner-registrations/' + currentRegId + '/status', {status: status, adminNotes: notes})
+    .then(function() {
+      toast('Status updated to ' + status, 'success');
+      closeModal('reg-detail-overlay');
+      loadRegistrations();
+    }).catch(function(e){ toast(e.message, 'error'); });
+}
 </script>
 </body>
 </html>

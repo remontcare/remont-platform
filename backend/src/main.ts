@@ -21,7 +21,13 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
     rawBody: true,
+    bodyParser: true,
   });
+
+  // Increase body limit to 15MB for base64 document uploads in partner registration
+  const express = require('express');
+  app.use(express.json({ limit: '15mb' }));
+  app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
   const allowedOrigins = [
     'https://remontindia.com',

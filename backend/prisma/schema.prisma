@@ -1140,3 +1140,89 @@ model StaffMember {
   isActive    Boolean  @default(true)
   joinedAt    DateTime @default(now())
 }
+
+// ─── Partner Registration (pre-approval onboarding) ───────────────────────────
+model PartnerRegistration {
+  id             String   @id @default(cuid())
+  registrationId String   @unique // PR-YYYYMMDD-XXXX
+
+  // Contact
+  phone          String
+  userId         String?
+
+  // Step 2 — Basic Info
+  fullName       String   @default("")
+  email          String?
+  gender         String?
+  dateOfBirth    String?
+
+  // Address
+  fullAddress    String?
+  city           String?
+  area           String?
+  state          String?
+  pincode        String?
+  latitude       Float?
+  longitude      Float?
+  locationSource String?
+
+  // Step 3 — Service Categories
+  categories     String[]
+  categoryOther  String?
+
+  // Step 4 — Experience
+  experienceYears    String?
+  previousCompany    String?
+  hasOwnTeam         Boolean @default(false)
+  teamSize           Int?
+  hasOwnVehicle      Boolean @default(false)
+  availableFullTime  Boolean @default(false)
+  availableEmergency Boolean @default(false)
+
+  // Step 5 — Documents (base64 data-URLs or CDN URLs)
+  idProofType            String?
+  idProofFront           String?  @db.Text
+  idProofBack            String?  @db.Text
+  panNumber              String?
+  panCardUrl             String?  @db.Text
+  profilePhotoUrl        String?  @db.Text
+  skillCertificateUrl    String?  @db.Text
+  policeVerificationUrl  String?  @db.Text
+  policeVerificationStatus String? // AVAILABLE | NEED_HELP
+
+  // Step 6 — Bank Details
+  bankAccountName    String?
+  bankAccountNumber  String?
+  bankIfsc           String?
+  bankName           String?
+  bankBranch         String?
+  upiId              String?
+  cancelledChequeUrl String?  @db.Text
+
+  // Step 7 — Emergency Contact
+  emergencyName     String?
+  emergencyRelation String?
+  emergencyPhone    String?
+  emergencyAltPhone String?
+
+  // Step 8 — Agreements
+  agreedTerms      Boolean   @default(false)
+  agreedBackground Boolean   @default(false)
+  agreedCommission Boolean   @default(false)
+  agreedStandards  Boolean   @default(false)
+  agreedAt         DateTime?
+
+  // Meta
+  language    String   @default("EN")
+  currentStep Int      @default(1)
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_DOCS
+  adminNotes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+  @@index([status])
+  @@index([city])
+  @@index([createdAt])
+}
