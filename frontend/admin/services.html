@@ -686,6 +686,8 @@ function exportServices() {
 
 // ── INIT ──────────────────────────────────────────────────────────────
 
+attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200 });
 loadCategories();
 loadServices();
 </script>

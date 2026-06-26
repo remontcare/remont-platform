@@ -157,3 +157,124 @@ function renderSidebar(page) {
     });
   }
 }
+
+// ── IMAGE COMPRESSION ────────────────────────────────────────────────
+// Canvas-based client-side compression. Quality 0.88 = visually lossless for web.
+// cb(dataUrl, origKB, compKB)
+function compressImage(file, cb, maxDim, quality) {
+  maxDim = maxDim || 1600;
+  quality = quality || 0.88;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var w = img.width, h = img.height;
+      var scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.round(w * scale); h = Math.round(h * scale);
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      var out = canvas.toDataURL('image/jpeg', quality);
+      cb(out, Math.round(file.size / 1024), Math.round(out.length * 0.75 / 1024));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Attach "📷 Upload" button next to any image URL text input.
+// After picking a file it compresses, fills the input, and shows a preview.
+// opts: { maxDim, quality, previewW, previewH }
+function attachImageUpload(inputId, opts) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  opts = opts || {};
+  var maxDim = opts.maxDim || 1600;
+  var quality = opts.quality || 0.88;
+  var previewW = opts.previewW || 130;
+  var previewH = opts.previewH || 78;
+
+  var fileInp = document.createElement('input');
+  fileInp.type = 'file'; fileInp.accept = 'image/*'; fileInp.style.display = 'none';
+
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-outline btn-sm';
+  btn.style.cssText = 'margin-top:6px;font-size:12px;display:inline-flex;align-items:center;gap:5px;';
+  btn.innerHTML = '📷 Upload Image';
+  btn.onclick = function() { fileInp.click(); };
+
+  var info = document.createElement('span');
+  info.style.cssText = 'display:none;font-size:11px;font-weight:600;color:#22c55e;margin-left:8px;vertical-align:middle';
+
+  var thumb = document.createElement('img');
+  thumb.style.cssText = 'display:none;width:' + previewW + 'px;height:' + previewH + 'px;object-fit:cover;border-radius:6px;border:1.5px solid #e5e7eb;margin-top:6px;';
+
+  fileInp.onchange = function() {
+    var file = fileInp.files[0]; if (!file) return;
+    btn.disabled = true; btn.innerHTML = '⏳ Compressing…';
+    compressImage(file, function(dataUrl, origKB, compKB) {
+      input.value = dataUrl;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      thumb.src = dataUrl; thumb.style.display = 'block';
+      info.textContent = '✓ ' + compKB + ' KB (was ' + origKB + ' KB)';
+      info.style.display = 'inline';
+      btn.disabled = false; btn.innerHTML = '📷 Change Image';
+      fileInp.value = '';
+    }, maxDim, quality);
+  };
+
+  // Hide stale preview when admin manually types a URL
+  input.addEventListener('input', function() {
+    if (input.value && !input.value.startsWith('data:')) {
+      thumb.style.display = 'none'; info.style.display = 'none';
+      btn.innerHTML = '📷 Upload Image';
+    }
+  });
+
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;';
+  row.appendChild(btn); row.appendChild(info);
+
+  var p = input.parentNode;
+  p.insertBefore(fileInp, input.nextSibling);
+  p.insertBefore(row, fileInp.nextSibling);
+  p.insertBefore(thumb, row.nextSibling);
+}
+
+// Attach a "📷" upload button for multi-image gallery/chip inputs.
+// After compression it sets the input value and calls addFn() to push to the array.
+function attachGalleryUpload(inputId, addFn, opts) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  opts = opts || {};
+  var maxDim = opts.maxDim || 1200;
+  var quality = opts.quality || 0.88;
+
+  var fileInp = document.createElement('input');
+  fileInp.type = 'file'; fileInp.accept = 'image/*'; fileInp.style.display = 'none';
+
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-outline btn-sm';
+  btn.style.cssText = 'font-size:12px;white-space:nowrap;';
+  btn.title = 'Upload & compress image';
+  btn.innerHTML = '📷 Upload';
+  btn.onclick = function() { fileInp.click(); };
+
+  fileInp.onchange = function() {
+    var file = fileInp.files[0]; if (!file) return;
+    btn.disabled = true; btn.innerHTML = '⏳';
+    compressImage(file, function(dataUrl, origKB, compKB) {
+      input.value = dataUrl;
+      addFn();
+      btn.disabled = false; btn.innerHTML = '📷 Upload';
+      fileInp.value = '';
+      if (typeof toast === 'function') toast('Image compressed: ' + compKB + 'KB (was ' + origKB + 'KB)');
+    }, maxDim, quality);
+  };
+
+  // Insert right after the existing "Add" button
+  var addBtn = input.nextElementSibling;
+  var ref = addBtn ? addBtn.nextSibling : input.nextSibling;
+  input.parentNode.insertBefore(fileInp, ref);
+  input.parentNode.insertBefore(btn, fileInp.nextSibling);
+}

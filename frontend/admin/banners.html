@@ -122,6 +122,7 @@ function deleteBanner(id){
   api('DELETE','/admin/banners/'+id).then(function(){toast('Banner deleted','warning');load();}).catch(function(e){toast(e.message,'error');});
 }
 
+attachImageUpload('b-img', { maxDim: 1920, previewW: 200, previewH: 112 });
 load();
 </script>
 </body>

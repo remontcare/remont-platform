@@ -132,6 +132,7 @@ function del(id) {
   api('DELETE', '/admin/blogs/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
 }
 
+attachImageUpload('b-img', { maxDim: 1600, previewW: 160, previewH: 90 });
 load();
 </script>
 </body>

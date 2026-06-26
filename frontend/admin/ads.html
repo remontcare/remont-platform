@@ -147,6 +147,7 @@ function del(id) {
   api('DELETE', '/admin/ads/' + id).then(function() { toast('Deleted', 'warning'); load(); }).catch(function(e) { toast(e.message, 'error'); });
 }
 
+attachImageUpload('a-img', { maxDim: 1200, previewW: 140, previewH: 84 });
 load();
 </script>
 </body>
