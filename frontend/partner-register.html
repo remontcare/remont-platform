@@ -1256,6 +1256,27 @@ function triggerUpload(key) {
   // Handled by input[type=file] click delegation
 }
 var MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+var COMPRESS_MAX_DIM = 1200; // max pixel dimension
+var COMPRESS_QUALITY = 0.78; // JPEG quality
+
+// Compress image using Canvas API — returns compressed dataUrl via callback
+function compressImage(dataUrl, originalSize, cb) {
+  var img = new Image();
+  img.onload = function() {
+    var w = img.width, h = img.height;
+    var scale = Math.min(1, COMPRESS_MAX_DIM / Math.max(w, h));
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+    var canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    var compressed = canvas.toDataURL('image/jpeg', COMPRESS_QUALITY);
+    var compressedKB = Math.round(compressed.length * 0.75 / 1024);
+    var originalKB = Math.round(originalSize / 1024);
+    cb(compressed, originalKB, compressedKB);
+  };
+  img.src = dataUrl;
+}
 
 function handleFile(input, key) {
   var file = input.files[0];
@@ -1267,17 +1288,33 @@ function handleFile(input, key) {
   if (!allowed.includes(file.type)) {
     alert(LANG === 'HI' ? 'केवल JPG, PNG या PDF फाइलें अनुमत हैं।' : 'Only JPG, PNG, or PDF files are allowed.'); input.value = ''; return;
   }
+  // Show spinner in upload area while processing
+  var areaEl = document.getElementById('ua-' + key);
+  if (areaEl) areaEl.style.opacity = '0.5';
+
   var reader = new FileReader();
   reader.onload = function(e) {
-    files[key] = e.target.result;
-    showFilePreview(key, file, e.target.result);
-    // Save file to backend
-    if (registrationId) saveFileToBackend(key, e.target.result);
+    var dataUrl = e.target.result;
+    if (file.type === 'application/pdf') {
+      // PDFs: use as-is, no canvas compression possible
+      files[key] = dataUrl;
+      if (areaEl) areaEl.style.opacity = '';
+      showFilePreview(key, file, dataUrl, file.size, null);
+      if (registrationId) saveFileToBackend(key, dataUrl);
+    } else {
+      // Images: compress via Canvas
+      compressImage(dataUrl, file.size, function(compressed, origKB, compKB) {
+        files[key] = compressed;
+        if (areaEl) areaEl.style.opacity = '';
+        showFilePreview(key, file, compressed, origKB, compKB);
+        if (registrationId) saveFileToBackend(key, compressed);
+      });
+    }
   };
   reader.readAsDataURL(file);
 }
 
-function showFilePreview(key, file, dataUrl) {
+function showFilePreview(key, file, dataUrl, origKB, compKB) {
   var previewEl = document.getElementById('up-' + key);
   if (!previewEl) return;
   var isPdf = file.type === 'application/pdf';
@@ -1289,8 +1326,14 @@ function showFilePreview(key, file, dataUrl) {
     var photoThumb = document.getElementById('photo-thumb');
     if (photoThumb && !isPdf) photoThumb.innerHTML = '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover">';
   }
+  var sizeInfo = '';
+  if (compKB !== null && compKB < origKB) {
+    sizeInfo = '<span style="color:var(--success);font-size:10px;font-weight:600">✓ ' + compKB + ' KB <span style="color:#9ca3af;font-weight:400">(was ' + origKB + ' KB)</span></span>';
+  } else {
+    sizeInfo = '<span style="font-size:11px;color:#6b7280">' + origKB + ' KB</span>';
+  }
   previewEl.innerHTML = thumb +
-    '<div class="up-info"><div class="up-name">' + file.name + '</div><div class="up-size">' + (file.size/1024).toFixed(0) + ' KB</div></div>' +
+    '<div class="up-info"><div class="up-name">' + file.name + '</div><div>' + sizeInfo + '</div></div>' +
     '<button class="up-remove" onclick="removeFile(\'' + key + '\')" title="Remove">🗑</button>';
   previewEl.classList.add('show');
 }
