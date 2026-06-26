@@ -8,6 +8,7 @@ import { UserRole, VendorStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, slugify } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
+import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 
 @Injectable()
 export class AdminService {
@@ -15,7 +16,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -1403,6 +1404,8 @@ Return JSON with:
       }),
     );
     await Promise.all(ops);
+    // Live-reload payment gateway when credentials change — no server restart needed
+    if (group === 'payment') await this.payments.reinitialize();
     return { success: true };
   }
 
@@ -1663,6 +1666,7 @@ export class AdminController {
 }
 
 @Module({
+  imports: [PaymentsModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

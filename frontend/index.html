@@ -7168,17 +7168,20 @@ function submitCheckoutOrder() {
     }
 
     if (d.requiresPayment) {
-      btn.textContent = 'Initiating payment…';
-      var rzpOrder = { orderNumber: orderNumber };
-      var rzpPayment = {
-        gatewayOrderId: d.gatewayOrderId,  // Razorpay order_id (order_xxx), NOT the DB UUID
-        amount: totalAmount,
-        currency: 'INR',
-        keyId: d.razorpayKeyId
-      };
-      launchRazorpay(rzpPayment, rzpOrder, totalAmount, btn).catch(function() {
-        btn.textContent = 'Pay Online →'; btn.disabled = false;
-      });
+      if (d.gateway === 'PHONEPE') {
+        btn.textContent = 'Redirecting to PhonePe…';
+        // PhonePe: redirect-based flow — save cart state then redirect
+        localStorage.setItem('remont_pending_order', JSON.stringify({ orderNumber: orderNumber, totalAmount: totalAmount, orderId: d.orderId }));
+        window.location.href = d.redirectUrl;
+      } else {
+        // Razorpay: popup flow
+        btn.textContent = 'Initiating payment…';
+        var rzpOrder = { orderNumber: orderNumber };
+        var rzpPayment = { gatewayOrderId: d.gatewayOrderId, amount: totalAmount, currency: 'INR', keyId: d.razorpayKeyId };
+        launchRazorpay(rzpPayment, rzpOrder, totalAmount, btn).catch(function() {
+          btn.textContent = 'Pay Online →'; btn.disabled = false;
+        });
+      }
     }
   })
   .catch(function(err) {
@@ -7338,6 +7341,23 @@ function closeOrderSuccessModal() {
   document.getElementById('order-success-modal').style.display = 'none';
   document.body.style.overflow = '';
 }
+
+// Handle PhonePe return — show success if redirected back from PhonePe payment
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('payment') === 'success') {
+    var orderNumber = params.get('orderNumber');
+    var pending = JSON.parse(localStorage.getItem('remont_pending_order') || '{}');
+    localStorage.removeItem('remont_pending_order');
+    localStorage.removeItem('remont_cart');
+    if (typeof updateCartBadge === 'function') updateCartBadge();
+    setTimeout(function() {
+      openOrderSuccessModal(orderNumber || pending.orderNumber, pending.totalAmount, 'Payment successful via PhonePe! Your order is confirmed.');
+    }, 500);
+    // Clean URL without reload
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+})();
 
 // ── My Orders Modal ─────────────────────────────────────────────────
 

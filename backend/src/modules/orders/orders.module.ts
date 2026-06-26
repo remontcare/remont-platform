@@ -655,15 +655,43 @@ export class GuestBookingService {
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
 
-    // Create Razorpay order — throws BadRequestException if gateway not configured
-    const rzpOrder = await this.payments.createOrder(user.id, totalAmount, order.id);
+    // Initiate payment via whichever gateway is active (configured in Admin → Payment Gateways)
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder = await this.payments.initiatePayment(user.id, totalAmount, order.id, frontendUrl);
+
+    if (payOrder.gateway === 'PHONEPE') {
+      return {
+        orderNumber: order.orderNumber, orderId: order.id, totalAmount,
+        paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+        gateway: 'PHONEPE',
+        redirectUrl: (payOrder as any).redirectUrl,
+        txId: (payOrder as any).txId,
+      };
+    }
+
     return {
       orderNumber: order.orderNumber, orderId: order.id, totalAmount,
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
-      gatewayOrderId: rzpOrder.gatewayOrderId,
-      razorpayKeyId: rzpOrder.keyId,
-      txId: rzpOrder.txId,
+      gateway: 'RAZORPAY',
+      gatewayOrderId: (payOrder as any).gatewayOrderId,
+      razorpayKeyId: (payOrder as any).keyId,
+      txId: (payOrder as any).txId,
     };
+  }
+
+  async verifyPhonePeReturn(txId: string, dbOrderId: string) {
+    const result = await this.payments.verifyPhonePePayment(txId);
+    if (result.success) {
+      const order = await this.prisma.order.findUnique({ where: { id: dbOrderId } });
+      if (order && order.status === OrderStatus.PENDING_PAYMENT) {
+        await this.prisma.order.update({
+          where: { id: dbOrderId },
+          data: { paymentId: result.paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED },
+        });
+      }
+      return { success: true, orderNumber: order?.orderNumber, message: 'Payment verified and order confirmed' };
+    }
+    return { success: false, state: result.state, message: 'Payment not completed or pending' };
   }
 
   async trackOrder(orderNumber: string, phone: string) {
@@ -736,10 +764,16 @@ export class PublicBookingController {
   @Post('book') book(@Body() dto: GuestBookingDto) { return this.guest.book(dto); }
   @Post('checkout') checkout(@Body() dto: PublicProductCheckoutDto) { return this.guest.publicProductCheckout(dto); }
 
-  // Atomic verify+confirm for guest checkout — HMAC signature is the proof of payment (no JWT needed)
+  // Atomic verify+confirm for Razorpay guest checkout
   @Post('confirm-payment')
   confirmPayment(@Body() b: { dbOrderId: string; gatewayOrderId: string; paymentId: string; signature: string }) {
     return this.orders.confirmPayment(b.dbOrderId, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  // PhonePe return callback — called by payment-return.html after redirect back from PhonePe
+  @Get('verify-phonepe-return')
+  async verifyPhonePeReturn(@Query('txId') txId: string, @Query('dbOrderId') dbOrderId: string) {
+    return this.guest.verifyPhonePeReturn(txId, dbOrderId);
   }
 
   @Get('track/:orderNumber') track(@Param('orderNumber') num: string, @Query('phone') phone: string) {

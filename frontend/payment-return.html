@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verifying Payment — Remont India</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:#fff;border-radius:20px;box-shadow:0 8px 40px rgba(0,0,0,.1);padding:48px 36px;text-align:center;max-width:400px;width:100%}
+.logo{width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:28px;margin:0 auto 20px}
+h2{font-size:20px;font-weight:700;color:#1e293b;margin-bottom:8px}
+p{font-size:14px;color:#6b7280;line-height:1.6}
+.spinner{width:48px;height:48px;border:4px solid #f1f5f9;border-top-color:#f97316;border-radius:50%;animation:spin 1s linear infinite;margin:24px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.icon-big{font-size:56px;margin:16px 0}
+.btn{display:inline-block;margin-top:20px;padding:13px 28px;background:#f97316;color:#fff;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;border:none;cursor:pointer}
+.btn-outline{background:#fff;color:#f97316;border:2px solid #f97316}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">R</div>
+  <div id="state-loading">
+    <div class="spinner"></div>
+    <h2>Verifying your payment…</h2>
+    <p>Please wait, we are confirming your payment with PhonePe. Do not close this page.</p>
+  </div>
+  <div id="state-success" style="display:none">
+    <div class="icon-big">✅</div>
+    <h2>Payment Successful!</h2>
+    <p id="success-msg">Your order has been confirmed. Thank you for shopping with Remont India.</p>
+    <a class="btn" href="/">Go to Home</a>
+  </div>
+  <div id="state-failure" style="display:none">
+    <div class="icon-big">❌</div>
+    <h2>Payment Not Completed</h2>
+    <p id="failure-msg">Your payment could not be verified. If money was deducted, contact support.</p>
+    <a class="btn btn-outline" href="/">Try Again</a>
+  </div>
+</div>
+
+<script>
+var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+
+function getParam(name) {
+  return new URLSearchParams(window.location.search).get(name) || '';
+}
+
+var txId = getParam('txId');
+var dbOrderId = getParam('dbOrderId');
+var gateway = getParam('gateway') || 'phonepe';
+
+if (!txId || !dbOrderId) {
+  // No params — redirect home
+  window.location.href = '/';
+} else {
+  verify();
+}
+
+function verify() {
+  fetch(API_BASE + '/api/v1/orders/public/verify-phonepe-return?txId=' + encodeURIComponent(txId) + '&dbOrderId=' + encodeURIComponent(dbOrderId))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var data = d.data || d;
+      if (data.success) {
+        document.getElementById('state-loading').style.display = 'none';
+        document.getElementById('state-success').style.display = '';
+        if (data.orderNumber) {
+          document.getElementById('success-msg').textContent =
+            'Order ' + data.orderNumber + ' confirmed. Thank you for shopping with Remont India!';
+        }
+        // Redirect to home after 4 seconds
+        setTimeout(function() { window.location.href = '/?payment=success&orderNumber=' + (data.orderNumber || ''); }, 4000);
+      } else {
+        document.getElementById('state-loading').style.display = 'none';
+        document.getElementById('state-failure').style.display = '';
+        if (data.state) {
+          document.getElementById('failure-msg').textContent =
+            'Payment status: ' + data.state + '. If money was deducted, please contact support with transaction ID: ' + txId;
+        }
+      }
+    })
+    .catch(function() {
+      document.getElementById('state-loading').style.display = 'none';
+      document.getElementById('state-failure').style.display = '';
+      document.getElementById('failure-msg').textContent =
+        'Unable to verify payment. Please contact support with transaction ID: ' + txId;
+    });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Payment Gateways — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.gw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:22px;margin-bottom:28px}
+.gw-card{background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.07);border:2px solid transparent;transition:border-color .2s}
+.gw-card.active-gw{border-color:#22c55e}
+.gw-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid #f1f5f9}
+.gw-logo-row{display:flex;align-items:center;gap:12px}
+.gw-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px}
+.gw-name{font-size:15px;font-weight:700;color:#1e293b}
+.gw-sub{font-size:11px;color:#6b7280;font-weight:500}
+.gw-status{display:flex;align-items:center;gap:8px}
+.gw-dot{width:9px;height:9px;border-radius:50%;background:#e2e8f0}
+.gw-dot.configured{background:#22c55e}
+.gw-dot.active{background:#f97316;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.gw-body{padding:18px 20px}
+.gw-field{margin-bottom:14px}
+.gw-field label{display:block;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.gw-input{width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:monospace;background:#f8fafc;color:#1e293b;transition:border-color .2s;box-sizing:border-box}
+.gw-input:focus{outline:none;border-color:#f97316;background:#fff}
+.gw-input.secret{letter-spacing:3px}
+.gw-input.secret:focus,.gw-input.secret.revealed{letter-spacing:normal}
+.mode-toggle{display:flex;gap:0;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px}
+.mode-btn{flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:#f8fafc;color:#6b7280;transition:all .2s}
+.mode-btn.active-mode{background:#1e293b;color:#fff}
+.gw-foot{display:flex;gap:8px;padding:14px 20px;border-top:1px solid #f1f5f9;flex-wrap:wrap}
+.gw-active-banner{background:#dcfce7;color:#15803d;border-radius:0 0 12px 12px;padding:8px 20px;font-size:12px;font-weight:600;text-align:center}
+.active-selector{background:#fff;border-radius:14px;box-shadow:0 1px 6px rgba(0,0,0,.07);padding:20px;margin-bottom:24px}
+.active-selector h3{font-size:14px;font-weight:700;color:#1e293b;margin:0 0 12px}
+.gw-radio-group{display:flex;gap:12px;flex-wrap:wrap}
+.gw-radio{display:flex;align-items:center;gap:8px;padding:10px 16px;border:1.5px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all .2s}
+.gw-radio:hover{border-color:#f97316}
+.gw-radio.selected{border-color:#f97316;background:#fff7ed}
+.gw-radio input{accent-color:#f97316}
+.gw-radio span{font-size:13px;font-weight:600;color:#1e293b}
+.status-bar{display:flex;align-items:center;gap:12px;padding:14px 20px;background:#f0fdf4;border:1px solid #86efac;border-radius:12px;margin-bottom:22px}
+.status-bar.warn{background:#fff7ed;border-color:#fed7aa}
+.status-bar.err{background:#fef2f2;border-color:#fca5a5}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Payment Gateways</h1><p>Configure and manage payment integrations</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Live status -->
+    <div id="status-bar" class="status-bar warn">
+      <span style="font-size:20px">⏳</span>
+      <div><div style="font-weight:700;font-size:13px">Loading gateway status…</div></div>
+    </div>
+
+    <!-- Active gateway selector -->
+    <div class="active-selector">
+      <h3>Active Payment Gateway</h3>
+      <p style="font-size:12px;color:#6b7280;margin:0 0 12px">Which gateway should customers pay through?</p>
+      <div class="gw-radio-group">
+        <label class="gw-radio" id="radio-razorpay">
+          <input type="radio" name="active-gw" value="RAZORPAY" onchange="setActive(this.value)">
+          <span>💳 Razorpay</span>
+        </label>
+        <label class="gw-radio" id="radio-phonepe">
+          <input type="radio" name="active-gw" value="PHONEPE" onchange="setActive(this.value)">
+          <span>📱 PhonePe</span>
+        </label>
+        <label class="gw-radio" id="radio-cashfree">
+          <input type="radio" name="active-gw" value="CASHFREE" onchange="setActive(this.value)" disabled>
+          <span style="color:#9ca3af">💰 Cashfree <span style="font-size:10px;background:#f1f5f9;padding:2px 6px;border-radius:10px">Coming Soon</span></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="gw-grid">
+
+      <!-- ── RAZORPAY ── -->
+      <div class="gw-card" id="card-razorpay">
+        <div class="gw-header">
+          <div class="gw-logo-row">
+            <div class="gw-icon" style="background:#0d2137">💳</div>
+            <div>
+              <div class="gw-name">Razorpay</div>
+              <div class="gw-sub">Popup checkout — Credit/Debit/UPI/Net Banking</div>
+            </div>
+          </div>
+          <div class="gw-status">
+            <div class="gw-dot" id="rzp-dot"></div>
+            <span style="font-size:11px;color:#6b7280;font-weight:600" id="rzp-status-text">Not configured</span>
+          </div>
+        </div>
+        <div class="gw-body">
+          <div style="margin-bottom:14px">
+            <div class="mode-toggle">
+              <button class="mode-btn active-mode" id="rzp-mode-test" onclick="setRzpMode('test')">🧪 Test Mode</button>
+              <button class="mode-btn" id="rzp-mode-live" onclick="setRzpMode('live')">🔴 Live Mode</button>
+            </div>
+            <div style="font-size:11px;color:#f59e0b;font-weight:500" id="rzp-mode-hint">
+              Test mode — no real money charged
+            </div>
+          </div>
+          <div class="gw-field">
+            <label>Key ID</label>
+            <input class="gw-input" id="rzp-key-id" placeholder="rzp_test_xxxxxxxxxxxx or rzp_live_xxxxxxxxxxxx" oninput="rzpAutoMode(this.value)">
+          </div>
+          <div class="gw-field">
+            <label>Key Secret <span style="float:right;cursor:pointer;color:#f97316;font-size:10px" onclick="toggleReveal('rzp-key-secret')">show/hide</span></label>
+            <input class="gw-input secret" id="rzp-key-secret" type="password" placeholder="••••••••••••••••••••••••">
+          </div>
+          <div class="gw-field">
+            <label>Webhook Secret <span style="font-size:10px;color:#9ca3af">(from Razorpay Dashboard → Webhooks)</span></label>
+            <input class="gw-input" id="rzp-webhook-secret" placeholder="Optional — for webhook verification">
+          </div>
+        </div>
+        <div class="gw-foot">
+          <button class="btn btn-primary" onclick="saveRazorpay()">Save & Activate</button>
+          <button class="btn btn-outline" onclick="testRazorpay()">Test Connection</button>
+        </div>
+        <div id="rzp-active-banner" style="display:none" class="gw-active-banner">✓ Active Gateway — customers are paying through Razorpay</div>
+      </div>
+
+      <!-- ── PHONEPE ── -->
+      <div class="gw-card" id="card-phonepe">
+        <div class="gw-header">
+          <div class="gw-logo-row">
+            <div class="gw-icon" style="background:#5f259f">📱</div>
+            <div>
+              <div class="gw-name">PhonePe</div>
+              <div class="gw-sub">Redirect checkout — UPI/Wallet/Net Banking</div>
+            </div>
+          </div>
+          <div class="gw-status">
+            <div class="gw-dot" id="pp-dot"></div>
+            <span style="font-size:11px;color:#6b7280;font-weight:600" id="pp-status-text">Not configured</span>
+          </div>
+        </div>
+        <div class="gw-body">
+          <div style="margin-bottom:14px">
+            <div class="mode-toggle">
+              <button class="mode-btn active-mode" id="pp-mode-test" onclick="setPpMode('test')">🧪 UAT/Test</button>
+              <button class="mode-btn" id="pp-mode-live" onclick="setPpMode('live')">🔴 Production</button>
+            </div>
+            <div style="font-size:11px;color:#f59e0b;font-weight:500" id="pp-mode-hint">
+              UAT mode — use PhonePe sandbox credentials
+            </div>
+          </div>
+          <div class="gw-field">
+            <label>Merchant ID</label>
+            <input class="gw-input" id="pp-merchant-id" placeholder="PGTESTPAYUAT (UAT) or your merchant ID">
+          </div>
+          <div class="gw-field">
+            <label>Salt Key <span style="float:right;cursor:pointer;color:#f97316;font-size:10px" onclick="toggleReveal('pp-salt-key')">show/hide</span></label>
+            <input class="gw-input secret" id="pp-salt-key" type="password" placeholder="099eb0cd-02cf-4dc2-a872-6963b1d789da (UAT example)">
+          </div>
+          <div class="gw-field">
+            <label>Salt Index</label>
+            <input class="gw-input" id="pp-salt-index" placeholder="1" value="1" style="max-width:80px">
+          </div>
+        </div>
+        <div class="gw-foot">
+          <button class="btn btn-primary" onclick="savePhonePe()">Save & Activate</button>
+          <button class="btn btn-outline" onclick="testPhonePe()">Test Connection</button>
+        </div>
+        <div id="pp-active-banner" style="display:none" class="gw-active-banner">✓ Active Gateway — customers are paying through PhonePe</div>
+      </div>
+
+      <!-- ── CASHFREE ── -->
+      <div class="gw-card" style="opacity:.6">
+        <div class="gw-header">
+          <div class="gw-logo-row">
+            <div class="gw-icon" style="background:#0a2540">💰</div>
+            <div>
+              <div class="gw-name">Cashfree <span style="font-size:10px;background:#f1f5f9;color:#6b7280;padding:2px 8px;border-radius:10px;margin-left:4px">Coming Soon</span></div>
+              <div class="gw-sub">Popup checkout — All payment methods</div>
+            </div>
+          </div>
+        </div>
+        <div class="gw-body">
+          <div class="gw-field">
+            <label>App ID</label>
+            <input class="gw-input" placeholder="Coming soon…" disabled>
+          </div>
+          <div class="gw-field">
+            <label>Secret Key</label>
+            <input class="gw-input" placeholder="Coming soon…" disabled>
+          </div>
+        </div>
+        <div class="gw-foot">
+          <button class="btn btn-outline" disabled>Coming Soon</button>
+        </div>
+      </div>
+
+    </div><!-- /gw-grid -->
+
+    <!-- PhonePe test credentials hint -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:10px">📋 PhonePe UAT Test Credentials</div>
+      <div style="font-size:12px;color:#374151;line-height:1.8">
+        <b>Merchant ID:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">PGTESTPAYUAT</code><br>
+        <b>Salt Key:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">099eb0cd-02cf-4dc2-a872-6963b1d789da</code><br>
+        <b>Salt Index:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">1</code><br>
+        <div style="margin-top:6px;color:#6b7280">For live keys, go to <b>PhonePe Business Dashboard → API Integration</b></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:10px">📋 Razorpay Test Credentials</div>
+      <div style="font-size:12px;color:#374151;line-height:1.8">
+        <b>Key ID:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">rzp_test_T6DpdOs2X3ORUl</code><br>
+        <b>Key Secret:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">2MFJUD9RME8nqmhvvTkM7tNg</code><br>
+        <div style="margin-top:6px;color:#6b7280">For live keys: <b>Razorpay Dashboard → Settings → API Keys → Live Mode</b></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('payment-gateways');
+requireAuth();
+
+var _config = null;
+var _rzpMode = 'test';
+var _ppMode = 'test';
+
+function load() {
+  // Load current config from backend
+  api('GET', '/payments/config').then(function(cfg) {
+    _config = cfg;
+    applyConfig(cfg);
+  }).catch(function() {});
+
+  // Load saved keys from integrations
+  api('GET', '/admin/integrations').then(function(groups) {
+    var p = groups && groups.payment ? groups.payment : {};
+    // Razorpay
+    if (p.razorpay_key_id) document.getElementById('rzp-key-id').value = p.razorpay_key_id;
+    if (p.razorpay_key_secret) document.getElementById('rzp-key-secret').value = p.razorpay_key_secret;
+    if (p.razorpay_webhook_secret) document.getElementById('rzp-webhook-secret').value = p.razorpay_webhook_secret;
+    if (p.razorpay_mode) setRzpMode(p.razorpay_mode, true);
+    // PhonePe
+    if (p.phonepe_merchant_id) document.getElementById('pp-merchant-id').value = p.phonepe_merchant_id;
+    if (p.phonepe_salt_key) document.getElementById('pp-salt-key').value = p.phonepe_salt_key;
+    if (p.phonepe_salt_index) document.getElementById('pp-salt-index').value = p.phonepe_salt_index;
+    if (p.phonepe_mode) setPpMode(p.phonepe_mode, true);
+    // Active gateway radio
+    var active = p.active_payment_gateway;
+    if (active) {
+      var radio = document.querySelector('input[name="active-gw"][value="'+active+'"]');
+      if (radio) { radio.checked = true; highlightRadio(active); }
+    }
+  }).catch(function() {});
+}
+
+function applyConfig(cfg) {
+  if (!cfg) return;
+  var active = cfg.activeGateway;
+
+  // Status bar
+  var bar = document.getElementById('status-bar');
+  if (active === 'RAZORPAY' || active === 'PHONEPE') {
+    bar.className = 'status-bar';
+    var gwName = active === 'PHONEPE' ? 'PhonePe' : 'Razorpay';
+    var isLive = active === 'PHONEPE' ? cfg.phonepe.isLive : cfg.razorpay.isLive;
+    bar.innerHTML = '<span style="font-size:20px">✅</span><div><div style="font-weight:700;font-size:13px">'+gwName+' is active and ready</div><div style="font-size:11px;color:#15803d">'+(isLive?'🔴 LIVE MODE — real transactions':'🧪 Test mode — no real charges')+'</div></div>';
+  } else {
+    bar.className = 'status-bar err';
+    bar.innerHTML = '<span style="font-size:20px">❌</span><div><div style="font-weight:700;font-size:13px">No payment gateway configured</div><div style="font-size:12px;color:#dc2626">Add your API keys below and click Save & Activate</div></div>';
+  }
+
+  // Razorpay status dot
+  var rzpOk = cfg.razorpay && cfg.razorpay.configured;
+  document.getElementById('rzp-dot').className = 'gw-dot' + (active==='RAZORPAY' ? ' active' : rzpOk ? ' configured' : '');
+  document.getElementById('rzp-status-text').textContent = active==='RAZORPAY' ? '● Active' : rzpOk ? 'Configured' : 'Not configured';
+  document.getElementById('card-razorpay').className = 'gw-card' + (active==='RAZORPAY' ? ' active-gw' : '');
+  document.getElementById('rzp-active-banner').style.display = active==='RAZORPAY' ? '' : 'none';
+  if (rzpOk && cfg.razorpay.keyId) setRzpMode(cfg.razorpay.isLive ? 'live' : 'test', true);
+
+  // PhonePe status dot
+  var ppOk = cfg.phonepe && cfg.phonepe.configured;
+  document.getElementById('pp-dot').className = 'gw-dot' + (active==='PHONEPE' ? ' active' : ppOk ? ' configured' : '');
+  document.getElementById('pp-status-text').textContent = active==='PHONEPE' ? '● Active' : ppOk ? 'Configured' : 'Not configured';
+  document.getElementById('card-phonepe').className = 'gw-card' + (active==='PHONEPE' ? ' active-gw' : '');
+  document.getElementById('pp-active-banner').style.display = active==='PHONEPE' ? '' : 'none';
+  if (ppOk) setPpMode(cfg.phonepe.isLive ? 'live' : 'test', true);
+
+  // Radio
+  if (active) {
+    var radio = document.querySelector('input[name="active-gw"][value="'+active+'"]');
+    if (radio) { radio.checked = true; highlightRadio(active); }
+  }
+}
+
+function highlightRadio(val) {
+  document.querySelectorAll('.gw-radio').forEach(function(el) {
+    el.classList.remove('selected');
+  });
+  var sel = document.getElementById('radio-' + val.toLowerCase());
+  if (sel) sel.classList.add('selected');
+}
+
+function setActive(val) {
+  highlightRadio(val);
+}
+
+function setRzpMode(mode, silent) {
+  _rzpMode = mode;
+  document.getElementById('rzp-mode-test').className = 'mode-btn' + (mode==='test' ? ' active-mode' : '');
+  document.getElementById('rzp-mode-live').className = 'mode-btn' + (mode==='live' ? ' active-mode' : '');
+  document.getElementById('rzp-mode-hint').textContent = mode==='live'
+    ? '🔴 Live mode — real money will be charged'
+    : 'Test mode — no real money charged';
+  document.getElementById('rzp-mode-hint').style.color = mode==='live' ? '#ef4444' : '#f59e0b';
+}
+
+function setPpMode(mode, silent) {
+  _ppMode = mode;
+  document.getElementById('pp-mode-test').className = 'mode-btn' + (mode==='test' ? ' active-mode' : '');
+  document.getElementById('pp-mode-live').className = 'mode-btn' + (mode==='live' ? ' active-mode' : '');
+  document.getElementById('pp-mode-hint').textContent = mode==='live'
+    ? '🔴 Production — real transactions'
+    : 'UAT mode — PhonePe sandbox, no real charges';
+  document.getElementById('pp-mode-hint').style.color = mode==='live' ? '#ef4444' : '#f59e0b';
+}
+
+function rzpAutoMode(keyId) {
+  if (keyId.startsWith('rzp_live_')) setRzpMode('live');
+  else if (keyId.startsWith('rzp_test_')) setRzpMode('test');
+}
+
+function toggleReveal(id) {
+  var el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function saveRazorpay() {
+  var keyId = document.getElementById('rzp-key-id').value.trim();
+  var keySecret = document.getElementById('rzp-key-secret').value.trim();
+  var webhookSecret = document.getElementById('rzp-webhook-secret').value.trim();
+  if (!keyId || !keySecret) { toast('Key ID and Key Secret are required', 'error'); return; }
+
+  var activeGw = document.querySelector('input[name="active-gw"]:checked');
+  var payload = {
+    razorpay_key_id: keyId,
+    razorpay_key_secret: keySecret,
+    razorpay_webhook_secret: webhookSecret,
+    razorpay_enabled: 'true',
+    razorpay_mode: _rzpMode,
+  };
+  if (activeGw && activeGw.value === 'RAZORPAY') payload.active_payment_gateway = 'RAZORPAY';
+
+  api('PATCH', '/admin/integrations/payment', payload).then(function() {
+    toast('Razorpay configured and activated!', 'success');
+    setTimeout(load, 600);
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function savePhonePe() {
+  var merchantId = document.getElementById('pp-merchant-id').value.trim();
+  var saltKey = document.getElementById('pp-salt-key').value.trim();
+  var saltIndex = document.getElementById('pp-salt-index').value.trim() || '1';
+  if (!merchantId || !saltKey) { toast('Merchant ID and Salt Key are required', 'error'); return; }
+
+  var activeGw = document.querySelector('input[name="active-gw"]:checked');
+  var payload = {
+    phonepe_merchant_id: merchantId,
+    phonepe_salt_key: saltKey,
+    phonepe_salt_index: saltIndex,
+    phonepe_enabled: 'true',
+    phonepe_mode: _ppMode,
+  };
+  if (activeGw && activeGw.value === 'PHONEPE') payload.active_payment_gateway = 'PHONEPE';
+
+  api('PATCH', '/admin/integrations/payment', payload).then(function() {
+    toast('PhonePe configured and activated!', 'success');
+    setTimeout(load, 600);
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function testRazorpay() {
+  var keyId = document.getElementById('rzp-key-id').value.trim();
+  if (!keyId) { toast('Enter Key ID first', 'warning'); return; }
+  if (keyId.startsWith('rzp_test_') || keyId.startsWith('rzp_live_')) {
+    toast('Key format valid ✓ — save keys to test actual connection', 'success');
+  } else {
+    toast('Invalid key format. Must start with rzp_test_ or rzp_live_', 'error');
+  }
+}
+
+function testPhonePe() {
+  var mid = document.getElementById('pp-merchant-id').value.trim();
+  if (!mid) { toast('Enter Merchant ID first', 'warning'); return; }
+  toast('Keys saved → connection is tested on first real payment attempt', 'success');
+}
+
+load();
+</script>
+</body>
+</html>

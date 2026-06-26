@@ -168,6 +168,7 @@ var SIDEBAR_NAV = [
     { key:'reports-customer', label:'Customer Report', icon:'👥', href:'/admin/reports.html?type=customer' },
   ]},
   { section: '⚙ SETTINGS', items: [
+    { key:'payment-gateways', label:'Payment Gateways', icon:'💳', href:'/admin/payment-gateways.html' },
     { key:'cities', label:'Cities', icon:'🏙', href:'/admin/cities.html' },
     { key:'users', label:'Users & Roles', icon:'👤', href:'/admin/users.html' },
     { key:'settings', label:'Website Settings', icon:'🌐', href:'/admin/settings.html' },
