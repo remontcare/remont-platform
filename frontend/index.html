@@ -4792,7 +4792,7 @@
     s.addEventListener('click', function() { sendChat(s.textContent.trim()); });
   });
 
-  // ── Header Search ────────────────────────────────────────────────────────────
+  // ── Header Search (Smart AI-assisted) ───────────────────────────────
   var headerInput  = document.getElementById('headerSearchInput');
   var searchDropEl = document.getElementById('searchDropdown');
   var searchTimer  = null;
@@ -4803,77 +4803,123 @@
     PEST:'🐛', PAINTING:'🎨', CARPENTRY:'🪚', DEFAULT:'🔨'
   };
 
-  function openSearchDrop(html) {
-    searchDropEl.innerHTML = html;
-    searchDropEl.classList.add('open');
-  }
-  function closeSearchDrop() {
-    searchDropEl.classList.remove('open');
-    searchDropEl.innerHTML = '';
+  // Smart keyword map — handles typos, Hindi, intent matching
+  var SMART_KEYWORDS = [
+    { w:['ac','air condition','airconditioner','cooling','split ac','inverter ac','ac gas','ac filter','cool','ठंडक','एसी','ac repair','ac service','ac not cooling','ac not working'], svc:'AC Service & Repair', cat:'AC_SERVICE', icon:'❄️' },
+    { w:['plumb','pipe','leak','tap','drain','bathroom','toilet','geyser','shower','water','tank','nal','pani','paani','नल','पाइप','nali','blockage','clog'], svc:'Plumbing', cat:'PLUMBING', icon:'🔧' },
+    { w:['electric','wiring','switch','fan','mcb','short circuit','light','socket','power','earthing','bijli','बिजली','current','tripping','fitting','wiring','wirring'], svc:'Electrical Work', cat:'ELECTRICAL', icon:'⚡' },
+    { w:['washing machine','fridge','refrigerator','tv','television','microwave','oven','dishwasher','appliance','repair','machine','गीज़र','geysir','geyzer','उपकरण','washer','dryer'], svc:'Appliance Repair', cat:'APPLIANCE', icon:'🔌' },
+    { w:['clean','cleaning','deep clean','sofa','carpet','sanitize','disinfect','sweep','mop','सफाई','साफ','home clean','house clean','office clean'], svc:'Deep Cleaning', cat:'CLEANING', icon:'🧹' },
+    { w:['pest','cockroach','cockroch','cockorach','roach','termite','bedbug','bed bug','mosquito','rat','mouse','mice','ant','fly','insect','fumigat','spray','treatment','tila','kida','कीट','कॉकरोच','कॉकरोच','dengue','dengue spray','mosquito spray'], svc:'Pest Control', cat:'PEST', icon:'🐛' },
+    { w:['paint','painting','wall paint','colour','color','whitewash','polish','rang','रंग','पेंट','paint peel','exterior paint','interior paint'], svc:'Painting', cat:'PAINTING', icon:'🎨' },
+    { w:['carpenter','carpentary','furniture','sofa repair','door','window','almira','cupboard','wood','laminate','woodwork','बढ़ई','wardrobe','cabinet'], svc:'Carpentry & Furniture', cat:'CARPENTRY', icon:'🪚' },
+    { w:['interior','design','decor','false ceiling','modular kitchen','renovation','makeover','home design','room design'], svc:'Interior Design', cat:'INTERIOR', icon:'🏠' },
+    { w:['cctv','camera','security','surveillance','security camera','install camera','dvr','nvr'], svc:'CCTV Installation', cat:'ELECTRICAL', icon:'📷' },
+    { w:['ro','water purifier','purifier','water filter','ro service','ro repair','kent','aquaguard'], svc:'RO / Water Purifier', cat:'APPLIANCE', icon:'🫧' },
+    { w:['solar','solar panel','solar install','solar repair','inverter','battery'], svc:'Solar & Inverter', cat:'ELECTRICAL', icon:'☀️' },
+    { w:['waterproof','waterproofing','seepage','leakage roof','terrace leak','wall damp','damp','seepage'], svc:'Waterproofing', cat:'CONSTRUCTION', icon:'💧' },
+    { w:['tile','tiles','flooring','marble','granite','mosaic','floor repair','floor polish'], svc:'Tile & Flooring', cat:'CONSTRUCTION', icon:'🪟' },
+  ];
+
+  // Fuzzy match — query word matches keyword if first 5 chars overlap OR substring match
+  function fuzzyMatch(word, keyword) {
+    if (keyword.length < 3) return word === keyword;
+    var minLen = Math.min(word.length, keyword.length, 5);
+    return word.indexOf(keyword) !== -1 || keyword.indexOf(word) !== -1 ||
+      (minLen >= 4 && word.slice(0, minLen) === keyword.slice(0, minLen));
   }
 
-  function renderSearchResults(results, query) {
-    if (!results || !results.length) {
-      openSearchDrop('<div class="sd-empty">🔍 No results for "<strong>' + query + '</strong>"<br><span style="font-size:11px">Try AC, plumbing, cleaning…</span></div>');
-      return;
-    }
-    var html = results.slice(0, 8).map(function(s) {
-      var catKey = (s.category && s.category.key) ? s.category.key : 'DEFAULT';
-      var icon = CAT_ICONS[catKey] || CAT_ICONS.DEFAULT;
-      var cat  = (s.category && s.category.name) ? s.category.name : '';
-      var price = s.basePrice ? '₹' + Number(s.basePrice).toLocaleString('en-IN') : '';
-      var svcId = s.id || '';
-      var svcName = (s.name || '').replace(/'/g, "\\'");
-      return '<div class="sd-item" onclick="closeSearchDrop();openBookingModal(\'' + svcId + '\',\'' + svcName + '\',\'' + price + '\')">' +
-        '<div class="sd-icon">' + icon + '</div>' +
-        '<div class="sd-info"><div class="sd-name">' + (s.name || '') + '</div><div class="sd-meta">' + cat + '</div></div>' +
-        (price ? '<div class="sd-price">' + price + '</div>' : '') +
-        '</div>';
-    }).join('');
-    openSearchDrop(html);
-  }
-
-  // Local fallback — search already-loaded serviceData
-  function localSearch(query) {
-    var q = query.toLowerCase();
-    var hits = [];
-    Object.keys(serviceData).forEach(function(key) {
-      var d = serviceData[key];
-      if (!d) return;
-      var title = (d.title || '').toLowerCase();
-      if (title.indexOf(q) !== -1) {
-        hits.push({ id: d.id || '', name: d.title, category: { name: key, key: key.toUpperCase() }, basePrice: null });
-      }
-      // Also search sub-services
-      if (d.services) {
-        d.services.forEach(function(s) {
-          if ((s.name || '').toLowerCase().indexOf(q) !== -1) {
-            hits.push({ id: s.id || '', name: s.name, category: { name: d.title, key: key.toUpperCase() }, basePrice: s.price || null });
-          }
-        });
+  // Returns matching service entries from SMART_KEYWORDS
+  function smartKeywordSearch(query) {
+    var qWords = query.toLowerCase().replace(/[^a-z0-9ऀ-ॿ ]/g,'').split(/\s+/).filter(Boolean);
+    var hits = [], seen = {};
+    SMART_KEYWORDS.forEach(function(entry) {
+      if (seen[entry.svc]) return;
+      var matched = entry.w.some(function(kw) {
+        return qWords.some(function(qw) { return fuzzyMatch(qw, kw) || fuzzyMatch(kw, qw); });
+      });
+      if (matched) {
+        seen[entry.svc] = true;
+        hits.push({ id:'', name: entry.svc, category:{ name: entry.svc, key: entry.cat }, basePrice: null, _icon: entry.icon });
       }
     });
     return hits;
   }
 
+  // Exact/substring search in loaded serviceData
+  function localSearch(query) {
+    var q = query.toLowerCase();
+    var hits = [], seen = {};
+    Object.keys(serviceData).forEach(function(key) {
+      var d = serviceData[key];
+      if (!d) return;
+      if ((d.title||'').toLowerCase().indexOf(q) !== -1 && !seen[d.title]) {
+        seen[d.title] = true;
+        hits.push({ id: d.id||'', name: d.title, category:{ name: d.title, key: key.toUpperCase() }, basePrice: null });
+      }
+      (d.services||[]).forEach(function(s) {
+        if ((s.name||'').toLowerCase().indexOf(q) !== -1 && !seen[s.name]) {
+          seen[s.name] = true;
+          hits.push({ id: s.id||'', name: s.name, category:{ name: d.title, key: key.toUpperCase() }, basePrice: s.price||null });
+        }
+      });
+    });
+    return hits;
+  }
+
+  function openSearchDrop(html) { searchDropEl.innerHTML = html; searchDropEl.classList.add('open'); }
+  function closeSearchDrop() { searchDropEl.classList.remove('open'); searchDropEl.innerHTML = ''; }
+
+  function renderSearchResults(results, query) {
+    if (!results || !results.length) {
+      openSearchDrop(
+        '<div class="sd-empty">' +
+          '🔍 No exact match for "<strong>' + query + '</strong>"<br>' +
+          '<span style="font-size:11px;color:#9ca3af">Let our AI assistant help you</span>' +
+          '<br><button onclick="closeSearchDrop();document.querySelector(\'.ai-fab\')&&document.querySelector(\'.ai-fab\').click()" ' +
+          'style="margin-top:10px;padding:8px 18px;background:var(--sienna);color:#fff;border:none;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer">🤖 Ask Remi AI</button>' +
+        '</div>'
+      );
+      return;
+    }
+    var html = results.slice(0, 8).map(function(s) {
+      var catKey = (s.category && s.category.key) ? s.category.key : 'DEFAULT';
+      var icon = s._icon || CAT_ICONS[catKey] || CAT_ICONS.DEFAULT;
+      var cat  = (s.category && s.category.name) ? s.category.name : '';
+      var price = s.basePrice ? '₹' + Number(s.basePrice).toLocaleString('en-IN') : '';
+      var svcId = (s.id || '').replace(/'/g,"\\'");
+      var svcName = (s.name || '').replace(/'/g,"\\'");
+      return '<div class="sd-item" onclick="closeSearchDrop();openBookingModal(\'' + svcId + '\',\'' + svcName + '\',\'' + price + '\')">' +
+        '<div class="sd-icon">' + icon + '</div>' +
+        '<div class="sd-info"><div class="sd-name">' + (s.name||'') + '</div><div class="sd-meta">' + cat + '</div></div>' +
+        (price ? '<div class="sd-price">' + price + '</div>' : '<div class="sd-price" style="font-size:11px;color:#9ca3af">Book Now</div>') +
+        '</div>';
+    }).join('');
+    openSearchDrop(html);
+  }
+
   function runSearch(query) {
     query = (query || '').trim();
     if (!query) { closeSearchDrop(); return; }
-
     openSearchDrop('<div class="sd-loading">🔍 Searching…</div>');
 
     apiGet('/api/v1/services/search?q=' + encodeURIComponent(query))
       .then(function(res) {
         var data = res && res.data ? res.data : (Array.isArray(res) ? res : []);
+        // If API returns nothing, use smart keyword + local fallback
+        if (!data.length) data = smartKeywordSearch(query);
         if (!data.length) data = localSearch(query);
         renderSearchResults(data, query);
       })
       .catch(function() {
-        renderSearchResults(localSearch(query), query);
+        // API unreachable — use smart keyword map first, then local
+        var data = smartKeywordSearch(query);
+        if (!data.length) data = localSearch(query);
+        renderSearchResults(data, query);
       });
   }
 
-  // Live search with 350ms debounce
+  // Live search — 350ms debounce
   if (headerInput) {
     headerInput.addEventListener('input', function() {
       clearTimeout(searchTimer);
@@ -4887,7 +4933,43 @@
     });
   }
 
-  // Close dropdown on outside click
+  // ── Voice search (Web Speech API) ──────────────────────────────────
+  (function() {
+    var micBtn = document.querySelector('.ai-mic-btn');
+    if (!micBtn) return;
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { micBtn.title = 'Voice search not supported in this browser'; return; }
+    var recognition = new SR();
+    recognition.lang = 'en-IN';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    var listening = false;
+    micBtn.onclick = function() {
+      if (listening) { recognition.stop(); return; }
+      recognition.start();
+    };
+    recognition.onstart = function() {
+      listening = true;
+      micBtn.style.background = 'var(--sienna)';
+      micBtn.style.color = '#fff';
+      micBtn.title = 'Listening… speak now';
+      if (headerInput) headerInput.placeholder = '🎙️ Listening…';
+    };
+    recognition.onresult = function(e) {
+      var transcript = e.results[0][0].transcript;
+      if (headerInput) { headerInput.value = transcript; runSearch(transcript); }
+    };
+    recognition.onerror = function() { recognition.stop(); };
+    recognition.onend = function() {
+      listening = false;
+      micBtn.style.background = '';
+      micBtn.style.color = '';
+      micBtn.title = 'Voice search';
+      if (headerInput) headerInput.placeholder = 'Try "AC not cooling" or browse "modular kitchen"...';
+    };
+  })();
+
+  // Close on outside click
   document.addEventListener('click', function(e) {
     if (!e.target.closest('.header-search')) closeSearchDrop();
   });
