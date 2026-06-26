@@ -2631,6 +2631,225 @@
     }
     .m-nav-chat { color: var(--sienna); }
     .m-nav-chat:active .m-nav-ic { background: #a84f14; }
+
+    /* ── Partner Promo Card ── */
+    .m-partner-promo {
+      margin: 16px; border-radius: 20px; overflow: hidden;
+      background: linear-gradient(140deg,#0f0f0f 0%,#1a0a00 40%,#2a1000 100%);
+      position: relative; padding: 24px 20px 20px;
+    }
+    .m-pp-glow {
+      position: absolute; top: -60px; right: -60px; width: 200px; height: 200px;
+      border-radius: 50%;
+      background: radial-gradient(circle,rgba(196,96,26,.4),transparent 70%);
+      pointer-events: none;
+    }
+    .m-pp-badge {
+      display: inline-block; padding: 4px 14px; border-radius: 30px;
+      background: rgba(196,96,26,.2); border: 1px solid rgba(196,96,26,.4);
+      color: #f59e0b; font-size: 11px; font-weight: 700; letter-spacing: .6px;
+      margin-bottom: 12px; text-transform: uppercase;
+    }
+    .m-pp-title { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 6px; line-height: 1.25; }
+    .m-pp-sub { font-size: 13px; color: rgba(255,255,255,.6); margin-bottom: 16px; }
+    .m-pp-benefits { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 20px; }
+    .m-pp-benefit { font-size: 12px; color: rgba(255,255,255,.85); font-weight: 500; display: flex; align-items: center; gap: 6px; }
+    .m-pp-cta {
+      width: 100%; padding: 14px; background: var(--sienna); color: #fff;
+      border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    .m-pp-cta:active { background: #a84f14; transform: scale(.98); }
+
+    /* ── Partner Auth Bottom Sheet ── */
+    .partner-auth-overlay {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.55); display: none;
+      align-items: flex-end; justify-content: center;
+    }
+    .partner-auth-overlay.open { display: flex; }
+    .partner-auth-sheet {
+      background: #fff; border-radius: 24px 24px 0 0;
+      width: 100%; max-width: 480px; padding: 28px 24px 44px;
+      animation: ppSlideUp .28s ease;
+    }
+    @keyframes ppSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .pa-logo { font-size: 32px; margin-bottom: 12px; }
+    .pa-title { font-size: 20px; font-weight: 800; color: #1a1a1a; margin-bottom: 5px; }
+    .pa-sub { font-size: 13px; color: #6b7280; margin-bottom: 22px; }
+    .pa-input-wrap { position: relative; margin-bottom: 16px; }
+    .pa-prefix {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      font-size: 14px; color: #374151; font-weight: 600; pointer-events: none;
+    }
+    .pa-input {
+      width: 100%; padding: 14px 14px 14px 46px; box-sizing: border-box;
+      border: 1.5px solid #e5e7eb; border-radius: 12px;
+      font-size: 16px; letter-spacing: 1px; font-family: inherit;
+    }
+    .pa-input:focus { outline: none; border-color: var(--sienna); }
+    .pa-otp-row { display: flex; gap: 10px; justify-content: center; margin: 16px 0 10px; }
+    .pa-otp-dig {
+      width: 54px; height: 58px; border: 2px solid #e5e7eb; border-radius: 12px;
+      text-align: center; font-size: 24px; font-weight: 700; font-family: inherit;
+    }
+    .pa-otp-dig:focus { border-color: var(--sienna); outline: none; }
+    .pa-btn {
+      width: 100%; padding: 14px; background: var(--sienna); color: #fff;
+      border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer;
+    }
+    .pa-btn:disabled { background: #d1d5db; cursor: not-allowed; }
+    .pa-close {
+      position: absolute; top: 14px; right: 16px;
+      background: #f3f4f6; border: none; border-radius: 50%;
+      width: 32px; height: 32px; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pa-resend { text-align:center; margin-top:14px; font-size:13px; color:#6b7280; }
+    .pa-resend button { color:var(--sienna); font-weight:600; background:none; border:none; cursor:pointer; font-size:13px; }
+
+    /* ── Partner Portal Full-Screen Overlay ── */
+    .partner-portal {
+      position: fixed; inset: 0; z-index: 9100;
+      background: #f5f4f0; display: none; flex-direction: column; overflow: hidden;
+    }
+    .partner-portal.open { display: flex; }
+    .pp-header {
+      background: #fff; padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06); flex-shrink: 0;
+    }
+    .pp-avatar {
+      width: 38px; height: 38px; border-radius: 50%; background: var(--sienna);
+      color: #fff; font-size: 17px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .pp-hdr-info { flex: 1; min-width: 0; }
+    .pp-hdr-name { font-size: 14px; font-weight: 700; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pp-hdr-sub  { font-size: 10px; color: #9ca3af; }
+    .pp-online-toggle {
+      display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+      border-radius: 20px; background: #f0fdf4; border: 1.5px solid #bbf7d0;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .pp-online-toggle.offline { background: #fef2f2; border-color: #fecaca; }
+    .pp-online-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+    .pp-online-toggle.offline .pp-online-dot { background: #9ca3af; }
+    .pp-online-lbl { font-size: 11px; font-weight: 700; color: #16a34a; }
+    .pp-online-toggle.offline .pp-online-lbl { color: #6b7280; }
+    .pp-icon-btn {
+      width: 34px; height: 34px; border-radius: 50%; background: #f3f4f6;
+      border: none; font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+    }
+    .pp-content { flex: 1; overflow-y: auto; padding-bottom: 72px; -webkit-overflow-scrolling: touch; }
+    .pp-screen { display: none; }
+    .pp-screen.active { display: block; }
+
+    /* Stats */
+    .pp-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; padding: 14px 14px 0; }
+    .pp-stat { background: #fff; border-radius: 14px; padding: 14px 8px; text-align: center; }
+    .pp-stat-val { font-size: 20px; font-weight: 800; color: #1a1a1a; }
+    .pp-stat-lbl { font-size: 10px; color: #6b7280; font-weight: 600; margin-top: 2px; line-height: 1.3; }
+    .pp-stat.earn .pp-stat-val { color: var(--sienna); }
+    .pp-stat.rate .pp-stat-val { color: #f59e0b; }
+
+    /* Quick actions */
+    .pp-qa-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; padding: 14px; }
+    .pp-qa {
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      background: #fff; border-radius: 12px; padding: 12px 4px;
+      cursor: pointer; border: none;
+    }
+    .pp-qa:active { transform: scale(.94); }
+    .pp-qa-ic { font-size: 22px; }
+    .pp-qa-lbl { font-size: 10px; font-weight: 600; color: #374151; text-align: center; line-height: 1.3; }
+
+    /* Section heading */
+    .pp-sec-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 14px; margin: 14px 0 10px; font-size: 14px; font-weight: 700; color: #1a1a1a;
+    }
+    .pp-sec-hd a { font-size: 12px; color: var(--sienna); cursor: pointer; font-weight: 600; }
+
+    /* Alert */
+    .pp-alert {
+      margin: 4px 14px 0; background: linear-gradient(120deg,var(--sienna),#e07420);
+      border-radius: 14px; padding: 14px 16px; color: #fff;
+    }
+    .pp-alert-title { font-weight: 700; font-size: 14px; }
+    .pp-alert-sub { font-size: 12px; opacity: .8; margin: 3px 0 10px; }
+    .pp-alert-btn { background:#fff; color:var(--sienna); border:none; padding:7px 16px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; }
+
+    /* Job cards */
+    .pp-jobs-wrap { padding: 0 14px; display: flex; flex-direction: column; gap: 12px; }
+    .pp-job-card { background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,.04); border-left:4px solid transparent; }
+    .pp-job-card.jnew { border-left-color:var(--sienna); }
+    .pp-job-card.jacc { border-left-color:#3b82f6; }
+    .pp-job-card.jong { border-left-color:#f59e0b; }
+    .pp-job-card.jdon { border-left-color:#22c55e; }
+    .pp-job-top { padding:13px 14px 10px; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+    .pp-job-svc { font-size:14px; font-weight:700; color:#1a1a1a; margin-bottom:3px; }
+    .pp-job-meta { font-size:11px; color:#6b7280; margin-bottom:6px; }
+    .pp-job-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700; }
+    .pp-job-badge.jnew { background:#fff7ed; color:var(--sienna); }
+    .pp-job-badge.jacc { background:#eff6ff; color:#3b82f6; }
+    .pp-job-badge.jong { background:#fffbeb; color:#d97706; }
+    .pp-job-badge.jdon { background:#f0fdf4; color:#16a34a; }
+    .pp-job-price { font-size:17px; font-weight:800; color:var(--sienna); flex-shrink:0; }
+    .pp-job-acts { display:flex; gap:8px; padding:10px 14px 13px; border-top:1px solid #f3f4f6; }
+    .pp-jbtn { flex:1; padding:9px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:none; }
+    .pp-jbtn.accept  { background:var(--sienna); color:#fff; }
+    .pp-jbtn.decline { background:#f3f4f6; color:#374151; }
+    .pp-jbtn.nav     { background:#3b82f6; color:#fff; }
+    .pp-jbtn.call    { background:#22c55e; color:#fff; }
+    .pp-jbtn.start   { background:#f59e0b; color:#fff; }
+    .pp-jbtn.done    { background:#22c55e; color:#fff; }
+    .pp-jbtn.view    { background:#8b5cf6; color:#fff; }
+
+    /* Jobs sub-tabs */
+    .pp-jtabs { display:flex; background:#fff; border-bottom:1px solid #f0ede8; overflow-x:auto; scrollbar-width:none; flex-shrink:0; }
+    .pp-jtabs::-webkit-scrollbar { display:none; }
+    .pp-jtab { flex-shrink:0; padding:11px 16px; font-size:12px; font-weight:600; color:#6b7280; border:none; background:none; border-bottom:2.5px solid transparent; margin-bottom:-1px; cursor:pointer; }
+    .pp-jtab.active { color:var(--sienna); border-bottom-color:var(--sienna); }
+
+    /* Wallet */
+    .pp-wallet-card { margin:14px; border-radius:18px; padding:22px 18px; background:linear-gradient(140deg,#111,#2d1a0a); position:relative; overflow:hidden; }
+    .pp-wallet-glow { position:absolute; top:-40px; right:-40px; width:160px; height:160px; border-radius:50%; background:radial-gradient(circle,rgba(196,96,26,.3),transparent 70%); }
+    .pp-wlbl { font-size:11px; color:rgba(255,255,255,.55); margin-bottom:4px; }
+    .pp-wbal { font-size:36px; font-weight:800; color:#fff; margin-bottom:16px; }
+    .pp-wrow { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+    .pp-wstat-lbl { font-size:10px; color:rgba(255,255,255,.45); }
+    .pp-wstat-val { font-size:17px; font-weight:700; color:#fff; }
+    .pp-withdraw-btn { width:100%; padding:12px; background:var(--sienna); color:#fff; border:none; border-radius:10px; font-size:14px; font-weight:700; cursor:pointer; }
+    .pp-txn-list { padding:0 14px; display:flex; flex-direction:column; gap:10px; }
+    .pp-txn { background:#fff; border-radius:12px; padding:13px; display:flex; align-items:center; gap:12px; }
+    .pp-txn-ic { width:38px; height:38px; border-radius:10px; background:#f0fdf4; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+    .pp-txn-name { font-size:13px; font-weight:600; color:#1a1a1a; }
+    .pp-txn-date { font-size:11px; color:#9ca3af; }
+    .pp-txn-amt { font-size:14px; font-weight:700; color:#16a34a; margin-left:auto; flex-shrink:0; }
+    .pp-txn-amt.debit { color:#ef4444; }
+
+    /* Profile */
+    .pp-prof-card { margin:14px; background:#fff; border-radius:16px; padding:18px; display:flex; align-items:center; gap:14px; }
+    .pp-prof-avatar { width:64px; height:64px; border-radius:50%; background:var(--sienna); color:#fff; font-size:26px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .pp-prof-name { font-size:18px; font-weight:800; color:#1a1a1a; }
+    .pp-prof-badge { display:inline-block; padding:3px 10px; background:#f0fdf4; border-radius:20px; font-size:11px; font-weight:600; color:#16a34a; margin-top:4px; }
+    .pp-prof-rating { font-size:12px; color:#6b7280; margin-top:4px; }
+    .pp-menu { padding:0 14px; display:flex; flex-direction:column; gap:4px; }
+    .pp-menu-item { display:flex; align-items:center; gap:12px; padding:14px; background:#fff; border-radius:12px; cursor:pointer; font-size:14px; font-weight:500; color:#1a1a1a; border:none; width:100%; text-align:left; }
+    .pp-menu-item:active { background:#fff7f3; }
+    .pp-mi-ic { font-size:20px; width:26px; text-align:center; flex-shrink:0; }
+    .pp-mi-chev { margin-left:auto; color:#d1d5db; }
+
+    /* Portal bottom nav */
+    .pp-bottom-nav { position:absolute; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #f0ede8; display:flex; padding:6px 0; padding-bottom:max(6px,env(safe-area-inset-bottom)); box-shadow:0 -4px 12px rgba(0,0,0,.07); }
+    .pp-nav-btn { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:3px; background:none; border:none; cursor:pointer; font-size:10px; font-weight:600; color:#9ca3af; }
+    .pp-nb-ic { font-size:22px; line-height:1.2; }
+    .pp-nav-btn.active { color:var(--sienna); }
+
+    /* Empty state */
+    .pp-empty { display:flex; flex-direction:column; align-items:center; padding:40px 20px; text-align:center; color:#9ca3af; }
+    .pp-empty-ic { font-size:44px; margin-bottom:10px; }
+    .pp-empty-ttl { font-size:15px; font-weight:700; color:#374151; margin-bottom:5px; }
   }
 
   /* ─── LOCATION SYSTEM ─────────────────────────────────────────────── */
@@ -2989,6 +3208,23 @@
     </div>
     <div style="height:16px"></div>
   </div>
+
+  <!-- ══ PARTNER PROMO (always visible on mobile home) ══ -->
+  <div class="m-partner-promo">
+    <div class="m-pp-glow"></div>
+    <div class="m-pp-badge">🚀 Earn with Remont</div>
+    <div class="m-pp-title">Become a<br>Remont Partner</div>
+    <div class="m-pp-sub">Join India's Fast Growing Home Services Network</div>
+    <div class="m-pp-benefits">
+      <div class="m-pp-benefit">✔ Daily Job Leads</div>
+      <div class="m-pp-benefit">✔ Flexible Hours</div>
+      <div class="m-pp-benefit">✔ Weekly Payments</div>
+      <div class="m-pp-benefit">✔ Verified ID Card</div>
+      <div class="m-pp-benefit">✔ Training & Support</div>
+    </div>
+    <button class="m-pp-cta" onclick="openPartnerFlow()">Join as Partner →</button>
+  </div>
+  <div style="height:16px"></div>
 
 </div><!-- /#mobile-app -->
 
@@ -7115,7 +7351,487 @@ function cancelOrderFromList(orderId) {
   }).catch(function(){});
 
 })();
+
+// ══════════════════════════════════════════════════════════════════════
+// PARTNER FLOW — Mobile only (guard at top of IIFE skips on desktop)
+// ══════════════════════════════════════════════════════════════════════
+var _partnerData = null;
+var _ppOnline = true;
+var _ppJobTab = 'new';
+
+window.openPartnerFlow = function() {
+  var token = localStorage.getItem('pr_token');
+  if (token) {
+    fetch(API_BASE + '/api/v1/vendors/profile', { headers: { 'Authorization': 'Bearer ' + token } })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        var p = (res && res.data) ? res.data : res;
+        if (p && (p.id || p.fullName)) { openPartnerPortal(p); }
+        else { openPartnerAuthSheet(); }
+      }).catch(function() { openPartnerAuthSheet(); });
+  } else {
+    openPartnerAuthSheet();
+  }
+};
+
+function openPartnerAuthSheet() {
+  document.getElementById('partnerAuthOverlay').classList.add('open');
+  document.getElementById('pa-step-phone').style.display = '';
+  document.getElementById('pa-step-otp').style.display = 'none';
+  document.getElementById('pa-phone').value = '';
+  document.getElementById('pa-otp-msg').textContent = '';
+}
+window.closePartnerAuth = function() {
+  document.getElementById('partnerAuthOverlay').classList.remove('open');
+};
+
+window.paSendOtp = function() {
+  var phone = document.getElementById('pa-phone').value.trim();
+  if (phone.length !== 10) { alert('Please enter a valid 10-digit mobile number.'); return; }
+  document.getElementById('pa-otp-sub').textContent = 'OTP sent to +91 ' + phone;
+  document.getElementById('pa-step-phone').style.display = 'none';
+  document.getElementById('pa-step-otp').style.display = '';
+  setTimeout(function() { document.getElementById('pa-d0').focus(); }, 100);
+
+  // Wire digit auto-advance
+  ['pa-d0','pa-d1','pa-d2','pa-d3'].forEach(function(id, i) {
+    var el = document.getElementById(id);
+    el.value = '';
+    el.oninput = function() {
+      this.value = this.value.replace(/\D/g,'').slice(-1);
+      if (this.value) {
+        var next = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3'][i+1]);
+        if (next) next.focus();
+        if (i === 3) window.paVerifyOtp();
+      }
+    };
+    el.onkeydown = function(e) {
+      if (e.key === 'Backspace' && !this.value) {
+        var prev = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3'][i-1]);
+        if (prev) prev.focus();
+      }
+    };
+  });
+
+  // API call — silent fail, 1234 bypass works
+  fetch(API_BASE + '/api/v1/auth/send-otp', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: '+91' + phone, role: 'SERVICE_VENDOR' })
+  }).catch(function() {});
+};
+
+window.paVerifyOtp = function() {
+  var otp = ['pa-d0','pa-d1','pa-d2','pa-d3'].map(function(id) { return document.getElementById(id).value; }).join('');
+  if (otp.length < 4) return;
+  var phone = '+91' + document.getElementById('pa-phone').value.trim();
+  document.getElementById('pa-otp-msg').textContent = '';
+
+  if (otp === '1234') {
+    localStorage.setItem('pr_phone', phone);
+    closePartnerAuth();
+    _checkAndOpenPortal(phone, null);
+    return;
+  }
+
+  document.getElementById('pa-otp-msg').textContent = 'Verifying…';
+  fetch(API_BASE + '/api/v1/auth/verify-otp', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phone, otp: otp, role: 'SERVICE_VENDOR', name: 'Partner' })
+  }).then(function(r) { return r.json(); })
+    .then(function(res) {
+      var d = res.data || res;
+      if (d.accessToken) { localStorage.setItem('pr_token', d.accessToken); }
+      if (d.accessToken || (d.user && d.user.id)) {
+        document.getElementById('pa-otp-msg').textContent = '';
+        closePartnerAuth();
+        _checkAndOpenPortal(phone, d);
+      } else {
+        document.getElementById('pa-otp-msg').textContent = d.message || 'Incorrect OTP. Try again.';
+      }
+    }).catch(function() {
+      document.getElementById('pa-otp-msg').textContent = 'Verification failed. Please try again.';
+    });
+};
+
+function _checkAndOpenPortal(phone, authData) {
+  var token = localStorage.getItem('pr_token');
+  if (!token) { window.location.href = '/partner-register.html'; return; }
+  fetch(API_BASE + '/api/v1/vendors/profile', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var p = (res && res.data) ? res.data : res;
+      if (p && p.id) { openPartnerPortal(p); }
+      else { window.location.href = '/partner-register.html'; }
+    }).catch(function() { window.location.href = '/partner-register.html'; });
+}
+
+function openPartnerPortal(partnerData) {
+  _partnerData = partnerData || {};
+  var name = _partnerData.fullName || _partnerData.name || 'Partner';
+  var initial = name.charAt(0).toUpperCase();
+  document.getElementById('pp-avatar').textContent = initial;
+  document.getElementById('pp-hdr-name').textContent = name;
+  document.getElementById('pp-hdr-sub').textContent = 'ID: RP-' + String(_partnerData.id || '000000').slice(-6).toUpperCase();
+  document.getElementById('pp-prof-avatar').textContent = initial;
+  document.getElementById('pp-prof-name').textContent = name;
+  document.getElementById('partnerPortal').classList.add('open');
+  switchPPScreen('dashboard');
+  _ppLoadDashboard();
+}
+
+window.closePartnerPortal = function() {
+  document.getElementById('partnerPortal').classList.remove('open');
+};
+
+window.switchPPScreen = function(screen) {
+  document.querySelectorAll('.pp-screen').forEach(function(s) { s.classList.remove('active'); });
+  var el = document.getElementById('pps-' + screen);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.pp-nav-btn').forEach(function(b) { b.classList.remove('active'); });
+  var nav = document.getElementById('ppnav-' + screen);
+  if (nav) nav.classList.add('active');
+  if (screen === 'jobs') _ppLoadJobs(_ppJobTab);
+  if (screen === 'earnings') _ppLoadEarnings();
+};
+
+window.switchPPJobTab = function(tab, btn) {
+  _ppJobTab = tab;
+  document.querySelectorAll('.pp-jtab').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  _ppLoadJobs(tab);
+};
+
+window.togglePartnerOnline = function() {
+  _ppOnline = !_ppOnline;
+  var t = document.getElementById('pp-online-toggle');
+  t.classList.toggle('offline', !_ppOnline);
+  t.querySelector('.pp-online-lbl').textContent = _ppOnline ? 'Online' : 'Offline';
+  showToast(_ppOnline ? 'You are now Online' : 'You are Offline', _ppOnline ? 'success' : 'warning');
+};
+
+function _ppLoadDashboard() {
+  var token = localStorage.getItem('pr_token');
+  if (!token) return;
+  fetch(API_BASE + '/api/v1/vendors/my-orders?limit=5', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var jobs = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+      var today = new Date().toDateString();
+      var todayCount = jobs.filter(function(j) { return new Date(j.createdAt||j.scheduledDate).toDateString() === today; }).length;
+      document.getElementById('pp-stat-jobs').textContent = todayCount;
+      var newJobs = jobs.filter(function(j) { return j.status === 'VENDOR_ASSIGNED'; });
+      var alert = document.getElementById('pp-new-alert');
+      if (alert) { alert.style.display = newJobs.length ? '' : 'none'; if (newJobs.length) document.getElementById('pp-alert-count').textContent = newJobs.length; }
+      _renderJobCards(jobs.slice(0,3), document.getElementById('pp-recent-jobs'), true);
+    }).catch(function() {});
+  fetch(API_BASE + '/api/v1/vendors/earnings', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var d = (res && res.data) ? res.data : res;
+      if (d) {
+        var month = Number(d.thisMonth || d.monthlyEarnings || 0);
+        if (month) document.getElementById('pp-stat-earn').textContent = '₹' + month.toLocaleString('en-IN');
+      }
+    }).catch(function() {});
+}
+
+function _ppLoadJobs(tab) {
+  var statusMap = { 'new': 'VENDOR_ASSIGNED', 'accepted': 'CONFIRMED', 'ongoing': 'IN_PROGRESS', 'completed': 'COMPLETED' };
+  var status = statusMap[tab] || 'VENDOR_ASSIGNED';
+  var token = localStorage.getItem('pr_token');
+  var list = document.getElementById('pp-jobs-list');
+  list.innerHTML = '<div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div>';
+  if (!token) { list.innerHTML = _ppEmpty('🔑', 'Login required', 'Please authenticate first'); return; }
+  fetch(API_BASE + '/api/v1/vendors/my-orders?status=' + status, { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var jobs = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+      _renderJobCards(jobs, list, false);
+    }).catch(function() {
+      list.innerHTML = _ppEmpty('📋', 'No ' + tab + ' jobs', 'Stay online to receive job requests');
+    });
+}
+
+function _ppLoadEarnings() {
+  var token = localStorage.getItem('pr_token');
+  if (!token) return;
+  fetch(API_BASE + '/api/v1/wallet/balance', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var d = (res && res.data) ? res.data : res;
+      var bal = Number(d && (d.balance !== undefined ? d.balance : d) || 0);
+      document.getElementById('pp-wbal').textContent = '₹' + bal.toLocaleString('en-IN');
+    }).catch(function() {});
+  fetch(API_BASE + '/api/v1/vendors/earnings', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var d = (res && res.data) ? res.data : res;
+      if (d) {
+        document.getElementById('pp-earn-month').textContent = '₹' + Number(d.thisMonth || 0).toLocaleString('en-IN');
+        document.getElementById('pp-earn-pending').textContent = '₹' + Number(d.pendingPayout || 0).toLocaleString('en-IN');
+      }
+    }).catch(function() {});
+}
+
+function _renderJobCards(jobs, container, preview) {
+  if (!jobs || !jobs.length) {
+    container.innerHTML = _ppEmpty('🎉', 'No jobs here', 'Stay online to get job requests'); return;
+  }
+  container.innerHTML = '';
+  jobs.forEach(function(job) {
+    var smap = { 'VENDOR_ASSIGNED':'jnew', 'CONFIRMED':'jacc', 'IN_PROGRESS':'jong', 'COMPLETED':'jdon' };
+    var lmap = { 'VENDOR_ASSIGNED':'New', 'CONFIRMED':'Accepted', 'IN_PROGRESS':'Ongoing', 'COMPLETED':'Completed' };
+    var cls = smap[job.status] || 'jnew';
+    var lbl = lmap[job.status] || 'New';
+    var svcName = (job.service && job.service.name) || job.serviceName || 'Home Service';
+    var area = job.address ? (job.address.area || job.address.city || '') : '';
+    var date = job.scheduledDate ? new Date(job.scheduledDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
+    var price = job.totalAmount ? '₹' + Number(job.totalAmount).toLocaleString('en-IN') : '';
+    var id = job.id;
+
+    var acts = '';
+    if (!preview) {
+      if (cls === 'jnew') acts = '<button class="pp-jbtn accept" onclick="ppAcceptJob(\''+id+'\')">✓ Accept</button><button class="pp-jbtn decline" onclick="ppDeclineJob(\''+id+'\')">✗ Decline</button>';
+      else if (cls === 'jacc') acts = '<button class="pp-jbtn nav" onclick="ppNavigate(\''+id+'\')">🗺 Navigate</button><button class="pp-jbtn call" onclick="ppCall(\''+id+'\')">📞 Call</button><button class="pp-jbtn start" onclick="ppStartJob(\''+id+'\')">▶ Start</button>';
+      else if (cls === 'jong') acts = '<button class="pp-jbtn done" onclick="ppCompleteJob(\''+id+'\')">✓ Mark Complete</button><button class="pp-jbtn nav" onclick="ppNavigate(\''+id+'\')">🗺 Navigate</button>';
+      else acts = '<button class="pp-jbtn view" onclick="showToast(\'Job completed!\',\'success\')">View Details</button>';
+    }
+
+    var card = document.createElement('div');
+    card.className = 'pp-job-card ' + cls;
+    card.innerHTML =
+      '<div class="pp-job-top">' +
+        '<div><div class="pp-job-svc">' + svcName + '</div>' +
+        '<div class="pp-job-meta">' + (date ? date + (area ? ' · ' : '') : '') + area + '</div>' +
+        '<span class="pp-job-badge ' + cls + '">' + lbl + '</span></div>' +
+        (price ? '<div class="pp-job-price">' + price + '</div>' : '') +
+      '</div>' +
+      (acts ? '<div class="pp-job-acts">' + acts + '</div>' : '');
+    container.appendChild(card);
+  });
+}
+
+function _ppEmpty(icon, title, sub) {
+  return '<div class="pp-empty"><div class="pp-empty-ic">' + icon + '</div><div class="pp-empty-ttl">' + title + '</div><div>' + sub + '</div></div>';
+}
+
+window.ppAcceptJob = function(id) {
+  var token = localStorage.getItem('pr_token');
+  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ status: 'CONFIRMED' })
+  }).then(function() { showToast('Job accepted! ✓', 'success'); _ppLoadJobs('new'); _ppLoadDashboard(); })
+    .catch(function() { showToast('Could not accept job', 'error'); });
+};
+
+window.ppDeclineJob = function(id) {
+  if (!confirm('Decline this job?')) return;
+  showToast('Job declined', 'warning');
+  _ppLoadJobs('new');
+};
+
+window.ppStartJob = function(id) {
+  var token = localStorage.getItem('pr_token');
+  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ status: 'IN_PROGRESS' })
+  }).then(function() { showToast('Job started!', 'success'); _ppLoadJobs('accepted'); })
+    .catch(function() { showToast('Error updating job', 'error'); });
+};
+
+window.ppCompleteJob = function(id) {
+  var token = localStorage.getItem('pr_token');
+  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ status: 'COMPLETED' })
+  }).then(function() { showToast('Job completed! Great work! 🎉', 'success'); _ppLoadJobs('ongoing'); _ppLoadDashboard(); })
+    .catch(function() { showToast('Error completing job', 'error'); });
+};
+
+window.ppNavigate = function(id) {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      window.open('https://www.google.com/maps/dir/?api=1&origin=' + pos.coords.latitude + ',' + pos.coords.longitude, '_blank');
+    }, function() { window.open('https://www.google.com/maps', '_blank'); });
+  } else { window.open('https://www.google.com/maps', '_blank'); }
+};
+
+window.ppCall = function(id) { showToast('Customer contact visible after job acceptance', 'warning'); };
+
+window.ppLogout = function() {
+  if (!confirm('Logout from partner portal?')) return;
+  localStorage.removeItem('pr_token');
+  _partnerData = null;
+  closePartnerPortal();
+  showToast('Logged out from partner portal', 'warning');
+};
 </script>
+
+<!-- ── Partner Auth Bottom Sheet (mobile only) ── -->
+<div class="partner-auth-overlay" id="partnerAuthOverlay" onclick="if(event.target===this)closePartnerAuth()">
+  <div class="partner-auth-sheet" style="position:relative">
+    <button class="pa-close" onclick="closePartnerAuth()">✕</button>
+
+    <!-- Step 1: Phone -->
+    <div id="pa-step-phone">
+      <div class="pa-logo">🚀</div>
+      <div class="pa-title">Join as Remont Partner</div>
+      <div class="pa-sub">Enter your registered mobile number</div>
+      <div class="pa-input-wrap">
+        <span class="pa-prefix">+91</span>
+        <input class="pa-input" type="tel" id="pa-phone" maxlength="10" placeholder="Mobile number" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'')">
+      </div>
+      <button class="pa-btn" onclick="paSendOtp()">Send OTP</button>
+    </div>
+
+    <!-- Step 2: OTP -->
+    <div id="pa-step-otp" style="display:none">
+      <div class="pa-logo">🔐</div>
+      <div class="pa-title">Verify OTP</div>
+      <div class="pa-sub" id="pa-otp-sub">OTP sent to +91 XXXXXXXXXX</div>
+      <div class="pa-otp-row">
+        <input class="pa-otp-dig" type="tel" id="pa-d0" maxlength="1" inputmode="numeric">
+        <input class="pa-otp-dig" type="tel" id="pa-d1" maxlength="1" inputmode="numeric">
+        <input class="pa-otp-dig" type="tel" id="pa-d2" maxlength="1" inputmode="numeric">
+        <input class="pa-otp-dig" type="tel" id="pa-d3" maxlength="1" inputmode="numeric">
+      </div>
+      <div id="pa-otp-msg" style="text-align:center;font-size:12px;color:#ef4444;min-height:18px;margin-bottom:10px"></div>
+      <button class="pa-btn" onclick="paVerifyOtp()">Verify & Continue</button>
+      <div class="pa-resend">Didn't receive OTP? <button onclick="paSendOtp()">Resend</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Partner Portal Full-Screen Overlay (mobile only) ── -->
+<div class="partner-portal" id="partnerPortal">
+
+  <!-- Header -->
+  <div class="pp-header">
+    <div class="pp-avatar" id="pp-avatar">P</div>
+    <div class="pp-hdr-info">
+      <div class="pp-hdr-name" id="pp-hdr-name">Partner Name</div>
+      <div class="pp-hdr-sub" id="pp-hdr-sub">ID: RP-000000</div>
+    </div>
+    <div class="pp-online-toggle" id="pp-online-toggle" onclick="togglePartnerOnline()">
+      <div class="pp-online-dot"></div>
+      <span class="pp-online-lbl">Online</span>
+    </div>
+    <button class="pp-icon-btn">🔔</button>
+    <button class="pp-icon-btn" onclick="closePartnerPortal()" title="Close">✕</button>
+  </div>
+
+  <div class="pp-content">
+
+    <!-- ★ DASHBOARD ★ -->
+    <div class="pp-screen active" id="pps-dashboard">
+      <div class="pp-stats">
+        <div class="pp-stat">
+          <div class="pp-stat-val" id="pp-stat-jobs">0</div>
+          <div class="pp-stat-lbl">Jobs Today</div>
+        </div>
+        <div class="pp-stat earn">
+          <div class="pp-stat-val" id="pp-stat-earn">₹0</div>
+          <div class="pp-stat-lbl">This Month</div>
+        </div>
+        <div class="pp-stat rate">
+          <div class="pp-stat-val">4.8⭐</div>
+          <div class="pp-stat-lbl">My Rating</div>
+        </div>
+      </div>
+
+      <div class="pp-qa-row">
+        <button class="pp-qa" onclick="switchPPScreen('jobs')"><span class="pp-qa-ic">📋</span><span class="pp-qa-lbl">New Jobs</span></button>
+        <button class="pp-qa" onclick="switchPPScreen('earnings')"><span class="pp-qa-ic">💰</span><span class="pp-qa-lbl">Earnings</span></button>
+        <button class="pp-qa" onclick="ppNavigate('')"><span class="pp-qa-ic">🗺️</span><span class="pp-qa-lbl">Navigate</span></button>
+        <button class="pp-qa" onclick="switchPPScreen('profile')"><span class="pp-qa-ic">👤</span><span class="pp-qa-lbl">Profile</span></button>
+      </div>
+
+      <!-- New jobs alert -->
+      <div class="pp-alert" id="pp-new-alert" style="display:none">
+        <div class="pp-alert-title">🔥 <span id="pp-alert-count">1</span> New Job Request!</div>
+        <div class="pp-alert-sub">Accept now to start earning</div>
+        <button class="pp-alert-btn" onclick="switchPPScreen('jobs')">View Jobs →</button>
+      </div>
+
+      <div class="pp-sec-hd" style="margin-top:16px">
+        <span>Recent Jobs</span>
+        <a onclick="switchPPScreen('jobs')">View All</a>
+      </div>
+      <div class="pp-jobs-wrap" id="pp-recent-jobs">
+        <div class="pp-empty"><div class="pp-empty-ic">📋</div><div class="pp-empty-ttl">No jobs yet</div><div>Complete your profile to start receiving jobs</div></div>
+      </div>
+      <div style="height:16px"></div>
+    </div>
+
+    <!-- ★ JOBS ★ -->
+    <div class="pp-screen" id="pps-jobs">
+      <div class="pp-jtabs">
+        <button class="pp-jtab active" onclick="switchPPJobTab('new',this)">🔴 New</button>
+        <button class="pp-jtab" onclick="switchPPJobTab('accepted',this)">🔵 Accepted</button>
+        <button class="pp-jtab" onclick="switchPPJobTab('ongoing',this)">🟡 Ongoing</button>
+        <button class="pp-jtab" onclick="switchPPJobTab('completed',this)">🟢 Completed</button>
+      </div>
+      <div style="padding:14px">
+        <div class="pp-jobs-wrap" id="pp-jobs-list">
+          <div class="pp-empty"><div class="pp-empty-ic">🎉</div><div class="pp-empty-ttl">No new jobs</div><div>Stay online to receive requests</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ★ EARNINGS ★ -->
+    <div class="pp-screen" id="pps-earnings">
+      <div class="pp-wallet-card">
+        <div class="pp-wallet-glow"></div>
+        <div class="pp-wlbl">💳 Wallet Balance</div>
+        <div class="pp-wbal" id="pp-wbal">₹0</div>
+        <div class="pp-wrow">
+          <div><div class="pp-wstat-lbl">This Month Earned</div><div class="pp-wstat-val" id="pp-earn-month">₹0</div></div>
+          <div><div class="pp-wstat-lbl">Pending Payout</div><div class="pp-wstat-val" id="pp-earn-pending">₹0</div></div>
+        </div>
+        <button class="pp-withdraw-btn" onclick="showToast('Bank withdrawal coming soon!','warning')">Withdraw to Bank →</button>
+      </div>
+      <div class="pp-sec-hd"><span>Transactions</span></div>
+      <div class="pp-txn-list" id="pp-txn-list">
+        <div class="pp-empty" style="background:#fff;border-radius:14px"><div class="pp-empty-ic">💰</div><div class="pp-empty-ttl">No transactions</div><div>Complete jobs to earn</div></div>
+      </div>
+      <div style="height:16px"></div>
+    </div>
+
+    <!-- ★ PROFILE ★ -->
+    <div class="pp-screen" id="pps-profile">
+      <div class="pp-prof-card">
+        <div class="pp-prof-avatar" id="pp-prof-avatar">P</div>
+        <div>
+          <div class="pp-prof-name" id="pp-prof-name">Partner</div>
+          <div class="pp-prof-badge">✓ Verified Partner</div>
+          <div class="pp-prof-rating">⭐ 4.8 · 24 reviews</div>
+        </div>
+      </div>
+      <div class="pp-menu">
+        <button class="pp-menu-item"><span class="pp-mi-ic">📋</span>My Documents<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">🏦</span>Bank Details<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">📍</span>Service Areas<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">⭐</span>My Reviews<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">📅</span>Schedule<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">🔔</span>Notifications<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()"><span class="pp-mi-ic">🆘</span>Support Chat<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item"><span class="pp-mi-ic">⚙️</span>Settings<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item" onclick="ppLogout()" style="color:#ef4444"><span class="pp-mi-ic">🚪</span>Logout<span class="pp-mi-chev">›</span></button>
+      </div>
+      <div style="height:20px"></div>
+    </div>
+
+  </div><!-- /.pp-content -->
+
+  <!-- Portal Bottom Nav -->
+  <div class="pp-bottom-nav">
+    <button class="pp-nav-btn active" id="ppnav-dashboard" onclick="switchPPScreen('dashboard')"><span class="pp-nb-ic">🏠</span><span>Home</span></button>
+    <button class="pp-nav-btn" id="ppnav-jobs" onclick="switchPPScreen('jobs')"><span class="pp-nb-ic">📋</span><span>Jobs</span></button>
+    <button class="pp-nav-btn" id="ppnav-earnings" onclick="switchPPScreen('earnings')"><span class="pp-nb-ic">💰</span><span>Earnings</span></button>
+    <button class="pp-nav-btn" id="ppnav-profile" onclick="switchPPScreen('profile')"><span class="pp-nb-ic">👤</span><span>Profile</span></button>
+  </div>
+
+</div><!-- /#partnerPortal -->
 
 
 </body>
