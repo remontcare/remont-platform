@@ -2,6 +2,6 @@
   "name": "remont-platform",
   "version": "1.0.0",
   "scripts": {
-    "build": "mkdir -p public && cp frontend/index.html public/ && cp -r frontend/admin public/"
+    "build": "mkdir -p public && cp frontend/*.html public/ && cp -r frontend/admin public/"
   }
 }

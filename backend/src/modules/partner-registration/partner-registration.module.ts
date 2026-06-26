@@ -28,16 +28,33 @@ export class PartnerRegistrationService {
   async initRegistration(phone: string, language: string) {
     const normalized = phone.startsWith('+91') ? phone : `+91${phone.replace(/\D/g, '')}`;
 
-    // Check if already submitted
+    // Find most recent non-rejected registration for this phone
     const existing = await this.prisma.partnerRegistration.findFirst({
-      where: { phone: normalized, status: { not: 'REJECTED' } },
+      where: { phone: normalized },
+      orderBy: { createdAt: 'desc' },
     });
-    if (existing && existing.status === 'PENDING' && existing.agreedTerms) {
-      return { registrationId: existing.registrationId, alreadySubmitted: true, status: existing.status };
+
+    // If already approved, return status info
+    if (existing && existing.status === 'APPROVED') {
+      return { registrationId: existing.registrationId, alreadyApproved: true, status: 'APPROVED' };
     }
 
-    // Create or return draft
-    const draft = existing || await this.prisma.partnerRegistration.create({
+    // If submitted and pending review, return existing
+    if (existing && existing.agreedTerms && existing.status === 'PENDING') {
+      return { registrationId: existing.registrationId, alreadySubmitted: true, status: 'PENDING' };
+    }
+
+    // Use existing draft or create new one
+    if (existing && !existing.agreedTerms) {
+      // Resume existing draft
+      await this.prisma.partnerRegistration.update({
+        where: { id: existing.id },
+        data: { language },
+      });
+      return { registrationId: existing.registrationId, isNew: false };
+    }
+
+    const draft = await this.prisma.partnerRegistration.create({
       data: {
         registrationId: generateRegistrationId(),
         phone: normalized,
@@ -46,7 +63,7 @@ export class PartnerRegistrationService {
       },
     });
 
-    return { registrationId: draft.registrationId, isNew: !existing };
+    return { registrationId: draft.registrationId, isNew: true };
   }
 
   /** Save step data (autosave) — accepts any partial step payload */
@@ -172,10 +189,105 @@ export class PartnerRegistrationService {
     const allowed = ['PENDING', 'APPROVED', 'REJECTED', 'HOLD', 'MORE_DOCS'];
     if (!allowed.includes(status)) throw new BadRequestException('Invalid status');
 
-    return this.prisma.partnerRegistration.update({
+    const reg = await this.prisma.partnerRegistration.findUnique({ where: { id } });
+    if (!reg) throw new NotFoundException('Registration not found');
+
+    const updated = await this.prisma.partnerRegistration.update({
       where: { id },
       data: { status, adminNotes: adminNotes || undefined },
     });
+
+    // On APPROVED: ensure User has SERVICE_VENDOR role + create/update ServiceVendor profile
+    if (status === 'APPROVED') {
+      await this._activatePartner(reg);
+    }
+
+    return updated;
+  }
+
+  private async _activatePartner(reg: any) {
+    try {
+      // 1. Find or create the User and set role to SERVICE_VENDOR
+      let user = await this.prisma.user.findFirst({ where: { phone: reg.phone } });
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: {
+            phone: reg.phone,
+            name: reg.fullName || 'Partner',
+            email: reg.email || undefined,
+            role: UserRole.SERVICE_VENDOR,
+            isVerified: true,
+          },
+        });
+      } else {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            role: UserRole.SERVICE_VENDOR,
+            isVerified: true,
+            name: reg.fullName || user.name,
+            ...(reg.email ? { email: reg.email } : {}),
+          },
+        });
+      }
+
+      // 2. Link userId back to the registration
+      await this.prisma.partnerRegistration.update({
+        where: { id: reg.id },
+        data: { userId: user.id },
+      });
+
+      // 3. Create or update ServiceVendor record from registration data
+      const skills = reg.categories || [];
+      await this.prisma.serviceVendor.upsert({
+        where: { userId: user.id },
+        create: {
+          userId:           user.id,
+          fullName:         reg.fullName || 'Partner',
+          baseCity:         reg.city     || '',
+          skills,
+          preferredLanguage: reg.language === 'HI' ? 'HI' : 'EN',
+          currentLatitude:  reg.latitude  || null,
+          currentLongitude: reg.longitude || null,
+          status:           'ACTIVE',
+        },
+        update: {
+          fullName: reg.fullName || 'Partner',
+          baseCity: reg.city    || '',
+          skills,
+          status:   'ACTIVE',
+          ...(reg.latitude  ? { currentLatitude:  reg.latitude  } : {}),
+          ...(reg.longitude ? { currentLongitude: reg.longitude } : {}),
+        },
+      });
+
+      // 4. Save key documents to VendorDocument table
+      const sv = await this.prisma.serviceVendor.findUnique({ where: { userId: user.id } });
+      if (sv) {
+        const docFields: Array<[string, string]> = [
+          ['idProofFront', reg.idProofType ? `${reg.idProofType}_FRONT` : 'ID_FRONT'],
+          ['idProofBack',  reg.idProofType ? `${reg.idProofType}_BACK`  : 'ID_BACK'],
+          ['panCardUrl',   'PAN'],
+          ['profilePhotoUrl', 'PHOTO'],
+          ['policeVerificationUrl', 'POLICE_CERT'],
+          ['cancelledChequeUrl', 'CHEQUE'],
+        ];
+        for (const [field, docType] of docFields) {
+          const url = (reg as any)[field];
+          if (url && url !== '[uploaded]') {
+            // Delete old doc of same type then re-create (avoid duplicate upsert issues)
+            await this.prisma.vendorDocument.deleteMany({ where: { vendorId: sv.id, type: docType } });
+            await this.prisma.vendorDocument.create({
+              data: { vendorId: sv.id, type: docType, url, verified: true },
+            });
+          }
+        }
+      }
+
+      this.logger.log(`✅ Partner activated: ${reg.fullName} (${reg.phone}) → userId ${user.id}`);
+    } catch (e) {
+      this.logger.error(`Failed to activate partner ${reg.registrationId}: ${e.message}`);
+    }
   }
 }
 
