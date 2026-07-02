@@ -5275,6 +5275,86 @@
     if (el) el.classList.remove('show');
   }
 
+  // ── GPS → city auto-detection ──────────────────────────────────────────────
+  // Alias map: Nominatim city names → our city modal names
+  var _GPS_CITY_ALIASES = {
+    // Mumbai variations
+    'mumbai': 'Mumbai', 'navi mumbai': 'Mumbai', 'thane': 'Mumbai',
+    'mumbai city': 'Mumbai', 'mumbai suburban': 'Mumbai', 'greater mumbai': 'Mumbai',
+    // Delhi variations
+    'delhi': 'Delhi NCR', 'new delhi': 'Delhi NCR', 'north delhi': 'Delhi NCR',
+    'south delhi': 'Delhi NCR', 'east delhi': 'Delhi NCR', 'west delhi': 'Delhi NCR',
+    'central delhi': 'Delhi NCR', 'gurgaon': 'Delhi NCR', 'gurugram': 'Delhi NCR',
+    'noida': 'Delhi NCR', 'faridabad': 'Delhi NCR', 'ghaziabad': 'Delhi NCR',
+    // Bangalore variations
+    'bangalore': 'Bangalore', 'bengaluru': 'Bangalore', 'bangalore urban': 'Bangalore',
+    'bengaluru urban': 'Bangalore',
+    // Hyderabad variations
+    'hyderabad': 'Hyderabad', 'secunderabad': 'Hyderabad', 'rangareddy': 'Hyderabad',
+    'cyberabad': 'Hyderabad',
+    // Pune variations
+    'pune': 'Pune', 'pimpri-chinchwad': 'Pune', 'pimpri chinchwad': 'Pune',
+    'pune city': 'Pune',
+    // Chennai variations
+    'chennai': 'Chennai', 'madras': 'Chennai', 'greater chennai': 'Chennai',
+    // Kolkata variations
+    'kolkata': 'Kolkata', 'calcutta': 'Kolkata', 'howrah': 'Kolkata',
+    // Others
+    'ahmedabad': 'Ahmedabad', 'jaipur': 'Jaipur', 'lucknow': 'Lucknow',
+    'indore': 'Indore', 'chandigarh': 'Chandigarh',
+  };
+
+  function _haversineKm(lat1, lng1, lat2, lng2) {
+    var R = 6371;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLng = (lng2 - lng1) * Math.PI / 180;
+    var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Find nearest serviced city using lat/lng from bookingCities (loaded from API)
+  function _findNearestCity(lat, lng) {
+    var best = null, bestDist = Infinity;
+    bookingCities.forEach(function(c) {
+      if (!c.latitude || !c.longitude) return;
+      var d = _haversineKm(lat, lng, c.latitude, c.longitude);
+      if (d < bestDist) { bestDist = d; best = c; }
+    });
+    // Only match if within 150 km of a serviced city
+    return (best && bestDist < 150) ? best.name : null;
+  }
+
+  // Auto-select city in the header + city modal after GPS detection
+  function _autoSelectCityFromGPS(lat, lng, geoCity) {
+    // Try coordinate-based nearest city first (most accurate)
+    var matched = _findNearestCity(lat, lng);
+
+    // Fallback: alias map from reverse geocode city string
+    if (!matched && geoCity) {
+      matched = _GPS_CITY_ALIASES[geoCity.toLowerCase().trim()] || null;
+    }
+
+    if (!matched) return; // GPS city not in our service area
+
+    if (matched === currentCity) return; // already on the right city
+
+    // Update header city label and currentCity state (without closing modals)
+    currentCity = matched;
+    localStorage.setItem('remont_city', matched);
+    var cityEl = document.getElementById('currentCity');
+    if (cityEl) cityEl.textContent = matched;
+
+    // Sync city modal selection highlight
+    document.querySelectorAll('.cm-city').forEach(function(c) {
+      c.classList.toggle('selected', c.dataset.city === matched);
+    });
+
+    applyCityFilter();
+    _locShowToast('📍 City set to ' + matched + ' via GPS · Tap city name to change');
+  }
+
   function locRequestGPS(fromModal) {
     locDismissBanner();
     var strip = document.getElementById('loc-gps-strip');
@@ -5300,11 +5380,10 @@
             LocationService.save(loc);
             if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '✅'; msg.textContent = 'GPS location captured (no address — please fill details)'; }
           }
+          // Auto-change city based on GPS coordinates
+          _autoSelectCityFromGPS(loc.latitude, loc.longitude, geo ? geo.city : null);
           // Show OSM map preview in modal
           _locShowMapPreview(loc.latitude, loc.longitude);
-          if (!fromModal) {
-            _locShowToast('📍 Location saved (' + (geo && geo.city ? geo.city : 'GPS') + ')');
-          }
         });
       },
       function(errMsg) {
