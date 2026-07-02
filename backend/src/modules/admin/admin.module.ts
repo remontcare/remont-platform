@@ -768,15 +768,25 @@ Return JSON with:
 
     // Default settings
     const settings = [
+      { key: 'site_name', value: 'Remont', label: 'Site / Brand Name', group: 'general' },
+      { key: 'site_tagline', value: 'India', label: 'Site Tagline (shown beside logo)', group: 'general' },
+      { key: 'site_description', value: "India's AI-powered multi-service marketplace. Handyman, interior, construction, AMC — booked via app, web, WhatsApp, AI chat, or call.", label: 'Site Description (footer)', group: 'general' },
+      { key: 'logo_url', value: '', label: 'Logo Image URL (leave blank to use default icon)', group: 'general' },
       { key: 'support_phone', value: '+91 98765 43210', label: 'Support Phone', group: 'contact' },
       { key: 'support_email', value: 'support@remontindia.com', label: 'Support Email', group: 'contact' },
+      { key: 'support_label', value: '24/7 AI Chat Support', label: 'Support Hours Label', group: 'contact' },
       { key: 'whatsapp_number', value: '+919876543210', label: 'WhatsApp Number', group: 'contact' },
+      { key: 'social_linkedin', value: '', label: 'LinkedIn URL', group: 'social' },
+      { key: 'social_instagram', value: '', label: 'Instagram URL', group: 'social' },
+      { key: 'social_twitter', value: '', label: 'Twitter / X URL', group: 'social' },
+      { key: 'social_youtube', value: '', label: 'YouTube URL', group: 'social' },
+      { key: 'social_facebook', value: '', label: 'Facebook URL', group: 'social' },
       { key: 'total_cities', value: '32', label: 'Total Cities (shown on homepage)', group: 'stats' },
       { key: 'total_reviews', value: '50000', label: 'Total Reviews (shown on homepage)', group: 'stats' },
       { key: 'total_vendors', value: '5000', label: 'Total Vendors (shown on homepage)', group: 'stats' },
     ];
     for (const s of settings) {
-      await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: { value: s.value } });
+      await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: {} });
     }
     results.push(`✓ Default settings upserted`);
 

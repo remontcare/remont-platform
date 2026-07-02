@@ -29,7 +29,7 @@ renderSidebar('settings');
 requireAuth();
 
 var settingsData = {};
-var groups = { general: 'General', contact: '📞 Contact Info', stats: '📊 Homepage Stats', social: '🔗 Social Links' };
+var groups = { general: '🏢 Brand & General', contact: '📞 Contact Info', stats: '📊 Homepage Stats', social: '🔗 Social Links' };
 
 function load() {
   api('GET','/admin/settings').then(function(settings) {

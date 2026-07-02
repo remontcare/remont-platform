@@ -3078,8 +3078,8 @@
   <div class="grp">
     <div class="grp-title">Booking</div>
     <a href="#"><span>🤖</span> AI Chat Booking</a>
-    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener"><span>💬</span> WhatsApp Booking</a>
-    <a href="tel:+919876543210"><span>📞</span> Call to Book</a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="mobile-whatsapp-link"><span>💬</span> WhatsApp Booking</a>
+    <a href="tel:+919876543210" data-setting="mobile-phone-link"><span>📞</span> Call to Book</a>
   </div>
   <div class="grp">
     <div class="grp-title">For Business</div>
@@ -3101,9 +3101,9 @@
 <!-- ═══ TOP UTILITY STRIP ═══ -->
 <div class="top-strip">
   <div class="left">
-    <span>📞 +91 98765 43210</span>
-    <span>✉️ hello@remontindia.com</span>
-    <span>🕐 24/7 AI Chat Support</span>
+    <span data-setting="support-phone">📞 +91 98765 43210</span>
+    <span data-setting="support-email">✉️ hello@remontindia.com</span>
+    <span data-setting="support-label">🕐 24/7 AI Chat Support</span>
   </div>
   <div class="right">
     <span class="lang-toggle">🌐 EN / हिं</span>
@@ -3112,7 +3112,7 @@
     <span class="strip-divider"></span>
     <a href="#corporate" class="strip-btn">🏢 Corporate Login</a>
     <span class="strip-divider"></span>
-    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp">💬 WhatsApp Book</a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp" data-setting="whatsapp-link">💬 WhatsApp Book</a>
     <a href="#" class="strip-btn highlight">📱 Download App</a>
   </div>
 </div>
@@ -3120,10 +3120,11 @@
 <!-- ═══ MAIN HEADER ═══ -->
 <header id="header">
   <div class="logo">
-    <div class="logo-mark"></div>
+    <img id="header-logo-img" src="" alt="" style="display:none;height:36px;width:auto;object-fit:contain">
+    <div class="logo-mark" id="header-logo-mark"></div>
     <div class="logo-text-wrap">
-      <span class="logo-text">REMONT</span>
-      <span class="logo-sub">INDIA</span>
+      <span class="logo-text" data-setting="site-name">REMONT</span>
+      <span class="logo-sub" data-setting="site-tagline">INDIA</span>
     </div>
   </div>
 
@@ -4389,24 +4390,25 @@
   <div class="footer-grid">
     <div class="footer-brand">
       <div class="logo">
-        <div class="logo-mark"></div>
+        <img id="footer-logo-img" src="" alt="" style="display:none;height:36px;width:auto;object-fit:contain">
+        <div class="logo-mark" id="footer-logo-mark"></div>
         <div class="logo-text-wrap">
-          <span class="logo-text">REMONT</span>
-          <span class="logo-sub" style="color: var(--amber);">INDIA</span>
+          <span class="logo-text" data-setting="site-name">REMONT</span>
+          <span class="logo-sub" data-setting="site-tagline" style="color: var(--amber);">INDIA</span>
         </div>
       </div>
-      <p class="footer-desc">India's AI-powered multi-service marketplace. Handyman, interior, construction, AMC — booked via app, web, WhatsApp, AI chat, or call.</p>
+      <p class="footer-desc" data-setting="site-description">India's AI-powered multi-service marketplace. Handyman, interior, construction, AMC — booked via app, web, WhatsApp, AI chat, or call.</p>
       <div class="footer-trust-row">
         <div class="trust-badge">🛡️ Verified Pros</div>
         <div class="trust-badge">🔒 Secure Payments</div>
         <div class="trust-badge">📜 GST Compliant</div>
       </div>
       <div class="footer-social">
-        <a href="#" class="social-btn">in</a>
-        <a href="#" class="social-btn">ig</a>
-        <a href="#" class="social-btn">𝕏</a>
-        <a href="#" class="social-btn">▶</a>
-        <a href="#" class="social-btn">f</a>
+        <a href="#" class="social-btn" data-setting="social-linkedin" target="_blank" rel="noopener">in</a>
+        <a href="#" class="social-btn" data-setting="social-instagram" target="_blank" rel="noopener">ig</a>
+        <a href="#" class="social-btn" data-setting="social-twitter" target="_blank" rel="noopener">𝕏</a>
+        <a href="#" class="social-btn" data-setting="social-youtube" target="_blank" rel="noopener">▶</a>
+        <a href="#" class="social-btn" data-setting="social-facebook" target="_blank" rel="noopener">f</a>
       </div>
     </div>
     <div class="footer-col">
@@ -4434,8 +4436,8 @@
       <h4>Booking</h4>
       <div class="footer-links">
         <a href="#">AI Chat Booking</a>
-        <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener">WhatsApp Bot</a>
-        <a href="tel:+919876543210">Call Center</a>
+        <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="whatsapp-link">WhatsApp Bot</a>
+        <a href="tel:+919876543210" data-setting="mobile-phone-link">Call Center</a>
         <a href="#">Mobile App</a>
         <a href="#">Voice (Alexa)</a>
       </div>
@@ -6996,15 +6998,32 @@ function verifyOtpAuth() {
     return r.json();
   }).then(function(d) {
     var token = d.accessToken || d.access_token || (d.data && d.data.accessToken);
+    var user = d.user || (d.data && d.data.user) || {};
     if (!token) throw new Error('No token');
     localStorage.setItem('remont_token', token);
     localStorage.setItem('remont_phone', phone);
+    if (user && user.id) {
+      localStorage.setItem('remont_user', JSON.stringify({ id: user.id, name: user.name || '', phone: user.phone || phone, email: user.email || '', role: user.role || 'CUSTOMER' }));
+    }
     btn.textContent = 'Verify OTP →'; btn.disabled = false;
     closeAuthModal();
+    var role = (user && user.role) || '';
+    // Route by role — vendor and admin go to their portals
+    if (role === 'SERVICE_VENDOR') {
+      localStorage.setItem('pr_token', token);
+      window.location.href = '/vendor.html';
+      return;
+    }
+    if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
+      window.location.href = '/admin/dashboard.html';
+      return;
+    }
+    // Customer — sync full profile then run callback
+    _syncUserProfile();
     if (_authCallback) { var cb = _authCallback; _authCallback = null; cb(); }
   }).catch(function() {
     btn.textContent = 'Verify OTP →'; btn.disabled = false;
-    showAuthMsg('Invalid OTP. Check Railway logs for the code.');
+    showAuthMsg('Invalid OTP. Try again.');
   });
 }
 
@@ -8315,5 +8334,142 @@ window.closeCustPartner = function() {
 </div><!-- /#partnerPortal -->
 
 
+<script>
+(function () {
+  const defaults = {
+    siteName: 'REMONT',
+    siteTagline: 'INDIA',
+    supportPhone: '+91 98765 43210',
+    supportEmail: 'hello@remontindia.com',
+    supportLabel: '24/7 AI Chat Support',
+    whatsappNumber: '+919876543210',
+    whatsappMessage: 'Hi Remont, I want a quote',
+  };
+
+  function getApiBase() {
+    return window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+  }
+
+  function unwrapPayload(payload) {
+    if (payload && payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+      return payload.data;
+    }
+    return payload || {};
+  }
+
+  function normalizePhone(value) {
+    return String(value || '').trim();
+  }
+
+  function buildWhatsAppUrl(value, message) {
+    const phone = normalizePhone(value || '').replace(/[^\d+]/g, '');
+    const text = encodeURIComponent(message || defaults.whatsappMessage);
+    if (!phone) return '#';
+    return 'https://wa.me/' + phone.replace(/^\+/, '') + '?text=' + text;
+  }
+
+  function renderSettings(settings) {
+    const siteName = settings.site_name || settings.company_name || settings.brand_name || defaults.siteName;
+    const siteTagline = settings.site_tagline || settings.brand_tagline || defaults.siteTagline;
+    const supportPhone = settings.support_phone || defaults.supportPhone;
+    const supportEmail = settings.support_email || defaults.supportEmail;
+    const supportLabel = settings.support_label || settings.support_text || defaults.supportLabel;
+    const whatsappNumber = settings.whatsapp_number || defaults.whatsappNumber;
+    const logoUrl = settings.logo_url || settings.logo || '';
+    const siteDesc = settings.site_description || settings.brand_description || '';
+
+    document.title = siteName + ' — AI-Powered Home Services';
+
+    // Logo image — show <img> if logo_url is set, else show CSS logo-mark
+    ['header-logo-img', 'footer-logo-img'].forEach(function (imgId) {
+      var imgEl = document.getElementById(imgId);
+      var markId = imgId.replace('-img', '-mark');
+      var markEl = document.getElementById(markId);
+      if (logoUrl && imgEl) {
+        imgEl.src = logoUrl;
+        imgEl.alt = siteName;
+        imgEl.style.display = 'block';
+        if (markEl) markEl.style.display = 'none';
+      } else if (imgEl) {
+        imgEl.style.display = 'none';
+        if (markEl) markEl.style.display = '';
+      }
+    });
+
+    document.querySelectorAll('[data-setting="site-name"]').forEach(function (el) {
+      el.textContent = String(siteName).toUpperCase();
+    });
+    document.querySelectorAll('[data-setting="site-tagline"]').forEach(function (el) {
+      el.textContent = String(siteTagline).toUpperCase();
+    });
+    if (siteDesc) {
+      document.querySelectorAll('[data-setting="site-description"]').forEach(function (el) {
+        el.textContent = siteDesc;
+      });
+    }
+    document.querySelectorAll('[data-setting="support-phone"]').forEach(function (el) {
+      el.textContent = '📞 ' + supportPhone;
+    });
+    document.querySelectorAll('[data-setting="support-email"]').forEach(function (el) {
+      el.textContent = '✉️ ' + supportEmail;
+    });
+    document.querySelectorAll('[data-setting="support-label"]').forEach(function (el) {
+      el.textContent = '🕐 ' + supportLabel;
+    });
+
+    const whatsappUrl = buildWhatsAppUrl(whatsappNumber, defaults.whatsappMessage);
+    document.querySelectorAll('[data-setting="whatsapp-link"]').forEach(function (el) {
+      el.href = whatsappUrl;
+    });
+    document.querySelectorAll('[data-setting="mobile-whatsapp-link"]').forEach(function (el) {
+      el.href = whatsappUrl;
+    });
+
+    const phoneUrl = 'tel:' + normalizePhone(supportPhone).replace(/\s+/g, '');
+    document.querySelectorAll('[data-setting="mobile-phone-link"]').forEach(function (el) {
+      el.href = phoneUrl;
+    });
+
+    // Social links
+    var socialMap = {
+      'social-linkedin': settings.social_linkedin || settings.linkedin_url || '',
+      'social-instagram': settings.social_instagram || settings.instagram_url || '',
+      'social-twitter': settings.social_twitter || settings.twitter_url || '',
+      'social-youtube': settings.social_youtube || settings.youtube_url || '',
+      'social-facebook': settings.social_facebook || settings.facebook_url || '',
+    };
+    Object.keys(socialMap).forEach(function (key) {
+      var url = socialMap[key];
+      if (url) {
+        document.querySelectorAll('[data-setting="' + key + '"]').forEach(function (el) {
+          el.href = url;
+        });
+      }
+    });
+  }
+
+  function loadSiteSettings() {
+    const endpoint = getApiBase() + '/api/v1/cms/settings';
+    fetch(endpoint, { headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Settings request failed');
+        return response.json();
+      })
+      .then(function (json) {
+        const settings = unwrapPayload(json);
+        renderSettings(settings || {});
+      })
+      .catch(function () {
+        renderSettings({});
+      });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadSiteSettings);
+  } else {
+    loadSiteSettings();
+  }
+})();
+</script>
 </body>
 </html>
