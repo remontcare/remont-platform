@@ -140,6 +140,27 @@
         <div class="form-group" style="flex:1"><label class="form-label">MRP (₹)</label><input id="prod-mrp" class="form-control" type="number" placeholder="249"></div>
         <div class="form-group" style="flex:1"><label class="form-label">Stock</label><input id="prod-stock" class="form-control" type="number" value="0"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Unit / Sold As</label>
+          <select id="prod-unit" class="form-control">
+            <option value="piece">Piece / Unit</option>
+            <option value="set">Set</option>
+            <option value="pair">Pair</option>
+            <option value="pack">Pack</option>
+            <option value="box">Box</option>
+            <option value="bag">Bag</option>
+            <option value="roll">Roll</option>
+            <option value="sqft">Sq.Ft</option>
+            <option value="meter">Meter</option>
+            <option value="kg">Kg</option>
+            <option value="gram">Gram</option>
+            <option value="litre">Litre</option>
+            <option value="ml">ML</option>
+            <option value="bulk">Bulk</option>
+          </select>
+        </div>
+      </div>
       <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-active" checked> Active</label>
     </div>
 
@@ -342,6 +363,7 @@ function openProdModal(prod) {
   document.getElementById('prod-cat').value = prod ? prod.categoryId : '';
   document.getElementById('prod-brand').value = prod ? (prod.brand||'') : '';
   document.getElementById('prod-desc').value = prod ? (prod.description||'') : '';
+  document.getElementById('prod-unit').value = prod ? (prod.unit||'piece') : 'piece';
   document.getElementById('prod-price').value = prod ? prod.price : '';
   document.getElementById('prod-mrp').value = prod ? (prod.mrp||'') : '';
   document.getElementById('prod-stock').value = prod ? prod.stock : 0;
@@ -376,6 +398,7 @@ function saveProduct() {
     name: document.getElementById('prod-name').value.trim(),
     brand: document.getElementById('prod-brand').value.trim()||undefined,
     description: document.getElementById('prod-desc').value.trim()||undefined,
+    unit: document.getElementById('prod-unit').value || 'piece',
     price: price,
     mrp: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     stock: parseInt(document.getElementById('prod-stock').value)||0,

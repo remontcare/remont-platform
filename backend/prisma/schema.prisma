@@ -348,6 +348,9 @@ model Service {
   name            String
   slug            String   @unique
   description     String?
+  unit            String   @default("per visit")
+  inclusions      String[]
+  exclusions      String[]
   basePrice       Decimal  @db.Decimal(10, 2)
   originalPrice   Decimal? @db.Decimal(10, 2)
   durationMinutes Int      @default(60)
@@ -398,6 +401,7 @@ model Product {
   brand           String?
   description     String?
   aiGeneratedDesc String?
+  unit            String   @default("piece")
   price           Decimal  @db.Decimal(10, 2)
   mrp             Decimal? @db.Decimal(10, 2)
   stock           Int      @default(0)

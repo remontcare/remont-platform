@@ -170,6 +170,35 @@
         <div class="form-group" style="flex:1"><label class="form-label">Original / MRP (₹)</label><input id="svc-mrp" class="form-control" type="number" placeholder="699"></div>
         <div class="form-group" style="flex:1"><label class="form-label">Duration (min)</label><input id="svc-duration" class="form-control" type="number" value="60"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Unit / Pricing Basis</label>
+          <select id="svc-unit" class="form-control">
+            <option value="per visit">Per Visit</option>
+            <option value="per unit">Per Unit</option>
+            <option value="per sqft">Per Sq.Ft</option>
+            <option value="per meter">Per Meter</option>
+            <option value="per room">Per Room</option>
+            <option value="per floor">Per Floor</option>
+            <option value="per kg">Per Kg</option>
+            <option value="per litre">Per Litre</option>
+            <option value="per hour">Per Hour</option>
+            <option value="per day">Per Day</option>
+            <option value="bulk">Bulk / Package</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">✅ What's Included <small style="color:#9ca3af">(one per line)</small></label>
+          <textarea id="svc-inclusions" class="form-control" rows="4" placeholder="Filter cleaning&#10;Gas pressure check&#10;Performance testing&#10;Basic inspection"></textarea>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label class="form-label">❌ Not Included <small style="color:#9ca3af">(one per line)</small></label>
+          <textarea id="svc-exclusions" class="form-control" rows="4" placeholder="Gas refill (charged extra)&#10;Spare parts&#10;Electrical wiring&#10;Wall mounting"></textarea>
+        </div>
+      </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-active" checked> Active</label>
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-popular"> Popular</label>
@@ -417,6 +446,9 @@ function openSvcModal(svc) {
   document.getElementById('svc-price').value = svc ? svc.basePrice : '';
   document.getElementById('svc-mrp').value = svc ? (svc.originalPrice||'') : '';
   document.getElementById('svc-duration').value = svc ? svc.durationMinutes : 60;
+  document.getElementById('svc-unit').value = svc ? (svc.unit||'per visit') : 'per visit';
+  document.getElementById('svc-inclusions').value = svc ? (svc.inclusions||[]).join('\n') : '';
+  document.getElementById('svc-exclusions').value = svc ? (svc.exclusions||[]).join('\n') : '';
   document.getElementById('svc-img').value = svc ? (svc.imageUrl||'') : '';
   document.getElementById('svc-active').checked = svc ? svc.isActive : true;
   document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
@@ -462,6 +494,9 @@ function saveService() {
     categoryId: document.getElementById('svc-cat').value,
     name: document.getElementById('svc-name').value.trim(),
     description: document.getElementById('svc-desc').value.trim()||undefined,
+    unit: document.getElementById('svc-unit').value || 'per visit',
+    inclusions: document.getElementById('svc-inclusions').value.split('\n').map(function(l){return l.trim();}).filter(Boolean),
+    exclusions: document.getElementById('svc-exclusions').value.split('\n').map(function(l){return l.trim();}).filter(Boolean),
     basePrice: price,
     originalPrice: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     durationMinutes: parseInt(document.getElementById('svc-duration').value)||60,
