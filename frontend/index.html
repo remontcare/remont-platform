@@ -4876,6 +4876,9 @@
     }
   };
 
+  // Escape value for safe use inside inline JS string attributes
+  function escJs(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
+
   function renderService(key) {
     const d = serviceData[key];
     if (!d) return;
@@ -6077,9 +6080,6 @@
     var headerBadge = document.getElementById('cartBadgeHeader');
     if (headerBadge) headerBadge.textContent = total || '';
   }
-
-  // Escape a value for safe inline JS string attributes
-  function escJs(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
   function addToCart(item) {
     var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
