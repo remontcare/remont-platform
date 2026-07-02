@@ -428,6 +428,20 @@ export class AdminService {
     return this.prisma.serviceCategory.delete({ where: { id } });
   }
 
+  async forceDeleteCategory(id: string) {
+    const cat = await this.prisma.serviceCategory.findUnique({ where: { id } });
+    if (!cat) throw new NotFoundException('Category not found');
+    const services = await this.prisma.service.findMany({ where: { categoryId: id }, select: { id: true } });
+    const svcIds = services.map(s => s.id);
+    if (svcIds.length > 0) {
+      await this.prisma.order.updateMany({ where: { serviceId: { in: svcIds } }, data: { serviceId: null } });
+      await this.prisma.cityService.deleteMany({ where: { serviceId: { in: svcIds } } });
+      await this.prisma.service.deleteMany({ where: { id: { in: svcIds } } });
+    }
+    await this.prisma.serviceCategory.delete({ where: { id } });
+    return { deleted: true, categoryName: cat.name, servicesRemoved: svcIds.length };
+  }
+
   async bulkUpdateCategories(ids: string[], data: { isActive?: boolean }) {
     return this.prisma.serviceCategory.updateMany({ where: { id: { in: ids } }, data });
   }
@@ -472,6 +486,19 @@ export class AdminService {
 
   async bulkUpdateServices(ids: string[], data: { isActive?: boolean }) {
     return this.prisma.service.updateMany({ where: { id: { in: ids } }, data });
+  }
+
+  async deleteAllOrders() {
+    await this.prisma.review.deleteMany({});
+    await this.prisma.invoice.deleteMany({});
+    const result = await this.prisma.order.deleteMany({});
+    return { deleted: result.count };
+  }
+
+  async deleteAllServices() {
+    await this.prisma.cityService.deleteMany({});
+    const result = await this.prisma.service.deleteMany({});
+    return { deleted: result.count };
   }
 
   // City-wise service assignment
@@ -1471,6 +1498,7 @@ export class AdminController {
   @Patch('orders/:id/assign-vendor') assignVendor(@Param('id') id: string, @Body() b: { vendorId: string }) { return this.admin.forceAssignVendor(id, b.vendorId); }
   @Patch('orders/:id/cancel') cancelOrder(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.adminCancelOrder(id, b.reason); }
   @Patch('orders/:id/refund') refund(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason); }
+  @Delete('orders/all') deleteAllOrders() { return this.admin.deleteAllOrders(); }
 
   // Cities
   @Get('cities') cities() { return this.admin.listCities(); }
@@ -1484,6 +1512,7 @@ export class AdminController {
   @Patch('services/categories/bulk') bulkCategories(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateCategories(b.ids, { isActive: b.isActive }); }
   @Patch('services/categories/:id') updateCategory(@Param('id') id: string, @Body() b: any) { return this.admin.updateCategory(id, b); }
   @Delete('services/categories/:id') deleteCategory(@Param('id') id: string) { return this.admin.deleteCategory(id); }
+  @Delete('services/categories/:id/force') forceDeleteCategory(@Param('id') id: string) { return this.admin.forceDeleteCategory(id); }
 
   // Services
   @Get('services/export') exportSvcs() { return this.admin.exportServices(); }
@@ -1494,6 +1523,7 @@ export class AdminController {
   @Post('services') createService(@Body() b: any) { return this.admin.createService(b); }
   @Post('services/bulk') bulkServices(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateServices(b.ids, { isActive: b.isActive }); }
   @Patch('services/:id') updateService(@Param('id') id: string, @Body() b: any) { return this.admin.updateService(id, b); }
+  @Delete('services/all') deleteAllServices() { return this.admin.deleteAllServices(); }
   @Delete('services/:id') deleteService(@Param('id') id: string) { return this.admin.deleteService(id); }
   @Get('services/:id/cities') serviceCities(@Param('id') id: string) { return this.admin.listServiceCities(id); }
   @Patch('services/:id/cities/:cityId') upsertServiceCity(@Param('id') sid: string, @Param('cityId') cid: string, @Body() b: { isActive: boolean; customPrice?: number }) {
