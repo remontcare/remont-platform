@@ -916,6 +916,32 @@
   #prod-detail-popup .pd-spec { font-size: 11px; color: #374151; background: #f9fafb; padding: 6px 8px; border-radius: 6px; }
   #prod-detail-popup .pd-spec div { margin-bottom: 3px; }
   #prod-detail-popup .pd-unit { font-size: 11px; font-weight: 600; color: var(--sienna); margin-bottom: 6px; }
+  /* Service detail modal */
+  #svc-detail-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9600; display: none;
+    align-items: flex-end; justify-content: center;
+  }
+  #svc-detail-overlay.open { display: flex; }
+  #svc-detail-modal {
+    background: #fff; border-radius: 20px 20px 0 0; width: 100%; max-width: 540px;
+    max-height: 88vh; overflow-y: auto; padding: 24px 22px 32px;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
+  }
+  #svc-detail-modal .sdm-handle { width: 40px; height: 4px; background: #e5e7eb; border-radius: 2px; margin: 0 auto 18px; }
+  #svc-detail-modal .sdm-icon { font-size: 32px; margin-bottom: 8px; }
+  #svc-detail-modal .sdm-name { font-size: 18px; font-weight: 700; color: #111; margin-bottom: 4px; }
+  #svc-detail-modal .sdm-price { font-size: 22px; font-weight: 700; color: var(--sienna); margin-bottom: 2px; }
+  #svc-detail-modal .sdm-orig { font-size: 13px; color: #9ca3af; text-decoration: line-through; margin-right: 8px; }
+  #svc-detail-modal .sdm-unit { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
+  #svc-detail-modal .sdm-desc { font-size: 14px; color: #374151; line-height: 1.6; margin-bottom: 16px; background: #f9fafb; padding: 12px; border-radius: 10px; }
+  #svc-detail-modal .sdm-section { font-size: 12px; font-weight: 700; color: #374151; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; margin-top: 14px; }
+  #svc-detail-modal .sdm-list { list-style: none; margin: 0 0 8px; padding: 0; }
+  #svc-detail-modal .sdm-list li { font-size: 13px; color: #374151; padding: 5px 0; border-bottom: 1px solid #f3f4f6; display: flex; gap: 8px; align-items: flex-start; }
+  #svc-detail-modal .sdm-list li .ic { flex-shrink: 0; }
+  #svc-detail-modal .sdm-btns { display: flex; gap: 10px; margin-top: 20px; }
+  #svc-detail-modal .sdm-cart { flex: 1; padding: 13px; border: 2px solid var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--sienna); background: #fff; }
+  #svc-detail-modal .sdm-book { flex: 1.5; padding: 13px; background: var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; }
+  #svc-detail-modal .sdm-close { position: absolute; top: 16px; right: 18px; font-size: 22px; color: #9ca3af; background: none; border: none; cursor: pointer; }
   /* Cart order group indicator */
   .cart-group-badge {
     font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px;
@@ -4923,7 +4949,7 @@
       </div>
       <div class="product-grid">
         ${d.products.map(p => `
-          <div class="product-card" data-product-id="${p.id || ''}">
+          <div class="product-card" data-product-id="${p.id || ''}" onclick="if(!event.target.closest('.product-cta')&&!event.target.closest('.product-info-btn')&&!event.target.closest('.product-fav'))showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${JSON.stringify(p.specs||{})})">
             <div class="product-img" style="background-image:url('${p.img}');position:relative">
               ${p.badge ? `<div class="product-badge${p.badgeGreen ? ' green' : ''}">${p.badge}</div>` : ''}
               <div class="product-fav">♡</div>
@@ -5126,12 +5152,12 @@
    *   - Update category nav (cosmetic only — services panel is the source of truth)
    */
   function applyCityFilter() {
-    const available = CITY_SERVICES[currentCity] || [];
+    const available = CITY_SERVICES[currentCity] || null; // null = show all (unknown city)
 
     // Update services panel
     document.querySelectorAll('.svc-item[data-svc]').forEach(item => {
       const svc = item.dataset.svc;
-      const isAvailable = available.includes(svc);
+      const isAvailable = !available || available.includes(svc);
       item.classList.toggle('unavailable', !isAvailable);
     });
 
@@ -5970,11 +5996,24 @@
     if (!categories || categories.length === 0) return;
 
     // Map category key to frontend svc-item key
-    var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction' };
+    var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction','PEST_CONTROL':'pest-control','FALSE_CEILING':'false-ceiling','FALSE-CEILING':'false-ceiling' };
+
+    // Deduplicate by normalized key (keep first/largest)
+    var seen = {};
+    var deduped = [];
+    categories.forEach(function(cat) {
+      var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-');
+      if (!seen[fkey] || (cat.services||[]).length > (seen[fkey].services||[]).length) {
+        seen[fkey] = cat;
+      }
+    });
+    Object.keys(seen).forEach(function(k){ deduped.push(seen[k]); });
+    deduped.sort(function(a,b){ return (a.sortOrder||99)-(b.sortOrder||99); });
+    categories = deduped;
 
     // Update serviceData from API categories
     categories.forEach(function(cat) {
-      var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+      var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-');
       var services = cat.services || [];
       if (services.length === 0) return;
 
@@ -6036,8 +6075,9 @@
     }
 
     // Render first available category
-    var firstKey = categories[0] ? (keyMap[categories[0].key] || categories[0].key.toLowerCase()) : null;
+    var firstKey = categories[0] ? (keyMap[categories[0].key] || categories[0].key.toLowerCase().replace(/_/g,'-')) : null;
     if (firstKey && serviceData[firstKey]) renderService(firstKey);
+    applyCityFilter();
   }
 
   // ── Load products for a service category from API ─────────────────
@@ -6160,15 +6200,67 @@
     addToCart({ id: productId, name: name ? name.textContent.trim() : 'Product', price: priceNum, type: 'product' });
   });
 
-  // Book service button handler — opens real booking form
+  // Service card click → show detail popup
   document.addEventListener('click', function(e) {
-    var btn = e.target.closest('.sub-svc-card');
-    if (!btn) return;
-    var svcId = btn.getAttribute('data-svc-id') || '';
-    var svcName = btn.querySelector('.nm') ? btn.querySelector('.nm').textContent.trim() : '';
-    var svcPrice = btn.querySelector('.pr') ? btn.querySelector('.pr').textContent.replace(/<[^>]*>/g, '').trim() : '';
-    openBookingModal(svcId, svcName, svcPrice);
+    var card = e.target.closest('.sub-svc-card');
+    if (!card) return;
+    if (e.target.closest('.svc-cart-btn') || e.target.closest('.svc-book-btn')) return;
+    var svcId = card.getAttribute('data-svc-id') || '';
+    var svcName = card.querySelector('.nm') ? card.querySelector('.nm').textContent.trim() : '';
+    var svcPrice = card.querySelector('.pr') ? card.querySelector('.pr').textContent.replace(/<[^>]*>/g,'').trim() : '';
+    // Find full data from serviceData
+    var svcData = null;
+    Object.keys(serviceData).forEach(function(k) {
+      if (serviceData[k] && serviceData[k].subServices) {
+        var found = serviceData[k].subServices.find(function(s){ return s.id === svcId || s.n === svcName; });
+        if (found) svcData = found;
+      }
+    });
+    showSvcDetail(svcId, svcName, svcPrice, svcData);
   });
+
+  function showSvcDetail(id, name, price, data) {
+    var icon = (data && data.ic) ? data.ic : '🔧';
+    var orig = (data && data.o && data.o !== '—') ? data.o : '';
+    var unit = (data && data.unit) ? data.unit : 'per visit';
+    var desc = (data && data.desc) ? data.desc : '';
+    var inclusions = (data && data.inclusions && data.inclusions.length) ? data.inclusions : [];
+    var exclusions = (data && data.exclusions && data.exclusions.length) ? data.exclusions : [];
+    var pNum = (data && data.pNum) ? data.pNum : 0;
+    var categoryKey = (data && data.categoryKey) ? data.categoryKey : '';
+
+    var html = '<div class="sdm-icon">' + icon + '</div>' +
+      '<div class="sdm-name">' + escHtml(name) + '</div>' +
+      '<div class="sdm-price">' + (orig ? '<span class="sdm-orig">' + escHtml(orig) + '</span>' : '') + escHtml(price) + '</div>' +
+      '<div class="sdm-unit">Per: ' + escHtml(unit) + '</div>';
+
+    if (desc) html += '<div class="sdm-desc">' + escHtml(desc) + '</div>';
+
+    if (inclusions.length) {
+      html += '<div class="sdm-section">✅ What\'s Included</div><ul class="sdm-list">';
+      inclusions.forEach(function(inc){ html += '<li><span class="ic">✓</span>' + escHtml(inc) + '</li>'; });
+      html += '</ul>';
+    }
+    if (exclusions.length) {
+      html += '<div class="sdm-section">❌ Not Included</div><ul class="sdm-list">';
+      exclusions.forEach(function(exc){ html += '<li><span class="ic">✕</span>' + escHtml(exc) + '</li>'; });
+      html += '</ul>';
+    }
+
+    html += '<div class="sdm-btns">' +
+      '<button class="sdm-cart" onclick="addToCart({id:\'' + escJs(id) + '\',name:\'' + escJs(name) + '\',price:' + pNum + ',type:\'service\',unit:\'' + escJs(unit) + '\',categoryKey:\'' + escJs(categoryKey) + '\'});closeSvcDetail();showToast(\'Added to cart\',\'success\')">+ Add to Cart</button>' +
+      '<button class="sdm-book" onclick="closeSvcDetail();openBookingModal(\'' + escJs(id) + '\',\'' + escJs(name) + '\',\'' + escJs(price) + '\')">⚡ Book Now</button>' +
+      '</div>';
+
+    document.getElementById('svc-detail-content').innerHTML = html;
+    document.getElementById('svc-detail-overlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSvcDetail() {
+    document.getElementById('svc-detail-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  }
 
   updateCartBadge();
 
@@ -6202,9 +6294,9 @@
       if (cats && cats.length > 0) {
         buildServicePanel(cats);
         // Load products for each category
-        var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction' };
+        var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction','PEST_CONTROL':'pest-control','FALSE_CEILING':'false-ceiling','FALSE-CEILING':'false-ceiling' };
         cats.forEach(function(cat){
-          var fkey = keyMap[cat.key] || cat.key.toLowerCase();
+          var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
           loadProductsForCategory(cat.key, fkey);
         });
       }
@@ -6522,6 +6614,15 @@
 <!-- ═══ CART DRAWER ═══ -->
 <!-- Product detail info popup -->
 <div id="prod-detail-popup"></div>
+
+<!-- Service Detail Modal -->
+<div id="svc-detail-overlay" onclick="if(event.target===this)closeSvcDetail()">
+  <div id="svc-detail-modal" style="position:relative">
+    <div class="sdm-handle"></div>
+    <button class="sdm-close" onclick="closeSvcDetail()">×</button>
+    <div id="svc-detail-content"></div>
+  </div>
+</div>
 
 <div id="cartOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;transition:opacity .3s" onclick="if(event.target===this)closeCart()"></div>
 <div id="cartDrawer" style="position:fixed;top:0;right:0;width:420px;max-width:100vw;height:100vh;background:#fff;z-index:9001;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.15);transition:transform .35s cubic-bezier(.4,0,.2,1)">
