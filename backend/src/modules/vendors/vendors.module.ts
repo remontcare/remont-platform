@@ -80,6 +80,20 @@ export class ServiceVendorsService {
     });
   }
 
+  async availableJobs(userId: string) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+    return this.prisma.order.findMany({
+      where: { vendorId: null, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] as any[] } },
+      include: {
+        service: { select: { name: true, categoryId: true } },
+        address: { select: { fullAddress: true, city: true, pincode: true, latitude: true, longitude: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+    });
+  }
+
   async acceptJob(userId: string, orderId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
@@ -109,6 +123,7 @@ export class ServiceVendorsController {
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: { isOnline: boolean }) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
   @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }
+  @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub); }
   @Post('me/jobs/:orderId/accept') accept(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.acceptJob(u.sub, id); }
 }
 
