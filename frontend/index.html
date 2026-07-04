@@ -6341,14 +6341,29 @@
 
   // ── Booking Modal ──────────────────────────────────────────────────────────
 
+  // ── Booking modal state ───────────────────────────────────────────────
+  window._bmStep = 1;
+  window._bmCoupon = null; // { code, discount, couponId }
+  window._bmPriceNum = 0;
+  window._bmPayMethod = 'COD';
+  window._bmSavedAddrs = [];
+
   function openBookingModal(svcId, svcName, svcPrice) {
     document.getElementById('bm-svc-id').value = svcId || '';
     document.getElementById('bm-service').textContent = svcName
-      ? svcName + (svcPrice ? ' · ' + svcPrice : '')
+      ? svcName + (svcPrice ? ' — ' + svcPrice : '')
       : 'Home Service Booking';
+
+    // Parse price number
+    var pNum = svcPrice ? parseFloat(svcPrice.replace(/[^0-9.]/g,'').replace(/,/g,'')) || 0 : 0;
+    window._bmPriceNum = pNum;
+    window._bmCoupon = null;
+    window._bmPayMethod = 'COD';
+
     var today = new Date().toISOString().slice(0, 10);
     document.getElementById('bm-date').value = today;
     document.getElementById('bm-date').min = today;
+
     var sel = document.getElementById('bm-city');
     sel.innerHTML = '<option value="">Select city…</option>';
     bookingCities.forEach(function(c) {
@@ -6357,8 +6372,218 @@
     if (typeof currentCity !== 'undefined' && currentCity) {
       Array.from(sel.options).forEach(function(o) { if (o.textContent === currentCity) o.selected = true; });
     }
+
+    // Autofill from profile if logged in
+    var token = localStorage.getItem('remont_token');
+    if (token) {
+      var phone = localStorage.getItem('remont_phone') || '';
+      if (phone) document.getElementById('bm-phone').value = phone;
+      // Load saved addresses
+      apiGet('/api/v1/users/me/addresses').then(function(res) {
+        var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+        window._bmSavedAddrs = list;
+        bmRenderAddresses(list);
+      }).catch(function() { window._bmSavedAddrs = []; bmRenderAddresses([]); });
+      // Load profile name
+      apiGet('/api/v1/users/me').then(function(res) {
+        var u = res.data || res;
+        if (u.name && u.name !== 'User') document.getElementById('bm-name').value = u.name;
+        if (u.email) document.getElementById('bm-email').value = u.email;
+      }).catch(function(){});
+    } else {
+      window._bmSavedAddrs = [];
+      bmRenderAddresses([]);
+    }
+
+    document.getElementById('bm-coupon-inp').value = '';
+    document.getElementById('bm-coupon-msg').style.display = 'none';
+    document.getElementById('bm-selected-address-id').value = '';
+    bmGoStep(1);
     document.getElementById('booking-modal').style.display = 'flex';
     document.body.style.overflow = 'hidden';
+  }
+
+  function bmRenderAddresses(list) {
+    var container = document.getElementById('bm-saved-addrs');
+    var addrField = document.getElementById('bm-address');
+    if (!list || !list.length) {
+      container.innerHTML = '';
+      addrField.style.display = '';
+      return;
+    }
+    var html = '';
+    list.forEach(function(a, i) {
+      html += '<label class="bm-addr-card' + (i===0?' sel':'') + '" onclick="bmSelectAddr(\'' + a.id + '\',this)">' +
+        '<input type="radio" name="bm-addr-radio" value="' + a.id + '"' + (i===0?' checked':'') + '>' +
+        '<div><div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:2px">' + escHtml(a.label || 'Address') + '</div>' +
+        '<div style="font-size:13px;color:#6b7280;line-height:1.4">' + escHtml(a.fullAddress) + (a.pincode ? ' — ' + a.pincode : '') + '</div></div>' +
+        '</label>';
+    });
+    html += '<div class="bm-addr-new" onclick="bmUseNewAddr()">+ Add New Address</div>';
+    container.innerHTML = html;
+    // Pre-select first
+    document.getElementById('bm-selected-address-id').value = list[0].id;
+    addrField.style.display = 'none';
+  }
+
+  function bmSelectAddr(id, el) {
+    document.querySelectorAll('.bm-addr-card').forEach(function(c){ c.classList.remove('sel'); });
+    el.classList.add('sel');
+    document.getElementById('bm-selected-address-id').value = id;
+    document.getElementById('bm-address').style.display = 'none';
+  }
+
+  function bmUseNewAddr() {
+    document.querySelectorAll('.bm-addr-card').forEach(function(c){ c.classList.remove('sel'); });
+    document.querySelectorAll('input[name=bm-addr-radio]').forEach(function(r){ r.checked = false; });
+    document.getElementById('bm-selected-address-id').value = '';
+    document.getElementById('bm-address').style.display = '';
+    document.getElementById('bm-address').focus();
+  }
+
+  function bmPhoneCheck() {
+    // If phone matches a saved address profile, that's fine — no extra lookup needed
+  }
+
+  function bmSelPay(method, el) {
+    window._bmPayMethod = method;
+    document.querySelectorAll('.bm-pay-opt').forEach(function(o){ o.classList.remove('sel'); });
+    el.classList.add('sel');
+  }
+
+  function bmGoStep(n) {
+    window._bmStep = n;
+    [1,2,3].forEach(function(i) {
+      var panel = document.getElementById('bm-panel-'+i);
+      var step = document.getElementById('bm-step-'+i);
+      if (!panel || !step) return;
+      panel.classList.toggle('active', i===n);
+      step.classList.remove('active','done');
+      if (i < n) step.classList.add('done');
+      else if (i === n) step.classList.add('active');
+    });
+    var backBtn = document.getElementById('bm-back-btn');
+    var nextBtn = document.getElementById('bm-next-btn');
+    backBtn.style.display = n > 1 ? '' : 'none';
+    if (n === 3) {
+      nextBtn.textContent = '✔ Confirm & Book';
+    } else {
+      nextBtn.textContent = 'Continue →';
+    }
+    if (n === 2) bmBuildSummary();
+    if (n === 3) bmBuildPayRecap();
+  }
+
+  function bmNextStep() {
+    var step = window._bmStep;
+    if (step === 1) {
+      // Validate step 1
+      var name = document.getElementById('bm-name').value.trim();
+      var phone = document.getElementById('bm-phone').value.trim();
+      var cityId = document.getElementById('bm-city').value;
+      var date = document.getElementById('bm-date').value;
+      var addrId = document.getElementById('bm-selected-address-id').value;
+      var addrText = document.getElementById('bm-address').value.trim();
+      if (!name) { showToast('Please enter your name', 'error'); return; }
+      if (!phone || phone.replace(/\D/g,'').length < 10) { showToast('Please enter a valid phone number', 'error'); return; }
+      if (!cityId) { showToast('Please select your city', 'error'); return; }
+      if (!date) { showToast('Please select a date', 'error'); return; }
+      if (!addrId && !addrText) { showToast('Please enter your address', 'error'); return; }
+      bmGoStep(2);
+    } else if (step === 2) {
+      bmGoStep(3);
+    } else if (step === 3) {
+      submitBooking();
+    }
+  }
+
+  function bmBuildSummary() {
+    var svcName = document.getElementById('bm-service').textContent;
+    var price = window._bmPriceNum;
+    var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
+    var subtotal = Math.max(0, price - couponDiscount);
+    var gst = Math.round(subtotal * 0.18);
+    var total = subtotal + gst;
+
+    // Items list
+    var svcId = document.getElementById('bm-svc-id').value;
+    document.getElementById('bm-items-list').innerHTML =
+      '<div style="background:#f9fafb;border-radius:10px;padding:12px 14px;margin-bottom:12px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div><div style="font-size:13px;font-weight:600;color:#111">' + escHtml(svcName.split('—')[0].trim()) + '</div>' +
+      '<div style="font-size:11px;color:#9ca3af">1 service</div></div>' +
+      '<div style="font-size:14px;font-weight:700;color:#374151">₹' + price.toLocaleString('en-IN') + '</div>' +
+      '</div></div>';
+
+    document.getElementById('bs-service').textContent = '₹' + price.toLocaleString('en-IN');
+    var discRow = document.getElementById('bs-discount-row');
+    if (couponDiscount > 0) {
+      discRow.style.display = '';
+      document.getElementById('bs-discount').textContent = '-₹' + couponDiscount.toLocaleString('en-IN');
+    } else {
+      discRow.style.display = 'none';
+    }
+    document.getElementById('bs-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+    document.getElementById('bs-total').textContent = '₹' + total.toLocaleString('en-IN');
+    window._bmTotal = total;
+    window._bmGst = gst;
+    window._bmSubtotal = subtotal;
+  }
+
+  function bmBuildPayRecap() {
+    var price = window._bmPriceNum;
+    var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
+    var subtotal = Math.max(0, price - couponDiscount);
+    var gst = Math.round(subtotal * 0.18);
+    var total = subtotal + gst;
+    document.getElementById('bp-subtotal').textContent = '₹' + price.toLocaleString('en-IN');
+    var discRow = document.getElementById('bp-disc-row');
+    if (couponDiscount > 0) {
+      discRow.style.display = '';
+      document.getElementById('bp-disc').textContent = '-₹' + couponDiscount.toLocaleString('en-IN');
+    } else { discRow.style.display = 'none'; }
+    document.getElementById('bp-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+    document.getElementById('bp-total').textContent = '₹' + total.toLocaleString('en-IN');
+    window._bmTotal = total;
+  }
+
+  function bmApplyCoupon() {
+    var code = document.getElementById('bm-coupon-inp').value.trim().toUpperCase();
+    var msg = document.getElementById('bm-coupon-msg');
+    if (!code) { showToast('Enter a coupon code', 'error'); return; }
+    var price = window._bmPriceNum;
+    var token = localStorage.getItem('remont_token');
+    if (!token) {
+      // Guest: can't validate coupon (requires auth) — show info
+      msg.className = 'bm-coupon-msg err';
+      msg.textContent = 'Please login to apply coupon codes';
+      msg.style.display = '';
+      return;
+    }
+    fetch(API_BASE + '/api/v1/coupons/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ code: code, orderAmount: price })
+    }).then(function(r){ return r.json(); }).then(function(res) {
+      var d = res.data || res;
+      if (d.valid) {
+        window._bmCoupon = { code: code, discount: d.discount, couponId: d.coupon && d.coupon.id };
+        msg.className = 'bm-coupon-msg ok';
+        msg.textContent = '🎉 Coupon applied! You save ₹' + Number(d.discount).toLocaleString('en-IN');
+        msg.style.display = '';
+        bmBuildSummary();
+      } else {
+        window._bmCoupon = null;
+        msg.className = 'bm-coupon-msg err';
+        msg.textContent = '❌ ' + (d.reason || 'Invalid coupon code');
+        msg.style.display = '';
+        bmBuildSummary();
+      }
+    }).catch(function() {
+      msg.className = 'bm-coupon-msg err';
+      msg.textContent = 'Could not validate coupon. Try again.';
+      msg.style.display = '';
+    });
   }
 
   function closeBookingModal() {
@@ -6374,30 +6599,35 @@
     var cityId  = document.getElementById('bm-city').value;
     var date    = document.getElementById('bm-date').value;
     var time    = document.getElementById('bm-time').value;
+    var addrId  = document.getElementById('bm-selected-address-id').value;
     var address = document.getElementById('bm-address').value.trim();
     var notes   = document.getElementById('bm-notes').value.trim();
-    if (!name)    { showToast('Please enter your name', 'error'); return; }
-    if (!phone || phone.replace(/\D/g,'').length < 10) { showToast('Please enter a valid 10-digit phone number', 'error'); return; }
-    if (!cityId)  { showToast('Please select your city', 'error'); return; }
-    if (!date)    { showToast('Please select a date', 'error'); return; }
-    if (!address) { showToast('Please enter your address', 'error'); return; }
-    if (!svcId)   { showToast('Service not found — please try again', 'error'); return; }
-    var btn = document.getElementById('bm-submit');
+    if (!svcId) { showToast('Service not found — please try again', 'error'); return; }
+
+    var btn = document.getElementById('bm-next-btn');
     btn.textContent = 'Booking…'; btn.disabled = true;
-    var payload = { name: name, phone: phone, serviceId: svcId, cityId: cityId, fullAddress: address, slotDate: date, slotTime: time, channel: 'WEBSITE' };
+
+    var payload = {
+      name: name, phone: phone, serviceId: svcId, cityId: cityId,
+      fullAddress: addrId ? undefined : address,
+      slotDate: date, slotTime: time, channel: 'WEBSITE',
+      paymentMethod: window._bmPayMethod || 'COD'
+    };
+    if (!addrId) payload.fullAddress = address;
     if (email) payload.email = email;
     if (notes) payload.notes = notes;
+    if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
+
     apiPost('/api/v1/orders/public/book', payload).then(function(res) {
-      btn.textContent = 'Confirm Booking →'; btn.disabled = false;
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       var r = res && res.data ? res.data : res;
       var orderNum = r.orderNumber || '—';
       _lastBookedOrderNum = orderNum;
       closeBookingModal();
-      ['bm-name','bm-phone','bm-email','bm-address','bm-notes'].forEach(function(id){ document.getElementById(id).value = ''; });
       document.getElementById('success-order-num').textContent = orderNum;
       document.getElementById('booking-success').style.display = 'flex';
     }).catch(function(err) {
-      btn.textContent = 'Confirm Booking →'; btn.disabled = false;
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       showToast((err && err.message) || 'Booking failed. Please call us to book.', 'error');
     });
   }
@@ -6475,69 +6705,163 @@
 </script>
 
 <!-- ═══ BOOKING MODAL ═══ -->
-<div id="booking-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto">
-  <div style="background:#fff;border-radius:20px;max-width:500px;width:100%;padding:28px 24px;position:relative;margin:auto">
-    <button onclick="closeBookingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
-    <div style="font-size:22px;margin-bottom:4px">📅</div>
-    <h3 style="font-size:19px;font-weight:700;color:#111;margin:0 0 4px">Book Service</h3>
-    <div id="bm-service" style="color:#c4601a;font-size:13px;font-weight:600;margin-bottom:18px"></div>
-    <input type="hidden" id="bm-svc-id">
+<!-- ═══ BOOKING MODAL — 3-STEP CHECKOUT ═══ -->
+<style>
+.bm-wrap{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:16px 12px;overflow-y:auto}
+.bm-box{background:#fff;border-radius:20px;max-width:520px;width:100%;padding:0;position:relative;margin:auto;overflow:hidden}
+.bm-header{padding:20px 24px 16px;border-bottom:1px solid #f3f4f6}
+.bm-steps{display:flex;gap:0;margin-bottom:14px}
+.bm-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative}
+.bm-step:not(:last-child)::after{content:'';position:absolute;top:13px;left:50%;width:100%;height:2px;background:#e5e7eb;z-index:0}
+.bm-step.done::after,.bm-step.active::after{background:#c4601a}
+.bm-step-dot{width:26px;height:26px;border-radius:50%;border:2px solid #e5e7eb;background:#fff;font-size:12px;font-weight:700;color:#9ca3af;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;transition:.2s}
+.bm-step.active .bm-step-dot{border-color:#c4601a;background:#c4601a;color:#fff}
+.bm-step.done .bm-step-dot{border-color:#c4601a;background:#c4601a;color:#fff}
+.bm-step-label{font-size:10px;font-weight:600;color:#9ca3af;text-align:center}
+.bm-step.active .bm-step-label,.bm-step.done .bm-step-label{color:#c4601a}
+.bm-body{padding:20px 24px}
+.bm-panel{display:none}.bm-panel.active{display:block}
+.bm-lbl{font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.bm-inp{width:100%;padding:10px 13px;border:1.5px solid #e5e7eb;border-radius:9px;font-size:14px;outline:none;box-sizing:border-box;font-family:inherit;transition:border-color .2s}
+.bm-inp:focus{border-color:#c4601a}
+.bm-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.bm-field{margin-bottom:12px}
+.bm-addr-card{border:1.5px solid #e5e7eb;border-radius:10px;padding:11px 13px;cursor:pointer;transition:.2s;display:flex;align-items:flex-start;gap:10px;margin-bottom:8px}
+.bm-addr-card:hover,.bm-addr-card.sel{border-color:#c4601a;background:#fef9f6}
+.bm-addr-card input[type=radio]{margin-top:2px;accent-color:#c4601a}
+.bm-addr-new{border:1.5px dashed #d1d5db;border-radius:10px;padding:10px 13px;cursor:pointer;color:#6b7280;font-size:13px;text-align:center;transition:.2s;margin-bottom:12px}
+.bm-addr-new:hover{border-color:#c4601a;color:#c4601a}
+/* billing */
+.bm-summary-item{display:flex;justify-content:space-between;font-size:13px;color:#374151;padding:7px 0;border-bottom:1px solid #f3f4f6}
+.bm-summary-item:last-child{border:none}
+.bm-summary-total{display:flex;justify-content:space-between;font-size:16px;font-weight:800;color:#111;padding:12px 0 0;border-top:2px solid #e5e7eb;margin-top:4px}
+.bm-coupon-row{display:flex;gap:8px;margin-bottom:14px}
+.bm-coupon-row input{flex:1}
+.bm-coupon-btn{padding:10px 16px;background:#111;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.2s}
+.bm-coupon-btn:hover{background:#c4601a}
+.bm-coupon-msg{font-size:12px;margin-bottom:10px;padding:8px 12px;border-radius:8px}
+.bm-coupon-msg.ok{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+.bm-coupon-msg.err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+/* payment options */
+.bm-pay-opt{border:2px solid #e5e7eb;border-radius:12px;padding:14px 16px;cursor:pointer;transition:.2s;margin-bottom:10px;display:flex;align-items:center;gap:14px}
+.bm-pay-opt:hover{border-color:#c4601a}
+.bm-pay-opt.sel{border-color:#c4601a;background:#fef9f6}
+.bm-pay-opt input[type=radio]{accent-color:#c4601a;width:18px;height:18px}
+.bm-pay-opt .po-icon{font-size:26px}
+.bm-pay-opt .po-title{font-size:14px;font-weight:700;color:#111}
+.bm-pay-opt .po-sub{font-size:12px;color:#6b7280}
+/* footer */
+.bm-footer{padding:16px 24px;border-top:1px solid #f3f4f6;display:flex;gap:10px}
+.bm-back{padding:12px 20px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:600;color:#6b7280;background:#fff;cursor:pointer}
+.bm-next{flex:1;padding:13px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s}
+.bm-next:disabled{opacity:.6;cursor:not-allowed}
+</style>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Your Name *</label>
-        <input id="bm-name" type="text" placeholder="Rahul Sharma" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
-      </div>
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Phone *</label>
-        <input id="bm-phone" type="tel" placeholder="+91 98765 43210" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
-      </div>
-    </div>
+<div id="booking-modal" class="bm-wrap">
+ <div class="bm-box">
 
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Email (optional)</label>
-      <input id="bm-email" type="email" placeholder="rahul@email.com" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">City *</label>
-        <select id="bm-city" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:#fff">
-          <option value="">Select city…</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Date *</label>
-        <input id="bm-date" type="date" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
-      </div>
-    </div>
-
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Time Slot *</label>
-      <select id="bm-time" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:#fff">
-        <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
-        <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
-        <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
-        <option value="13:00">1:00 PM</option><option value="14:00">2:00 PM</option>
-        <option value="15:00">3:00 PM</option><option value="16:00">4:00 PM</option>
-        <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
-        <option value="19:00">7:00 PM</option>
-      </select>
-    </div>
-
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Full Address *</label>
-      <textarea id="bm-address" rows="2" placeholder="Flat/House No, Street, Area, Pincode…" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;resize:none;box-sizing:border-box"></textarea>
-    </div>
-
-    <div style="margin-bottom:20px">
-      <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Notes (optional)</label>
-      <textarea id="bm-notes" rows="2" placeholder="Describe the problem or any special instructions…" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;resize:none;box-sizing:border-box"></textarea>
-    </div>
-
-    <button id="bm-submit" onclick="submitBooking()" style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s">Confirm Booking →</button>
-    <p style="text-align:center;font-size:11px;color:#9ca3af;margin:10px 0 0">🔒 Our team will call you within 30 min to confirm. No advance payment needed.</p>
+  <!-- Header -->
+  <div class="bm-header">
+   <button onclick="closeBookingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+   <div style="font-size:13px;color:#c4601a;font-weight:700;margin-bottom:12px" id="bm-service">Book Service</div>
+   <div class="bm-steps">
+    <div class="bm-step active" id="bm-step-1"><div class="bm-step-dot">1</div><div class="bm-step-label">Details</div></div>
+    <div class="bm-step" id="bm-step-2"><div class="bm-step-dot">2</div><div class="bm-step-label">Summary</div></div>
+    <div class="bm-step" id="bm-step-3"><div class="bm-step-dot">3</div><div class="bm-step-label">Payment</div></div>
+   </div>
   </div>
+
+  <input type="hidden" id="bm-svc-id">
+  <input type="hidden" id="bm-selected-address-id">
+
+  <!-- STEP 1: Contact + Address + Schedule -->
+  <div class="bm-body">
+  <div class="bm-panel active" id="bm-panel-1">
+   <div class="bm-row">
+    <div><label class="bm-lbl">Your Name *</label><input id="bm-name" class="bm-inp" type="text" placeholder="Rahul Sharma"></div>
+    <div><label class="bm-lbl">Phone *</label><input id="bm-phone" class="bm-inp" type="tel" placeholder="+91 98765 43210" oninput="bmPhoneCheck()"></div>
+   </div>
+   <div class="bm-field"><label class="bm-lbl">Email (optional)</label><input id="bm-email" class="bm-inp" type="email" placeholder="rahul@email.com"></div>
+   <div class="bm-row">
+    <div>
+     <label class="bm-lbl">City *</label>
+     <select id="bm-city" class="bm-inp" style="background:#fff"><option value="">Select city…</option></select>
+    </div>
+    <div><label class="bm-lbl">Date *</label><input id="bm-date" class="bm-inp" type="date"></div>
+   </div>
+   <div class="bm-field">
+    <label class="bm-lbl">Time Slot *</label>
+    <select id="bm-time" class="bm-inp" style="background:#fff">
+     <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
+     <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
+     <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
+     <option value="13:00">1:00 PM</option><option value="14:00">2:00 PM</option>
+     <option value="15:00">3:00 PM</option><option value="16:00">4:00 PM</option>
+     <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
+     <option value="19:00">7:00 PM</option>
+    </select>
+   </div>
+   <div class="bm-field">
+    <label class="bm-lbl">Delivery Address *</label>
+    <div id="bm-saved-addrs"></div>
+    <textarea id="bm-address" class="bm-inp" rows="2" placeholder="Flat/House No, Street, Area, Pincode…" style="resize:none"></textarea>
+   </div>
+   <div class="bm-field"><label class="bm-lbl">Notes (optional)</label><textarea id="bm-notes" class="bm-inp" rows="2" placeholder="Describe the problem or any special instructions…" style="resize:none"></textarea></div>
+  </div>
+
+  <!-- STEP 2: Summary + Coupon -->
+  <div class="bm-panel" id="bm-panel-2">
+   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Order Summary</div>
+   <div id="bm-items-list" style="margin-bottom:16px"></div>
+
+   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Have a Coupon?</div>
+   <div class="bm-coupon-row">
+    <input id="bm-coupon-inp" class="bm-inp" type="text" placeholder="Enter coupon code" style="text-transform:uppercase">
+    <button class="bm-coupon-btn" onclick="bmApplyCoupon()">Apply</button>
+   </div>
+   <div id="bm-coupon-msg" style="display:none" class="bm-coupon-msg"></div>
+
+   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Bill Details</div>
+   <div style="background:#f9fafb;border-radius:12px;padding:14px 16px">
+    <div class="bm-summary-item"><span>Service Amount</span><span id="bs-service">₹0</span></div>
+    <div class="bm-summary-item" id="bs-discount-row" style="color:#16a34a"><span>🎉 Coupon Discount</span><span id="bs-discount">-₹0</span></div>
+    <div class="bm-summary-item"><span>GST (18%)</span><span id="bs-gst">₹0</span></div>
+    <div class="bm-summary-total"><span>Total Payable</span><span id="bs-total" style="color:#c4601a">₹0</span></div>
+   </div>
+  </div>
+
+  <!-- STEP 3: Payment Method -->
+  <div class="bm-panel" id="bm-panel-3">
+   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:14px;text-transform:uppercase;letter-spacing:.5px">Choose Payment Method</div>
+   <label class="bm-pay-opt sel" onclick="bmSelPay('COD',this)">
+    <input type="radio" name="bm-pay" value="COD" checked>
+    <span class="po-icon">💵</span>
+    <div><div class="po-title">Cash on Delivery</div><div class="po-sub">Pay when our professional arrives</div></div>
+   </label>
+   <label class="bm-pay-opt" onclick="bmSelPay('ONLINE',this)">
+    <input type="radio" name="bm-pay" value="ONLINE">
+    <span class="po-icon">📱</span>
+    <div><div class="po-title">Online Payment (UPI / Card)</div><div class="po-sub">Secure payment via Razorpay · Instant confirmation</div></div>
+   </label>
+
+   <!-- Final bill recap -->
+   <div style="background:#fef9f6;border:1.5px solid #fed7aa;border-radius:12px;padding:14px 16px;margin-top:14px">
+    <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Order Total</div>
+    <div style="display:flex;justify-content:space-between;font-size:14px;color:#374151;margin-bottom:4px"><span>Subtotal</span><span id="bp-subtotal">₹0</span></div>
+    <div id="bp-disc-row" style="display:flex;justify-content:space-between;font-size:14px;color:#16a34a;margin-bottom:4px"><span>Discount</span><span id="bp-disc">-₹0</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px;color:#374151;margin-bottom:8px"><span>GST (18%)</span><span id="bp-gst">₹0</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:800;color:#c4601a;border-top:1.5px solid #fed7aa;padding-top:10px"><span>Total</span><span id="bp-total">₹0</span></div>
+   </div>
+  </div>
+  </div>
+
+  <!-- Footer nav -->
+  <div class="bm-footer">
+   <button class="bm-back" id="bm-back-btn" onclick="bmGoStep(window._bmStep-1)" style="display:none">← Back</button>
+   <button class="bm-next" id="bm-next-btn" onclick="bmNextStep()">Continue →</button>
+  </div>
+
+ </div>
 </div>
 
 <!-- ═══ BOOKING SUCCESS ═══ -->
