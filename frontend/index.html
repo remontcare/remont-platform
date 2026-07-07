@@ -6647,6 +6647,7 @@
 
   // ── Order Tracking Modal ───────────────────────────────────────────────────
 
+  var trackPollTimer = null;
   function openTrackingModal() {
     document.getElementById('tracking-result').style.display = 'none';
     document.getElementById('tracking-error').style.display = 'none';
@@ -6657,6 +6658,7 @@
   function closeTrackingModal() {
     document.getElementById('tracking-modal').style.display = 'none';
     document.body.style.overflow = '';
+    clearInterval(trackPollTimer);
   }
 
   function trackOrderSubmit() {
@@ -6690,16 +6692,19 @@
           document.getElementById('tr-vendor-block').style.display = 'none';
         }
         document.getElementById('tracking-result').style.display = '';
+        clearInterval(trackPollTimer);
+        trackPollTimer = setInterval(trackOrderSubmit, 25000);
       }).catch(function() {
         document.getElementById('tracking-error').style.display = '';
         document.getElementById('tracking-error').textContent = 'Order not found. Please check your order number and phone number.';
+        clearInterval(trackPollTimer);
       });
   }
 
   // Close modals on backdrop click
   ['booking-modal','booking-success','tracking-modal'].forEach(function(id) {
     var el = document.getElementById(id);
-    if (el) el.addEventListener('click', function(e) { if (e.target === el) { el.style.display='none'; document.body.style.overflow=''; } });
+    if (el) el.addEventListener('click', function(e) { if (e.target === el) { el.style.display='none'; document.body.style.overflow=''; clearInterval(trackPollTimer); } });
   });
 
 </script>
@@ -7365,6 +7370,17 @@ function cartCheckout() {
     <div id="mo-body" style="padding:20px 24px;min-height:200px">
       <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
     </div>
+  </div>
+</div>
+
+<div id="rate-order-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:24px;width:400px;max-width:96vw;position:relative">
+    <button onclick="closeRateModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    <h3 style="font-size:18px;font-weight:700;color:#111;margin-bottom:6px">Rate this service</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:18px">How was your experience?</p>
+    <div id="rate-stars" style="font-size:32px;text-align:center;margin-bottom:16px;letter-spacing:6px"></div>
+    <textarea id="rate-comment" rows="3" placeholder="Tell us more (optional)" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;resize:vertical;margin-bottom:16px"></textarea>
+    <button onclick="submitReview()" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer">Submit Rating</button>
   </div>
 </div>
 
@@ -8066,6 +8082,7 @@ var STATUS_COLORS_MO = {
   CLOSED: '#9ca3af', CANCELLED: '#ef4444', REFUNDED: '#6b7280',
 };
 
+var myOrdersPollTimer = null;
 function openMyOrdersModal() {
   var token = localStorage.getItem('remont_token');
   if (!token) {
@@ -8075,18 +8092,31 @@ function openMyOrdersModal() {
   document.getElementById('my-orders-modal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   loadMyOrders();
+  clearInterval(myOrdersPollTimer);
+  myOrdersPollTimer = setInterval(loadMyOrders, 25000);
 }
 
 function closeMyOrdersModal() {
   document.getElementById('my-orders-modal').style.display = 'none';
   document.body.style.overflow = '';
+  clearInterval(myOrdersPollTimer);
 }
+
+var _reviewedOrderIds = null;
 
 function loadMyOrders() {
   var body = document.getElementById('mo-body');
   body.innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading orders…</p>';
-  apiGet('/api/v1/orders/mine').then(function(res) {
+  Promise.all([
+    apiGet('/api/v1/orders/mine'),
+    apiGet('/api/v1/reviews/mine').catch(function(){ return []; })
+  ]).then(function(results) {
+    var res = results[0];
+    var reviewsRes = results[1];
     var orders = Array.isArray(res) ? res : (res.data || []);
+    var reviews = Array.isArray(reviewsRes) ? reviewsRes : (reviewsRes.data || []);
+    _reviewedOrderIds = {};
+    reviews.forEach(function(r){ _reviewedOrderIds[r.orderId] = true; });
     if (!orders.length) {
       body.innerHTML = '<div style="text-align:center;padding:40px 0">' +
         '<div style="font-size:40px;margin-bottom:12px">📦</div>' +
@@ -8101,6 +8131,8 @@ function loadMyOrders() {
       var date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
       var total = o.totalAmount ? '₹' + Number(o.totalAmount).toLocaleString('en-IN') : '—';
       var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
+      var isCompleted = o.status === 'COMPLETED' || o.status === 'INVOICED' || o.status === 'CLOSED';
+      var reviewed = _reviewedOrderIds[o.id];
       html += '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
           '<div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(serviceName) + '</div>' +
@@ -8115,7 +8147,9 @@ function loadMyOrders() {
                '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
                (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
              '</div>'
-           : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
+           : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' :
+           isCompleted && reviewed ? '<span style="font-size:12px;font-weight:600;color:#22c55e">✅ Reviewed</span>' :
+           isCompleted ? '<button onclick="openRateModal(\'' + o.id + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⭐ Rate Service</button>' : '') +
         '</div>' +
       '</div>';
     });
@@ -8125,6 +8159,42 @@ function loadMyOrders() {
       (e && e.message === '401' ? 'Please <button onclick="closeMyOrdersModal();openAuthModal(function(){setTimeout(openMyOrdersModal,300)})" style="background:none;border:none;color:#c4601a;font-weight:600;cursor:pointer;text-decoration:underline">login again</button>.' : 'Try again.') +
       '</p>';
   });
+}
+
+// ── Rate / Review Modal ─────────────────────────────────────────────────────
+var _rateOrderId = null;
+var _rateStars = 0;
+function openRateModal(orderId) {
+  _rateOrderId = orderId;
+  _rateStars = 0;
+  document.getElementById('rate-comment').value = '';
+  renderRateStars();
+  document.getElementById('rate-order-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function closeRateModal() {
+  document.getElementById('rate-order-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function renderRateStars() {
+  var html = '';
+  for (var i = 1; i <= 5; i++) {
+    html += '<span onclick="setRateStars(' + i + ')" style="cursor:pointer;color:' + (i <= _rateStars ? '#f59e0b' : '#e5e7eb') + '">★</span>';
+  }
+  document.getElementById('rate-stars').innerHTML = html;
+}
+function setRateStars(n) { _rateStars = n; renderRateStars(); }
+function submitReview() {
+  if (!_rateStars) { showToast('Please select a star rating', 'error'); return; }
+  var comment = document.getElementById('rate-comment').value.trim();
+  apiPost('/api/v1/reviews', { orderId: _rateOrderId, rating: _rateStars, comment: comment || undefined })
+    .then(function() {
+      showToast('Thanks for your rating!', 'success');
+      closeRateModal();
+      loadMyOrders();
+    }).catch(function(e) {
+      showToast((e && e.message) || 'Could not submit review', 'error');
+    });
 }
 
 function retryPayment(orderId, totalAmount, orderNumber) {

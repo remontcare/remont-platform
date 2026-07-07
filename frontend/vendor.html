@@ -833,7 +833,8 @@ function renderJfStep(){
       <div class="cc-detail-row"><span class="cdl">Service</span><span class="cdr">${d.service}</span></div>
       <div class="cc-detail-row"><span class="cdl">Area</span><span class="cdr">${d.area}</span></div>
       <div class="cc-detail-row"><span class="cdl">Est. Amount</span><span class="cdr">${fmtMoney(d.amount)}</span></div></div>`;
-    foot = `<button class="btn-primary" id="jf-start-btn" onclick="jfStartHeading()">Start Job →</button>`;
+    foot = `<button class="btn-primary" id="jf-start-btn" onclick="jfStartHeading()">Start Job →</button>` +
+      (!jfState.mock && jfState.orderId ? `<button class="btn-outline" style="width:100%;margin-top:10px;color:var(--error);border-color:var(--error)" onclick="jfRejectJob()">Can't take this job</button>` : '');
   }
   else if(s===2){
     var mapHref = (!jfState.mock && d.lat && d.lng) ? `https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}` : 'https://www.google.com/maps/dir/?api=1&destination=23.2599,77.4126';
@@ -915,6 +916,12 @@ function jfStartHeading(){
   apiFetch('/orders/'+jfState.orderId+'/en-route', {method:'PATCH'})
     .then(function(){ jfGoto(2); })
     .catch(function(e){ alert('Could not update status: '+e.message); btn.disabled=false; btn.textContent='Start Job →'; });
+}
+function jfRejectJob(){
+  if(!confirm("Reject this job? It will go back into the pool for other vendors.")) return;
+  apiFetch('/vendors/service/me/jobs/'+jfState.orderId+'/reject', {method:'POST'})
+    .then(function(){ exitJobFlow(); })
+    .catch(function(e){ alert('Could not reject job: '+e.message); });
 }
 function jfOtpJump(i){
   var el=document.getElementById('jotp-'+i);

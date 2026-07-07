@@ -109,6 +109,45 @@ export class ServiceVendorsService {
     await this.wa.sendJobAssigned(v.userId, updated);
     return updated;
   }
+
+  async rejectJob(userId: string, orderId: string) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException();
+    if (order.vendorId !== v.id) throw new ForbiddenException();
+    if (order.status !== 'VENDOR_ASSIGNED') {
+      throw new BadRequestException('Cannot reject job in its current state');
+    }
+
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: { vendorId: null, status: 'CONFIRMED' },
+    });
+  }
+
+  // NOTE: job status transitions (en-route/verify-otp/complete) and extra-work items are
+  // handled by OrdersService/ExtraWorkService in orders.module.ts instead of here — those
+  // versions include the real side effects (WhatsApp start-OTP, customer approval + order
+  // total recalculation, invoice generation, vendor earnings/wallet updates) that a generic
+  // status-PATCH here would not. Removed a duplicate updateJobStatus()/addExtraWork() pair
+  // that lived here unused by any frontend, to avoid two endpoints doing the same job with
+  // different (and here, incomplete) business logic.
+
+  async getJobDetail(userId: string, orderId: string) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        customer: { select: { name: true, phone: true } },
+        service: true, address: true, extraWorkItems: true,
+      },
+    });
+    if (!order) throw new NotFoundException();
+    if (order.vendorId && order.vendorId !== v.id) throw new ForbiddenException();
+    return order;
+  }
 }
 
 @ApiTags('Vendors')
@@ -124,7 +163,9 @@ export class ServiceVendorsController {
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
   @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }
   @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub); }
+  @Get('me/jobs/:orderId') jobDetail(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.getJobDetail(u.sub, id); }
   @Post('me/jobs/:orderId/accept') accept(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.acceptJob(u.sub, id); }
+  @Post('me/jobs/:orderId/reject') reject(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.rejectJob(u.sub, id); }
 }
 
 // ─── Product Vendor ───
