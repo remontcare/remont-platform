@@ -826,6 +826,7 @@ var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001
 var LANG = 'EN';
 var currentStep = 1;
 var registrationId = localStorage.getItem('pr_reg_id') || null;
+var regStatus = null; // {alreadyApproved, alreadySubmitted, status} from partner-registration/init
 var otpVerified = false;
 var selections = { gender: null, exp: null, 'id-type': null, police: null, relation: null };
 var files = {};
@@ -1019,10 +1020,12 @@ function sendOtp(isResend) {
       body: JSON.stringify({phone: '+91' + phone, language: LANG})
     });
   }).then(function(r){ if(r) return r.json(); }).then(function(res) {
-    if (res && res.data && res.data.registrationId) {
-      registrationId = res.data.registrationId;
+    var d = (res && res.data) || res;
+    if (d && d.registrationId) {
+      registrationId = d.registrationId;
       localStorage.setItem('pr_reg_id', registrationId);
     }
+    regStatus = d && d.status ? d : null;
   }).catch(function(){});
 }
 
@@ -1074,6 +1077,24 @@ function markOtpVerified() {
   otpVerified = true;
   showMsg('otp-verify-msg', '');
   document.getElementById('otp-section').style.display = 'none';
+
+  if (regStatus && (regStatus.alreadyApproved || regStatus.alreadySubmitted)) {
+    document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
+    document.getElementById('progress-wrap').style.display = 'none';
+    var s = document.getElementById('success-screen');
+    s.style.display = ''; s.classList.add('show');
+    if (regStatus.alreadyApproved) {
+      s.querySelector('h2').textContent = LANG === 'HI' ? 'आप पहले से ही स्वीकृत पार्टनर हैं!' : "You're already an approved partner!";
+      s.querySelector('p').textContent = LANG === 'HI' ? 'कृपया वेबसाइट पर लॉगिन करें — आप सीधे अपने वेंडर डैशबोर्ड पर पहुंच जाएंगे।' : 'Please log in from the main site — you will be taken straight to your vendor dashboard.';
+    } else {
+      s.querySelector('h2').textContent = LANG === 'HI' ? 'आवेदन पहले से ही जमा है' : 'Application already submitted';
+      s.querySelector('p').textContent = LANG === 'HI' ? 'आपका आवेदन पहले से ही समीक्षा में है। हमारी टीम 24-48 घंटों में संपर्क करेगी।' : 'Your application is already under review. Our team will contact you within 24-48 hours.';
+    }
+    document.getElementById('success-reg-id').textContent = registrationId || '';
+    window.scrollTo({top:0, behavior:'smooth'});
+    return;
+  }
+
   var badge = document.getElementById('otp-verified-badge');
   badge.style.display = 'flex';
   document.getElementById('step2-extra').style.display = '';
@@ -1082,9 +1103,6 @@ function markOtpVerified() {
 function verifyOtp() {
   var otp = [0,1,2,3].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
   if (otp.length < 4) return;
-
-  // Dev bypass — OTP 1234 always works
-  if (otp === '1234') { markOtpVerified(); return; }
 
   showMsg('otp-verify-msg', LANG === 'HI' ? 'सत्यापित हो रहा है…' : 'Verifying…', false);
   var phone = '+91' + val('f-phone');

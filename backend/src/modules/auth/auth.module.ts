@@ -94,8 +94,18 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
     if (!user) throw new BadRequestException('Phone not registered');
     if (!user.otpCode || !user.otpExpiresAt) throw new BadRequestException('No OTP requested');
-    if (user.otpExpiresAt < new Date()) throw new BadRequestException('OTP expired');
-    if (user.otpCode !== dto.otp) throw new UnauthorizedException('Invalid OTP');
+
+    // Real WhatsApp/SMS delivery isn't configured yet (no MSG91_AUTH_KEY on Railway), so a
+    // fixed test code can be enabled via DEV_OTP_OVERRIDE env var. Still requires a prior
+    // send-otp call (the check above), and still runs the real role-elevation logic below —
+    // unlike the old frontend-only "1234 always works" shortcuts this replaces, which skipped
+    // the backend (and role elevation) entirely. Unset the env var to disable.
+    const devOtp = process.env.DEV_OTP_OVERRIDE;
+    const isDevOtp = !!devOtp && dto.otp === devOtp;
+    if (!isDevOtp) {
+      if (user.otpExpiresAt < new Date()) throw new BadRequestException('OTP expired');
+      if (user.otpCode !== dto.otp) throw new UnauthorizedException('Invalid OTP');
+    }
 
     // Allow a plain CUSTOMER to be elevated to a vendor role on their own verified OTP request
     // (e.g. someone who browsed as a customer earlier and is now completing vendor registration).

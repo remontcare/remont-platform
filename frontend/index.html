@@ -7376,8 +7376,9 @@ function cartCheckout() {
 var _authCallback = null;
 var _checkoutOrderId = null;
 
-var DEV_MODE = true; // temporary: real SMS API nahi hai, OTP fixed 1234
-var TEST_OTP  = '1234';
+// Real SMS/WhatsApp delivery isn't configured yet (no MSG91_AUTH_KEY on Railway), so OTP
+// "1234" is accepted as a fixed test code — but now via the real backend (DEV_OTP_OVERRIDE
+// env var), not a client-side shortcut. See auth.module.ts verifyOtp().
 
 // ── OTP Auth ────────────────────────────────────────────────────────
 
@@ -7633,15 +7634,6 @@ function sendOtpAuth() {
   if (raw.length !== 10) { showAuthMsg('Enter a valid 10-digit number'); return; }
   var phone = '+91' + raw;
 
-  if (DEV_MODE) {
-    document.getElementById('auth-phone-display').textContent = phone;
-    document.getElementById('auth-step-phone').style.display = 'none';
-    document.getElementById('auth-step-otp').style.display = '';
-    document.getElementById('auth-otp').focus();
-    showAuthMsg('DEV mode: use OTP ' + TEST_OTP);
-    return;
-  }
-
   var btn = document.getElementById('auth-send-btn');
   btn.textContent = 'Sending…'; btn.disabled = true;
   document.getElementById('auth-msg').style.display = 'none';
@@ -7665,18 +7657,6 @@ function verifyOtpAuth() {
   var phone = '+91' + raw;
   var otp = document.getElementById('auth-otp').value.trim();
   if (!otp) { showAuthMsg('Enter the OTP'); return; }
-
-  if (DEV_MODE) {
-    if (otp === TEST_OTP) {
-      localStorage.setItem('remont_token', 'dev-token-' + Date.now());
-      localStorage.setItem('remont_phone', phone);
-      closeAuthModal();
-      if (_authCallback) { var cb = _authCallback; _authCallback = null; cb(); }
-    } else {
-      showAuthMsg('Invalid OTP (dev: use ' + TEST_OTP + ')');
-    }
-    return;
-  }
 
   var btn = document.getElementById('auth-verify-btn');
   btn.textContent = 'Verifying…'; btn.disabled = true;
@@ -8345,7 +8325,7 @@ window.paSendOtp = function() {
     };
   });
 
-  // API call — silent fail, 1234 bypass works
+  // API call — role SERVICE_VENDOR is elevated server-side once verify-otp succeeds
   fetch(API_BASE + '/api/v1/auth/send-otp', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone: '+91' + phone, role: 'SERVICE_VENDOR' })
@@ -8357,13 +8337,6 @@ window.paVerifyOtp = function() {
   if (otp.length < 4) return;
   var phone = '+91' + document.getElementById('pa-phone').value.trim();
   document.getElementById('pa-otp-msg').textContent = '';
-
-  if (otp === '1234') {
-    localStorage.setItem('pr_phone', phone);
-    closePartnerAuth();
-    _checkAndOpenPortal(phone, null);
-    return;
-  }
 
   document.getElementById('pa-otp-msg').textContent = 'Verifying…';
   fetch(API_BASE + '/api/v1/auth/verify-otp', {
