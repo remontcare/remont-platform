@@ -23,6 +23,7 @@ export class VerifyOtpDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsEnum(Language) language?: Language;
+  @IsOptional() @IsEnum(UserRole) role?: UserRole;
 }
 export class RefreshTokenDto {
   @IsString() refreshToken: string;
@@ -96,6 +97,13 @@ export class AuthService {
     if (user.otpExpiresAt < new Date()) throw new BadRequestException('OTP expired');
     if (user.otpCode !== dto.otp) throw new UnauthorizedException('Invalid OTP');
 
+    // Allow a plain CUSTOMER to be elevated to a vendor role on their own verified OTP request
+    // (e.g. someone who browsed as a customer earlier and is now completing vendor registration).
+    // Never touches ADMIN/SUPER_ADMIN accounts or downgrades an existing vendor.
+    const ELEVATABLE_ROLES: UserRole[] = [UserRole.SERVICE_VENDOR, UserRole.PRODUCT_VENDOR];
+    const roleUpgrade = dto.role && user.role === UserRole.CUSTOMER && ELEVATABLE_ROLES.includes(dto.role)
+      ? dto.role : undefined;
+
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -106,6 +114,7 @@ export class AuthService {
         ...(dto.name && user.name === 'New User' ? { name: dto.name } : {}),
         ...(dto.email ? { email: dto.email } : {}),
         ...(dto.language ? { language: dto.language } : {}),
+        ...(roleUpgrade ? { role: roleUpgrade } : {}),
       },
     });
 

@@ -496,7 +496,11 @@ a{color:inherit;text-decoration:none}
 <script>
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 var LANG='EN';
-var accessToken = localStorage.getItem('vendorAccessToken') || null;
+// Vendors can land here either via this page's own login, or redirected straight from the
+// main site's login (index.html stores the token as 'pr_token'/'remont_token' after seeing
+// role===SERVICE_VENDOR) — accept whichever token is available so that redirect doesn't
+// dead-end back on this page's login screen.
+var accessToken = localStorage.getItem('vendorAccessToken') || localStorage.getItem('pr_token') || localStorage.getItem('remont_token') || null;
 var refreshTok = localStorage.getItem('vendorRefreshToken') || null;
 var vendorProfile = null, earningsData = null, jobsAll = [];
 var pendingPhone = '';
@@ -556,7 +560,7 @@ function verifyLoginOtp(){
   var err=document.getElementById('otp-err'); err.textContent='';
   if(code.length!==4){err.textContent='Enter the 4-digit OTP';return;}
   var btn=document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
-  apiFetch('/auth/verify-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, otp: code})})
+  apiFetch('/auth/verify-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, otp: code, role:'SERVICE_VENDOR'})})
     .then(function(res){
       accessToken=res.accessToken; refreshTok=res.refreshToken;
       localStorage.setItem('vendorAccessToken', accessToken);
@@ -574,7 +578,12 @@ function loadVendorProfile(){
 }
 function afterAuth(){
   return apiFetch('/auth/me')
-    .then(function(me){ document.getElementById('prof-phone').textContent = me.phone; return loadVendorProfile(); })
+    .then(function(me){
+      if (me.role && me.role !== 'SERVICE_VENDOR') { doLogout(); alert('This number is registered as a ' + me.role.toLowerCase() + ', not a service partner.'); return; }
+      localStorage.setItem('vendorAccessToken', accessToken); // normalize key if we got here via a cross-site redirect token
+      document.getElementById('prof-phone').textContent = me.phone;
+      return loadVendorProfile();
+    })
     .catch(function(){ doLogout(); });
 }
 function selectType(t){
@@ -617,6 +626,7 @@ function showScreen(id){document.querySelectorAll('.screen').forEach(function(s)
 function doLogout(){
   accessToken=null; refreshTok=null; vendorProfile=null;
   localStorage.removeItem('vendorAccessToken'); localStorage.removeItem('vendorRefreshToken');
+  localStorage.removeItem('pr_token'); localStorage.removeItem('remont_token'); localStorage.removeItem('remont_user');
   showScreen('screen-login');
   document.getElementById('login-phone-step').style.display='block';
   document.getElementById('login-otp-step').style.display='none';
