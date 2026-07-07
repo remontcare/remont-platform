@@ -262,8 +262,8 @@ a{color:inherit;text-decoration:none}
           </div>
         </div>
         <div class="auth-error" id="login-err"></div>
-        <button class="btn-primary" onclick="sendLoginOtp()" data-en="Send OTP →" data-hi="OTP भेजें →">Send OTP →</button>
-        <div class="demo-note">Demo prototype — enter any 10-digit number. OTP is <b>1234</b></div>
+        <button class="btn-primary" id="send-otp-btn" onclick="sendLoginOtp()" data-en="Send OTP →" data-hi="OTP भेजें →">Send OTP →</button>
+        <div class="demo-note" data-en="OTP is sent via WhatsApp to this number" data-hi="OTP इस नंबर पर WhatsApp से भेजा जाएगा">OTP is sent via WhatsApp to this number</div>
       </div>
 
       <div id="login-otp-step" style="display:none">
@@ -275,9 +275,8 @@ a{color:inherit;text-decoration:none}
           <input class="otp-digit" maxlength="1" id="lotp-2" oninput="otpJump(this,2)">
           <input class="otp-digit" maxlength="1" id="lotp-3" oninput="otpJump(this,3)">
         </div>
-        <div class="otp-hint" data-en="Dev OTP: 1234" data-hi="डेव OTP: 1234">Dev OTP: 1234</div>
         <div class="auth-error" id="otp-err"></div>
-        <button class="btn-primary" onclick="verifyLoginOtp()" data-en="Verify & Continue" data-hi="सत्यापित करें">Verify & Continue</button>
+        <button class="btn-primary" id="verify-otp-btn" onclick="verifyLoginOtp()" data-en="Verify & Continue" data-hi="सत्यापित करें">Verify & Continue</button>
       </div>
     </div>
   </div>
@@ -299,7 +298,24 @@ a{color:inherit;text-decoration:none}
           <div class="tc-sub" data-en="I manage a team" data-hi="मैं एक टीम संभालता हूं">I manage a team</div>
         </div>
       </div>
-      <button class="btn-primary" onclick="finishRegister()" data-en="Continue to Dashboard →" data-hi="डैशबोर्ड पर जाएं →">Continue to Dashboard →</button>
+      <div class="field">
+        <label data-en="Your Full Name" data-hi="आपका पूरा नाम">Your Full Name</label>
+        <input type="text" id="reg-name" placeholder="e.g. Ramesh Kumar">
+      </div>
+      <div class="field" id="reg-business-field" style="display:none">
+        <label data-en="Agency / Business Name" data-hi="एजेंसी / व्यवसाय का नाम">Agency / Business Name</label>
+        <input type="text" id="reg-business" placeholder="e.g. Kumar Electric Works">
+      </div>
+      <div class="field">
+        <label data-en="City" data-hi="शहर">City</label>
+        <input type="text" id="reg-city" placeholder="e.g. Bhopal">
+      </div>
+      <div class="field">
+        <label data-en="Primary Skill / Service" data-hi="मुख्य कौशल / सेवा">Primary Skill / Service</label>
+        <input type="text" id="reg-skill" placeholder="e.g. Electrician">
+      </div>
+      <div class="auth-error" id="regtype-err"></div>
+      <button class="btn-primary" id="regtype-btn" onclick="finishRegister()" data-en="Continue to Dashboard →" data-hi="डैशबोर्ड पर जाएं →">Continue to Dashboard →</button>
     </div>
   </div>
 
@@ -323,30 +339,24 @@ a{color:inherit;text-decoration:none}
       <div class="view active" id="view-home">
         <div class="wallet-banner">
           <div class="wb-label" data-en="Wallet Balance" data-hi="वॉलेट बैलेंस">Wallet Balance</div>
-          <div class="wb-val">₹8,450</div>
+          <div class="wb-val" id="home-wallet-val">₹0</div>
           <div class="wb-row">
-            <div style="font-size:11px;opacity:.85" data-en="Today's Earnings: ₹1,240" data-hi="आज की कमाई: ₹1,240">Today's Earnings: ₹1,240</div>
+            <div style="font-size:11px;opacity:.85"><span data-en="Today's Earnings: " data-hi="आज की कमाई: ">Today's Earnings: </span><span id="home-today-earn">₹0</span></div>
             <button class="wb-btn" onclick="goView('earnings')" data-en="View →" data-hi="देखें →">View →</button>
           </div>
         </div>
 
         <div class="stat-grid">
-          <div class="stat-card"><div class="sc-label" data-en="Rating" data-hi="रेटिंग">Rating</div><div class="sc-val accent">⭐ 4.8</div><div class="sc-sub" data-en="128 reviews" data-hi="128 समीक्षाएं">128 reviews</div></div>
-          <div class="stat-card"><div class="sc-label" data-en="Completed" data-hi="पूर्ण">Completed</div><div class="sc-val">312</div><div class="sc-sub" data-en="jobs total" data-hi="कुल काम">jobs total</div></div>
+          <div class="stat-card"><div class="sc-label" data-en="Rating" data-hi="रेटिंग">Rating</div><div class="sc-val accent" id="stat-rating">⭐ —</div><div class="sc-sub" data-en="jobs completed" data-hi="काम पूर्ण">jobs completed</div></div>
+          <div class="stat-card"><div class="sc-label" data-en="Completed" data-hi="पूर्ण">Completed</div><div class="sc-val" id="stat-completed">—</div><div class="sc-sub" data-en="jobs total" data-hi="कुल काम">jobs total</div></div>
         </div>
 
-        <button class="demo-btn" onclick="simulateIncomingJob()">🔔 <span data-en="Simulate Incoming Job (Demo)" data-hi="नया काम सिम्युलेट करें (डेमो)">Simulate Incoming Job (Demo)</span></button>
+        <button class="demo-btn" onclick="checkRealJobs()">🔔 <span data-en="Check for Job Requests" data-hi="काम के अनुरोध जांचें">Check for Job Requests</span></button>
+        <button class="demo-btn" style="border-style:dashed;opacity:.75" onclick="simulateIncomingJob()">🧪 <span data-en="Demo Walkthrough (mock job)" data-hi="डेमो वॉकथ्रू (मॉक जॉब)">Demo Walkthrough (mock job)</span></button>
 
         <div class="section-title"><span data-en="Recent Activity" data-hi="हाल की गतिविधि">Recent Activity</span><span class="st-link" onclick="goView('jobs')" data-en="See all" data-hi="सभी देखें">See all</span></div>
-        <div class="job-card" onclick="goView('jobs')">
-          <div class="jc-icon">🔌</div>
-          <div class="jc-info"><div class="jc-title">Fan Repair — Rajesh Sharma</div><div class="jc-meta">Kolar Road · 2 hrs ago</div></div>
-          <div class="jc-right"><div class="jc-amount">₹450</div><span class="badge done" data-en="Completed" data-hi="पूर्ण">Completed</span></div>
-        </div>
-        <div class="job-card" onclick="goView('jobs')">
-          <div class="jc-icon">💡</div>
-          <div class="jc-info"><div class="jc-title">Wiring Check — Priya Nair</div><div class="jc-meta">Arera Colony · Yesterday</div></div>
-          <div class="jc-right"><div class="jc-amount">₹780</div><span class="badge done" data-en="Completed" data-hi="पूर्ण">Completed</span></div>
+        <div id="home-recent-list">
+          <div class="empty-state"><div class="es-icon">📭</div><div class="es-text" data-en="No completed jobs yet" data-hi="अभी तक कोई पूर्ण काम नहीं">No completed jobs yet</div></div>
         </div>
       </div>
 
@@ -360,9 +370,7 @@ a{color:inherit;text-decoration:none}
           <div class="empty-state"><div class="es-icon">📭</div><div class="es-text" data-en="No active jobs. Go online to start receiving jobs!" data-hi="कोई सक्रिय काम नहीं। काम पाने के लिए ऑनलाइन जाएं!">No active jobs. Go online to start receiving jobs!</div></div>
         </div>
         <div id="jobs-completed-list" style="display:none">
-          <div class="job-card"><div class="jc-icon">🔌</div><div class="jc-info"><div class="jc-title">Fan Repair — Rajesh Sharma</div><div class="jc-meta">Kolar Road · Today</div></div><div class="jc-right"><div class="jc-amount">₹450</div><span class="badge done">Done</span></div></div>
-          <div class="job-card"><div class="jc-icon">💡</div><div class="jc-info"><div class="jc-title">Wiring Check — Priya Nair</div><div class="jc-meta">Arera Colony · Yesterday</div></div><div class="jc-right"><div class="jc-amount">₹780</div><span class="badge done">Done</span></div></div>
-          <div class="job-card"><div class="jc-icon">🚿</div><div class="jc-info"><div class="jc-title">Geyser Install — Amit Verma</div><div class="jc-meta">MP Nagar · 2 days ago</div></div><div class="jc-right"><div class="jc-amount">₹1,200</div><span class="badge done">Done</span></div></div>
+          <div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No completed jobs yet</div></div>
         </div>
       </div>
 
@@ -370,8 +378,8 @@ a{color:inherit;text-decoration:none}
       <div class="view" id="view-earnings">
         <div class="wallet-banner">
           <div class="wb-label" data-en="Total Wallet Balance" data-hi="कुल वॉलेट बैलेंस">Total Wallet Balance</div>
-          <div class="wb-val">₹8,450</div>
-          <div class="wb-row"><div style="font-size:11px;opacity:.85" data-en="Next payout: Friday" data-hi="अगला भुगतान: शुक्रवार">Next payout: Friday</div><button class="wb-btn" data-en="Withdraw" data-hi="निकासी">Withdraw</button></div>
+          <div class="wb-val" id="earn-wallet-val">₹0</div>
+          <div class="wb-row"><div style="font-size:11px;opacity:.85" id="earn-pending-label" data-en="Pending payout" data-hi="लंबित भुगतान">Pending payout</div><button class="wb-btn" data-en="Withdraw" data-hi="निकासी">Withdraw</button></div>
         </div>
         <div class="tab-row">
           <button class="tab-btn active" onclick="earnTab(this,'today')" data-en="Today" data-hi="आज">Today</button>
@@ -379,14 +387,13 @@ a{color:inherit;text-decoration:none}
           <button class="tab-btn" onclick="earnTab(this,'life')" data-en="Lifetime" data-hi="जीवनभर">Lifetime</button>
         </div>
         <div class="stat-grid">
-          <div class="stat-card"><div class="sc-label" data-en="Jobs Done" data-hi="काम पूर्ण">Jobs Done</div><div class="sc-val" id="earn-jobs">3</div></div>
-          <div class="stat-card"><div class="sc-label" data-en="Earnings" data-hi="कमाई">Earnings</div><div class="sc-val accent" id="earn-amt">₹1,240</div></div>
+          <div class="stat-card"><div class="sc-label" data-en="Jobs Done" data-hi="काम पूर्ण">Jobs Done</div><div class="sc-val" id="earn-jobs">0</div></div>
+          <div class="stat-card"><div class="sc-label" data-en="Earnings" data-hi="कमाई">Earnings</div><div class="sc-val accent" id="earn-amt">₹0</div></div>
         </div>
         <div class="section-title" data-en="Recent Transactions" data-hi="हाल के लेनदेन">Recent Transactions</div>
-        <div class="txn-row"><div class="txn-info"><div class="tr-title">Fan Repair Payment</div><div class="tr-date">Today, 3:40 PM</div></div><div class="txn-amt pos">+₹450</div></div>
-        <div class="txn-row"><div class="txn-info"><div class="tr-title">Wiring Check Payment</div><div class="tr-date">Yesterday, 6:10 PM</div></div><div class="txn-amt pos">+₹780</div></div>
-        <div class="txn-row"><div class="txn-info"><div class="tr-title">Platform Commission (18%)</div><div class="tr-date">Yesterday, 6:10 PM</div></div><div class="txn-amt neg">-₹140</div></div>
-        <div class="txn-row"><div class="txn-info"><div class="tr-title">Weekly Payout</div><div class="tr-date">Fri, 4 Jul</div></div><div class="txn-amt pos">+₹6,200</div></div>
+        <div id="earn-txn-list">
+          <div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No transactions yet</div></div>
+        </div>
       </div>
 
       <!-- SUPPORT VIEW -->
@@ -416,6 +423,7 @@ a{color:inherit;text-decoration:none}
 
         <div id="agency-team-block" style="display:none">
           <div class="section-title" data-en="My Team" data-hi="मेरी टीम">My Team</div>
+          <div class="demo-note" style="margin:0 0 12px" data-en="Team management API not built yet — showing sample data" data-hi="टीम प्रबंधन API अभी नहीं बना — नमूना डेटा दिखाया जा रहा है">Team management API not built yet — showing sample data</div>
           <div class="team-row"><div class="team-avatar">👨‍🔧</div><div class="team-info"><div class="team-name">Suresh Yadav</div><div class="team-sub">⭐ 4.6 · Electrician</div></div><button class="team-remove" onclick="removeMember(this)">Remove</button></div>
           <div class="team-row"><div class="team-avatar">👨‍🔧</div><div class="team-info"><div class="team-name">Mohit Rathore</div><div class="team-sub">⭐ 4.9 · Electrician</div></div><button class="team-remove" onclick="removeMember(this)">Remove</button></div>
           <button class="add-member-btn" onclick="addMember()" data-en="+ Add Team Member" data-hi="+ टीम सदस्य जोड़ें">+ Add Team Member</button>
@@ -448,9 +456,9 @@ a{color:inherit;text-decoration:none}
     <div class="io-title" data-en="New Job Request!" data-hi="नया काम अनुरोध!">New Job Request!</div>
     <div class="io-timer">⏱ <span id="io-countdown">30</span>s <span data-en="to respond" data-hi="जवाब देने के लिए">to respond</span></div>
     <div class="io-details">
-      <div class="io-row"><span class="iol" data-en="Service" data-hi="सेवा">Service</span><span class="ior">Electrician — Fan Repair</span></div>
-      <div class="io-row"><span class="iol" data-en="Area" data-hi="क्षेत्र">Area</span><span class="ior">Kolar Road (3.2 km)</span></div>
-      <div class="io-row"><span class="iol" data-en="Est. Amount" data-hi="अनुमानित राशि">Est. Amount</span><span class="ior">₹350 – ₹500</span></div>
+      <div class="io-row"><span class="iol" data-en="Service" data-hi="सेवा">Service</span><span class="ior" id="io-service">Electrician — Fan Repair</span></div>
+      <div class="io-row"><span class="iol" data-en="Area" data-hi="क्षेत्र">Area</span><span class="ior" id="io-area">Kolar Road</span></div>
+      <div class="io-row"><span class="iol" data-en="Est. Amount" data-hi="अनुमानित राशि">Est. Amount</span><span class="ior" id="io-amount">₹350 – ₹500</span></div>
     </div>
     <div class="io-btns">
       <button class="btn-decline" onclick="declineJob()" data-en="Decline" data-hi="अस्वीकार">Decline</button>
@@ -486,11 +494,38 @@ a{color:inherit;text-decoration:none}
 </div>
 
 <script>
-var LANG='EN', onlineState=false, memberCount=2;
-var demoJobData={service:'Electrician — Fan Repair', area:'Kolar Road', customer:'Suresh Patel', phone:'+91 90000 11122', amount:'₹450', otp:'1234'};
-var jfState={step:1, photosBefore:[], photosAfter:[], extras:[], payMethod:null};
+var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+var LANG='EN';
+var accessToken = localStorage.getItem('vendorAccessToken') || null;
+var refreshTok = localStorage.getItem('vendorRefreshToken') || null;
+var vendorProfile = null, earningsData = null, jobsAll = [];
+var pendingPhone = '';
+var onlineState = false;
+window.vendorType = 'individual';
+var jfState = {step:1, orderId:null, mock:true, order:null, photosBefore:[], photosAfter:[], extras:[], payMethod:null};
 var JF_STEPS=['Accepted','En Route','Verify','Before','Working','Extra','After','Payment','Done'];
 
+/* ── API HELPER ── */
+function apiFetch(path, opts){
+  opts = opts || {};
+  var headers = {'Content-Type':'application/json'};
+  if (opts.headers) for (var k in opts.headers) headers[k]=opts.headers[k];
+  if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+  var fetchOpts = {method: opts.method||'GET', headers: headers};
+  if (opts.body) fetchOpts.body = opts.body;
+  return fetch(API_BASE + '/api/v1' + path, fetchOpts).then(function(res){
+    return res.json().catch(function(){ return {}; }).then(function(data){
+      if (!res.ok) {
+        var msg = (data && (data.message || data.error)) || ('Request failed (' + res.status + ')');
+        throw new Error(Array.isArray(msg) ? msg.join(', ') : msg);
+      }
+      return data;
+    });
+  });
+}
+function fmtMoney(n){ return '₹' + Number(n||0).toLocaleString('en-IN'); }
+
+/* ── LANG ── */
 function setLang(l){LANG=l;document.querySelectorAll('.lang-btn').forEach(function(b){b.classList.remove('active')});
   event.target.classList.add('active');
   document.querySelectorAll('[data-en]').forEach(function(el){el.textContent=el.getAttribute('data-'+l.toLowerCase());});
@@ -499,35 +534,94 @@ function setLang(l){LANG=l;document.querySelectorAll('.lang-btn').forEach(functi
 
 function otpJump(el,i){ if(el.value){el.classList.add('filled'); var n=document.getElementById('lotp-'+(i+1)); if(n)n.focus();} else {el.classList.remove('filled');} }
 
+/* ── AUTH ── */
 function sendLoginOtp(){
-  var phone=document.getElementById('login-phone').value;
+  var digits=document.getElementById('login-phone').value;
   var err=document.getElementById('login-err'); err.textContent='';
-  if(phone.length!==10){err.textContent='Enter a valid 10-digit mobile number';return;}
-  document.getElementById('otp-sent-to').textContent='Code sent to +91 '+phone;
-  document.getElementById('login-phone-step').style.display='none';
-  document.getElementById('login-otp-step').style.display='block';
-  setTimeout(function(){document.getElementById('lotp-0').focus();},100);
+  if(digits.length!==10){err.textContent='Enter a valid 10-digit mobile number';return;}
+  pendingPhone = '+91'+digits;
+  var btn=document.getElementById('send-otp-btn'); btn.disabled=true; btn.textContent='Sending…';
+  apiFetch('/auth/send-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, role:'SERVICE_VENDOR'})})
+    .then(function(){
+      document.getElementById('otp-sent-to').textContent='Code sent to '+pendingPhone;
+      document.getElementById('login-phone-step').style.display='none';
+      document.getElementById('login-otp-step').style.display='block';
+      setTimeout(function(){document.getElementById('lotp-0').focus();},100);
+    })
+    .catch(function(e){ err.textContent=e.message; })
+    .then(function(){ btn.disabled=false; btn.textContent='Send OTP →'; });
 }
 function verifyLoginOtp(){
   var code=['0','1','2','3'].map(function(i){return document.getElementById('lotp-'+i).value}).join('');
-  var err=document.getElementById('otp-err');
-  if(code!=='1234'){err.textContent='Incorrect OTP. Try 1234 for this demo.';return;}
-  err.textContent='';
-  // Simulate: 50/50 new vs existing user for demo purposes -> always show register type once
-  showScreen('screen-regtype');
+  var err=document.getElementById('otp-err'); err.textContent='';
+  if(code.length!==4){err.textContent='Enter the 4-digit OTP';return;}
+  var btn=document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
+  apiFetch('/auth/verify-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, otp: code})})
+    .then(function(res){
+      accessToken=res.accessToken; refreshTok=res.refreshToken;
+      localStorage.setItem('vendorAccessToken', accessToken);
+      localStorage.setItem('vendorRefreshToken', refreshTok);
+      document.getElementById('prof-phone').textContent = res.user.phone;
+      return loadVendorProfile();
+    })
+    .catch(function(e){ err.textContent=e.message; })
+    .then(function(){ btn.disabled=false; btn.textContent='Verify & Continue'; });
+}
+function loadVendorProfile(){
+  return apiFetch('/vendors/service/me')
+    .then(function(v){ vendorProfile=v; enterDashboard(); })
+    .catch(function(){ showScreen('screen-regtype'); });
+}
+function afterAuth(){
+  return apiFetch('/auth/me')
+    .then(function(me){ document.getElementById('prof-phone').textContent = me.phone; return loadVendorProfile(); })
+    .catch(function(){ doLogout(); });
 }
 function selectType(t){
   document.getElementById('type-individual').classList.toggle('selected',t==='individual');
   document.getElementById('type-agency').classList.toggle('selected',t==='agency');
+  document.getElementById('reg-business-field').style.display = t==='agency' ? 'block':'none';
   window.vendorType=t;
 }
 function finishRegister(){
-  document.getElementById('agency-team-block').style.display = window.vendorType==='agency' ? 'block':'none';
-  document.getElementById('hdr-sub').textContent = window.vendorType==='agency' ? '⭐ 4.8 · Agency (3 members)' : '⭐ 4.8 · Electrician';
+  var err=document.getElementById('regtype-err'); err.textContent='';
+  var fullName=document.getElementById('reg-name').value.trim();
+  var baseCity=document.getElementById('reg-city').value.trim();
+  var skill=document.getElementById('reg-skill').value.trim();
+  var business=document.getElementById('reg-business').value.trim();
+  if(!fullName||!baseCity||!skill){ err.textContent='Please fill your name, city and primary skill'; return; }
+  var payload={fullName:fullName, baseCity:baseCity, skills:[skill]};
+  if(window.vendorType==='agency' && business) payload.businessName=business;
+  var btn=document.getElementById('regtype-btn'); btn.disabled=true; btn.textContent='Saving…';
+  apiFetch('/vendors/service/register', {method:'POST', body: JSON.stringify(payload)})
+    .then(function(v){ vendorProfile=v; enterDashboard(); })
+    .catch(function(e){ err.textContent=e.message; })
+    .then(function(){ btn.disabled=false; btn.textContent='Continue to Dashboard →'; });
+}
+function enterDashboard(){
+  document.getElementById('hdr-name').textContent = vendorProfile.fullName || 'Partner';
+  document.getElementById('hdr-sub').textContent = '⭐ '+Number(vendorProfile.rating||0).toFixed(1)+' · '+((vendorProfile.skills&&vendorProfile.skills[0])||'Service Partner');
+  document.getElementById('prof-name').textContent = vendorProfile.fullName || 'Partner';
+  document.getElementById('stat-rating').textContent = '⭐ '+Number(vendorProfile.rating||0).toFixed(1);
+  document.getElementById('stat-completed').textContent = vendorProfile.completedJobs || 0;
+  onlineState = !!vendorProfile.isOnline;
+  document.getElementById('online-toggle').checked = onlineState;
+  document.getElementById('online-pill').classList.toggle('on', onlineState);
+  document.getElementById('online-label').textContent = onlineState?'Online':'Offline';
+  document.getElementById('agency-team-block').style.display = vendorProfile.businessName ? 'block':'none';
   showScreen('screen-app');
+  loadEarnings();
+  loadJobs();
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
-function doLogout(){showScreen('screen-login');document.getElementById('login-phone-step').style.display='block';document.getElementById('login-otp-step').style.display='none';document.getElementById('login-phone').value='';}
+function doLogout(){
+  accessToken=null; refreshTok=null; vendorProfile=null;
+  localStorage.removeItem('vendorAccessToken'); localStorage.removeItem('vendorRefreshToken');
+  showScreen('screen-login');
+  document.getElementById('login-phone-step').style.display='block';
+  document.getElementById('login-otp-step').style.display='none';
+  document.getElementById('login-phone').value='';
+}
 
 function goView(name){
   document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});
@@ -541,23 +635,118 @@ function jobTab(t){
   document.getElementById('jobs-active-list').style.display = t==='active'?'block':'none';
   document.getElementById('jobs-completed-list').style.display = t==='completed'?'block':'none';
 }
-function earnTab(el,t){
-  document.querySelectorAll('#view-earnings .tab-btn').forEach(function(b){b.classList.remove('active')});
-  el.classList.add('active');
-  var data={today:{jobs:3,amt:'₹1,240'},month:{jobs:42,amt:'₹18,600'},life:{jobs:312,amt:'₹1,42,300'}};
-  document.getElementById('earn-jobs').textContent=data[t].jobs;
-  document.getElementById('earn-amt').textContent=data[t].amt;
-}
 function toggleOnline(){
   onlineState=document.getElementById('online-toggle').checked;
   document.getElementById('online-pill').classList.toggle('on',onlineState);
   document.getElementById('online-label').textContent=onlineState?'Online':'Offline';
+  apiFetch('/vendors/service/me/status', {method:'PATCH', body: JSON.stringify({isOnline:onlineState})})
+    .catch(function(e){
+      onlineState=!onlineState;
+      document.getElementById('online-toggle').checked=onlineState;
+      document.getElementById('online-pill').classList.toggle('on',onlineState);
+      document.getElementById('online-label').textContent=onlineState?'Online':'Offline';
+      alert('Could not update status: '+e.message);
+    });
+}
+
+/* ── EARNINGS ── */
+function loadEarnings(){
+  apiFetch('/vendors/service/me/earnings').then(function(e){
+    earningsData=e;
+    document.getElementById('home-wallet-val').textContent = fmtMoney(e.lifetime.pending);
+    document.getElementById('home-today-earn').textContent = fmtMoney(e.today.earnings);
+    document.getElementById('earn-wallet-val').textContent = fmtMoney(e.lifetime.pending);
+    earnTabRender('today');
+  }).catch(function(e){ console.warn('earnings load failed', e.message); });
+}
+function earnTab(el,t){
+  document.querySelectorAll('#view-earnings .tab-btn').forEach(function(b){b.classList.remove('active')});
+  el.classList.add('active');
+  earnTabRender(t);
+}
+function earnTabRender(t){
+  if(!earningsData) return;
+  var map={
+    today:{jobs:earningsData.today.jobs, amt:earningsData.today.earnings},
+    month:{jobs:earningsData.thisMonth.jobs, amt:earningsData.thisMonth.earnings},
+    life:{jobs:vendorProfile?vendorProfile.completedJobs:0, amt:earningsData.lifetime.amount}
+  };
+  document.getElementById('earn-jobs').textContent = map[t].jobs;
+  document.getElementById('earn-amt').textContent = fmtMoney(map[t].amt);
+}
+
+/* ── JOBS LIST ── */
+function loadJobs(){
+  apiFetch('/vendors/service/me/jobs').then(function(list){
+    jobsAll=list;
+    renderJobs();
+    renderRecentActivity();
+    renderTransactions();
+  }).catch(function(e){ console.warn('jobs load failed', e.message); });
+}
+function statusLabel(s){
+  var map={VENDOR_ASSIGNED:'Assigned',VENDOR_EN_ROUTE:'En Route',STARTED:'Started',IN_PROGRESS:'In Progress',EXTRA_WORK_ADDED:'Extra Work',COMPLETED:'Completed',CANCELLED:'Cancelled'};
+  return map[s]||s;
+}
+function jobCardHtml(j){
+  var title=((j.service&&j.service.name)||'Service')+' — '+((j.customer&&j.customer.name)||'Customer');
+  var meta=((j.address&&j.address.city)||'')+' · '+new Date(j.createdAt).toLocaleDateString('en-IN');
+  var amt=fmtMoney(j.status==='COMPLETED' ? j.vendorPayout : j.totalAmount);
+  var badgeClass = j.status==='COMPLETED' ? 'done' : 'active';
+  var clickable = j.status!=='COMPLETED' && j.status!=='CANCELLED';
+  return `<div class="job-card" data-order-id="${j.id}" data-clickable="${clickable}"><div class="jc-icon">🔧</div><div class="jc-info"><div class="jc-title">${title}</div><div class="jc-meta">${meta}</div></div><div class="jc-right"><div class="jc-amount">${amt}</div><span class="badge ${badgeClass}">${statusLabel(j.status)}</span></div></div>`;
+}
+function attachJobCardClicks(container){
+  container.querySelectorAll('.job-card[data-clickable="true"]').forEach(function(card){
+    card.addEventListener('click', function(){ resumeJob(card.getAttribute('data-order-id')); });
+  });
+}
+function renderJobs(){
+  var active=jobsAll.filter(function(j){return j.status!=='COMPLETED'&&j.status!=='CANCELLED'});
+  var completed=jobsAll.filter(function(j){return j.status==='COMPLETED'});
+  var activeEl=document.getElementById('jobs-active-list');
+  var completedEl=document.getElementById('jobs-completed-list');
+  activeEl.innerHTML = active.length ? active.map(jobCardHtml).join('') : '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No active jobs. Go online to start receiving jobs!</div></div>';
+  completedEl.innerHTML = completed.length ? completed.map(jobCardHtml).join('') : '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No completed jobs yet</div></div>';
+  attachJobCardClicks(activeEl); attachJobCardClicks(completedEl);
+}
+function renderRecentActivity(){
+  var completed=jobsAll.filter(function(j){return j.status==='COMPLETED'}).slice(0,2);
+  var el=document.getElementById('home-recent-list');
+  el.innerHTML = completed.length ? completed.map(jobCardHtml).join('') : '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No completed jobs yet</div></div>';
+  attachJobCardClicks(el);
+}
+function renderTransactions(){
+  var completed=jobsAll.filter(function(j){return j.status==='COMPLETED'}).slice(0,10);
+  var el=document.getElementById('earn-txn-list');
+  if(!completed.length){ el.innerHTML='<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No transactions yet</div></div>'; return; }
+  el.innerHTML = completed.map(function(j){
+    var title=((j.service&&j.service.name)||'Service')+' Payment';
+    var date = j.completedAt ? new Date(j.completedAt).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}) : '';
+    return `<div class="txn-row"><div class="txn-info"><div class="tr-title">${title}</div><div class="tr-date">${date}</div></div><div class="txn-amt pos">+${fmtMoney(j.vendorPayout)}</div></div>`;
+  }).join('');
+}
+function resumeJob(orderId){
+  apiFetch('/vendors/service/me/jobs/'+orderId).then(function(order){ startJobFlow(order,false); }).catch(function(e){ alert(e.message); });
 }
 
 /* ── INCOMING JOB ── */
-var ioTimer=null, ioSeconds=30;
+var ioTimer=null, ioSeconds=30, currentIncoming=null;
+function checkRealJobs(){
+  apiFetch('/vendors/service/me/available-jobs').then(function(list){
+    if(!list.length){ alert('No job requests available right now. Try the Demo Walkthrough to see how it works.'); return; }
+    openIncomingJob(list[0], false);
+  }).catch(function(e){ alert('Could not check for jobs: '+e.message); });
+}
 function simulateIncomingJob(){
   if(!onlineState){document.getElementById('online-toggle').checked=true;toggleOnline();}
+  openIncomingJob({id:null, service:{name:'Fan Repair (Demo)'}, address:{city:'Kolar Road'}, totalAmount:450}, true);
+}
+function openIncomingJob(job, isMock){
+  currentIncoming=job; currentIncoming._mock=isMock;
+  document.getElementById('io-service').textContent=(job.service&&job.service.name)||'Service';
+  document.getElementById('io-area').textContent=(job.address&&job.address.city)||'—';
+  document.getElementById('io-amount').textContent= job.totalAmount ? fmtMoney(job.totalAmount) : '—';
   ioSeconds=30;
   document.getElementById('io-countdown').textContent=ioSeconds;
   document.getElementById('job-overlay').classList.add('show');
@@ -566,17 +755,29 @@ function simulateIncomingJob(){
     if(ioSeconds<=0){clearInterval(ioTimer);declineJob();}
   },1000);
 }
-function declineJob(){clearInterval(ioTimer);document.getElementById('job-overlay').classList.remove('show');}
-function acceptJob(){clearInterval(ioTimer);document.getElementById('job-overlay').classList.remove('show');startJobFlow();}
+function declineJob(){clearInterval(ioTimer);document.getElementById('job-overlay').classList.remove('show');currentIncoming=null;}
+function acceptJob(){
+  clearInterval(ioTimer);
+  document.getElementById('job-overlay').classList.remove('show');
+  if(currentIncoming && currentIncoming._mock){ startJobFlow(null,true); return; }
+  var job=currentIncoming;
+  apiFetch('/vendors/service/me/jobs/'+job.id+'/accept', {method:'POST'})
+    .then(function(order){ startJobFlow(order,false); })
+    .catch(function(e){ alert('Could not accept job: '+e.message); });
+}
 
 /* ── JOB FLOW ── */
-function startJobFlow(){
-  jfState={step:1,photosBefore:[],photosAfter:[],extras:[],payMethod:null};
+function startJobFlow(order, isMock){
+  jfState={step:1, orderId: order?order.id:null, mock:isMock, order:order, photosBefore:[], photosAfter:[], extras:(order&&order.extraWorkItems)||[], payMethod:null};
+  if(order){
+    var stepMap={VENDOR_ASSIGNED:1, VENDOR_EN_ROUTE:3, STARTED:5, IN_PROGRESS:5, EXTRA_WORK_ADDED:5};
+    jfState.step = stepMap[order.status] || 1;
+  }
   buildProgress();
   renderJfStep();
   document.getElementById('job-flow').classList.add('show');
 }
-function exitJobFlow(){document.getElementById('job-flow').classList.remove('show');}
+function exitJobFlow(){document.getElementById('job-flow').classList.remove('show'); loadJobs(); loadEarnings();}
 function buildProgress(){
   var wrap=document.getElementById('jf-progress'); wrap.innerHTML='';
   JF_STEPS.forEach(function(_,i){
@@ -592,92 +793,138 @@ function updateDots(){
   });
 }
 function jfNext(){ jfState.step++; updateDots(); renderJfStep(); }
-function jfBack(){ if(jfState.step>1){jfState.step--; updateDots(); renderJfStep();} }
+function jfGoto(n){ jfState.step=n; updateDots(); renderJfStep(); }
+
+function jfDisplay(){
+  if(jfState.mock){
+    return {customer:'Suresh Patel (Demo)', service:'Electrician — Fan Repair', area:'Kolar Road', amount:450, address:'12 Kolar Road, Bhopal'};
+  }
+  var o=jfState.order||{};
+  return {
+    customer:(o.customer&&o.customer.name)||'Customer',
+    service:(o.service&&o.service.name)||'Service',
+    area:(o.address&&o.address.city)||'',
+    amount:Number(o.totalAmount||o.serviceAmount||0),
+    address:(o.address&&o.address.fullAddress)||'',
+    lat:o.address&&o.address.latitude, lng:o.address&&o.address.longitude
+  };
+}
 
 function renderJfStep(){
   var body=document.getElementById('jf-body'); var footer=document.getElementById('jf-footer');
   var s=jfState.step;
   var html='', foot='';
+  var d=jfDisplay();
 
-  if(s===1){ // Accepted
-    html = '<div class="jf-step-tag">Step 1 of 9 — Accepted</div><div class="jf-title">Job Accepted!</div>' +
-      '<div class="jf-sub">Here are the partial job details. Full address unlocks once you start.</div>' +
-      '<div class="customer-card"><div class="cc-top"><div class="cc-avatar">🧑</div><div><div class="cc-name">'+demoJobData.customer+'</div><div class="cc-phone">Contact unlocks after start</div></div></div>' +
-      '<div class="cc-detail-row"><span class="cdl">Service</span><span class="cdr">'+demoJobData.service+'</span></div>' +
-      '<div class="cc-detail-row"><span class="cdl">Area</span><span class="cdr">'+demoJobData.area+'</span></div>' +
-      '<div class="cc-detail-row"><span class="cdl">Est. Amount</span><span class="cdr">'+demoJobData.amount+'</span></div></div>';
-    foot = '<button class="btn-primary" onclick="jfNext()">Start Job →</button>';
+  if(s===1){
+    html = `<div class="jf-step-tag">Step 1 of 9 — Accepted</div><div class="jf-title">Job Accepted!</div>
+      <div class="jf-sub">Here are the partial job details. Full address unlocks once you start.</div>
+      <div class="customer-card"><div class="cc-top"><div class="cc-avatar">🧑</div><div><div class="cc-name">${d.customer}</div><div class="cc-phone">Contact unlocks after start</div></div></div>
+      <div class="cc-detail-row"><span class="cdl">Service</span><span class="cdr">${d.service}</span></div>
+      <div class="cc-detail-row"><span class="cdl">Area</span><span class="cdr">${d.area}</span></div>
+      <div class="cc-detail-row"><span class="cdl">Est. Amount</span><span class="cdr">${fmtMoney(d.amount)}</span></div></div>`;
+    foot = `<button class="btn-primary" id="jf-start-btn" onclick="jfStartHeading()">Start Job →</button>`;
   }
-  else if(s===2){ // En Route
-    html = '<div class="jf-step-tag">Step 2 of 9 — En Route</div><div class="jf-title">Head to Customer</div>' +
-      '<div class="jf-sub">Navigate to the customer location using Google Maps.</div>' +
-      '<div class="customer-card"><div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">12 Kolar Road, Bhopal</span></div>' +
-      '<div class="cc-detail-row"><span class="cdl">Distance</span><span class="cdr">3.2 km · ~11 min</span></div></div>';
-    foot = '<a class="map-nav-btn" href="https://www.google.com/maps/dir/?api=1&destination=23.2599,77.4126" target="_blank">🗺️ Start Navigation</a>' +
-           '<button class="btn-primary" onclick="jfNext()">I\'ve Arrived →</button>';
+  else if(s===2){
+    var mapHref = (!jfState.mock && d.lat && d.lng) ? `https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}` : 'https://www.google.com/maps/dir/?api=1&destination=23.2599,77.4126';
+    html = `<div class="jf-step-tag">Step 2 of 9 — En Route</div><div class="jf-title">Head to Customer</div>
+      <div class="jf-sub">Navigate to the customer location using Google Maps.</div>
+      <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${d.address||'Unlocked after accept'}</span></div></div>`;
+    foot = `<a class="map-nav-btn" href="${mapHref}" target="_blank">🗺️ Start Navigation</a>
+      <button class="btn-primary" onclick="jfGoto(3)">I've Arrived →</button>`;
   }
-  else if(s===3){ // OTP verify
-    html = '<div class="jf-step-tag">Step 3 of 9 — Verify</div><div class="jf-title">Verify Customer OTP</div>' +
-      '<div class="jf-sub">Ask the customer for their 4-digit start OTP.</div>' +
-      '<div class="otp-row"><input class="otp-digit" maxlength="1" id="jotp-0" oninput="otpJump(this,0)" style="--x:0"><input class="otp-digit" maxlength="1" id="jotp-1" oninput="jfOtpJump(1)"><input class="otp-digit" maxlength="1" id="jotp-2" oninput="jfOtpJump(2)"><input class="otp-digit" maxlength="1" id="jotp-3" oninput="jfOtpJump(3)"></div>' +
-      '<div class="otp-hint">Dev OTP: '+demoJobData.otp+'</div><div class="auth-error" id="jf-otp-err"></div>';
-    foot = '<button class="btn-primary" onclick="verifyJfOtp()">Verify & Start Job →</button>';
+  else if(s===3){
+    html = `<div class="jf-step-tag">Step 3 of 9 — Verify</div><div class="jf-title">Verify Customer OTP</div>
+      <div class="jf-sub">${jfState.mock ? 'Ask the customer for their 4-digit start OTP.' : 'The customer received a start OTP via WhatsApp when the job was assigned. Ask them for it.'}</div>
+      <div class="otp-row"><input class="otp-digit" maxlength="1" id="jotp-0" oninput="jfOtpJump(0)"><input class="otp-digit" maxlength="1" id="jotp-1" oninput="jfOtpJump(1)"><input class="otp-digit" maxlength="1" id="jotp-2" oninput="jfOtpJump(2)"><input class="otp-digit" maxlength="1" id="jotp-3" oninput="jfOtpJump(3)"></div>
+      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}
+      <div class="auth-error" id="jf-otp-err"></div>`;
+    foot = `<button class="btn-primary" id="jf-verify-btn" onclick="verifyJfOtp()">Verify & Start Job →</button>`;
   }
-  else if(s===4){ // Before photos
-    html = '<div class="jf-step-tag">Step 4 of 9 — Before Photos</div><div class="jf-title">Upload Before Photos</div>' +
-      '<div class="jf-sub">Take 1–3 photos of the site before starting work.</div>' +
-      '<div class="photo-grid" id="photo-grid-before"></div>' +
-      '<div class="upload-area"><input type="file" accept="image/*" onchange="addPhoto(this,\'photosBefore\',\'photo-grid-before\')"><div style="font-size:26px">📷</div><div style="font-size:13px;font-weight:600">Tap to add photo</div></div>';
-    foot = '<button class="btn-primary" id="before-next-btn" onclick="jfNext()" disabled>Continue →</button>';
+  else if(s===4){
+    html = `<div class="jf-step-tag">Step 4 of 9 — Before Photos</div><div class="jf-title">Upload Before Photos</div>
+      <div class="jf-sub">Take 1–3 photos of the site before starting work.${jfState.mock ? '' : ' (Stored on this device only for now — cloud photo storage is not built yet.)'}</div>
+      <div class="photo-grid" id="photo-grid-before"></div>
+      <div class="upload-area"><input type="file" accept="image/*" onchange="addPhoto(this,'photosBefore','photo-grid-before')"><div style="font-size:26px">📷</div><div style="font-size:13px;font-weight:600">Tap to add photo</div></div>`;
+    foot = `<button class="btn-primary" id="before-next-btn" onclick="jfNext()" disabled>Continue →</button>`;
+    setTimeout(function(){ renderPhotoGrid('photosBefore','photo-grid-before'); },0);
   }
-  else if(s===5){ // Working
-    html = '<div class="jf-step-tag">Step 5 of 9 — Working</div><div class="jf-title">Job In Progress</div>' +
-      '<div class="jf-sub">Add extra work if needed, or mark the job complete.</div>' +
-      '<div class="customer-card" style="text-align:center;padding:30px 18px"><div style="font-size:40px;margin-bottom:10px">🔧</div><div style="font-weight:700;font-size:15px">Working on: '+demoJobData.service+'</div></div>';
-    foot = '<div style="display:flex;gap:10px"><button class="btn-outline" style="flex:1" onclick="jfState.step=6;updateDots();renderJfStep()">+ Extra Work</button><button class="btn-primary" style="flex:1" onclick="jfState.step=7;updateDots();renderJfStep()">Mark Complete →</button></div>';
+  else if(s===5){
+    html = `<div class="jf-step-tag">Step 5 of 9 — Working</div><div class="jf-title">Job In Progress</div>
+      <div class="jf-sub">Add extra work if needed, or mark the job complete.</div>
+      <div class="customer-card" style="text-align:center;padding:30px 18px"><div style="font-size:40px;margin-bottom:10px">🔧</div><div style="font-weight:700;font-size:15px">Working on: ${d.service}</div></div>`;
+    foot = `<div style="display:flex;gap:10px"><button class="btn-outline" style="flex:1" onclick="jfGoto(6)">+ Extra Work</button><button class="btn-primary" style="flex:1" onclick="jfGoto(7)">Mark Complete →</button></div>`;
   }
-  else if(s===6){ // Extra work
-    html = '<div class="jf-step-tag">Step 6 of 9 — Extra Work</div><div class="jf-title">Add Extra Work</div>' +
-      '<div class="jf-sub">Customer will be asked to approve before it\'s added to the bill.</div>' +
-      '<div class="field"><label>Item description</label><input id="extra-desc" placeholder="e.g. Extra wiring"></div>' +
-      '<div class="field"><label>Amount (₹)</label><input id="extra-amt" type="number" placeholder="e.g. 150"></div>' +
-      '<button class="btn-outline" style="width:100%;margin-bottom:16px" onclick="addExtraItem()">+ Add Item</button>' +
-      '<div id="extra-list"></div>' +
-      '<div id="extra-approval-msg" class="auth-error"></div>';
-    foot = '<button class="btn-primary" onclick="sendExtraForApproval()">Send for Customer Approval →</button>';
+  else if(s===6){
+    html = `<div class="jf-step-tag">Step 6 of 9 — Extra Work</div><div class="jf-title">Add Extra Work</div>
+      <div class="jf-sub">${jfState.mock ? "Customer will be asked to approve before it's added to the bill." : "The customer gets a WhatsApp approval request. You can continue working while it's pending."}</div>
+      <div class="field"><label>Item description</label><input id="extra-desc" placeholder="e.g. Extra wiring"></div>
+      <div class="field"><label>Amount (₹)</label><input id="extra-amt" type="number" placeholder="e.g. 150"></div>
+      <button class="btn-outline" style="width:100%;margin-bottom:16px" onclick="addExtraItem()">+ Add Item</button>
+      <div id="extra-list"></div>
+      <div id="extra-approval-msg" class="auth-error"></div>`;
+    foot = `<button class="btn-primary" onclick="sendExtraForApproval()">Send for Customer Approval →</button>`;
     setTimeout(renderExtraList,0);
   }
-  else if(s===7){ // After photos
-    html = '<div class="jf-step-tag">Step 7 of 9 — After Photos</div><div class="jf-title">Upload Completion Photos</div>' +
-      '<div class="jf-sub">Show the completed work clearly.</div>' +
-      '<div class="photo-grid" id="photo-grid-after"></div>' +
-      '<div class="upload-area"><input type="file" accept="image/*" onchange="addPhoto(this,\'photosAfter\',\'photo-grid-after\')"><div style="font-size:26px">📷</div><div style="font-size:13px;font-weight:600">Tap to add photo</div></div>';
-    foot = '<button class="btn-primary" id="after-next-btn" onclick="jfNext()" disabled>Continue to Payment →</button>';
+  else if(s===7){
+    html = `<div class="jf-step-tag">Step 7 of 9 — After Photos</div><div class="jf-title">Upload Completion Photos</div>
+      <div class="jf-sub">Show the completed work clearly.</div>
+      <div class="photo-grid" id="photo-grid-after"></div>
+      <div class="upload-area"><input type="file" accept="image/*" onchange="addPhoto(this,'photosAfter','photo-grid-after')"><div style="font-size:26px">📷</div><div style="font-size:13px;font-weight:600">Tap to add photo</div></div>`;
+    foot = `<button class="btn-primary" id="after-next-btn" onclick="jfNext()" disabled>Continue to Payment →</button>`;
+    setTimeout(function(){ renderPhotoGrid('photosAfter','photo-grid-after'); },0);
   }
-  else if(s===8){ // Payment
-    var total = 450 + jfState.extras.reduce(function(a,e){return a+e.amt},0);
-    html = '<div class="jf-step-tag">Step 8 of 9 — Payment</div><div class="jf-title">Collect Payment</div>' +
-      '<div class="customer-card"><div class="cc-detail-row"><span class="cdl">Base Amount</span><span class="cdr">₹450</span></div>' +
-      (jfState.extras.length? '<div class="cc-detail-row"><span class="cdl">Extra Work</span><span class="cdr">₹'+jfState.extras.reduce(function(a,e){return a+e.amt},0)+'</span></div>':'') +
-      '<div class="cc-detail-row" style="font-size:15px"><span class="cdl">Total</span><span class="cdr" style="color:var(--sienna)">₹'+total+'</span></div></div>' +
-      '<div class="pay-option" id="pay-cod" onclick="selectPay(\'cod\')"><div class="po-icon">💵</div><div><div class="po-name">Cash on Delivery</div><div class="po-sub">Confirm cash received</div></div></div>' +
-      '<div class="pay-option" id="pay-online" onclick="selectPay(\'online\')"><div class="po-icon">🔗</div><div><div class="po-name">Send Payment Link</div><div class="po-sub">Razorpay link via SMS/WhatsApp</div></div></div>';
-    foot = '<button class="btn-primary" id="pay-confirm-btn" onclick="confirmPayment()" disabled>Confirm Payment →</button>';
+  else if(s===8){
+    var extraTotal=jfState.extras.reduce(function(a,e){return a+Number(e.amount||e.amt||0);},0);
+    var total = d.amount + (jfState.mock ? extraTotal : 0);
+    html = `<div class="jf-step-tag">Step 8 of 9 — Payment</div><div class="jf-title">Collect Payment</div>
+      <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Base Amount</span><span class="cdr">${fmtMoney(d.amount)}</span></div>
+      ${extraTotal ? `<div class="cc-detail-row"><span class="cdl">Extra Work (pending approval)</span><span class="cdr">${fmtMoney(extraTotal)}</span></div>` : ''}
+      <div class="cc-detail-row" style="font-size:15px"><span class="cdl">Total</span><span class="cdr" style="color:var(--sienna)">${fmtMoney(total)}</span></div></div>
+      ${jfState.mock ? '' : '<div class="demo-note">Payment collection (COD confirm / Razorpay link) is not wired to a backend endpoint yet — the button below only marks the job complete.</div>'}
+      <div class="pay-option" id="pay-cod" onclick="selectPay('cod')"><div class="po-icon">💵</div><div><div class="po-name">Cash on Delivery</div><div class="po-sub">Confirm cash received</div></div></div>
+      <div class="pay-option" id="pay-online" onclick="selectPay('online')"><div class="po-icon">🔗</div><div><div class="po-name">Send Payment Link</div><div class="po-sub">Razorpay link via SMS/WhatsApp</div></div></div>`;
+    foot = `<button class="btn-primary" id="pay-confirm-btn" onclick="confirmPayment()" disabled>Confirm & Complete Job →</button>`;
   }
-  else if(s===9){ // Done
-    var total = 450 + jfState.extras.reduce(function(a,e){return a+e.amt},0);
-    html = '<div class="job-done-screen"><div class="jd-icon">🎉</div><h2>Job Completed!</h2>' +
-      '<div style="color:#6b7280;font-size:13px">Great work! Payment has been recorded.</div>' +
-      '<div class="earning-box"><div style="font-size:12px;color:#6b7280">You earned</div><div class="eb-val">₹'+Math.round(total*0.85)+'</div><div style="font-size:11px;color:#9ca3af;margin-top:4px">after 15% platform commission</div></div></div>';
-    foot = '<button class="btn-primary" onclick="exitJobFlow()">Back to Home</button>';
+  else if(s===9){
+    var extraTotal2=jfState.extras.reduce(function(a,e){return a+Number(e.amount||e.amt||0);},0);
+    var payout;
+    if(jfState.mock){ payout=Math.round((d.amount+extraTotal2)*0.85); }
+    else { payout = jfState.completedOrder ? Number(jfState.completedOrder.vendorPayout) : Math.round(d.amount*0.85); }
+    html = `<div class="job-done-screen"><div class="jd-icon">🎉</div><h2>Job Completed!</h2>
+      <div style="color:#6b7280;font-size:13px">Great work! Your earnings have been updated.</div>
+      <div class="earning-box"><div style="font-size:12px;color:#6b7280">You earned</div><div class="eb-val">${fmtMoney(payout)}</div><div style="font-size:11px;color:#9ca3af;margin-top:4px">after platform commission</div></div></div>`;
+    foot = `<button class="btn-primary" onclick="exitJobFlow()">Back to Home</button>`;
   }
   body.innerHTML=html; footer.innerHTML=foot;
 }
-function jfOtpJump(i){ var el=document.getElementById('jotp-'+i); var prev=document.getElementById('jotp-'+(i-1)); if(prev&&prev.value)prev.classList.add('filled'); if(el.value)el.classList.add('filled'); if(el.value){var n=document.getElementById('jotp-'+(i+1)); if(n)n.focus();} }
+
+function jfStartHeading(){
+  if(jfState.mock){ jfGoto(2); return; }
+  var btn=document.getElementById('jf-start-btn'); btn.disabled=true; btn.textContent='Updating…';
+  apiFetch('/orders/'+jfState.orderId+'/en-route', {method:'PATCH'})
+    .then(function(){ jfGoto(2); })
+    .catch(function(e){ alert('Could not update status: '+e.message); btn.disabled=false; btn.textContent='Start Job →'; });
+}
+function jfOtpJump(i){
+  var el=document.getElementById('jotp-'+i);
+  if(el.value){ el.classList.add('filled'); var n=document.getElementById('jotp-'+(i+1)); if(n)n.focus(); }
+  else { el.classList.remove('filled'); }
+}
 function verifyJfOtp(){
   var code=['0','1','2','3'].map(function(i){return document.getElementById('jotp-'+i).value}).join('');
-  if(code!==demoJobData.otp){document.getElementById('jf-otp-err').textContent='Incorrect OTP. Try '+demoJobData.otp;return;}
-  jfNext();
+  var errEl=document.getElementById('jf-otp-err'); errEl.textContent='';
+  if(code.length!==4){ errEl.textContent='Enter the 4-digit OTP'; return; }
+  var btn=document.getElementById('jf-verify-btn'); btn.disabled=true; btn.textContent='Verifying…';
+  if(jfState.mock){
+    if(code!=='1234'){ errEl.textContent='Incorrect OTP. Try 1234 for this demo.'; btn.disabled=false; btn.textContent='Verify & Start Job →'; return; }
+    btn.disabled=false; btn.textContent='Verify & Start Job →';
+    jfGoto(4); return;
+  }
+  apiFetch('/orders/'+jfState.orderId+'/verify-otp', {method:'POST', body: JSON.stringify({otp:code})})
+    .then(function(){ jfGoto(4); })
+    .catch(function(e){ errEl.textContent=e.message; })
+    .then(function(){ btn.disabled=false; btn.textContent='Verify & Start Job →'; });
 }
 function addPhoto(input,arrName,gridId){
   if(!input.files||!input.files[0])return;
@@ -691,8 +938,11 @@ function addPhoto(input,arrName,gridId){
 function renderPhotoGrid(arrName,gridId){
   var grid=document.getElementById(gridId); if(!grid)return;
   grid.innerHTML=jfState[arrName].map(function(src,i){
-    return '<div class="photo-thumb"><img src="'+src+'"><div class="pt-x" onclick="removePhoto(\''+arrName+'\',\''+gridId+'\','+i+')">✕</div></div>';
+    return `<div class="photo-thumb"><img src="${src}"><div class="pt-x" data-arr="${arrName}" data-grid="${gridId}" data-i="${i}">✕</div></div>`;
   }).join('');
+  grid.querySelectorAll('.pt-x').forEach(function(x){
+    x.addEventListener('click', function(){ removePhoto(x.getAttribute('data-arr'), x.getAttribute('data-grid'), parseInt(x.getAttribute('data-i'),10)); });
+  });
   var btnId = arrName==='photosBefore' ? 'before-next-btn' : 'after-next-btn';
   var btn=document.getElementById(btnId); if(btn) btn.disabled = jfState[arrName].length===0;
 }
@@ -701,23 +951,34 @@ function addExtraItem(){
   var desc=document.getElementById('extra-desc').value.trim();
   var amt=parseFloat(document.getElementById('extra-amt').value);
   if(!desc||!amt){return;}
-  jfState.extras.push({desc:desc,amt:amt});
+  jfState.extras.push({description:desc, amount:amt, _pending:true});
   document.getElementById('extra-desc').value=''; document.getElementById('extra-amt').value='';
   renderExtraList();
 }
 function renderExtraList(){
   var wrap=document.getElementById('extra-list'); if(!wrap)return;
-  wrap.innerHTML=jfState.extras.map(function(e){return '<div class="extra-item"><span>'+e.desc+'</span><span style="font-weight:700">₹'+e.amt+'</span></div>'}).join('');
+  wrap.innerHTML=jfState.extras.map(function(e){ return `<div class="extra-item"><span>${e.description}</span><span style="font-weight:700">${fmtMoney(e.amount)}</span></div>`; }).join('');
 }
 function sendExtraForApproval(){
-  if(jfState.extras.length===0){ jfState.step=7; updateDots(); renderJfStep(); return; }
-  document.getElementById('extra-approval-msg').style.color='var(--sage)';
-  document.getElementById('extra-approval-msg').textContent='Sent to customer — waiting for approval…';
-  setTimeout(function(){
-    document.getElementById('extra-approval-msg').style.color='var(--success)';
-    document.getElementById('extra-approval-msg').textContent='✅ Customer approved! Continuing…';
-    setTimeout(function(){ jfState.step=7; updateDots(); renderJfStep(); },900);
-  },1500);
+  var pending=jfState.extras.filter(function(e){return e._pending;});
+  var msgEl=document.getElementById('extra-approval-msg');
+  if(!pending.length){ jfGoto(7); return; }
+  if(jfState.mock){
+    msgEl.style.color='var(--success)'; msgEl.textContent='✅ Sent to customer (demo).';
+    pending.forEach(function(e){ e._pending=false; });
+    setTimeout(function(){ jfGoto(7); },800);
+    return;
+  }
+  msgEl.style.color='var(--sage)'; msgEl.textContent='Sending to customer…';
+  var chain=pending.reduce(function(p,item){
+    return p.then(function(){
+      return apiFetch('/orders/'+jfState.orderId+'/extra-work', {method:'POST', body: JSON.stringify({description:item.description, amount:item.amount})});
+    }).then(function(){ item._pending=false; });
+  }, Promise.resolve());
+  chain.then(function(){
+    msgEl.style.color='var(--success)'; msgEl.textContent='✅ Sent to customer via WhatsApp for approval.';
+    setTimeout(function(){ jfGoto(7); },900);
+  }).catch(function(e){ msgEl.style.color='var(--error)'; msgEl.textContent=e.message; });
 }
 function selectPay(m){
   jfState.payMethod=m;
@@ -725,9 +986,15 @@ function selectPay(m){
   document.getElementById('pay-online').classList.toggle('selected',m==='online');
   document.getElementById('pay-confirm-btn').disabled=false;
 }
-function confirmPayment(){ jfNext(); }
+function confirmPayment(){
+  var btn=document.getElementById('pay-confirm-btn'); btn.disabled=true; btn.textContent='Completing…';
+  if(jfState.mock){ jfGoto(9); return; }
+  apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify({photosAfter: jfState.photosAfter})})
+    .then(function(order){ jfState.completedOrder=order; jfGoto(9); })
+    .catch(function(e){ alert('Could not complete job: '+e.message); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; });
+}
 
-/* ── AGENCY TEAM ── */
+/* ── AGENCY TEAM (demo only — no backend yet) ── */
 function removeMember(btn){ btn.closest('.team-row').remove(); }
 function addMember(){ alert('In the live app this opens an invite-by-phone flow to add a new team member.'); }
 
@@ -736,14 +1003,19 @@ function toggleAI(){ var p=document.getElementById('ai-panel'); p.style.display 
 function aiSend(){
   var input=document.getElementById('ai-input'); var msg=input.value.trim(); if(!msg)return;
   var wrap=document.getElementById('ai-msgs');
-  wrap.innerHTML += '<div style="background:var(--sienna);color:#fff;padding:10px 14px;border-radius:14px;border-bottom-right-radius:4px;font-size:13px;max-width:85%;align-self:flex-end">'+msg+'</div>';
+  wrap.innerHTML += `<div style="background:var(--sienna);color:#fff;padding:10px 14px;border-radius:14px;border-bottom-right-radius:4px;font-size:13px;max-width:85%;align-self:flex-end">${msg}</div>`;
   input.value='';
   setTimeout(function(){
-    wrap.innerHTML += '<div style="background:var(--cream);padding:10px 14px;border-radius:14px;border-bottom-left-radius:4px;font-size:13px;max-width:85%">This is a demo response. In the live app I\'ll answer using your real job & account data.</div>';
+    wrap.innerHTML += '<div style="background:var(--cream);padding:10px 14px;border-radius:14px;border-bottom-left-radius:4px;font-size:13px;max-width:85%">This is a demo response. In the live app I will answer using your real job & account data.</div>';
     wrap.scrollTop=wrap.scrollHeight;
   },600);
   wrap.scrollTop=wrap.scrollHeight;
 }
+
+/* ── SESSION RESTORE ── */
+window.addEventListener('DOMContentLoaded', function(){
+  if(accessToken){ afterAuth(); }
+});
 </script>
 </body>
 </html>
