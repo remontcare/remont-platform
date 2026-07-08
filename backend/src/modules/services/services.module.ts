@@ -32,7 +32,16 @@ export class ServicesService {
     const categories = await this.prisma.serviceCategory.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
-      include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+      include: {
+        // Kept flat + unfiltered-by-subcategory for backward compatibility with anything
+        // still reading category.services directly.
+        services: { where: { isActive: true }, orderBy: { name: 'asc' } },
+        subCategories: {
+          where: { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+        },
+      },
     });
 
     if (!city) return categories;

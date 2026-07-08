@@ -446,6 +446,38 @@ export class AdminService {
     return this.prisma.serviceCategory.updateMany({ where: { id: { in: ids } }, data });
   }
 
+  // ─── Sub-Categories ───────────────────────────────────────────────────
+
+  async listSubCategories(categoryId?: string) {
+    return this.prisma.subCategory.findMany({
+      where: categoryId ? { categoryId } : {},
+      include: { category: { select: { name: true, key: true } }, _count: { select: { services: true } } },
+      orderBy: [{ categoryId: 'asc' }, { sortOrder: 'asc' }],
+    });
+  }
+
+  async createSubCategory(data: any) {
+    const slug = data.slug || slugify(data.name);
+    return this.prisma.subCategory.create({ data: { ...data, slug }, include: { category: true } });
+  }
+
+  async updateSubCategory(id: string, data: any) {
+    const existing = await this.prisma.subCategory.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Sub-category not found');
+    if (data.name && !data.slug) data.slug = slugify(data.name);
+    return this.prisma.subCategory.update({ where: { id }, data, include: { category: true } });
+  }
+
+  async deleteSubCategory(id: string) {
+    const svcCount = await this.prisma.service.count({ where: { subCategoryId: id } });
+    if (svcCount > 0) throw new BadRequestException(`Cannot delete: ${svcCount} services use this sub-category. Disable it instead.`);
+    return this.prisma.subCategory.delete({ where: { id } });
+  }
+
+  async bulkUpdateSubCategories(ids: string[], data: { isActive?: boolean }) {
+    return this.prisma.subCategory.updateMany({ where: { id: { in: ids } }, data });
+  }
+
   // ─── Services ───────────────────────────────────────────────────────
 
   async listAllServices(opts: { categoryId?: string; q?: string; isActive?: boolean; limit?: number; offset?: number } = {}) {
@@ -455,7 +487,7 @@ export class AdminService {
         ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
         ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { description: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
-      include: { category: { select: { name: true, key: true } }, cityServices: { select: { cityId: true, isActive: true, customPrice: true } } },
+      include: { category: { select: { name: true, key: true } }, subCategory: { select: { name: true, key: true } }, cityServices: { select: { cityId: true, isActive: true, customPrice: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 200,
       skip: opts.offset || 0,
@@ -467,7 +499,7 @@ export class AdminService {
     const { cities, ...rest } = data;
     return this.prisma.service.create({
       data: { ...rest, slug, requiredSkills: rest.requiredSkills || [], images: rest.images || [], seoKeywords: rest.seoKeywords || [] },
-      include: { category: true },
+      include: { category: true, subCategory: true },
     });
   }
 
@@ -475,7 +507,7 @@ export class AdminService {
     const existing = await this.prisma.service.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service not found');
     const { cities, ...rest } = data;
-    return this.prisma.service.update({ where: { id }, data: rest, include: { category: true } });
+    return this.prisma.service.update({ where: { id }, data: rest, include: { category: true, subCategory: true } });
   }
 
   async deleteService(id: string) {
@@ -1513,6 +1545,13 @@ export class AdminController {
   @Patch('services/categories/:id') updateCategory(@Param('id') id: string, @Body() b: any) { return this.admin.updateCategory(id, b); }
   @Delete('services/categories/:id') deleteCategory(@Param('id') id: string) { return this.admin.deleteCategory(id); }
   @Delete('services/categories/:id/force') forceDeleteCategory(@Param('id') id: string) { return this.admin.forceDeleteCategory(id); }
+
+  // Sub-Categories
+  @Get('services/subcategories') allSubCategories(@Query('categoryId') categoryId?: string) { return this.admin.listSubCategories(categoryId); }
+  @Post('services/subcategories') createSubCategory(@Body() b: any) { return this.admin.createSubCategory(b); }
+  @Patch('services/subcategories/bulk') bulkSubCategories(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateSubCategories(b.ids, { isActive: b.isActive }); }
+  @Patch('services/subcategories/:id') updateSubCategory(@Param('id') id: string, @Body() b: any) { return this.admin.updateSubCategory(id, b); }
+  @Delete('services/subcategories/:id') deleteSubCategory(@Param('id') id: string) { return this.admin.deleteSubCategory(id); }
 
   // Services
   @Get('services/export') exportSvcs() { return this.admin.exportServices(); }

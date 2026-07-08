@@ -339,12 +339,32 @@ model ServiceCategory {
   seoDesc      String?
   seoKeywords  String[]
 
+  services      Service[]
+  subCategories SubCategory[]
+}
+
+model SubCategory {
+  id          String   @id @default(cuid())
+  categoryId  String
+  key         String
+  slug        String?  @unique
+  name        String
+  icon        String?
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id])
   services Service[]
+
+  @@unique([categoryId, key])
+  @@index([categoryId])
 }
 
 model Service {
   id              String   @id @default(cuid())
   categoryId      String
+  subCategoryId   String?
   name            String
   slug            String   @unique
   description     String?
@@ -368,11 +388,13 @@ model Service {
   updatedAt       DateTime @updatedAt
 
   category     ServiceCategory @relation(fields: [categoryId], references: [id])
+  subCategory  SubCategory?    @relation(fields: [subCategoryId], references: [id])
   orders       Order[]
   cityServices CityService[]
   reviews      Review[]
 
   @@index([categoryId])
+  @@index([subCategoryId])
   @@index([isActive, isPopular])
 }
 

@@ -884,6 +884,18 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     max-width: 100%;
   }
+  /* Sub-category tiles (shown before drilling into a category's service list) */
+  .subcat-tile-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+  .subcat-tile {
+    background: var(--cream); border-radius: var(--radius); padding: 18px 10px;
+    text-align: center; border: 1px solid transparent; transition: all 0.2s; cursor: pointer;
+  }
+  .subcat-tile:hover { border-color: var(--sienna); background: #fff; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(196,96,26,0.10); }
+  .subcat-tile .icn { font-size: 30px; margin-bottom: 8px; display: block; }
+  .subcat-tile .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); line-height: 1.2; }
+  .subcat-back-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; color: var(--sienna); font-size: 13px; font-weight: 600; }
+  @media (max-width: 768px) { .subcat-tile-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 480px) { .subcat-tile-grid { grid-template-columns: repeat(2, 1fr); } }
   /* Dual action buttons on service card */
   .svc-card-btns { display: flex; gap: 5px; margin-top: 8px; }
   .svc-cart-btn, .svc-book-btn {
@@ -4904,35 +4916,23 @@
   // Escape value for safe use inside inline JS string attributes
   function escJs(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
-  function renderService(key) {
-    const d = serviceData[key];
-    if (!d) return;
-    const html = `
-      <div class="panel-head">
-        <div>
-          <h3>${d.title}</h3>
-          <p>${d.subtitle}</p>
-        </div>
-        <div class="panel-head-right">
-          <span class="panel-pill">⭐ 4.8 / 5.0</span>
-          <span class="panel-pill green">3-Click Book</span>
+  function svcCardsHtml(services) {
+    return services.map(s => `
+      <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''}>
+        <span class="icn">${s.ic}</span>
+        <div class="nm">${s.n}</div>
+        <div class="pr">${s.o !== '—' ? `<small>${s.o}</small>` : ''}${s.p}<span class="svc-unit">${s.unit || 'per visit'}</span></div>
+        ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).join(' · ')}</div>` : ''}
+        <div class="svc-card-btns">
+          <button class="svc-cart-btn" onclick="addSvcToCart(event,'${s.id}','${escJs(s.n)}',${s.pNum||0},'${escJs(s.unit||'per visit')}','${escJs(s.categoryKey||'')}',${JSON.stringify(s.inclusions||[])})">+ Cart</button>
+          <button class="svc-book-btn" onclick="bookSvcNow(event,'${s.id}','${escJs(s.n)}','${escJs(s.p)}')">⚡ Book Now</button>
         </div>
       </div>
-      <div class="sub-row-title">Choose a sub-service <span>Starting prices · Final via vendor</span></div>
-      <div class="sub-svc-grid">
-        ${d.subServices.map(s => `
-          <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''}>
-            <span class="icn">${s.ic}</span>
-            <div class="nm">${s.n}</div>
-            <div class="pr">${s.o !== '—' ? `<small>${s.o}</small>` : ''}${s.p}<span class="svc-unit">${s.unit || 'per visit'}</span></div>
-            ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).join(' · ')}</div>` : ''}
-            <div class="svc-card-btns">
-              <button class="svc-cart-btn" onclick="addSvcToCart(event,'${s.id}','${escJs(s.n)}',${s.pNum||0},'${escJs(s.unit||'per visit')}','${escJs(s.categoryKey||'')}',${JSON.stringify(s.inclusions||[])})">+ Cart</button>
-              <button class="svc-book-btn" onclick="bookSvcNow(event,'${s.id}','${escJs(s.n)}','${escJs(s.p)}')">⚡ Book Now</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
+    `).join('');
+  }
+
+  function productsSectionHtml(d) {
+    return `
       <div class="panel-promo">
         <div class="pp-text">
           <div class="pp-tag">Bundle Offer</div>
@@ -4972,6 +4972,66 @@
           </div>
         `).join('')}
       </div>
+    `;
+  }
+
+  function renderService(key) {
+    const d = serviceData[key];
+    if (!d) return;
+    const hasSubCats = d.subCategories && d.subCategories.length > 0;
+    const html = `
+      <div class="panel-head">
+        <div>
+          <h3>${d.title}</h3>
+          <p>${d.subtitle}</p>
+        </div>
+        <div class="panel-head-right">
+          <span class="panel-pill">⭐ 4.8 / 5.0</span>
+          <span class="panel-pill green">3-Click Book</span>
+        </div>
+      </div>
+      ${hasSubCats ? `
+        <div class="sub-row-title">Select a service type <span>Tap to see specific services</span></div>
+        <div class="subcat-tile-grid">
+          ${d.subCategories.map(sc => `
+            <div class="subcat-tile" onclick="renderSubCategoryServices('${key}','${escJs(sc.key)}')">
+              <span class="icn">${sc.icon}</span>
+              <div class="nm">${sc.name}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div class="sub-row-title">Choose a sub-service <span>Starting prices · Final via vendor</span></div>
+        <div class="sub-svc-grid">${svcCardsHtml(d.subServices)}</div>
+      `}
+      ${productsSectionHtml(d)}
+    `;
+    document.getElementById('displayPanel').innerHTML = html;
+  }
+
+  // Drill-down into one sub-category's services — pure client-side re-render, no network
+  // call and no page reload (the full category→subcategory→service tree already arrived
+  // in the one /services/categories fetch on page load).
+  function renderSubCategoryServices(key, subKey) {
+    const d = serviceData[key];
+    if (!d) return;
+    const sc = (d.subCategories || []).find(x => x.key === subKey);
+    if (!sc) return;
+    const html = `
+      <div class="panel-head">
+        <div>
+          <h3>${d.title}</h3>
+          <p>${d.subtitle}</p>
+        </div>
+        <div class="panel-head-right">
+          <span class="panel-pill">⭐ 4.8 / 5.0</span>
+          <span class="panel-pill green">3-Click Book</span>
+        </div>
+      </div>
+      <div class="subcat-back-row" onclick="renderService('${key}')">← Back to ${d.title} categories</div>
+      <div class="sub-row-title">${sc.name} <span>Starting prices · Final via vendor</span></div>
+      <div class="sub-svc-grid">${svcCardsHtml(sc.services)}</div>
+      ${productsSectionHtml(d)}
     `;
     document.getElementById('displayPanel').innerHTML = html;
   }
@@ -6021,6 +6081,21 @@
     categories = deduped;
 
     // Update serviceData from API categories
+    function mapSvc(s, cat) {
+      return {
+        id: s.id,
+        ic: cat.icon || '🔧',
+        n: s.name,
+        p: '₹' + Number(s.basePrice).toLocaleString('en-IN'),
+        pNum: Number(s.basePrice),
+        o: s.originalPrice ? '₹' + Number(s.originalPrice).toLocaleString('en-IN') : '—',
+        unit: s.unit || 'per visit',
+        inclusions: s.inclusions || [],
+        exclusions: s.exclusions || [],
+        desc: s.description || '',
+        categoryKey: cat.key,
+      };
+    }
     categories.forEach(function(cat) {
       var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-');
       var services = cat.services || [];
@@ -6031,19 +6106,13 @@
         key: cat.key,
         title: cat.name,
         subtitle: cat.description || 'Professional ' + cat.name + ' services',
-        subServices: services.map(function(s){
+        subServices: services.map(function(s){ return mapSvc(s, cat); }),
+        subCategories: (cat.subCategories || []).filter(function(sc){ return (sc.services||[]).length; }).map(function(sc){
           return {
-            id: s.id,
-            ic: cat.icon || '🔧',
-            n: s.name,
-            p: '₹' + Number(s.basePrice).toLocaleString('en-IN'),
-            pNum: Number(s.basePrice),
-            o: s.originalPrice ? '₹' + Number(s.originalPrice).toLocaleString('en-IN') : '—',
-            unit: s.unit || 'per visit',
-            inclusions: s.inclusions || [],
-            exclusions: s.exclusions || [],
-            desc: s.description || '',
-            categoryKey: cat.key,
+            key: sc.key,
+            name: sc.name,
+            icon: sc.icon || cat.icon || '🔧',
+            services: sc.services.map(function(s){ return mapSvc(s, cat); }),
           };
         }),
         productTitle: 'Related Products',

@@ -37,6 +37,7 @@
   <div class="content">
     <div class="tab-bar">
       <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Categories</button>
+      <button class="tab" id="tab-btn-subcat" onclick="showTab('subcat')">Sub-Categories</button>
       <button class="tab" id="tab-btn-svc" onclick="showTab('svc')">Services</button>
     </div>
 
@@ -58,6 +59,23 @@
           <button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="clearCatSelect()">Clear</button>
         </div>
         <div class="table-wrap"><div id="cat-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- ── SUB-CATEGORIES TAB ─────────────────────────────────────────── -->
+    <div id="tab-subcat" style="display:none">
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Sub-Categories</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="subcat-filter-cat" class="form-control" style="width:180px" onchange="loadSubCategories()">
+              <option value="">All Categories</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openSubCatModal()">+ Add Sub-Category</button>
+            <button class="btn btn-outline btn-sm" onclick="loadSubCategories()">↺</button>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="subcat-tbl" class="loading">Loading…</div></div>
       </div>
     </div>
 
@@ -145,6 +163,34 @@
   </div>
 </div>
 
+<!-- ── SUB-CATEGORY MODAL ──────────────────────────────────────────── -->
+<div id="subcat-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="subcat-modal-title">Add Sub-Category</span>
+      <button class="modal-close" onclick="closeModal('subcat-overlay')">×</button>
+    </div>
+    <input type="hidden" id="subcat-id">
+    <div class="form-group"><label class="form-label">Category <span style="color:red">*</span></label><select id="subcat-cat" class="form-control"><option value="">Select…</option></select></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Key <span style="color:red">*</span></label><input id="subcat-key" class="form-control" placeholder="switch-socket"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Icon / Emoji</label><input id="subcat-icon" class="form-control" placeholder="🔌"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Name <span style="color:red">*</span></label><input id="subcat-name" class="form-control" placeholder="Switch & Socket"></div>
+    <div class="form-group"><label class="form-label">Description</label><textarea id="subcat-desc" class="form-control" rows="2" placeholder="Short description…"></textarea></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="subcat-sort" class="form-control" type="number" value="0"></div>
+      <div class="form-group" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="subcat-active" checked> Active</label>
+      </div>
+    </div>
+    <div class="modal-footer" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('subcat-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSubCategory()">Save Sub-Category</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── SERVICE MODAL ───────────────────────────────────────────────── -->
 <div id="svc-overlay" class="overlay" style="display:none">
   <div class="modal" style="max-width:680px;max-height:90vh;overflow-y:auto">
@@ -162,7 +208,8 @@
     <input type="hidden" id="svc-id">
 
     <div id="svc-basic" class="modal-pane active">
-      <div class="form-group"><label class="form-label">Category <span style="color:red">*</span></label><select id="svc-cat" class="form-control"><option value="">Select…</option></select></div>
+      <div class="form-group"><label class="form-label">Category <span style="color:red">*</span></label><select id="svc-cat" class="form-control" onchange="populateSvcSubcatSelect()"><option value="">Select…</option></select></div>
+      <div class="form-group"><label class="form-label">Sub-Category <span style="color:red">*</span></label><select id="svc-subcat" class="form-control"><option value="">Select category first…</option></select></div>
       <div class="form-group"><label class="form-label">Service Name <span style="color:red">*</span></label><input id="svc-name" class="form-control" placeholder="1.5 Ton Split AC Service"></div>
       <div class="form-group"><label class="form-label">Description</label><textarea id="svc-desc" class="form-control" rows="4" placeholder="What's included in this service…"></textarea></div>
       <div class="form-row">
@@ -278,6 +325,7 @@ renderSidebar('services');
 requireAuth();
 
 var categories = [];
+var subCategories = [];
 var selectedCats = new Set();
 var selectedSvcs = new Set();
 var currentSvcId = null;
@@ -289,9 +337,12 @@ var importRows = [];
 
 function showTab(tab) {
   document.getElementById('tab-cat').style.display = tab==='cat' ? '' : 'none';
+  document.getElementById('tab-subcat').style.display = tab==='subcat' ? '' : 'none';
   document.getElementById('tab-svc').style.display = tab==='svc' ? '' : 'none';
   document.getElementById('tab-btn-cat').className = 'tab' + (tab==='cat' ? ' active' : '');
+  document.getElementById('tab-btn-subcat').className = 'tab' + (tab==='subcat' ? ' active' : '');
   document.getElementById('tab-btn-svc').className = 'tab' + (tab==='svc' ? ' active' : '');
+  if (tab === 'subcat') loadSubCategories();
 }
 
 function switchModalTab(btn, pane) {
@@ -401,6 +452,94 @@ function bulkCat(active) {
   api('PATCH','/admin/services/categories/bulk',{ids:[...selectedCats],isActive:active}).then(function(){ toast('Updated '+selectedCats.size+' categories','success'); selectedCats.clear(); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
 }
 
+// ── SUB-CATEGORIES ───────────────────────────────────────────────────
+
+function loadSubCategories() {
+  var catFilter = document.getElementById('subcat-filter-cat').value;
+  document.getElementById('subcat-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/services/subcategories' + (catFilter ? '?categoryId='+catFilter : '')).then(function(subs) {
+    subCategories = subs || [];
+    populateSubcatFilterSelect();
+    if (!subs.length) { document.getElementById('subcat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🗂️</div><h3>No sub-categories found</h3></div>'; return; }
+    var rows = subs.map(function(sc) {
+      return '<tr>' +
+        '<td style="width:36px;font-size:20px;text-align:center">' + escape(sc.icon||'') + '</td>' +
+        '<td>' + escape(sc.category ? sc.category.name : '—') + '</td>' +
+        '<td><strong>' + escape(sc.name) + '</strong></td>' +
+        '<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">' + escape(sc.key) + '</code></td>' +
+        '<td>' + (sc._count ? sc._count.services : 0) + ' svcs</td>' +
+        '<td>' + sc.sortOrder + '</td>' +
+        '<td>' + badge(sc.isActive?'Active':'Inactive',sc.isActive?'green':'gray') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openSubCatModal(' + JSON.stringify(sc) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs btn-warning" onclick="toggleSubCat(\'' + sc.id + '\',' + (!sc.isActive) + ')">' + (sc.isActive?'Disable':'Enable') + '</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteSubCat(\'' + sc.id + '\',\'' + escape(sc.name) + '\')">Delete</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('subcat-tbl').innerHTML = '<table><thead><tr><th>Icon</th><th>Category</th><th>Name</th><th>Key</th><th>Services</th><th>Sort</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){ document.getElementById('subcat-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function populateSubcatFilterSelect() {
+  var opts = categories.map(function(c){ return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
+  var sel = document.getElementById('subcat-filter-cat');
+  var current = sel.value;
+  sel.innerHTML = '<option value="">All Categories</option>' + opts;
+  sel.value = current;
+  document.getElementById('subcat-cat').innerHTML = '<option value="">Select…</option>' + opts;
+}
+
+function openSubCatModal(sc) {
+  document.getElementById('subcat-modal-title').textContent = sc ? 'Edit Sub-Category' : 'Add Sub-Category';
+  document.getElementById('subcat-id').value = sc ? sc.id : '';
+  document.getElementById('subcat-cat').value = sc ? sc.categoryId : '';
+  document.getElementById('subcat-key').value = sc ? sc.key : '';
+  document.getElementById('subcat-icon').value = sc ? (sc.icon||'') : '';
+  document.getElementById('subcat-name').value = sc ? sc.name : '';
+  document.getElementById('subcat-desc').value = sc ? (sc.description||'') : '';
+  document.getElementById('subcat-sort').value = sc ? sc.sortOrder : 0;
+  document.getElementById('subcat-active').checked = sc ? sc.isActive : true;
+  document.getElementById('subcat-overlay').style.display = 'flex';
+}
+
+function saveSubCategory() {
+  var id = document.getElementById('subcat-id').value;
+  var data = {
+    categoryId: document.getElementById('subcat-cat').value,
+    key: document.getElementById('subcat-key').value.trim().toLowerCase().replace(/\s+/g,'-'),
+    icon: document.getElementById('subcat-icon').value.trim() || undefined,
+    name: document.getElementById('subcat-name').value.trim(),
+    description: document.getElementById('subcat-desc').value.trim() || undefined,
+    sortOrder: parseInt(document.getElementById('subcat-sort').value) || 0,
+    isActive: document.getElementById('subcat-active').checked,
+  };
+  if (!data.categoryId) { toast('Select a category','error'); return; }
+  if (!data.key || !data.name) { toast('Key and name required','error'); return; }
+  var p = id ? api('PATCH','/admin/services/subcategories/'+id,data) : api('POST','/admin/services/subcategories',data);
+  p.then(function(){ toast(id?'Sub-category updated':'Sub-category created','success'); closeModal('subcat-overlay'); loadSubCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function toggleSubCat(id, active) {
+  api('PATCH','/admin/services/subcategories/'+id,{isActive:active}).then(function(){ toast(active?'Enabled':'Disabled',active?'success':'warning'); loadSubCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function deleteSubCat(id, name) {
+  if (!confirm('Delete sub-category "' + name + '"? This will fail if any services are attached.')) return;
+  api('DELETE','/admin/services/subcategories/'+id).then(function(){ toast('Sub-category deleted','warning'); loadSubCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// Populates the Service form's Sub-Category dropdown for whichever category is selected.
+function populateSvcSubcatSelect(preselectId) {
+  var catId = document.getElementById('svc-cat').value;
+  var sel = document.getElementById('svc-subcat');
+  if (!catId) { sel.innerHTML = '<option value="">Select category first…</option>'; return; }
+  var opts = subCategories.filter(function(sc){ return sc.categoryId === catId; })
+    .map(function(sc){ return '<option value="' + sc.id + '">' + escape(sc.name) + '</option>'; }).join('');
+  sel.innerHTML = '<option value="">Select…</option>' + opts;
+  if (preselectId) sel.value = preselectId;
+}
+
 // ── SERVICES ──────────────────────────────────────────────────────────
 
 function loadServices() {
@@ -421,6 +560,7 @@ function loadServices() {
         (s.imageUrl ? '<td><img src="' + escape(s.imageUrl) + '" style="width:48px;height:36px;object-fit:cover;border-radius:4px"></td>' : '<td style="text-align:center;color:#9ca3af;font-size:18px">' + (s.category && s.category.key ? '🔧' : '') + '</td>') +
         '<td><strong>' + escape(s.name) + '</strong></td>' +
         '<td>' + escape(s.category ? s.category.name : '—') + '</td>' +
+        '<td>' + escape(s.subCategory ? s.subCategory.name : '—') + '</td>' +
         '<td>' + fmtCur(s.basePrice) + (s.originalPrice && s.originalPrice > 0 ? ' <span style="text-decoration:line-through;color:#9ca3af;font-size:11px">' + fmtCur(s.originalPrice) + '</span>' : '') + '</td>' +
         '<td>' + s.durationMinutes + ' min</td>' +
         '<td>' + badge(cityCount > 0 ? cityCount + ' cities' : 'All cities', cityCount > 0 ? 'blue' : 'gray') + '</td>' +
@@ -432,7 +572,7 @@ function loadServices() {
         '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('svc-tbl').innerHTML = '<table style="min-width:900px"><thead><tr><th></th><th>Img</th><th>Name</th><th>Category</th><th>Price</th><th>Duration</th><th>Cities</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.getElementById('svc-tbl').innerHTML = '<table style="min-width:1000px"><thead><tr><th></th><th>Img</th><th>Name</th><th>Category</th><th>Sub-Category</th><th>Price</th><th>Duration</th><th>Cities</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e){ document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
@@ -441,6 +581,7 @@ function openSvcModal(svc) {
   document.getElementById('svc-id').value = svc ? svc.id : '';
   currentSvcId = svc ? svc.id : null;
   document.getElementById('svc-cat').value = svc ? svc.categoryId : '';
+  populateSvcSubcatSelect(svc ? svc.subCategoryId : null);
   document.getElementById('svc-name').value = svc ? svc.name : '';
   document.getElementById('svc-desc').value = svc ? (svc.description||'') : '';
   document.getElementById('svc-price').value = svc ? svc.basePrice : '';
@@ -488,10 +629,12 @@ function saveService() {
   var price = parseFloat(document.getElementById('svc-price').value);
   var mrp = parseFloat(document.getElementById('svc-mrp').value);
   if (!document.getElementById('svc-cat').value) { toast('Select a category','error'); return; }
+  if (!document.getElementById('svc-subcat').value) { toast('Select a sub-category','error'); return; }
   if (!document.getElementById('svc-name').value.trim()) { toast('Enter service name','error'); return; }
   if (isNaN(price)||price<=0) { toast('Enter valid price','error'); return; }
   var data = {
     categoryId: document.getElementById('svc-cat').value,
+    subCategoryId: document.getElementById('svc-subcat').value,
     name: document.getElementById('svc-name').value.trim(),
     description: document.getElementById('svc-desc').value.trim()||undefined,
     unit: document.getElementById('svc-unit').value || 'per visit',
@@ -724,6 +867,7 @@ function exportServices() {
 attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
 attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200 });
 loadCategories();
+loadSubCategories();
 loadServices();
 </script>
 </body>
