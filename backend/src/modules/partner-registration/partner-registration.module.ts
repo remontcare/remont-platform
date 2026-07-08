@@ -220,10 +220,15 @@ export class PartnerRegistrationService {
           },
         });
       } else {
+        // Never downgrade an existing ADMIN/SUPER_ADMIN (or any non-CUSTOMER role) just
+        // because a partner-registration application with their phone number got approved —
+        // this previously force-set role: SERVICE_VENDOR unconditionally, which could silently
+        // lock an admin out of their own panel if the same phone was ever used to submit one.
+        const newRole = user.role === UserRole.CUSTOMER ? UserRole.SERVICE_VENDOR : user.role;
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
-            role: UserRole.SERVICE_VENDOR,
+            role: newRole,
             isVerified: true,
             name: reg.fullName || user.name,
             ...(reg.email ? { email: reg.email } : {}),
