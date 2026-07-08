@@ -6031,7 +6031,7 @@
         key: cat.key,
         title: cat.name,
         subtitle: cat.description || 'Professional ' + cat.name + ' services',
-        subServices: services.slice(0, 6).map(function(s){
+        subServices: services.map(function(s){
           return {
             id: s.id,
             ic: cat.icon || '🔧',
