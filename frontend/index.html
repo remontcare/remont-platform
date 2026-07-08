@@ -4985,6 +4985,16 @@
     }
   }
 
+  // Category chips in the top nav (Plumbing/Electrical/etc.) — select the matching
+  // category in the #shop panel instead of just anchoring to the same generic section.
+  function selectCategoryChip(chipEl, fkey) {
+    document.querySelectorAll('.cat-nav-inner .cat-link').forEach(function(a){ a.classList.remove('active'); });
+    if (chipEl) chipEl.classList.add('active');
+    var svcItem = document.querySelector('.svc-item[data-svc="'+fkey+'"]');
+    if (svcItem) { switchService(svcItem); }
+    else { renderService(fkey); }
+  }
+
   renderService('ac');
 
   // ═══ Slider ═══
@@ -6059,13 +6069,14 @@
       panel.innerHTML = newHtml;
     }
 
-    // Update cat-nav
+    // Update cat-nav — each chip actually selects its matching category in the #shop
+    // panel (was: every chip pointed at the same generic href="#shop" with no filtering).
     var catNav = document.querySelector('.cat-nav-inner');
     if (catNav) {
-      var navLinks = ['<a href="#shop" class="cat-link active"><span class="ic">⚡</span> Quick Repair</a>'];
+      var navLinks = ['<a href="#shop" class="cat-link active" onclick="selectCategoryChip(this,\'ac\')"><span class="ic">⚡</span> Quick Repair</a>'];
       categories.forEach(function(cat){
-        var fkey = keyMap[cat.key] || cat.key.toLowerCase();
-        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'"><span class="ic">'+cat.icon+'</span> '+cat.name+'</a>');
+        var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
+        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+cat.icon+'</span> '+cat.name+'</a>');
       });
       navLinks.push('<a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
       navLinks.push('<a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>');
@@ -6079,28 +6090,38 @@
     applyCityFilter();
   }
 
-  // ── Load products for a service category from API ─────────────────
-  function loadProductsForCategory(catKey, fkey) {
-    apiGet('/api/v1/products?category=' + encodeURIComponent(catKey) + '&limit=4').then(function(resp) {
-      var products = resp && resp.data ? resp.data : (Array.isArray(resp) ? resp : []);
-      if (!products.length || !serviceData[fkey]) return;
-      serviceData[fkey].products = products.map(function(p){
-        return {
-          img: (p.images && p.images[0]) || 'https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80',
-          brand: p.brand || 'Remont',
-          name: p.name,
-          desc: p.description || p.aiGeneratedDesc || '',
-          unit: p.unit || 'piece',
-          specs: p.specifications || {},
-          rating: p.rating ? p.rating.toFixed(1) : '4.5',
-          count: p.reviewCount ? p.reviewCount.toLocaleString() : '—',
-          price: Number(p.price).toLocaleString('en-IN'),
-          priceNum: Number(p.price),
-          was: p.mrp ? Number(p.mrp).toLocaleString('en-IN') : null,
-          off: p.mrp ? Math.round((1 - Number(p.price)/Number(p.mrp))*100) + '%' : null,
-          id: p.id,
-          slug: p.slug,
-        };
+  // ── Load top products for ALL service categories in ONE batched call ──
+  // (was firing a separate /api/v1/products?category= request per category — 20+ requests
+  // on page load; now a single /api/v1/products/by-categories request grouped server-side)
+  var PRODUCT_IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Crect width='300' height='300' fill='%23f3f4f6'/%3E%3Ctext x='150' y='158' font-family='sans-serif' font-size='48' text-anchor='middle' fill='%23c4c9d1'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E";
+  function loadProductsForCategories(cats) {
+    var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction','PEST_CONTROL':'pest-control','FALSE_CEILING':'false-ceiling','FALSE-CEILING':'false-ceiling' };
+    var catKeys = cats.map(function(c){ return c.key; });
+    if (!catKeys.length) return;
+    apiGet('/api/v1/products/by-categories?categories=' + encodeURIComponent(catKeys.join(',')) + '&limitPerCategory=4').then(function(resp) {
+      var grouped = resp && resp.data ? resp.data : (resp || {});
+      Object.keys(grouped).forEach(function(catKey) {
+        var fkey = keyMap[catKey] || catKey.toLowerCase().replace(/_/g,'-');
+        var products = grouped[catKey] || [];
+        if (!products.length || !serviceData[fkey]) return;
+        serviceData[fkey].products = products.map(function(p){
+          return {
+            img: (p.images && p.images[0]) || PRODUCT_IMG_PLACEHOLDER,
+            brand: p.brand || 'Remont',
+            name: p.name,
+            desc: p.description || p.aiGeneratedDesc || '',
+            unit: p.unit || 'piece',
+            specs: p.specifications || {},
+            rating: p.rating ? p.rating.toFixed(1) : '4.5',
+            count: p.reviewCount ? p.reviewCount.toLocaleString() : '—',
+            price: Number(p.price).toLocaleString('en-IN'),
+            priceNum: Number(p.price),
+            was: p.mrp ? Number(p.mrp).toLocaleString('en-IN') : null,
+            off: p.mrp ? Math.round((1 - Number(p.price)/Number(p.mrp))*100) + '%' : null,
+            id: p.id,
+            slug: p.slug,
+          };
+        });
       });
     }).catch(function(){});
   }
@@ -6292,12 +6313,7 @@
       var cats = Array.isArray(data) ? data : (data && data.data ? data.data : []);
       if (cats && cats.length > 0) {
         buildServicePanel(cats);
-        // Load products for each category
-        var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction','PEST_CONTROL':'pest-control','FALSE_CEILING':'false-ceiling','FALSE-CEILING':'false-ceiling' };
-        cats.forEach(function(cat){
-          var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
-          loadProductsForCategory(cat.key, fkey);
-        });
+        loadProductsForCategories(cats);
       }
     }).catch(function(){});
 

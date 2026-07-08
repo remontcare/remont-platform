@@ -13,3 +13,4 @@ coverage/
 *.tsbuildinfo
 prisma/dev.db
 prisma/migrations/dev/
+graphify-out/

@@ -46,6 +46,28 @@ export class ProductsService {
     return products;
   }
 
+  /**
+   * One query for the homepage's "top N products per category" strip instead of a separate
+   * request per category (was firing 20+ parallel /products?category= calls on page load).
+   */
+  async listGroupedByCategories(categoryKeys: string[], limitPerCategory: number) {
+    const products = await this.prisma.product.findMany({
+      where: { isActive: true, category: { key: { in: categoryKeys } } },
+      include: { category: true, vendor: { select: { businessName: true, rating: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const grouped: Record<string, typeof products> = {};
+    for (const key of categoryKeys) grouped[key] = [];
+    for (const p of products) {
+      const key = p.category?.key;
+      if (key && grouped[key] && grouped[key].length < limitPerCategory) {
+        grouped[key].push(p);
+      }
+    }
+    return grouped;
+  }
+
   async getBySlug(slug: string) {
     const product = await this.prisma.product.findUnique({
       where: { slug },
@@ -115,6 +137,16 @@ export class ProductsController {
     @Query('city') city?: string,
     @Query('limit') limit?: number,
   ) { return this.products.list({ category, vendor, q, city, limit }); }
+
+  // Must come before @Get(':slug') — same path depth, would otherwise be swallowed as a slug.
+  @Public() @Get('by-categories')
+  byCategories(
+    @Query('categories') categories?: string,
+    @Query('limitPerCategory') limitPerCategory?: number,
+  ) {
+    const keys = (categories || '').split(',').map((k) => k.trim()).filter(Boolean);
+    return this.products.listGroupedByCategories(keys, Number(limitPerCategory) || 4);
+  }
 
   @Public() @Get(':slug')
   one(@Param('slug') slug: string) { return this.products.getBySlug(slug); }
