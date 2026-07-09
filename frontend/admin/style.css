@@ -264,6 +264,12 @@ textarea.form-control{resize:vertical;min-height:80px}
   box-shadow:0 20px 60px rgba(0,0,0,.2);
 }
 .modal-lg{width:740px}
+/* Many admin pages set a fixed px max-width inline (e.g. style="max-width:680px") for
+   desktop, which otherwise overrides the 95vw safety net above and pushes Save/Cancel
+   off-screen on phones. Desktop is untouched — this only applies under 600px. */
+@media (max-width: 600px) {
+  .modal { max-width: 95vw !important; }
+}
 .modal-header{
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #e8edf2;

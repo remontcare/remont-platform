@@ -897,6 +897,11 @@
   @media (max-width: 768px) { .subcat-tile-grid { grid-template-columns: repeat(3, 1fr); } }
   @media (max-width: 480px) { .subcat-tile-grid { grid-template-columns: repeat(2, 1fr); } }
   /* Dual action buttons on service card */
+  /* Enlarges the tappable area of small icon-only buttons (e.g. modal "✕" close)
+     without changing their visible size/position — a transparent, unstyled hit
+     zone extending past the button's own box. Mobile tap-target fix only. */
+  .tap-target-fix { position: relative; }
+  .tap-target-fix::after { content: ''; position: absolute; inset: -12px; }
   .svc-card-btns { display: flex; gap: 5px; margin-top: 8px; }
   .svc-cart-btn, .svc-book-btn {
     flex: 1; font-size: 10px; font-weight: 700; border: none; border-radius: 5px;
@@ -3282,10 +3287,10 @@
     <div class="m-section">
       <div class="m-sec-hd"><span>Service Categories</span><a onclick="document.querySelector('.cat-nav') && window.scrollTo(0,0)">View all</a></div>
       <div class="m-cat-grid" id="m-cat-grid">
-        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=ac]'));closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name">AC Repair</div></div>
-        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=plumbing]'))"><div class="m-cat-icon">🔧</div><div class="m-cat-name">Plumbing</div></div>
-        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=electrical]'))"><div class="m-cat-icon">⚡</div><div class="m-cat-name">Electrical</div></div>
-        <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=cleaning]'))"><div class="m-cat-icon">🧹</div><div class="m-cat-name">Cleaning</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','AC Service & Repair','₹399');closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name">AC Repair</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','Plumbing','₹299')"><div class="m-cat-icon">🔧</div><div class="m-cat-name">Plumbing</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','Electrical Work','₹249')"><div class="m-cat-icon">⚡</div><div class="m-cat-name">Electrical</div></div>
+        <div class="m-cat-item" onclick="openBookingModal('','Deep Cleaning','₹699')"><div class="m-cat-icon">🧹</div><div class="m-cat-name">Cleaning</div></div>
         <div class="m-cat-item" onclick="openBookingModal('','Pest Control','₹499')"><div class="m-cat-icon">🐛</div><div class="m-cat-name">Pest Control</div></div>
         <div class="m-cat-item" onclick="openBookingModal('','Painting','₹1999')"><div class="m-cat-icon">🎨</div><div class="m-cat-name">Painting</div></div>
         <div class="m-cat-item" onclick="switchService(document.querySelector('[data-svc=appliance]'))"><div class="m-cat-icon">🔌</div><div class="m-cat-name">Appliance Repair</div></div>
@@ -4679,7 +4684,7 @@
   <div class="loc-modal">
     <div class="loc-modal-head">
       <h3>📍 Set Your Location</h3>
-      <button onclick="closeLocModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1">✕</button>
+      <button class="tap-target-fix" onclick="closeLocModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1">✕</button>
     </div>
     <div class="loc-modal-body">
       <!-- GPS quick capture -->
@@ -4750,7 +4755,7 @@
       <div style="font-weight:700;font-size:15px">Remi AI</div>
       <div style="font-size:11px;opacity:.85">● Online · Hindi, English, Hinglish</div>
     </div>
-    <button onclick="closeRemiChat()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;padding:0">✕</button>
+    <button class="tap-target-fix" onclick="closeRemiChat()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;padding:0">✕</button>
   </div>
   <div id="remi-messages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#f9fafb"></div>
   <div id="remi-suggestions" style="padding:8px 12px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;background:#fff;border-top:1px solid #f3f4f6;flex-shrink:0"></div>
@@ -5683,6 +5688,20 @@
     if (token) headers['Authorization'] = 'Bearer ' + token;
     return fetch(API_BASE + path, {
       method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    }).then(function(res) {
+      if (!res.ok) throw new Error(res.status);
+      return res.json();
+    });
+  }
+
+  function apiPatch(path, body) {
+    var token = localStorage.getItem('remont_token');
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(API_BASE + path, {
+      method: 'PATCH',
       headers: headers,
       body: JSON.stringify(body)
     }).then(function(res) {
@@ -6975,7 +6994,7 @@
 <!-- ═══ ORDER TRACKING MODAL ═══ -->
 <div id="tracking-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto">
   <div style="background:#fff;border-radius:20px;max-width:460px;width:100%;padding:28px 24px;position:relative;margin:auto">
-    <button onclick="closeTrackingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+    <button class="tap-target-fix" onclick="closeTrackingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
     <div style="font-size:22px;margin-bottom:4px">📦</div>
     <h3 style="font-size:19px;font-weight:700;color:#111;margin:0 0 4px">Track Your Order</h3>
     <p style="font-size:13px;color:#6b7280;margin:0 0 20px">Enter your order number and registered phone number.</p>
@@ -7264,7 +7283,7 @@ function cartCheckout() {
 <!-- ═══ OTP AUTH MODAL ═══ -->
 <div id="auth-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10100;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:16px;padding:32px;width:360px;max-width:94vw;position:relative">
-    <button onclick="closeAuthModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    <button class="tap-target-fix" onclick="closeAuthModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     <h3 style="font-size:20px;font-weight:700;margin-bottom:6px;color:#111">Login to Continue</h3>
     <p style="font-size:13px;color:#6b7280;margin-bottom:20px">Enter your phone number to receive an OTP</p>
     <div id="auth-step-phone">
@@ -7306,7 +7325,7 @@ function cartCheckout() {
     <!-- Header -->
     <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;background:#fff;flex-shrink:0">
       <div style="font-size:18px;font-weight:700;color:#111">My Profile</div>
-      <button onclick="closeAccountModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1">✕</button>
+      <button class="tap-target-fix" onclick="closeAccountModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1">✕</button>
     </div>
 
     <!-- Scrollable body -->
@@ -7384,7 +7403,7 @@ function cartCheckout() {
   <div style="background:#fff;border-radius:16px;padding:0;width:480px;max-width:98vw;max-height:90vh;overflow:auto;position:relative">
     <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
       <h3 style="font-size:18px;font-weight:700;color:#111">Checkout</h3>
-      <button onclick="closeCheckoutModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+      <button class="tap-target-fix" onclick="closeCheckoutModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     </div>
     <div style="padding:20px 24px">
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Order Summary</h4>
@@ -7450,7 +7469,7 @@ function cartCheckout() {
   <div style="background:#fff;border-radius:16px;padding:0;width:560px;max-width:98vw;max-height:88vh;overflow:auto;position:relative">
     <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
       <h3 style="font-size:18px;font-weight:700;color:#111">My Orders</h3>
-      <button onclick="closeMyOrdersModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+      <button class="tap-target-fix" onclick="closeMyOrdersModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     </div>
     <div id="mo-body" style="padding:20px 24px;min-height:200px">
       <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
@@ -7460,7 +7479,7 @@ function cartCheckout() {
 
 <div id="rate-order-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10200;align-items:center;justify-content:center;padding:16px">
   <div style="background:#fff;border-radius:16px;padding:24px;width:400px;max-width:96vw;position:relative">
-    <button onclick="closeRateModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    <button class="tap-target-fix" onclick="closeRateModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     <h3 style="font-size:18px;font-weight:700;color:#111;margin-bottom:6px">Rate this service</h3>
     <p style="font-size:13px;color:#6b7280;margin-bottom:18px">How was your experience?</p>
     <div id="rate-stars" style="font-size:32px;text-align:center;margin-bottom:16px;letter-spacing:6px"></div>
@@ -7623,33 +7642,27 @@ function saveProfileEdit() {
   var payload = { name: name };
   if (email) payload.email = email;
 
-  // Save to localStorage immediately
-  var stored = {};
-  try { stored = JSON.parse(localStorage.getItem('remont_user') || '{}'); } catch(e) {}
-  stored.name = name;
-  if (email) stored.email = email;
-  localStorage.setItem('remont_user', JSON.stringify(stored));
+  apiPatch('/api/v1/users/me', payload)
+    .then(function() {
+      // Only cache locally once the server has actually confirmed the update.
+      var stored = {};
+      try { stored = JSON.parse(localStorage.getItem('remont_user') || '{}'); } catch(e) {}
+      stored.name = name;
+      if (email) stored.email = email;
+      localStorage.setItem('remont_user', JSON.stringify(stored));
 
-  // Try API (silently fails in dev mode with fake token)
-  apiPost('/api/v1/users/me', payload)
-    .catch(function() {
-      // PATCH via apiPost doesn't work (it's POST not PATCH); use fetch directly
-      return fetch(API_BASE + '/api/v1/users/me', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('remont_token') || '') },
-        body: JSON.stringify(payload)
-      });
-    })
-    .catch(function() {}) // silent — localStorage already saved
-    .finally(function() {
-      saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false;
-      // Update displayed values
       var initial = name.charAt(0).toUpperCase();
       document.getElementById('acct-avatar').textContent = initial;
       document.getElementById('acct-name').textContent   = name;
       if (email) document.getElementById('acct-email').textContent = email;
       cancelProfileEdit();
       showToast('Profile updated', 'success');
+    })
+    .catch(function(e) {
+      _acctEditMsg('Could not save changes' + (e && e.message ? ' (' + e.message + ')' : '') + '. Please try again.', 'error');
+    })
+    .finally(function() {
+      saveBtn.textContent = 'Save Changes'; saveBtn.disabled = false;
     });
 }
 
@@ -8185,13 +8198,19 @@ function closeMyOrdersModal() {
   document.getElementById('my-orders-modal').style.display = 'none';
   document.body.style.overflow = '';
   clearInterval(myOrdersPollTimer);
+  _lastOrdersHtml = null;
 }
 
 var _reviewedOrderIds = null;
 
+var _lastOrdersHtml = null;
 function loadMyOrders() {
   var body = document.getElementById('mo-body');
-  body.innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading orders…</p>';
+  // Only show the loading flash on the very first load — a 25s background poll (see
+  // myOrdersPollTimer) must not wipe the list out from under a user mid-tap on a button.
+  if (_lastOrdersHtml === null) {
+    body.innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading orders…</p>';
+  }
   Promise.all([
     apiGet('/api/v1/orders/mine'),
     apiGet('/api/v1/reviews/mine').catch(function(){ return []; })
@@ -8203,10 +8222,11 @@ function loadMyOrders() {
     _reviewedOrderIds = {};
     reviews.forEach(function(r){ _reviewedOrderIds[r.orderId] = true; });
     if (!orders.length) {
-      body.innerHTML = '<div style="text-align:center;padding:40px 0">' +
+      var emptyHtml = '<div style="text-align:center;padding:40px 0">' +
         '<div style="font-size:40px;margin-bottom:12px">📦</div>' +
         '<p style="color:#6b7280;font-size:14px">No orders yet.<br>Book a service or add products to cart!</p>' +
         '</div>';
+      if (emptyHtml !== _lastOrdersHtml) { body.innerHTML = emptyHtml; _lastOrdersHtml = emptyHtml; }
       return;
     }
     var html = '';
@@ -8226,7 +8246,7 @@ function loadMyOrders() {
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
           '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
-          (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + o.id + '\',' + Number(o.totalAmount||0) + ',\'' + (o.orderNumber||'') + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
+          (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + o.id + '\',' + Number(o.totalAmount||0) + ',\'' + (o.orderNumber||'') + '\',this)" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
            (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'IN_PROGRESS') && o.vendor ?
              '<div style="display:flex;gap:6px">' +
                '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
@@ -8238,7 +8258,7 @@ function loadMyOrders() {
         '</div>' +
       '</div>';
     });
-    body.innerHTML = html;
+    if (html !== _lastOrdersHtml) { body.innerHTML = html; _lastOrdersHtml = html; }
   }).catch(function(e) {
     body.innerHTML = '<p style="color:#ef4444;text-align:center;padding:40px 0">Failed to load orders. ' +
       (e && e.message === '401' ? 'Please <button onclick="closeMyOrdersModal();openAuthModal(function(){setTimeout(openMyOrdersModal,300)})" style="background:none;border:none;color:#c4601a;font-weight:600;cursor:pointer;text-decoration:underline">login again</button>.' : 'Try again.') +
@@ -8282,13 +8302,19 @@ function submitReview() {
     });
 }
 
-function retryPayment(orderId, totalAmount, orderNumber) {
+function retryPayment(orderId, totalAmount, orderNumber, btnEl) {
   _checkoutOrderId = orderId;
+  // Use the real tapped button (when available) so Razorpay's own loading/disabled
+  // states actually reach the DOM — a plain placeholder object here meant the button
+  // stayed clickable through the whole async flow, risking a double payment on mobile.
+  var btn = btnEl || { textContent: 'Pay', disabled: false };
+  var originalText = btn.textContent;
+  if (btnEl) { btn.disabled = true; btn.textContent = 'Processing…'; }
   apiPost('/api/v1/payments/create-order', { amount: totalAmount, orderId: orderId }).then(function(payment) {
-    var btn = { textContent: 'Pay', disabled: false };
     return launchRazorpay(payment, { orderNumber: orderNumber }, totalAmount, btn);
   }).catch(function(e) {
     showToast('Payment initiation failed: ' + (e && e.message || 'unknown error'), 'error');
+    if (btnEl) { btn.disabled = false; btn.textContent = originalText; }
   });
 }
 
@@ -8516,7 +8542,7 @@ window.paVerifyOtp = function() {
 function _checkAndOpenPortal(phone, authData) {
   var token = localStorage.getItem('pr_token');
   if (!token) { window.location.href = '/partner-register.html'; return; }
-  fetch(API_BASE + '/api/v1/vendors/profile', { headers: { 'Authorization': 'Bearer ' + token } })
+  fetch(API_BASE + '/api/v1/vendors/service/me', { headers: { 'Authorization': 'Bearer ' + token } })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var p = (res && res.data) ? res.data : res;
@@ -8534,6 +8560,9 @@ function openPartnerPortal(partnerData) {
   document.getElementById('pp-hdr-sub').textContent = 'ID: RP-' + String(_partnerData.id || '000000').slice(-6).toUpperCase();
   document.getElementById('pp-prof-avatar').textContent = initial;
   document.getElementById('pp-prof-name').textContent = name;
+  var rating = Number(_partnerData.rating || 0).toFixed(1);
+  var ratingTile = document.getElementById('pp-stat-rating'); if (ratingTile) ratingTile.textContent = rating + '⭐';
+  var profRating = document.getElementById('pp-prof-rating'); if (profRating) profRating.textContent = '⭐ ' + rating + ' · ' + (_partnerData.completedJobs || 0) + ' jobs';
   document.getElementById('partnerPortal').classList.add('open');
   switchPPScreen('dashboard');
   _ppLoadDashboard();
@@ -8569,43 +8598,62 @@ window.togglePartnerOnline = function() {
   showToast(_ppOnline ? 'You are now Online' : 'You are Offline', _ppOnline ? 'success' : 'warning');
 };
 
+// Real order status pipeline (backend/src/modules/orders/orders.module.ts):
+// unassigned pool -> VENDOR_ASSIGNED -> VENDOR_EN_ROUTE -> STARTED/IN_PROGRESS/EXTRA_WORK_ADDED -> COMPLETED.
+// "New" jobs are NOT a status on this vendor's own job list — they live in the separate
+// available-jobs pool (no vendor assigned yet) until this vendor accepts one.
+function _ppOngoingStatuses(s) { return s === 'VENDOR_EN_ROUTE' || s === 'STARTED' || s === 'IN_PROGRESS' || s === 'EXTRA_WORK_ADDED'; }
+
 function _ppLoadDashboard() {
   var token = localStorage.getItem('pr_token');
   if (!token) return;
-  fetch(API_BASE + '/api/v1/vendors/my-orders?limit=5', { headers: { 'Authorization': 'Bearer ' + token } })
+  var headers = { 'Authorization': 'Bearer ' + token };
+  fetch(API_BASE + '/api/v1/vendors/service/me/available-jobs', { headers: headers })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var avail = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+      var alert = document.getElementById('pp-new-alert');
+      if (alert) { alert.style.display = avail.length ? '' : 'none'; if (avail.length) document.getElementById('pp-alert-count').textContent = avail.length; }
+    }).catch(function() {});
+  fetch(API_BASE + '/api/v1/vendors/service/me/jobs', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var jobs = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
       var today = new Date().toDateString();
-      var todayCount = jobs.filter(function(j) { return new Date(j.createdAt||j.scheduledDate).toDateString() === today; }).length;
+      var todayCount = jobs.filter(function(j) { return new Date(j.createdAt).toDateString() === today; }).length;
       document.getElementById('pp-stat-jobs').textContent = todayCount;
-      var newJobs = jobs.filter(function(j) { return j.status === 'VENDOR_ASSIGNED'; });
-      var alert = document.getElementById('pp-new-alert');
-      if (alert) { alert.style.display = newJobs.length ? '' : 'none'; if (newJobs.length) document.getElementById('pp-alert-count').textContent = newJobs.length; }
       _renderJobCards(jobs.slice(0,3), document.getElementById('pp-recent-jobs'), true);
     }).catch(function() {});
-  fetch(API_BASE + '/api/v1/vendors/earnings', { headers: { 'Authorization': 'Bearer ' + token } })
+  fetch(API_BASE + '/api/v1/vendors/service/me/earnings', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var d = (res && res.data) ? res.data : res;
-      if (d) {
-        var month = Number(d.thisMonth || d.monthlyEarnings || 0);
-        if (month) document.getElementById('pp-stat-earn').textContent = '₹' + month.toLocaleString('en-IN');
-      }
+      if (d && d.thisMonth) document.getElementById('pp-stat-earn').textContent = '₹' + Number(d.thisMonth.earnings || 0).toLocaleString('en-IN');
     }).catch(function() {});
 }
 
 function _ppLoadJobs(tab) {
-  var statusMap = { 'new': 'VENDOR_ASSIGNED', 'accepted': 'CONFIRMED', 'ongoing': 'IN_PROGRESS', 'completed': 'COMPLETED' };
-  var status = statusMap[tab] || 'VENDOR_ASSIGNED';
   var token = localStorage.getItem('pr_token');
   var list = document.getElementById('pp-jobs-list');
   list.innerHTML = '<div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div>';
   if (!token) { list.innerHTML = _ppEmpty('🔑', 'Login required', 'Please authenticate first'); return; }
-  fetch(API_BASE + '/api/v1/vendors/my-orders?status=' + status, { headers: { 'Authorization': 'Bearer ' + token } })
+  var headers = { 'Authorization': 'Bearer ' + token };
+  if (tab === 'new') {
+    fetch(API_BASE + '/api/v1/vendors/service/me/available-jobs', { headers: headers })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        var jobs = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+        _renderJobCards(jobs, list, false, true);
+      }).catch(function() { list.innerHTML = _ppEmpty('📋', 'No new jobs', 'Stay online to receive job requests'); });
+    return;
+  }
+  fetch(API_BASE + '/api/v1/vendors/service/me/jobs', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var jobs = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+      if (tab === 'accepted') jobs = jobs.filter(function(j){ return j.status === 'VENDOR_ASSIGNED'; });
+      else if (tab === 'ongoing') jobs = jobs.filter(function(j){ return _ppOngoingStatuses(j.status); });
+      else if (tab === 'completed') jobs = jobs.filter(function(j){ return j.status === 'COMPLETED'; });
       _renderJobCards(jobs, list, false);
     }).catch(function() {
       list.innerHTML = _ppEmpty('📋', 'No ' + tab + ' jobs', 'Stay online to receive job requests');
@@ -8615,34 +8663,39 @@ function _ppLoadJobs(tab) {
 function _ppLoadEarnings() {
   var token = localStorage.getItem('pr_token');
   if (!token) return;
-  fetch(API_BASE + '/api/v1/wallet/balance', { headers: { 'Authorization': 'Bearer ' + token } })
+  var headers = { 'Authorization': 'Bearer ' + token };
+  fetch(API_BASE + '/api/v1/wallet/balance', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var d = (res && res.data) ? res.data : res;
       var bal = Number(d && (d.balance !== undefined ? d.balance : d) || 0);
       document.getElementById('pp-wbal').textContent = '₹' + bal.toLocaleString('en-IN');
     }).catch(function() {});
-  fetch(API_BASE + '/api/v1/vendors/earnings', { headers: { 'Authorization': 'Bearer ' + token } })
+  fetch(API_BASE + '/api/v1/vendors/service/me/earnings', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var d = (res && res.data) ? res.data : res;
       if (d) {
-        document.getElementById('pp-earn-month').textContent = '₹' + Number(d.thisMonth || 0).toLocaleString('en-IN');
-        document.getElementById('pp-earn-pending').textContent = '₹' + Number(d.pendingPayout || 0).toLocaleString('en-IN');
+        document.getElementById('pp-earn-month').textContent = '₹' + Number((d.thisMonth && d.thisMonth.earnings) || 0).toLocaleString('en-IN');
+        document.getElementById('pp-earn-pending').textContent = '₹' + Number((d.lifetime && d.lifetime.pending) || 0).toLocaleString('en-IN');
       }
     }).catch(function() {});
 }
 
-function _renderJobCards(jobs, container, preview) {
+function _renderJobCards(jobs, container, preview, isAvailablePool) {
   if (!jobs || !jobs.length) {
     container.innerHTML = _ppEmpty('🎉', 'No jobs here', 'Stay online to get job requests'); return;
   }
   container.innerHTML = '';
   jobs.forEach(function(job) {
-    var smap = { 'VENDOR_ASSIGNED':'jnew', 'CONFIRMED':'jacc', 'IN_PROGRESS':'jong', 'COMPLETED':'jdon' };
-    var lmap = { 'VENDOR_ASSIGNED':'New', 'CONFIRMED':'Accepted', 'IN_PROGRESS':'Ongoing', 'COMPLETED':'Completed' };
-    var cls = smap[job.status] || 'jnew';
-    var lbl = lmap[job.status] || 'New';
+    // "New" jobs come from the separate available-jobs pool (no vendor assigned yet), not
+    // from a status value on this vendor's own job list — see _ppLoadJobs/_ppLoadDashboard.
+    var cls, lbl;
+    if (isAvailablePool) { cls = 'jnew'; lbl = 'New'; }
+    else if (job.status === 'VENDOR_ASSIGNED') { cls = 'jacc'; lbl = 'Accepted'; }
+    else if (_ppOngoingStatuses(job.status)) { cls = 'jong'; lbl = 'Ongoing'; }
+    else if (job.status === 'COMPLETED') { cls = 'jdon'; lbl = 'Completed'; }
+    else { cls = 'jacc'; lbl = job.status; }
     var svcName = (job.service && job.service.name) || job.serviceName || 'Home Service';
     var area = job.address ? (job.address.area || job.address.city || '') : '';
     var date = job.scheduledDate ? new Date(job.scheduledDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
@@ -8677,14 +8730,16 @@ function _ppEmpty(icon, title, sub) {
 
 window.ppAcceptJob = function(id) {
   var token = localStorage.getItem('pr_token');
-  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ status: 'CONFIRMED' })
-  }).then(function() { showToast('Job accepted! ✓', 'success'); _ppLoadJobs('new'); _ppLoadDashboard(); })
-    .catch(function() { showToast('Could not accept job', 'error'); });
+  fetch(API_BASE + '/api/v1/vendors/service/me/jobs/' + id + '/accept', {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + token }
+  }).then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+    .then(function() { showToast('Job accepted! ✓', 'success'); _ppLoadJobs('new'); _ppLoadDashboard(); })
+    .catch(function() { showToast('Could not accept job — it may already be taken', 'error'); _ppLoadJobs('new'); });
 };
 
 window.ppDeclineJob = function(id) {
+  // No backend action needed — this job hasn't been assigned to anyone yet (it's still
+  // in the shared available-jobs pool), so simply not accepting it IS the decline.
   if (!confirm('Decline this job?')) return;
   showToast('Job declined', 'warning');
   _ppLoadJobs('new');
@@ -8692,19 +8747,20 @@ window.ppDeclineJob = function(id) {
 
 window.ppStartJob = function(id) {
   var token = localStorage.getItem('pr_token');
-  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ status: 'IN_PROGRESS' })
-  }).then(function() { showToast('Job started!', 'success'); _ppLoadJobs('accepted'); })
+  fetch(API_BASE + '/api/v1/orders/' + id + '/en-route', {
+    method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token }
+  }).then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+    .then(function() { showToast('On your way! ✓', 'success'); _ppLoadJobs('accepted'); })
     .catch(function() { showToast('Error updating job', 'error'); });
 };
 
 window.ppCompleteJob = function(id) {
   var token = localStorage.getItem('pr_token');
-  fetch(API_BASE + '/api/v1/orders/' + id + '/status', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ status: 'COMPLETED' })
-  }).then(function() { showToast('Job completed! Great work! 🎉', 'success'); _ppLoadJobs('ongoing'); _ppLoadDashboard(); })
+  fetch(API_BASE + '/api/v1/orders/' + id + '/complete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ photosAfter: [] })
+  }).then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+    .then(function() { showToast('Job completed! Great work! 🎉', 'success'); _ppLoadJobs('ongoing'); _ppLoadDashboard(); })
     .catch(function() { showToast('Error completing job', 'error'); });
 };
 
@@ -8974,7 +9030,7 @@ window.closeCustPartner = function() {
           <div class="pp-stat-lbl">This Month</div>
         </div>
         <div class="pp-stat rate">
-          <div class="pp-stat-val">4.8⭐</div>
+          <div class="pp-stat-val" id="pp-stat-rating">4.8⭐</div>
           <div class="pp-stat-lbl">My Rating</div>
         </div>
       </div>
@@ -9044,7 +9100,7 @@ window.closeCustPartner = function() {
         <div>
           <div class="pp-prof-name" id="pp-prof-name">Partner</div>
           <div class="pp-prof-badge">✓ Verified Partner</div>
-          <div class="pp-prof-rating">⭐ 4.8 · 24 reviews</div>
+          <div class="pp-prof-rating" id="pp-prof-rating">⭐ 4.8 · 24 reviews</div>
         </div>
       </div>
       <div class="pp-menu">
