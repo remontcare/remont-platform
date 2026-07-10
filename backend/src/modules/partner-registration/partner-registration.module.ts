@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.module';
-import { Public, JwtAuthGuard, RolesGuard, Roles } from '../../common';
+import { Public, JwtAuthGuard, RolesGuard, Roles, normalizeSkillKey } from '../../common';
 import { UserRole } from '@prisma/client';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -243,7 +243,8 @@ export class PartnerRegistrationService {
       });
 
       // 3. Create or update ServiceVendor record from registration data
-      const skills = reg.categories || [];
+      // Normalize onto real ServiceCategory.key values — see normalizeSkillKey() for why.
+      const skills = (reg.categories || []).map(normalizeSkillKey);
       await this.prisma.serviceVendor.upsert({
         where: { userId: user.id },
         create: {

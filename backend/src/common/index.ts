@@ -141,6 +141,24 @@ export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+// Vendor "skills" have been entered through at least two different UIs with different
+// vocabularies (a legacy category picker using names like ELECTRICIAN/PLUMBER/CIVIL, and
+// free-text/seed data using lowercase-hyphenated slugs like "plumbing"/"pest-control")
+// that never matched real ServiceCategory.key values (PLUMBING, ELECTRICAL, PEST_CONTROL,
+// RENOVATION, CONSTRUCTION, ...). DispatchService's vendor matching does an exact-match
+// `skills: { has: categoryKey }` lookup, so any mismatch here means that vendor is silently
+// never found for that category. This normalizes a raw skill value onto the real key space.
+const SKILL_KEY_ALIASES: Record<string, string> = {
+  PLUMBER: 'PLUMBING',
+  ELECTRICIAN: 'ELECTRICAL',
+  CIVIL: 'CONSTRUCTION',
+  PEST: 'PEST_CONTROL',
+};
+export function normalizeSkillKey(raw: string): string {
+  const key = String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return SKILL_KEY_ALIASES[key] || key;
+}
+
 // Re-export filter and interceptor with file-aliased names for main.ts
 export { HttpExceptionFilter as DefaultExceptionFilter };
 export { TransformInterceptor as DefaultTransformInterceptor };

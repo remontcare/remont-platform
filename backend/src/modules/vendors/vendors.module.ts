@@ -5,7 +5,7 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 
 // ─── Service Vendor ───
@@ -16,6 +16,9 @@ export class ServiceVendorsService {
   async register(userId: string, data: any) {
     // Strip fields a vendor must not self-assign
     const { status, rating, completedJobs, totalEarnings, pendingPayout, isOnline, ...safeData } = data;
+    // Normalize onto real ServiceCategory.key values — see normalizeSkillKey() for why
+    // (this free-text field has never matched the DispatchService lookup otherwise).
+    if (Array.isArray(safeData.skills)) safeData.skills = safeData.skills.map(normalizeSkillKey);
     return this.prisma.serviceVendor.upsert({
       where: { userId },
       create: { userId, ...safeData },
@@ -83,15 +86,36 @@ export class ServiceVendorsService {
   async availableJobs(userId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
-    return this.prisma.order.findMany({
-      where: { vendorId: null, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] as any[] } },
+
+    // Same category-matching rule as DispatchService's WhatsApp push, so what a vendor
+    // sees when they manually check is never a superset of what they'd be notified for.
+    const orders = await this.prisma.order.findMany({
+      where: {
+        vendorId: null,
+        status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] as any[] },
+        service: { category: { key: { in: v.skills } } },
+      },
       include: {
         service: { select: { name: true, categoryId: true } },
         address: { select: { fullAddress: true, city: true, pincode: true, latitude: true, longitude: true } },
       },
       orderBy: { createdAt: 'asc' },
-      take: 20,
+      take: 50,
     });
+
+    // Proximity: prefer live location + service radius (matches DispatchService); fall
+    // back to same-city matching if the vendor hasn't shared a live location yet.
+    if (v.currentLatitude != null && v.currentLongitude != null) {
+      return orders
+        .filter((o) => {
+          if (o.address?.latitude == null || o.address?.longitude == null) return true;
+          return haversineKm(v.currentLatitude!, v.currentLongitude!, o.address.latitude, o.address.longitude) <= v.serviceRadius;
+        })
+        .slice(0, 20);
+    }
+    return orders
+      .filter((o) => !o.address?.city || o.address.city.toLowerCase() === v.baseCity.toLowerCase())
+      .slice(0, 20);
   }
 
   async acceptJob(userId: string, orderId: string) {
