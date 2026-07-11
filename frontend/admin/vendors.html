@@ -23,6 +23,7 @@
     <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #f3f4f6;padding-bottom:0">
       <button id="tab-vendors" onclick="switchTab('vendors')" style="padding:10px 20px;border:none;border-bottom:3px solid #3b82f6;font-weight:700;font-size:14px;color:#3b82f6;background:none;cursor:pointer">Active Vendors</button>
       <button id="tab-registrations" onclick="switchTab('registrations')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">🆕 Partner Registrations <span id="reg-badge" style="background:#ef4444;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none">0</span></button>
+      <button id="tab-sellers" onclick="switchTab('sellers')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">🛒 Product Sellers</button>
     </div>
 
     <!-- VENDORS TAB -->
@@ -68,6 +69,56 @@
         </div>
         <div class="table-wrap"><div id="reg-tbl" class="loading">Loading…</div></div>
       </div>
+    </div>
+
+    <!-- PRODUCT SELLERS TAB -->
+    <div id="sellers-tab" style="display:none">
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Product Sellers</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="seller-filter-status" class="form-control" style="width:180px" onchange="loadSellers()">
+              <option value="">All Statuses</option>
+              <option>ACTIVE</option><option>SUSPENDED</option><option>PENDING_VERIFICATION</option>
+            </select>
+            <input id="seller-filter-q" class="form-control" style="width:160px" placeholder="Search business name…" oninput="loadSellers()">
+            <button class="btn btn-outline btn-sm" onclick="loadSellers()">↺ Refresh</button>
+            <button class="btn btn-primary btn-sm" onclick="openCreateSeller()">+ Create Seller</button>
+          </div>
+        </div>
+        <p style="padding:0 16px 12px;margin:0;font-size:12.5px;color:#6b7280">Public seller registration is disabled. Only accounts created here can log in to the Seller Portal.</p>
+        <div class="table-wrap"><div id="sellers-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE SELLER MODAL -->
+<div id="create-seller-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Create Product Seller</span>
+      <button class="modal-close" onclick="closeModal('create-seller-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mobile Number *</label>
+      <input id="cs-phone" class="form-control" placeholder="+919876543210" maxlength="13">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Seller / Contact Name *</label>
+      <input id="cs-name" class="form-control" placeholder="e.g. Ramesh Kumar">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Business Name *</label>
+      <input id="cs-business" class="form-control" placeholder="e.g. Kumar Electronics">
+    </div>
+    <div class="form-group">
+      <label class="form-label">GST Number (optional)</label>
+      <input id="cs-gst" class="form-control" placeholder="22AAAAA0000A1Z5">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('create-seller-overlay')">Cancel</button>
+      <button class="btn btn-primary" id="cs-submit-btn" onclick="submitCreateSeller()">Create Seller</button>
     </div>
   </div>
 </div>
@@ -183,17 +234,91 @@ loadRegistrations(true); // load count for badge
   var p = new URLSearchParams(window.location.search);
   var t = p.get('tab');
   if (t === 'pending' || t === 'registrations') switchTab('registrations');
+  if (t === 'sellers') switchTab('sellers');
 })();
 
 // ── TABS ──
 function switchTab(tab) {
   document.getElementById('vendors-tab').style.display = tab === 'vendors' ? '' : 'none';
   document.getElementById('registrations-tab').style.display = tab === 'registrations' ? '' : 'none';
-  document.getElementById('tab-vendors').style.borderBottomColor = tab === 'vendors' ? '#3b82f6' : 'transparent';
-  document.getElementById('tab-vendors').style.color = tab === 'vendors' ? '#3b82f6' : '#6b7280';
-  document.getElementById('tab-registrations').style.borderBottomColor = tab === 'registrations' ? '#3b82f6' : 'transparent';
-  document.getElementById('tab-registrations').style.color = tab === 'registrations' ? '#3b82f6' : '#6b7280';
+  document.getElementById('sellers-tab').style.display = tab === 'sellers' ? '' : 'none';
+  ['vendors', 'registrations', 'sellers'].forEach(function(t) {
+    var el = document.getElementById('tab-' + t);
+    el.style.borderBottomColor = tab === t ? '#3b82f6' : 'transparent';
+    el.style.color = tab === t ? '#3b82f6' : '#6b7280';
+  });
   if (tab === 'registrations') loadRegistrations();
+  if (tab === 'sellers') loadSellers();
+}
+
+// ── PRODUCT SELLERS ──
+function loadSellers() {
+  var status = document.getElementById('seller-filter-status').value;
+  var q = document.getElementById('seller-filter-q').value;
+  var p = [];
+  if (status) p.push('status=' + encodeURIComponent(status));
+  if (q) p.push('q=' + encodeURIComponent(q));
+  p.push('limit=100');
+  document.getElementById('sellers-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/product-vendors' + (p.length ? '?' + p.join('&') : '')).then(function(sellers) {
+    if (!sellers || !sellers.length) {
+      document.getElementById('sellers-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🛒</div><h3>No product sellers yet</h3><p>Create one with the button above.</p></div>';
+      return;
+    }
+    var rows = sellers.map(function(s) {
+      var u = s.user || {};
+      var productCount = (s._count && s._count.products) || 0;
+      return '<tr>' +
+        '<td><strong>' + escape(u.name || '—') + '</strong><br><small style="color:#6b7280">' + escape(u.phone || '') + '</small></td>' +
+        '<td>' + escape(s.businessName || '—') + '</td>' +
+        '<td>' + escape(s.gstNumber || '—') + '</td>' +
+        '<td style="text-align:center">' + productCount + '</td>' +
+        '<td style="text-align:center">' + escape(String(s.rating || '—')) + ' ★</td>' +
+        '<td>' + statusBadge(s.status) + '</td>' +
+        '<td>' + fmtDateShort(s.createdAt) + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          (s.status === 'ACTIVE' ? '<button class="btn btn-xs btn-warning" onclick="suspendSeller(\'' + s.id + '\')">Suspend</button>' : '') +
+          (s.status === 'SUSPENDED' ? '<button class="btn btn-xs btn-success" onclick="activateSeller(\'' + s.id + '\')">Reactivate</button>' : '') +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('sellers-tbl').innerHTML = '<table><thead><tr><th>Seller</th><th>Business</th><th>GST</th><th>Products</th><th>Rating</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('sellers-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openCreateSeller() {
+  document.getElementById('cs-phone').value = '';
+  document.getElementById('cs-name').value = '';
+  document.getElementById('cs-business').value = '';
+  document.getElementById('cs-gst').value = '';
+  document.getElementById('create-seller-overlay').style.display = 'flex';
+}
+
+function submitCreateSeller() {
+  var phone = document.getElementById('cs-phone').value.trim();
+  var name = document.getElementById('cs-name').value.trim();
+  var business = document.getElementById('cs-business').value.trim();
+  var gst = document.getElementById('cs-gst').value.trim();
+  if (!phone || !name || !business) { toast('Phone, name and business name are required', 'error'); return; }
+  if (phone.charAt(0) !== '+') phone = '+91' + phone.replace(/\D/g, '');
+  var btn = document.getElementById('cs-submit-btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  api('POST', '/admin/product-vendors', { phone: phone, name: name, businessName: business, gstNumber: gst || undefined })
+    .then(function() {
+      toast('Seller account created', 'success');
+      closeModal('create-seller-overlay');
+      loadSellers();
+    })
+    .catch(function(e) { toast(e.message, 'error'); })
+    .then(function() { btn.disabled = false; btn.textContent = 'Create Seller'; });
+}
+
+function suspendSeller(id) {
+  if (!confirm('Suspend this seller? Their products stay listed but they will not be able to manage them.')) return;
+  api('PATCH', '/admin/product-vendors/' + id + '/suspend').then(function() { toast('Seller suspended', 'warning'); loadSellers(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+function activateSeller(id) {
+  api('PATCH', '/admin/product-vendors/' + id + '/activate').then(function() { toast('Seller reactivated', 'success'); loadSellers(); }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 // ── PARTNER REGISTRATIONS ──
