@@ -162,6 +162,17 @@
         </div>
       </div>
       <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-active" checked> Active</label>
+
+      <div class="form-group" style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">
+        <label class="form-label">Coverage Area *</label>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="radio" name="prod-coverage" value="PAN_INDIA" checked onchange="onCoverageChange()"> 🌍 Pan India — available in every active city, including ones activated later, automatically</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="radio" name="prod-coverage" value="SELECTED_CITIES" onchange="onCoverageChange()"> 🏙 Selected Cities — pick specific cities in the Cities tab</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="radio" name="prod-coverage" value="STORE_PICKUP" onchange="onCoverageChange()"> 🏪 Store Pickup Only — visible only in the seller's own city</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;opacity:.55"><input type="radio" name="prod-coverage" value="ZONES" disabled> 📍 Selected Zones / Areas — coming soon</label>
+        </div>
+        <div id="prod-coverage-hint" style="font-size:12px;color:#6b7280;margin-top:6px"></div>
+      </div>
     </div>
 
     <div id="prod-media" class="modal-pane">
@@ -182,7 +193,7 @@
     </div>
 
     <div id="prod-cities" class="modal-pane">
-      <p style="font-size:13px;color:#6b7280;margin-top:0">Save product first. Then set city-specific availability, price and stock.</p>
+      <p id="prod-cities-note" style="font-size:13px;color:#6b7280;margin-top:0">Save product first. Then set city-specific availability, price and stock.</p>
       <div id="prod-cities-list" style="margin-top:8px"><div style="color:#9ca3af;font-size:13px">Save product to manage city availability.</div></div>
     </div>
 
@@ -342,6 +353,7 @@ function loadProducts() {
         '<td>'+escape(p.brand||'—')+'</td>'+
         '<td>'+fmtCur(p.price)+(p.mrp&&Number(p.mrp)>0?' <span style="text-decoration:line-through;color:#9ca3af;font-size:11px">'+fmtCur(p.mrp)+'</span>':'')+'</td>'+
         '<td>'+p.stock+'</td>'+
+        '<td>'+coverageBadge(p)+'</td>'+
         '<td>'+badge(p.isActive?'Active':'Inactive',p.isActive?'green':'gray')+'</td>'+
         '<td><div style="display:flex;gap:4px">'+
           '<button class="btn btn-xs btn-outline" onclick="editProduct(\''+p.id+'\')">Edit</button>'+
@@ -350,8 +362,17 @@ function loadProducts() {
         '</div></td>'+
       '</tr>';
     }).join('');
-    document.getElementById('prod-tbl').innerHTML='<table style="min-width:900px"><thead><tr><th></th><th>Img</th><th>Name / SKU</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    document.getElementById('prod-tbl').innerHTML='<table style="min-width:980px"><thead><tr><th></th><th>Img</th><th>Name / SKU</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th><th>Coverage</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }).catch(function(e){ document.getElementById('prod-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>'; });
+}
+
+function coverageBadge(p) {
+  var type = p.coverageType || 'PAN_INDIA';
+  var cityCount = (p._count && p._count.cityProducts) || 0;
+  if (type === 'PAN_INDIA') return badge('🌍 Pan India', 'blue');
+  if (type === 'STORE_PICKUP') return badge('🏪 Store Pickup', 'orange');
+  if (type === 'ZONES') return badge('📍 Zones', 'purple');
+  return badge('🏙 ' + cityCount + ' cit' + (cityCount === 1 ? 'y' : 'ies'), 'teal');
 }
 
 function openProdModal(prod) {
@@ -374,9 +395,23 @@ function openProdModal(prod) {
   prodImages = prod ? (prod.images||[]) : [];
   renderProdImages();
   document.getElementById('prod-ai-preview').style.display='none';
-  if (prod) loadProdCities(prod.id);
+  var coverage = prod ? (prod.coverageType || 'PAN_INDIA') : 'PAN_INDIA';
+  var radio = document.querySelector('input[name="prod-coverage"][value="'+coverage+'"]');
+  (radio || document.querySelector('input[name="prod-coverage"][value="PAN_INDIA"]')).checked = true;
+  onCoverageChange();
+  if (prod) loadProdCities(prod.id, coverage);
   else document.getElementById('prod-cities-list').innerHTML='<div style="color:#9ca3af;font-size:13px">Save product first.</div>';
   document.getElementById('prod-overlay').style.display='flex';
+}
+
+function onCoverageChange() {
+  var coverage = document.querySelector('input[name="prod-coverage"]:checked').value;
+  var hints = {
+    PAN_INDIA: 'Visible in every active city automatically. Use the Cities tab only if you need to exclude a specific city.',
+    SELECTED_CITIES: 'Hidden everywhere by default — check the cities this product should appear in, in the Cities tab.',
+    STORE_PICKUP: 'Only visible to customers in the seller\'s own city. The Cities tab is not used for this mode.',
+  };
+  document.getElementById('prod-coverage-hint').textContent = hints[coverage] || '';
 }
 
 function editProduct(id) {
@@ -407,6 +442,7 @@ function saveProduct() {
     seoTitle: document.getElementById('prod-seo-title').value.trim()||undefined,
     seoDesc: document.getElementById('prod-seo-desc').value.trim()||undefined,
     seoKeywords: document.getElementById('prod-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
+    coverageType: document.querySelector('input[name="prod-coverage"]:checked').value,
   };
   if (!id) { var sku = document.getElementById('prod-sku').value.trim(); if (sku) data.sku = sku; }
   var p = id ? api('PATCH','/admin/products/'+id,data) : api('POST','/admin/products',data);
@@ -440,13 +476,29 @@ function bulkProd(active) {
 
 // ── CITY AVAILABILITY ────────────────────────────────────────────────
 
-function loadProdCities(productId) {
+function loadProdCities(productId, coverageType) {
+  coverageType = coverageType || 'PAN_INDIA';
+  var note = document.getElementById('prod-cities-note');
+  if (coverageType === 'STORE_PICKUP') {
+    note.textContent = 'Coverage is set to Store Pickup Only — this product follows the seller\'s own city, not a manual city list.';
+    document.getElementById('prod-cities-list').innerHTML = '';
+    return;
+  }
+  note.textContent = coverageType === 'PAN_INDIA'
+    ? 'Coverage is Pan India — every city below is available by default. Uncheck a city to exclude it specifically.'
+    : 'Coverage is Selected Cities — check the cities this product should appear in. Unchecked cities will not show it.';
+
   document.getElementById('prod-cities-list').innerHTML='<div class="loading" style="padding:8px">Loading cities…</div>';
   api('GET','/admin/products/'+productId+'/cities').then(function(cities){
     if (!cities||!cities.length) { document.getElementById('prod-cities-list').innerHTML='<div style="color:#9ca3af;font-size:13px">No active cities. Run Seed from Dashboard.</div>'; return; }
+    var activeCount = 0;
     var html = cities.map(function(c){
       var a=c.assignment;
-      var isActive=!a||a.isActive!==false;
+      // Pan India: unassigned = available (opt-out). Selected Cities: unassigned = NOT
+      // available (opt-in) — must be explicitly checked, matching products.module.ts's
+      // list() filtering rule for SELECTED_CITIES/ZONES.
+      var isActive = coverageType === 'PAN_INDIA' ? (!a || a.isActive!==false) : !!(a && a.isActive);
+      if (isActive) activeCount++;
       var customPrice=a&&a.customPrice?Number(a.customPrice):'';
       var stock=a&&a.stock!==undefined?a.stock:'';
       return '<div class="city-row">'+
@@ -457,7 +509,7 @@ function loadProdCities(productId) {
         '<input id="city-stock-'+c.id+'" type="number" class="form-control" style="width:80px" placeholder="Stock" value="'+stock+'" onblur="saveProdCity(\''+productId+'\',\''+c.id+'\')">'+
       '</div>';
     }).join('');
-    document.getElementById('prod-cities-list').innerHTML=html;
+    document.getElementById('prod-cities-list').innerHTML='<div style="font-size:12px;color:#374151;font-weight:600;margin-bottom:8px">Active in '+activeCount+' of '+cities.length+' cities</div>'+html;
   }).catch(function(e){ document.getElementById('prod-cities-list').innerHTML='<div style="color:#ef4444;font-size:13px">'+escape(e.message)+'</div>'; });
 }
 

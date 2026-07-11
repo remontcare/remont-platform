@@ -300,6 +300,15 @@ a{color:inherit;text-decoration:none}
       <label>Active (visible to customers)</label>
       <div class="switch"><input type="checkbox" id="pf-active" checked><span class="switch-thumb" onclick="document.getElementById('pf-active').checked=!document.getElementById('pf-active').checked"></span></div>
     </div>
+    <div class="field" style="border-top:1px solid var(--mist);padding-top:14px;margin-top:2px">
+      <label>Coverage Area</label>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;text-transform:none;letter-spacing:normal"><input type="radio" name="pf-coverage" value="PAN_INDIA" checked onchange="onPfCoverageChange()"> 🌍 Pan India — every active city, including future ones</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;text-transform:none;letter-spacing:normal"><input type="radio" name="pf-coverage" value="SELECTED_CITIES" onchange="onPfCoverageChange()"> 🏙 Selected Cities — pick below</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;text-transform:none;letter-spacing:normal"><input type="radio" name="pf-coverage" value="STORE_PICKUP" onchange="onPfCoverageChange()"> 🏪 Store Pickup Only — only my own city</label>
+      </div>
+      <div id="pf-city-list" style="display:none;margin-top:10px;max-height:160px;overflow-y:auto;background:var(--cream);border-radius:10px;padding:10px 12px"></div>
+    </div>
     <div class="auth-error" id="pf-err"></div>
     <button class="btn-primary" id="pf-submit-btn" onclick="saveProduct()">Save Product</button>
   </div>
@@ -397,6 +406,7 @@ function enterDashboard(){
   pill.className = 'status-pill ' + (active ? 'active' : 'suspended');
   showScreen('screen-app');
   loadCategories();
+  loadCoverageCities();
   loadDashboardStats();
   loadProducts();
   loadOrders();
@@ -446,6 +456,28 @@ function loadCategories(){
       return '<option value="'+c.id+'">'+(c.icon||'')+' '+escHtml(c.name)+'</option>';
     }).join('');
   }).catch(function(e){ console.warn('categories load failed', e.message); });
+}
+
+/* ── COVERAGE AREA ── */
+var coverageCities = [];
+function loadCoverageCities(){
+  apiFetch('/cities').then(function(cities){ coverageCities = cities; }).catch(function(e){ console.warn('cities load failed', e.message); });
+}
+function onPfCoverageChange(){
+  var coverage = document.querySelector('input[name="pf-coverage"]:checked').value;
+  var box = document.getElementById('pf-city-list');
+  if (coverage !== 'SELECTED_CITIES') { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if (!box.dataset.rendered) {
+    box.innerHTML = coverageCities.map(function(c){
+      return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 0"><input type="checkbox" class="pf-city-chk" value="'+c.id+'"> '+escHtml(c.name)+'</label>';
+    }).join('') || '<div style="font-size:12px;color:#9ca3af">No active cities found.</div>';
+    box.dataset.rendered = '1';
+  }
+}
+function setCheckedCities(cityIds){
+  var set = new Set(cityIds || []);
+  document.querySelectorAll('.pf-city-chk').forEach(function(chk){ chk.checked = set.has(chk.value); });
 }
 
 /* ── PRODUCTS ── */
@@ -501,6 +533,10 @@ function openProductForm(productId){
       var prev = document.getElementById('pf-image-preview');
       prev.src = p.images[0]; prev.style.display = 'block';
     }
+    var coverage = p.coverageType || 'PAN_INDIA';
+    document.querySelector('input[name="pf-coverage"][value="'+coverage+'"]').checked = true;
+    onPfCoverageChange();
+    setCheckedCities((p.cityProducts || []).map(function(cp){ return cp.cityId; }));
   } else {
     document.getElementById('pf-title').textContent = 'Add Product';
     document.getElementById('pf-id').value = '';
@@ -513,6 +549,9 @@ function openProductForm(productId){
     document.getElementById('pf-unit').value = 'piece';
     document.getElementById('pf-desc').value = '';
     document.getElementById('pf-active').checked = true;
+    document.querySelector('input[name="pf-coverage"][value="PAN_INDIA"]').checked = true;
+    onPfCoverageChange();
+    setCheckedCities([]);
   }
   document.getElementById('product-form-overlay').classList.add('show');
 }
@@ -562,6 +601,10 @@ function saveProduct(){
     stock: isNaN(stock) ? 0 : stock,
     images: pfImageDataUrl ? [pfImageDataUrl] : [],
     isActive: document.getElementById('pf-active').checked,
+    coverageType: document.querySelector('input[name="pf-coverage"]:checked').value,
+    cityIds: document.querySelector('input[name="pf-coverage"]:checked').value === 'SELECTED_CITIES'
+      ? Array.from(document.querySelectorAll('.pf-city-chk:checked')).map(function(chk){ return chk.value; })
+      : undefined,
   };
 
   var btn = document.getElementById('pf-submit-btn');
