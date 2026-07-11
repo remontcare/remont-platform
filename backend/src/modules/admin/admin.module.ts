@@ -4,11 +4,22 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, slugify } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
+
+// Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
+// that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
+// front rather than silently creating a seller who can never log in.
+export class CreateProductVendorDto {
+  @IsString() @IsPhoneNumber('IN') phone: string;
+  @IsString() name: string;
+  @IsString() businessName: string;
+  @IsOptional() @IsString() gstNumber?: string;
+}
 
 @Injectable()
 export class AdminService {
@@ -209,11 +220,7 @@ export class AdminService {
     });
   }
 
-  async createProductVendor(data: { phone: string; name: string; businessName: string; gstNumber?: string }) {
-    if (!data.phone || !data.name || !data.businessName) {
-      throw new BadRequestException('phone, name and businessName are required');
-    }
-
+  async createProductVendor(data: CreateProductVendorDto) {
     const existingUser = await this.prisma.user.findUnique({ where: { phone: data.phone } });
     if (existingUser && existingUser.role !== UserRole.CUSTOMER && existingUser.role !== UserRole.PRODUCT_VENDOR) {
       throw new BadRequestException(`This phone number is already registered as ${existingUser.role}`);
@@ -1579,7 +1586,7 @@ export class AdminController {
   @Get('product-vendors') listProductVendors(@Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number) {
     return this.admin.listProductVendors({ status, q, limit });
   }
-  @Post('product-vendors') createProductVendor(@Body() b: { phone: string; name: string; businessName: string; gstNumber?: string }) {
+  @Post('product-vendors') createProductVendor(@Body() b: CreateProductVendorDto) {
     return this.admin.createProductVendor(b);
   }
   @Patch('product-vendors/:id/suspend') suspendProductVendor(@Param('id') id: string) { return this.admin.suspendProductVendor(id); }
