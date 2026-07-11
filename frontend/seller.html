@@ -81,6 +81,30 @@ a{color:inherit;text-decoration:none}
 .section-title{font-size:15px;font-weight:700;margin:20px 0 12px;display:flex;align-items:center;justify-content:space-between}
 .section-title .st-link{font-size:12px;color:var(--sienna);font-weight:600}
 
+/* ── SALES BANNER ── */
+.sales-banner{background:linear-gradient(135deg,var(--sienna),var(--amber));border-radius:16px;padding:20px;color:#fff;margin-bottom:16px;box-shadow:0 8px 24px rgba(196,96,26,.3)}
+.sales-banner .sb-label{font-size:12px;opacity:.85;margin-bottom:4px}
+.sales-banner .sb-val{font-size:30px;font-weight:800}
+.sales-banner .sb-row{display:flex;gap:18px;margin-top:10px;font-size:11.5px;opacity:.92}
+.sales-banner .sb-row b{font-weight:700;display:block;font-size:13px;margin-top:1px}
+
+/* ── STATUS TILES ── */
+.status-tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.status-tile{background:#fff;border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);cursor:pointer;transition:transform .15s;border-left:4px solid transparent}
+.status-tile:active{transform:scale(.97)}
+.status-tile.pending{border-left-color:#f59e0b}
+.status-tile.ongoing{border-left-color:var(--blue)}
+.status-tile.completed{border-left-color:var(--success)}
+.status-tile.returns{border-left-color:var(--error)}
+.status-tile .st-count{font-size:22px;font-weight:800;color:var(--charcoal)}
+.status-tile .st-label{font-size:11px;color:#6b7280;font-weight:600;margin-top:2px}
+
+/* ── TABS (Orders view) ── */
+.tab-row{display:flex;gap:6px;overflow-x:auto;background:var(--cream);border-radius:10px;padding:4px;margin-bottom:16px;-ms-overflow-style:none;scrollbar-width:none}
+.tab-row::-webkit-scrollbar{display:none}
+.tab-btn{flex-shrink:0;padding:8px 14px;border-radius:8px;font-size:12.5px;font-weight:700;color:#6b7280;transition:all .2s;white-space:nowrap}
+.tab-btn.active{background:#fff;color:var(--sienna);box-shadow:0 2px 6px rgba(0,0,0,.08)}
+
 /* ── PRODUCT / ORDER CARDS ── */
 .item-card{background:#fff;border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:10px;display:flex;gap:12px;align-items:center}
 .ic-thumb{width:48px;height:48px;border-radius:12px;background:var(--cream);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;overflow:hidden}
@@ -196,10 +220,32 @@ a{color:inherit;text-decoration:none}
 
       <!-- HOME VIEW -->
       <div class="view active" id="view-home">
+        <div class="sales-banner">
+          <div class="sb-label">Total Sales</div>
+          <div class="sb-val" id="sales-total">₹0</div>
+          <div class="sb-row">
+            <div>Today<b id="sales-today">₹0</b></div>
+            <div>This Month<b id="sales-month">₹0</b></div>
+          </div>
+        </div>
+
+        <div class="status-tile-grid">
+          <div class="status-tile pending" onclick="goOrdersTab('pending')">
+            <div class="st-count" id="cnt-pending">0</div><div class="st-label">⏳ Pending</div>
+          </div>
+          <div class="status-tile ongoing" onclick="goOrdersTab('ongoing')">
+            <div class="st-count" id="cnt-ongoing">0</div><div class="st-label">🚚 Ongoing</div>
+          </div>
+          <div class="status-tile completed" onclick="goOrdersTab('completed')">
+            <div class="st-count" id="cnt-completed">0</div><div class="st-label">✅ Completed</div>
+          </div>
+          <div class="status-tile returns" onclick="goOrdersTab('returns')">
+            <div class="st-count" id="cnt-returns">0</div><div class="st-label">↩️ Returns</div>
+          </div>
+        </div>
+
         <div class="stat-grid">
           <div class="stat-card"><div class="sc-label">Products</div><div class="sc-val" id="stat-products">—</div></div>
-          <div class="stat-card"><div class="sc-label">Orders</div><div class="sc-val" id="stat-orders">—</div></div>
-          <div class="stat-card"><div class="sc-label">Revenue</div><div class="sc-val accent" id="stat-revenue">₹0</div></div>
           <div class="stat-card"><div class="sc-label">Low Stock</div><div class="sc-val" id="stat-lowstock">—</div></div>
         </div>
         <button class="btn-primary" onclick="openProductForm()">+ Add Product</button>
@@ -215,7 +261,13 @@ a{color:inherit;text-decoration:none}
 
       <!-- ORDERS VIEW -->
       <div class="view" id="view-orders">
-        <div class="section-title"><span>Orders Containing My Products</span></div>
+        <div class="tab-row">
+          <button class="tab-btn active" data-bucket="all" onclick="ordersTab(this,'all')">All</button>
+          <button class="tab-btn" data-bucket="pending" onclick="ordersTab(this,'pending')">⏳ Pending</button>
+          <button class="tab-btn" data-bucket="ongoing" onclick="ordersTab(this,'ongoing')">🚚 Ongoing</button>
+          <button class="tab-btn" data-bucket="completed" onclick="ordersTab(this,'completed')">✅ Completed</button>
+          <button class="tab-btn" data-bucket="returns" onclick="ordersTab(this,'returns')">↩️ Returns</button>
+        </div>
         <div id="orders-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
       </div>
 
@@ -441,9 +493,10 @@ function goView(name){
 function loadDashboardStats(){
   apiFetch('/vendors/product/me/dashboard').then(function(d){
     document.getElementById('stat-products').textContent = d.totalProducts;
-    document.getElementById('stat-orders').textContent = d.totalOrders;
-    document.getElementById('stat-revenue').textContent = fmtMoney(d.totalRevenue);
     document.getElementById('stat-lowstock').textContent = d.lowStockCount;
+    document.getElementById('sales-total').textContent = fmtMoney(d.totalRevenue);
+    document.getElementById('sales-today').textContent = fmtMoney(d.todayRevenue);
+    document.getElementById('sales-month').textContent = fmtMoney(d.monthRevenue);
   }).catch(function(e){ console.warn('dashboard load failed', e.message); });
 }
 
@@ -621,24 +674,49 @@ function saveProduct(){
 
 /* ── ORDERS ── */
 var myOrders = [];
+var currentOrdersBucket = 'all';
+
+// Buckets built from the real OrderStatus values this backend actually uses (no dedicated
+// product-fulfillment lifecycle exists yet — see PROJECT_PROGRESS.md — so these are the
+// closest honest groupings of the statuses that do exist).
+function orderBucket(status){
+  if (status === 'PENDING_PAYMENT' || status === 'CONFIRMED') return 'pending';
+  if (status === 'VENDOR_ASSIGNED' || status === 'VENDOR_EN_ROUTE' || status === 'STARTED' || status === 'IN_PROGRESS' || status === 'EXTRA_WORK_ADDED') return 'ongoing';
+  if (status === 'COMPLETED' || status === 'INVOICED' || status === 'CLOSED') return 'completed';
+  if (status === 'CANCELLED' || status === 'REFUNDED') return 'returns';
+  return 'pending';
+}
+
 function loadOrders(){
   apiFetch('/vendors/product/me/orders').then(function(list){
     myOrders = list;
+    updateOrderCounts();
     renderOrders();
     renderRecentOrders();
   }).catch(function(e){
     document.getElementById('orders-list').innerHTML = '<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-text">'+escHtml(e.message)+'</div></div>';
   });
 }
+
+function updateOrderCounts(){
+  var counts = { pending: 0, ongoing: 0, completed: 0, returns: 0 };
+  myOrders.forEach(function(o){ counts[orderBucket(o.status)]++; });
+  document.getElementById('cnt-pending').textContent = counts.pending;
+  document.getElementById('cnt-ongoing').textContent = counts.ongoing;
+  document.getElementById('cnt-completed').textContent = counts.completed;
+  document.getElementById('cnt-returns').textContent = counts.returns;
+}
+
 function statusLabel(s){
-  var map={PENDING_PAYMENT:'Pending Payment',CONFIRMED:'Confirmed',VENDOR_ASSIGNED:'Assigned',VENDOR_EN_ROUTE:'En Route',STARTED:'Started',IN_PROGRESS:'In Progress',COMPLETED:'Completed',CANCELLED:'Cancelled'};
+  var map={PENDING_PAYMENT:'Pending Payment',CONFIRMED:'Confirmed',VENDOR_ASSIGNED:'Assigned',VENDOR_EN_ROUTE:'En Route',STARTED:'Started',IN_PROGRESS:'In Progress',EXTRA_WORK_ADDED:'Extra Work',COMPLETED:'Completed',INVOICED:'Invoiced',CLOSED:'Closed',CANCELLED:'Cancelled',REFUNDED:'Refunded'};
   return map[s]||s;
 }
 function orderCardHtml(o){
   var itemsTxt = o.items.map(function(it){ return it.productName+' ×'+it.quantity; }).join(', ');
   var total = o.items.reduce(function(sum,it){ return sum + Number(it.totalPrice||0); }, 0);
   var custName = (o.customer && o.customer.name) || 'Customer';
-  var badgeClass = o.status === 'COMPLETED' ? 'active' : (o.status === 'CANCELLED' ? 'low' : 'inactive');
+  var bucket = orderBucket(o.status);
+  var badgeClass = bucket === 'completed' ? 'active' : (bucket === 'returns' ? 'low' : 'inactive');
   return '<div class="item-card">' +
     '<div class="ic-thumb">🧾</div>' +
     '<div class="ic-info"><div class="ic-title">'+escHtml(o.orderNumber)+' — '+escHtml(custName)+'</div>' +
@@ -649,13 +727,25 @@ function orderCardHtml(o){
 }
 function renderOrders(){
   var el = document.getElementById('orders-list');
-  if (!myOrders.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No orders yet</div></div>'; return; }
-  el.innerHTML = myOrders.map(orderCardHtml).join('');
+  var list = currentOrdersBucket === 'all' ? myOrders : myOrders.filter(function(o){ return orderBucket(o.status) === currentOrdersBucket; });
+  if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No orders here yet</div></div>'; return; }
+  el.innerHTML = list.map(orderCardHtml).join('');
 }
 function renderRecentOrders(){
   var el = document.getElementById('home-recent-orders');
   if (!myOrders.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No orders yet</div></div>'; return; }
   el.innerHTML = myOrders.slice(0, 5).map(orderCardHtml).join('');
+}
+function ordersTab(btn, bucket){
+  document.querySelectorAll('#view-orders .tab-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  currentOrdersBucket = bucket;
+  renderOrders();
+}
+function goOrdersTab(bucket){
+  goView('orders');
+  var btn = document.querySelector('#view-orders .tab-btn[data-bucket="'+bucket+'"]');
+  if (btn) ordersTab(btn, bucket);
 }
 </script>
 </body>

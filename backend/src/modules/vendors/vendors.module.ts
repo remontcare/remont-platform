@@ -214,11 +214,24 @@ export class ProductVendorsService {
   async dashboard(userId: string) {
     const v = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
-    const [total, orders, revenue, lowStock] = await Promise.all([
+    // Same today/month/lifetime pattern as ServiceVendorsService.earnings() above — bucketed
+    // by createdAt rather than completedAt since product orders don't reliably set
+    // completedAt (there's no dedicated product-fulfillment lifecycle yet, unlike services).
+    const sod = new Date(); sod.setHours(0, 0, 0, 0);
+    const som = new Date(); som.setDate(1); som.setHours(0, 0, 0, 0);
+    const [total, orders, revenue, todayRevenue, monthRevenue, lowStock] = await Promise.all([
       this.prisma.product.count({ where: { vendorId: v.id } }),
       this.prisma.orderItem.count({ where: { product: { vendorId: v.id } } }),
       this.prisma.orderItem.aggregate({
         where: { product: { vendorId: v.id }, order: { status: 'COMPLETED' } },
+        _sum: { totalPrice: true },
+      }),
+      this.prisma.orderItem.aggregate({
+        where: { product: { vendorId: v.id }, order: { status: 'COMPLETED', createdAt: { gte: sod } } },
+        _sum: { totalPrice: true },
+      }),
+      this.prisma.orderItem.aggregate({
+        where: { product: { vendorId: v.id }, order: { status: 'COMPLETED', createdAt: { gte: som } } },
         _sum: { totalPrice: true },
       }),
       this.prisma.product.count({ where: { vendorId: v.id, stock: { lte: 5 } } }),
@@ -226,6 +239,8 @@ export class ProductVendorsService {
     return {
       totalProducts: total, totalOrders: orders,
       totalRevenue: revenue._sum.totalPrice || 0,
+      todayRevenue: todayRevenue._sum.totalPrice || 0,
+      monthRevenue: monthRevenue._sum.totalPrice || 0,
       lowStockCount: lowStock, rating: v.rating,
     };
   }
