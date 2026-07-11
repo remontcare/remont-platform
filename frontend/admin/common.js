@@ -132,6 +132,7 @@ var SIDEBAR_NAV = [
     { key:'vendors', label:'All Partners', icon:'👷', href:'/admin/vendors.html' },
     { key:'vendors-pending', label:'Partner Applications', icon:'📩', href:'/admin/vendors.html?tab=pending', badge:'partners' },
     { key:'product-sellers', label:'Product Sellers', icon:'🛒', href:'/admin/vendors.html?tab=sellers' },
+    { key:'seller-apps', label:'Seller Applications', icon:'📋', href:'/admin/vendors.html?tab=seller-apps' },
     { key:'partner-ratings', label:'Partner Ratings', icon:'⭐', href:'/admin/reviews.html' },
     { key:'partner-earnings', label:'Partner Earnings', icon:'💰', href:'/admin/partner-earnings.html' },
     { key:'partner-id-cards', label:'Partner ID Cards', icon:'🪪', href:'/admin/partner-id-cards.html' },

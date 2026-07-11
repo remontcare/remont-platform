@@ -24,6 +24,7 @@
       <button id="tab-vendors" onclick="switchTab('vendors')" style="padding:10px 20px;border:none;border-bottom:3px solid #3b82f6;font-weight:700;font-size:14px;color:#3b82f6;background:none;cursor:pointer">Active Vendors</button>
       <button id="tab-registrations" onclick="switchTab('registrations')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">🆕 Partner Registrations <span id="reg-badge" style="background:#ef4444;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none">0</span></button>
       <button id="tab-sellers" onclick="switchTab('sellers')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">🛒 Product Sellers</button>
+      <button id="tab-seller-apps" onclick="switchTab('seller-apps')" style="padding:10px 20px;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:#6b7280;background:none;cursor:pointer">📋 Seller Applications <span id="seller-app-badge" style="background:#ef4444;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none">0</span></button>
     </div>
 
     <!-- VENDORS TAB -->
@@ -86,10 +87,44 @@
             <button class="btn btn-primary btn-sm" onclick="openCreateSeller()">+ Create Seller</button>
           </div>
         </div>
-        <p style="padding:0 16px 12px;margin:0;font-size:12.5px;color:#6b7280">Public seller registration is disabled. Only accounts created here can log in to the Seller Portal.</p>
+        <p style="padding:0 16px 12px;margin:0;font-size:12.5px;color:#6b7280">Sellers can also apply publicly via the seller registration form — review new applications under "Seller Applications". Accounts created directly here skip that review.</p>
         <div class="table-wrap"><div id="sellers-tbl" class="loading">Loading…</div></div>
       </div>
     </div>
+
+    <!-- SELLER APPLICATIONS TAB -->
+    <div id="seller-apps-tab" style="display:none">
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Seller Registration Applications</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="sa-filter-status" class="form-control" style="width:180px" onchange="loadSellerApps()">
+              <option value="">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="HOLD">On Hold</option>
+              <option value="MORE_INFO">More Info Needed</option>
+            </select>
+            <input id="sa-filter-q" class="form-control" style="width:180px" placeholder="Search business / owner / phone…" oninput="loadSellerApps()">
+            <button class="btn btn-outline btn-sm" onclick="loadSellerApps()">↺ Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="sa-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SELLER APPLICATION DETAIL MODAL -->
+<div id="sa-detail-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:800px;width:95vw;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title">Seller Application Detail</span>
+      <button class="modal-close" onclick="closeModal('sa-detail-overlay')">×</button>
+    </div>
+    <div id="sa-detail-body" style="padding:16px"></div>
+    <div class="modal-footer" id="sa-detail-footer"></div>
   </div>
 </div>
 
@@ -254,12 +289,14 @@ function confirmReject() {
 
 loadPending(); loadAll();
 loadRegistrations(true); // load count for badge
+loadSellerApps(true); // load count for badge
 // Apply ?tab= URL param on load
 (function(){
   var p = new URLSearchParams(window.location.search);
   var t = p.get('tab');
   if (t === 'pending' || t === 'registrations') switchTab('registrations');
   if (t === 'sellers') switchTab('sellers');
+  if (t === 'seller-apps') switchTab('seller-apps');
 })();
 
 // ── TABS ──
@@ -267,13 +304,15 @@ function switchTab(tab) {
   document.getElementById('vendors-tab').style.display = tab === 'vendors' ? '' : 'none';
   document.getElementById('registrations-tab').style.display = tab === 'registrations' ? '' : 'none';
   document.getElementById('sellers-tab').style.display = tab === 'sellers' ? '' : 'none';
-  ['vendors', 'registrations', 'sellers'].forEach(function(t) {
+  document.getElementById('seller-apps-tab').style.display = tab === 'seller-apps' ? '' : 'none';
+  ['vendors', 'registrations', 'sellers', 'seller-apps'].forEach(function(t) {
     var el = document.getElementById('tab-' + t);
     el.style.borderBottomColor = tab === t ? '#3b82f6' : 'transparent';
     el.style.color = tab === t ? '#3b82f6' : '#6b7280';
   });
   if (tab === 'registrations') loadRegistrations();
   if (tab === 'sellers') loadSellers();
+  if (tab === 'seller-apps') loadSellerApps();
 }
 
 // ── PRODUCT SELLERS ──
@@ -406,6 +445,199 @@ function suspendSeller(id) {
 }
 function activateSeller(id) {
   api('PATCH', '/admin/product-vendors/' + id + '/activate').then(function() { toast('Seller reactivated', 'success'); loadSellers(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── SELLER APPLICATIONS (public registration review) ──
+function loadSellerApps(countOnly) {
+  var status = (document.getElementById('sa-filter-status') || {}).value || '';
+  var q = (document.getElementById('sa-filter-q') || {}).value || '';
+  var p = [];
+  if (status) p.push('status=' + encodeURIComponent(status));
+  if (q) p.push('q=' + encodeURIComponent(q));
+  var url = '/admin/seller-registrations' + (p.length ? '?' + p.join('&') : '');
+
+  api('GET', url).then(function(res) {
+    var items = res.items || res || [];
+
+    var badge = document.getElementById('seller-app-badge');
+    var pendingCount = items.filter(function(r){ return r.status === 'PENDING'; }).length;
+    if (pendingCount > 0) { badge.style.display = ''; badge.textContent = pendingCount; }
+    else badge.style.display = 'none';
+
+    if (countOnly) return;
+
+    if (!items.length) {
+      document.getElementById('sa-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h3>No seller applications found</h3></div>';
+      return;
+    }
+
+    var rows = items.map(function(r) {
+      var statusColor = {PENDING:'#f59e0b',APPROVED:'#22c55e',REJECTED:'#ef4444',HOLD:'#8b5cf6',MORE_INFO:'#3b82f6'}[r.status] || '#6b7280';
+      return '<tr>' +
+        '<td style="font-family:monospace;font-size:11px"><strong>' + escape(r.registrationId || '') + '</strong></td>' +
+        '<td><strong>' + escape(r.businessName || '—') + '</strong><br><small style="color:#6b7280">' + escape(r.ownerName || '') + ' · ' + escape(r.phone || '') + '</small></td>' +
+        '<td>' + escape(r.city || '—') + '</td>' +
+        '<td style="font-size:12px">' + escape(r.gstNumber || '—') + '</td>' +
+        '<td><span style="background:' + statusColor + '20;color:' + statusColor + ';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">' + r.status + '</span></td>' +
+        '<td style="font-size:11px;color:#6b7280">' + fmtDateShort(r.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" onclick="viewSellerApp(\'' + r.id + '\')">View Details</button></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('sa-tbl').innerHTML = '<table><thead><tr><th>App ID</th><th>Business / Owner / Phone</th><th>City</th><th>GST</th><th>Status</th><th>Applied</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) {
+    if (!countOnly) document.getElementById('sa-tbl').innerHTML = '<div class="empty-state"><small>' + escape(e.message) + '</small></div>';
+  });
+}
+
+var currentSellerAppId = null;
+function viewSellerApp(id) {
+  currentSellerAppId = id;
+  document.getElementById('sa-detail-body').innerHTML = '<div class="loading" style="padding:32px;text-align:center">Loading…</div>';
+  document.getElementById('sa-detail-overlay').style.display = 'flex';
+  api('GET', '/admin/seller-registrations/' + id).then(function(reg) {
+    renderSellerAppDetail(reg);
+  }).catch(function(e) {
+    document.getElementById('sa-detail-body').innerHTML = '<p style="color:#ef4444">' + escape(e.message) + '</p>';
+  });
+}
+
+function renderSellerAppDetail(r) {
+  var statusColor = {PENDING:'#f59e0b',APPROVED:'#22c55e',REJECTED:'#ef4444',HOLD:'#8b5cf6',MORE_INFO:'#3b82f6'}[r.status] || '#6b7280';
+
+  var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+  html += dItem('Application ID', r.registrationId, true);
+  html += dItem('Status', '<span style="background:' + statusColor + '20;color:' + statusColor + ';padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">' + r.status + '</span>');
+  html += dItem('Business Name', r.businessName || '—');
+  html += dItem('Owner Name', r.ownerName || '—');
+  html += dItem('Business Type', r.businessType || '—');
+  html += dItem('Applied On', fmtDateShort(r.createdAt));
+  html += '</div>';
+
+  // Business / KYC identifiers
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🏢 Business Identifiers</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('GST Number', r.gstNumber || '—') +
+    dItem('PAN Number', r.panNumber || '—') +
+    dItem('Aadhaar Number', r.aadhaarNumber || '—') +
+    dItem('CIN', r.cin || '—') +
+    dItem('MSME Registration', r.msmeNumber || '—') +
+    '</div></div>';
+
+  // Contact
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📞 Contact Details</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Primary Mobile', r.phone || '—') +
+    dItem('Alternate Mobile', r.alternatePhone || '—') +
+    dItem('WhatsApp Number', r.whatsappNumber || '—') +
+    dItem('Email', r.email || '—') +
+    '</div></div>';
+
+  // Address
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📍 Business Address</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Registered Address', r.registeredAddress || '—') +
+    dItem('Office Address', r.officeAddress || '—') +
+    dItem('Warehouse Address', r.warehouseAddress || '—') +
+    dItem('City / State / PIN', [r.city, r.state, r.pincode].filter(Boolean).join(', ') || '—') +
+    '</div></div>';
+
+  // Pickup Locations
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🚚 Pickup Locations (' + (r.pickupLocations || []).length + ')</strong>';
+  (r.pickupLocations || []).forEach(function(loc) {
+    var navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + loc.latitude + ',' + loc.longitude;
+    html += '<div style="margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+      '<strong style="font-size:13px">' + escape(loc.name) + (loc.isPrimary ? ' <span style="background:#dbeafe;color:#1d4ed8;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-left:4px">PRIMARY</span>' : '') + '</strong>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12.5px;color:#374151;margin-bottom:8px">' +
+      '<div>👤 ' + escape(loc.contactPerson || '—') + '</div><div>📱 ' + escape(loc.mobile || '—') + '</div>' +
+      '<div style="grid-column:span 2">📍 ' + escape(loc.address) + (loc.landmark ? ', near ' + escape(loc.landmark) : '') + ', ' + escape(loc.city) + ', ' + escape(loc.state) + ' - ' + escape(loc.pincode) + '</div>' +
+      '</div>' +
+      '<div style="border-radius:6px;overflow:hidden;border:1px solid #e5e7eb">' +
+      '<iframe src="https://www.openstreetmap.org/export/embed.html?bbox=' + (loc.longitude-0.005)+','+(loc.latitude-0.005)+','+(loc.longitude+0.005)+','+(loc.latitude+0.005) + '&layer=mapnik&marker=' + loc.latitude + ',' + loc.longitude + '" width="100%" height="130" frameborder="0" loading="lazy" style="display:block"></iframe></div>' +
+      '<a href="' + navUrl + '" target="_blank" style="display:inline-block;margin-top:6px;padding:4px 12px;background:#059669;color:#fff;border-radius:6px;font-size:11px;font-weight:600;text-decoration:none">🗺 Navigate</a>' +
+      '</div>';
+  });
+  html += '</div>';
+
+  // Documents
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📄 Documents</strong><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">';
+  var docs = [
+    {key:'gstCertificateUrl', label:'GST Certificate'},
+    {key:'panCardUrl', label:'PAN Card'},
+    {key:'cancelledChequeUrl', label:'Cancelled Cheque'},
+    {key:'bankPassbookUrl', label:'Bank Passbook'},
+    {key:'businessProofUrl', label:'Business Proof'},
+    {key:'addressProofUrl', label:'Address Proof'},
+    {key:'ownerPhotoUrl', label:'Owner Photo'},
+    {key:'ownerAadhaarUrl', label:'Owner Aadhaar'},
+  ];
+  docs.forEach(function(doc) {
+    var val = r[doc.key];
+    if (!val || val === '[uploaded]') {
+      if (val) html += '<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#166534">' + doc.label + ' ✅</div>';
+      else html += '<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#991b1b">' + doc.label + ' — missing</div>';
+    } else if (val.startsWith('data:image')) {
+      html += '<div style="text-align:center"><img src="' + val + '" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"><div style="font-size:11px;color:#6b7280;margin-top:4px">' + doc.label + '</div></div>';
+    } else if (val.startsWith('data:application/pdf')) {
+      html += '<div style="background:#fee2e2;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#991b1b">📄 ' + doc.label + '</div>';
+    }
+  });
+  (r.warehouseImages || []).forEach(function(url, i) {
+    html += '<div style="text-align:center"><img src="' + url + '" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"><div style="font-size:11px;color:#6b7280;margin-top:4px">Warehouse ' + (i+1) + '</div></div>';
+  });
+  (r.storeImages || []).forEach(function(url, i) {
+    html += '<div style="text-align:center"><img src="' + url + '" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"><div style="font-size:11px;color:#6b7280;margin-top:4px">Store ' + (i+1) + '</div></div>';
+  });
+  html += '</div></div>';
+
+  // Bank
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🏦 Bank Details</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    dItem('Account Holder', r.bankAccountHolder || '—') +
+    dItem('Account No', r.bankAccountNumber ? '****' + r.bankAccountNumber.slice(-4) : '—') +
+    dItem('IFSC', r.bankIfsc || '—') +
+    dItem('Bank', r.bankName || '—') +
+    dItem('Branch', r.bankBranch || '—') +
+    dItem('UPI ID', r.upiId || '—') +
+    '</div></div>';
+
+  // Terms acceptance
+  html += '<div style="margin-bottom:8px">' + dItem('Policies Accepted', r.agreedTerms ? '✅ Yes, on ' + fmtDateShort(r.agreedAt) : '❌ Not yet') + '</div>';
+
+  // Admin notes
+  html += '<div style="margin-bottom:8px"><label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">Internal Notes</label>' +
+    '<textarea id="sa-admin-notes" class="form-control" rows="2" style="margin-top:6px" placeholder="Add admin notes…">' + escape(r.adminNotes || '') + '</textarea></div>';
+
+  document.getElementById('sa-detail-body').innerHTML = html;
+
+  document.getElementById('sa-detail-footer').innerHTML =
+    '<select id="sa-status-select" class="form-control" style="width:200px">' +
+    '<option value="PENDING"' + (r.status==='PENDING'?' selected':'') + '>Pending</option>' +
+    '<option value="APPROVED"' + (r.status==='APPROVED'?' selected':'') + '>✅ Approve</option>' +
+    '<option value="REJECTED"' + (r.status==='REJECTED'?' selected':'') + '>❌ Reject</option>' +
+    '<option value="HOLD"' + (r.status==='HOLD'?' selected':'') + '>⏸ Hold</option>' +
+    '<option value="MORE_INFO"' + (r.status==='MORE_INFO'?' selected':'') + '>📋 Request More Info</option>' +
+    '</select>' +
+    '<button class="btn btn-primary" onclick="saveSellerAppStatus()">Save Status</button>' +
+    '<button class="btn btn-outline" onclick="closeModal(\'sa-detail-overlay\')">Close</button>';
+}
+
+function saveSellerAppStatus() {
+  var status = document.getElementById('sa-status-select').value;
+  var notes = document.getElementById('sa-admin-notes').value.trim();
+  if (status === 'REJECTED' && !notes) { toast('Add a reason before rejecting', 'error'); return; }
+  api('PATCH', '/admin/seller-registrations/' + currentSellerAppId + '/status', {status: status, adminNotes: notes})
+    .then(function() {
+      toast('Status updated to ' + status, 'success');
+      closeModal('sa-detail-overlay');
+      loadSellerApps();
+      if (status === 'APPROVED') loadSellers();
+    }).catch(function(e){ toast(e.message, 'error'); });
 }
 
 // ── PARTNER REGISTRATIONS ──
