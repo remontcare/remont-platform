@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-07-11 — Phase 1: Admin-managed Product Sellers + Seller Portal + Orders
+
+**Summary:** Implemented all 3 approved Phase 1 objectives — hybrid seller model
+(admin-managed accounts, no public registration), a lightweight seller portal, and
+seller-scoped orders visibility. Verified end-to-end against live production via a
+real admin→create-seller→login→product→order-visibility flow (test data created
+and cleaned up afterward), not just typecheck.
+
+**Files modified/added:**
+- `backend/src/modules/admin/admin.module.ts` — `listProductVendors`, `createProductVendor` (with `CreateProductVendorDto` phone validation), `suspendProductVendor`, `activateProductVendor` + routes under `/admin/product-vendors`
+- `backend/src/modules/vendors/vendors.module.ts` — `ProductVendorsService.myOrders()` + `GET /vendors/product/me/orders`
+- `backend/src/modules/products/products.module.ts` — public `GET /products/categories`; fixed a pre-existing gap where `update()` passed the PATCH body straight through, letting a seller reassign `vendorId` on their own product
+- `frontend/admin/vendors.html` — new "Product Sellers" tab (list/search/filter, create-seller modal, suspend/reactivate)
+- `frontend/admin/common.js` — sidebar nav entry for Product Sellers
+- `frontend/seller.html` (new) — lightweight seller portal: OTP login, Home (dashboard stats), Products (list/add/edit with client-side image compression), Orders (read-only, own-products-only), Profile
+
+**DB changes:** none (all additive via existing models — `ProductVendor`, `Product`, `OrderItem` were already sufficient)
+
+**API changes:**
+```
+GET   /admin/product-vendors                    [ADMIN]
+POST  /admin/product-vendors                     [ADMIN]
+PATCH /admin/product-vendors/:id/suspend         [ADMIN]
+PATCH /admin/product-vendors/:id/activate        [ADMIN]
+GET   /vendors/product/me/orders                 [PRODUCT_VENDOR]
+GET   /products/categories                       [Public]
+```
+
+**UI changes:** new admin tab (additive, existing tabs unchanged); new standalone `seller.html` page (doesn't touch `index.html` or any customer-facing UI).
+
+**Bug found + fixed during E2E verification:** `createProductVendor` had no phone-format validation — a typo would silently create a `User` row that could never pass `/auth/send-otp`'s `IsPhoneNumber` check, i.e. a seller account permanently unable to log in with no error at creation time. Added `CreateProductVendorDto` with the same validation `auth.module.ts` already uses.
+
+**Commits:** `fcdc441` (docs scaffold), `795b7b2` (admin seller CRUD), `4292678` (seller orders endpoint), `64a9dc3` (admin UI tab), `83732f9` (public categories endpoint), `5dc7c86` (seller portal + ownership hardening), `c2f33fa` (phone validation fix)
+
+---
+
 ## 2026-07-11 — Documentation scaffold
 
 **Summary:** Created the standing project documentation set requested for long-term,

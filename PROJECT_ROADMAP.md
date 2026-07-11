@@ -31,9 +31,9 @@ number of admin-onboarded local sellers).
 
 | Module | Status | Notes |
 |---|---|---|
-| Admin-managed Product Sellers | 🔧 In progress | Admin creates seller accounts directly (phone + OTP login, no password system). No public registration. |
-| Lightweight Seller Portal (`seller.html`) | 🔧 In progress | Login, own-products CRUD (reuses existing `/products` endpoints), orders visibility. |
-| Seller Orders Management | 🔧 In progress | Seller sees only orders containing their own products. |
+| Admin-managed Product Sellers | ✔ Done | Admin creates seller accounts directly (phone + OTP login, no password system). No public registration. Verified live 2026-07-11. |
+| Lightweight Seller Portal (`seller.html`) | ✔ Done | Login, own-products CRUD (reuses existing `/products` endpoints), orders visibility. Verified live 2026-07-11. |
+| Seller Orders Management | ✔ Done | Seller sees only orders containing their own products, enforced at query layer. Verified live 2026-07-11. |
 | Mobile catalog real-service browsing | ✔ Done | Fixed 2026-07-11 — see `CHANGELOG.md`. |
 | Automatic order dispatch (service side) | ✔ Done | Vendor skill-vocabulary bug fixed 2026-07-11. |
 
