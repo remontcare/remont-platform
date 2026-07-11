@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-07-11 — UI: "Join as Seller Partner" button
+
+**Summary:** Single additive UI change per explicit narrow-scope instruction — added
+a second button to the existing "Become a Service Partner" card in `index.html`'s
+`#vendor` section, linking to `seller-register.html` (Module 1). The existing "Apply
+as Partner" button's href/class/text/behavior were not touched; both now sit in a
+small flex row using the same `.btn-hero` class already proven on that card's
+gradient background — no new CSS, no new page, no other layout change.
+
+**Files modified:** `frontend/index.html` (4 insertions, 1 deletion)
+**DB/API changes:** none
+**Verified:** local render + live production — both buttons present with correct, independent `href`s (`/partner-register` and `/seller-register.html`), zero console errors, screenshot-confirmed visual placement matches the existing design.
+**Commit:** `e10151c`
+
+---
+
 ## 2026-07-11 — Enterprise Seller Module, Part 1: Public Registration + Approval
 
 **Summary:** Full reversal of the earlier "admin-only seller creation" rule, per
