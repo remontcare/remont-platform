@@ -112,7 +112,10 @@ export class ProductsService {
     if (!vendor) throw new ForbiddenException('Not a vendor');
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing || existing.vendorId !== vendor.id) throw new ForbiddenException();
-    return this.prisma.product.update({ where: { id }, data });
+    // Strip vendorId from the body — a seller must never be able to reassign their own
+    // product to a different vendor via PATCH (this used to pass `data` straight through).
+    const { vendorId, ...safeData } = data;
+    return this.prisma.product.update({ where: { id }, data: safeData });
   }
 
   async myProducts(userId: string) {
