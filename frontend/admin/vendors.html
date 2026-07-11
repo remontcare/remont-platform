@@ -93,13 +93,16 @@
   </div>
 </div>
 
-<!-- CREATE SELLER MODAL -->
+<!-- CREATE / EDIT SELLER MODAL -->
 <div id="create-seller-overlay" class="overlay" style="display:none">
-  <div class="modal">
+  <div class="modal" style="max-width:540px;max-height:90vh;overflow-y:auto">
     <div class="modal-header">
-      <span class="modal-title">Create Product Seller</span>
+      <span class="modal-title" id="cs-modal-title">Add Product Seller</span>
       <button class="modal-close" onclick="closeModal('create-seller-overlay')">×</button>
     </div>
+    <input type="hidden" id="cs-id">
+
+    <div class="form-section-label">Contact Details</div>
     <div class="form-group">
       <label class="form-label">Mobile Number *</label>
       <input id="cs-phone" class="form-control" placeholder="+919876543210" maxlength="13">
@@ -108,18 +111,36 @@
       <label class="form-label">Seller / Contact Name *</label>
       <input id="cs-name" class="form-control" placeholder="e.g. Ramesh Kumar">
     </div>
+
+    <div class="form-section-label" style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">Business Details</div>
     <div class="form-group">
       <label class="form-label">Business Name *</label>
       <input id="cs-business" class="form-control" placeholder="e.g. Kumar Electronics">
     </div>
-    <div class="form-group">
-      <label class="form-label">City</label>
-      <select id="cs-city" class="form-control"><option value="">Select city…</option></select>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">City</label>
+        <select id="cs-city" class="form-control"><option value="">Select city…</option></select>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">GST Number (optional)</label>
+        <input id="cs-gst" class="form-control" placeholder="22AAAAA0000A1Z5" style="text-transform:uppercase">
+      </div>
     </div>
+
+    <div class="form-section-label" style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">Address</div>
     <div class="form-group">
-      <label class="form-label">GST Number (optional)</label>
-      <input id="cs-gst" class="form-control" placeholder="22AAAAA0000A1Z5">
+      <label class="form-label">Business Address</label>
+      <textarea id="cs-address" class="form-control" rows="2" placeholder="Shop no., street, area, pincode"></textarea>
     </div>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:2px 0 12px;color:#374151">
+      <input type="checkbox" id="cs-pickup-same" checked onchange="togglePickupSame()"> Pickup address same as business address
+    </label>
+    <div class="form-group" id="cs-pickup-field" style="display:none">
+      <label class="form-label">Pickup Address</label>
+      <textarea id="cs-pickup" class="form-control" rows="2" placeholder="Where couriers/delivery partners collect stock from"></textarea>
+    </div>
+
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('create-seller-overlay')">Cancel</button>
       <button class="btn btn-primary" id="cs-submit-btn" onclick="submitCreateSeller()">Create Seller</button>
@@ -256,6 +277,7 @@ function switchTab(tab) {
 }
 
 // ── PRODUCT SELLERS ──
+var sellersCache = [];
 function loadSellers() {
   var status = document.getElementById('seller-filter-status').value;
   var q = document.getElementById('seller-filter-q').value;
@@ -265,6 +287,7 @@ function loadSellers() {
   p.push('limit=100');
   document.getElementById('sellers-tbl').innerHTML = '<div class="loading">Loading…</div>';
   api('GET', '/admin/product-vendors' + (p.length ? '?' + p.join('&') : '')).then(function(sellers) {
+    sellersCache = sellers || [];
     if (!sellers || !sellers.length) {
       document.getElementById('sellers-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🛒</div><h3>No product sellers yet</h3><p>Create one with the button above.</p></div>';
       return;
@@ -282,6 +305,7 @@ function loadSellers() {
         '<td>' + statusBadge(s.status) + '</td>' +
         '<td>' + fmtDateShort(s.createdAt) + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick="openEditSeller(\'' + s.id + '\')">Edit</button>' +
           (s.status === 'ACTIVE' ? '<button class="btn btn-xs btn-warning" onclick="suspendSeller(\'' + s.id + '\')">Suspend</button>' : '') +
           (s.status === 'SUSPENDED' ? '<button class="btn btn-xs btn-success" onclick="activateSeller(\'' + s.id + '\')">Reactivate</button>' : '') +
         '</div></td>' +
@@ -292,42 +316,88 @@ function loadSellers() {
 }
 
 var sellerCitiesLoaded = false;
+function ensureSellerCitiesLoaded(cb) {
+  if (sellerCitiesLoaded) { cb(); return; }
+  api('GET', '/admin/cities').then(function(cities) {
+    sellerCitiesLoaded = true;
+    var sel = document.getElementById('cs-city');
+    sel.innerHTML = '<option value="">Select city…</option>' + (cities || []).map(function(c) {
+      return '<option value="' + escape(c.name) + '">' + escape(c.name) + (c.isActive ? '' : ' (inactive)') + '</option>';
+    }).join('');
+    cb();
+  }).catch(function() { cb(); });
+}
+
+function togglePickupSame() {
+  var same = document.getElementById('cs-pickup-same').checked;
+  document.getElementById('cs-pickup-field').style.display = same ? 'none' : 'block';
+}
+
 function openCreateSeller() {
+  document.getElementById('cs-modal-title').textContent = 'Add Product Seller';
+  document.getElementById('cs-id').value = '';
   document.getElementById('cs-phone').value = '';
+  document.getElementById('cs-phone').disabled = false;
   document.getElementById('cs-name').value = '';
   document.getElementById('cs-business').value = '';
   document.getElementById('cs-gst').value = '';
-  document.getElementById('cs-city').value = '';
-  if (!sellerCitiesLoaded) {
-    api('GET', '/admin/cities').then(function(cities) {
-      sellerCitiesLoaded = true;
-      var sel = document.getElementById('cs-city');
-      sel.innerHTML = '<option value="">Select city…</option>' + (cities || []).map(function(c) {
-        return '<option value="' + escape(c.name) + '">' + escape(c.name) + (c.isActive ? '' : ' (inactive)') + '</option>';
-      }).join('');
-    }).catch(function() {});
-  }
-  document.getElementById('create-seller-overlay').style.display = 'flex';
+  document.getElementById('cs-address').value = '';
+  document.getElementById('cs-pickup').value = '';
+  document.getElementById('cs-pickup-same').checked = true;
+  togglePickupSame();
+  document.getElementById('cs-submit-btn').textContent = 'Create Seller';
+  ensureSellerCitiesLoaded(function() {
+    document.getElementById('cs-city').value = '';
+    document.getElementById('create-seller-overlay').style.display = 'flex';
+  });
+}
+
+function openEditSeller(id) {
+  var s = sellersCache.filter(function(x) { return x.id === id; })[0];
+  if (!s) return;
+  document.getElementById('cs-modal-title').textContent = 'Edit Product Seller';
+  document.getElementById('cs-id').value = s.id;
+  document.getElementById('cs-phone').value = (s.user && s.user.phone) || '';
+  document.getElementById('cs-phone').disabled = true; // phone is the login identity — not editable here
+  document.getElementById('cs-name').value = (s.user && s.user.name) || '';
+  document.getElementById('cs-business').value = s.businessName || '';
+  document.getElementById('cs-gst').value = s.gstNumber || '';
+  document.getElementById('cs-address').value = s.address || '';
+  var pickupSame = !s.pickupAddress || s.pickupAddress === s.address;
+  document.getElementById('cs-pickup-same').checked = pickupSame;
+  document.getElementById('cs-pickup').value = pickupSame ? '' : s.pickupAddress;
+  togglePickupSame();
+  document.getElementById('cs-submit-btn').textContent = 'Save Changes';
+  ensureSellerCitiesLoaded(function() {
+    document.getElementById('cs-city').value = s.city || '';
+    document.getElementById('create-seller-overlay').style.display = 'flex';
+  });
 }
 
 function submitCreateSeller() {
+  var id = document.getElementById('cs-id').value;
   var phone = document.getElementById('cs-phone').value.trim();
   var name = document.getElementById('cs-name').value.trim();
   var business = document.getElementById('cs-business').value.trim();
   var city = document.getElementById('cs-city').value;
   var gst = document.getElementById('cs-gst').value.trim();
+  var address = document.getElementById('cs-address').value.trim();
+  var pickupSame = document.getElementById('cs-pickup-same').checked;
+  var pickup = pickupSame ? address : document.getElementById('cs-pickup').value.trim();
   if (!phone || !name || !business) { toast('Phone, name and business name are required', 'error'); return; }
   if (phone.charAt(0) !== '+') phone = '+91' + phone.replace(/\D/g, '');
   var btn = document.getElementById('cs-submit-btn');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  api('POST', '/admin/product-vendors', { phone: phone, name: name, businessName: business, city: city || undefined, gstNumber: gst || undefined })
-    .then(function() {
-      toast('Seller account created', 'success');
+  btn.disabled = true; btn.textContent = id ? 'Saving…' : 'Creating…';
+  var payload = { name: name, businessName: business, city: city || undefined, gstNumber: gst || undefined, address: address || undefined, pickupAddress: pickup || undefined };
+  var req = id ? api('PATCH', '/admin/product-vendors/' + id, payload)
+               : api('POST', '/admin/product-vendors', Object.assign({ phone: phone }, payload));
+  req.then(function() {
+      toast(id ? 'Seller updated' : 'Seller account created', 'success');
       closeModal('create-seller-overlay');
       loadSellers();
     })
     .catch(function(e) { toast(e.message, 'error'); })
-    .then(function() { btn.disabled = false; btn.textContent = 'Create Seller'; });
+    .then(function() { btn.disabled = false; btn.textContent = id ? 'Save Changes' : 'Create Seller'; });
 }
 
 function suspendSeller(id) {
