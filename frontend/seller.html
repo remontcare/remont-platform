@@ -177,7 +177,7 @@ a{color:inherit;text-decoration:none}
 
       <div id="login-phone-step">
         <div class="auth-title">Seller Login</div>
-        <div class="auth-sub">Only accounts created by Remont admin can log in here</div>
+        <div class="auth-sub">Only approved sellers can log in — apply below if you're new</div>
         <div class="field">
           <label>Mobile Number</label>
           <div class="phone-input-row">
@@ -187,7 +187,8 @@ a{color:inherit;text-decoration:none}
         </div>
         <div class="auth-error" id="login-err"></div>
         <button class="btn-primary" id="send-otp-btn" onclick="sendLoginOtp()">Send OTP →</button>
-        <div class="demo-note">OTP is sent via WhatsApp to this number. Not registered as a seller yet? Contact Remont admin.</div>
+        <div class="demo-note">OTP is sent via WhatsApp to this number.</div>
+        <div style="text-align:center;margin-top:16px;font-size:13px;color:#6b7280">New seller? <a href="/seller-register.html" style="color:var(--sienna);font-weight:700">Apply here →</a></div>
       </div>
 
       <div id="login-otp-step" style="display:none">
@@ -444,7 +445,21 @@ function loadSellerProfile(){
     })
     .catch(function(e){
       doLogout();
-      alert('No seller account found for this number. Contact Remont admin to get set up.');
+      // Not an approved seller yet — check if there's an application in flight and give a
+      // specific, helpful message instead of a generic "contact admin" dead end.
+      apiFetch('/seller-registration/status?phone=' + encodeURIComponent(pendingPhone))
+        .then(function(reg){
+          var msgs = {
+            PENDING: 'Your seller application (' + reg.registrationId + ') is still under review. We\'ll notify you via WhatsApp once a decision is made.',
+            HOLD: 'Your seller application (' + reg.registrationId + ') is on hold. ' + (reg.adminNotes || 'Our team will contact you shortly.'),
+            MORE_INFO: 'We need more information for your seller application (' + reg.registrationId + '). ' + (reg.adminNotes || 'Please contact support.'),
+            REJECTED: 'Your seller application (' + reg.registrationId + ') was not approved.' + (reg.adminNotes ? ' Reason: ' + reg.adminNotes : ''),
+          };
+          alert(msgs[reg.status] || 'Your application status: ' + reg.status);
+        })
+        .catch(function(){
+          alert('This number is not registered as a seller yet. Tap "Apply here" on the login screen to get started.');
+        });
     });
 }
 function enterDashboard(){
