@@ -229,6 +229,46 @@ export class ProductVendorsService {
       lowStockCount: lowStock, rating: v.rating,
     };
   }
+
+  // Orders containing this seller's products — scoped at the query layer (product.vendorId),
+  // never exposes another seller's order items. Grouped by parent order since an order can
+  // also carry a service booking or another seller's products in the same checkout.
+  async myOrders(userId: string) {
+    const v = await this.prisma.productVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+
+    const items = await this.prisma.orderItem.findMany({
+      where: { product: { vendorId: v.id } },
+      include: {
+        product: { select: { name: true, images: true } },
+        order: {
+          select: {
+            id: true, orderNumber: true, status: true, paymentStatus: true, createdAt: true,
+            customer: { select: { name: true, phone: true } },
+            address: { select: { fullAddress: true, city: true, pincode: true } },
+          },
+        },
+      },
+      orderBy: { order: { createdAt: 'desc' } },
+      take: 200,
+    });
+
+    const byOrder = new Map<string, any>();
+    for (const item of items) {
+      if (!byOrder.has(item.order.id)) {
+        byOrder.set(item.order.id, { ...item.order, items: [] });
+      }
+      byOrder.get(item.order.id).items.push({
+        id: item.id,
+        productName: item.product.name,
+        productImage: item.product.images?.[0] || null,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+      });
+    }
+    return Array.from(byOrder.values());
+  }
 }
 
 @ApiTags('Vendors')
@@ -240,6 +280,7 @@ export class ProductVendorsController {
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.pv.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.pv.profile(u.sub); }
   @Get('me/dashboard') dash(@CurrentUser() u: JwtPayload) { return this.pv.dashboard(u.sub); }
+  @Get('me/orders') orders(@CurrentUser() u: JwtPayload) { return this.pv.myOrders(u.sub); }
 }
 
 @Module({
