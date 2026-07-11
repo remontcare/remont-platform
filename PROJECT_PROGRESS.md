@@ -17,6 +17,7 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 2. ✔ Lightweight Seller Portal
 3. ✔ Seller Orders Management
 4. ✔ Dynamic City Activation Management (bulk actions, stats dashboard, order-creation enforcement fix)
+5. ✔ Dynamic Product Coverage System (Pan India / Selected Cities / Store Pickup / Zones-schema-ready)
 
 ## Completed This Phase
 
@@ -41,6 +42,8 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 - [x] Frontend: `admin/cities.html` stats dashboard + bulk actions + global switch; city field added to seller creation and seller profile — commit `8658a51`
 - [x] E2E verified live: deactivate a (throwaway test) city → both order-creation paths correctly blocked → reactivate → both succeed. Visually confirmed the new admin dashboard renders correctly with live data (13 cities, real per-city technician counts).
 - [x] Deliberately did NOT fire `PATCH /admin/cities/all` against production during testing — verified by code review only, since it has no scoping and would affect all 13 real cities. Documented so the admin knows to trigger it consciously.
+- [x] Built the Product Coverage System (Pan India/Selected Cities/Store Pickup/Zones-schema-only) on top of the city system — reused the existing `CityProduct` table (previously written by 2 admin endpoints with zero frontend using them) rather than building a parallel mechanism — commits `7006ad8`, `53d83a3`.
+- [x] E2E verified live: 6 scenarios (Pan India both-cities, Selected-Cities scoping, Store-Pickup scoping, priority ordering, edit-coverage replace-not-accumulate, myProducts() prefill data) all passed against throwaway test cities/seller/products, cleaned up after.
 
 ## In Progress
 

@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-07-11 — Dynamic Product Coverage System
+
+**Summary:** Every product (admin-owned, seller-owned, or "Remont Direct") now
+declares where it's available: Pan India (default), Selected Cities, Store Pickup
+Only, or Zones (schema-only, future-ready). Built directly on top of the city
+activation system from earlier today — reused the existing `CityProduct` table
+(previously written by two admin endpoints with zero frontend consuming them) rather
+than introducing a parallel mechanism.
+
+**Files modified/added:**
+- `backend/prisma/schema.prisma` — `ProductCoverageType` enum, `Product.coverageType` (default `PAN_INDIA`, so all pre-existing products keep working unchanged), new `ProductZone` model (pincode/areaName — schema only, not yet enforced)
+- `backend/src/modules/products/products.module.ts` — `list()` rewritten with coverage-aware filtering + priority ordering (city-specific before Pan India, ineligible hidden); `syncCityCoverage()` replace-semantics helper; `create()`/`update()`/`myProducts()` updated
+- `backend/src/modules/admin/admin.module.ts` — same coverage handling for `adminCreateProduct`/`adminUpdateProduct`; `adminListProducts` now includes an active-city count
+- `frontend/admin/products.html` — Coverage Area radio group; the previously-dead Cities tab is now coverage-aware (Pan India = opt-out list, Selected Cities = opt-in list, Store Pickup = hidden); Coverage column on the products table
+- `frontend/seller.html` — same Coverage Area section on the product form, backed by the public city list
+
+**DB changes:** `Product.coverageType` (additive, default `PAN_INDIA`), new `ProductZone` table (additive, empty/unused)
+
+**API changes:** no new routes — `coverageType`/`cityIds` are new optional fields accepted by the existing `POST/PATCH /products` and `POST/PATCH /admin/products`
+
+**UI changes:** additive fields on existing admin/seller product forms; a previously entirely-unused admin "Cities" tab is now functional. No customer-facing UI touched (this changes what customers *see* via filtering, not any customer-facing page).
+
+**Verified live** (throwaway test cities/seller/products, cleaned up after): Pan India product appeared in both test cities; a Selected-Cities product scoped to one city was correctly hidden in the other; a Store-Pickup product was correctly scoped to its seller's city only; city-specific results correctly ranked before Pan India in the same query; editing a product's coverage from one city to another correctly replaced rather than accumulated the assignment (no duplication); `myProducts()` correctly returns `coverageType` + `cityProducts` for edit-form prefill.
+
+**Commits:** `7006ad8` (backend), `53d83a3` (frontend)
+
+---
+
 ## 2026-07-11 — Dynamic City Activation Management System
 
 **Summary:** Found (via direct production DB query) that all 13 configured cities were

@@ -37,6 +37,21 @@ All original tasks complete — see `CHANGELOG.md` 2026-07-11 entry for full det
 production. Use the new bulk actions in `admin/cities.html` to deactivate all but
 the launch city when ready.
 
+## Phase 1 — Dynamic Product Coverage System (added 2026-07-11, complete)
+
+| # | Task | Priority | Status |
+|---|---|---|---|
+| 1 | `ProductCoverageType` enum + `Product.coverageType` + `ProductZone` schema | High | ✅ |
+| 2 | Coverage-aware filtering + priority ordering in `products.module.ts list()` | High | ✅ |
+| 3 | `create()`/`update()`/`myProducts()` coverage handling (seller + admin) | High | ✅ |
+| 4 | Admin Coverage Area UI + coverage-aware Cities tab + table column | High | ✅ |
+| 5 | Seller Coverage Area UI on product form | High | ✅ |
+| 6 | Live E2E verification (6 scenarios, throwaway test data, cleaned up) | High | ✅ |
+
+**Known deliberate gap:** `ZONES` coverage type has schema (`ProductZone`) but zero
+enforcement — it currently behaves identically to `SELECTED_CITIES`. Build real
+pincode/area-level filtering only when the business actually needs it.
+
 ## Possible follow-on items (not started, not committed to — raise with user before building)
 
 - Seller can't currently see order-detail (customer address/phone) beyond what `myOrders()` returns — may want a detail view if sellers ask for it.

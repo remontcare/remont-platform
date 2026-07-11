@@ -84,7 +84,8 @@ No separate controller/service/dto files. Do not split an existing module into m
 Full source of truth: `backend/prisma/schema.prisma` (44+ models). Highlights relevant to current phase:
 
 - **`City` / `CityService` / `CityProduct`** — per-city activation, stock override, custom price, price multiplier. Already supports multi-city; launching in one city means activating exactly one `City` row and leaving others `isActive: false`. **No schema change needed to expand cities later.**
-- **`Product`** — `vendorId String?` (nullable → admin-owned when null), `categoryId`, price/mrp/stock, images, SEO fields (unpopulated placeholders for now), `isActive`.
+- **`Product`** — `vendorId String?` (nullable → admin-owned when null; in practice all current products are attributed to a "Remont Direct" seller account rather than actually null), `categoryId`, price/mrp/stock, images, SEO fields (unpopulated placeholders for now), `isActive`, `coverageType` (`PAN_INDIA` default / `SELECTED_CITIES` / `STORE_PICKUP` / `ZONES`-schema-only) — see §8 for the coverage business rules.
+- **`ProductZone`** — pincode/areaName per product. Schema exists for future zone-level coverage; nothing reads it yet (`ZONES` coverage type currently falls back to city-level `CityProduct` matching).
 - **`ProductVendor`** — `id, userId (unique), businessName, gstNumber?, status (VendorStatus), rating`. Deliberately thin — no KYC documents, no wallet/ledger yet (explicitly deferred, see roadmap).
 - **`Order` / `OrderItem`** — one `Order` can carry both a service booking (`serviceId`) and product line items (`items: OrderItem[]`) in the same checkout. This already works end-to-end (`orders.module.ts`).
 - **`VendorStatus` enum**: `PENDING_VERIFICATION · ACTIVE · SUSPENDED · REJECTED`.
@@ -116,6 +117,7 @@ GET   /vendors/product/me/dashboard [JWT + PRODUCT_VENDOR]  — 4 stats: product
 5. **Customer-facing UI (`index.html`) must remain visually unchanged** unless a task explicitly calls for a customer-facing change.
 6. Existing functionality must never break — verify against real data before considering a task done (this repo's established pattern: headless-browser smoke test against local-serving-real-API or live site, not just typecheck).
 7. Everything stays modular, additive, and scoped to what the current phase actually needs — see `PROJECT_ROADMAP.md`'s "guardrails" section. Do not build enterprise-scale features (bulk upload, KYC documents, multi-warehouse, courier aggregators, AI image search) until a future phase explicitly calls for them.
+8. **Product coverage**: Pan India products must appear automatically in any city activated later — no manual per-city update, ever (enforced by the filtering *rule*, not by writing rows: a Pan India product with zero `CityProduct` rows is eligible everywhere by default). Selected-Cities/Store-Pickup products are opt-in and only show where explicitly assigned. One product row serves every city it's eligible in — never duplicate a product to cover multiple cities.
 
 ---
 
