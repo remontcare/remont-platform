@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Become a Seller – Remont India</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root {
+  --sienna:#C4601A; --amber:#E8A650; --ivory:#FDFAF5; --cream:#F5F0E8;
+  --charcoal:#1A1A1A; --mist:#E8E3DA; --white:#fff; --sage:#6B7C5E;
+  --success:#22c55e; --error:#ef4444; --blue:#3b82f6;
+  --radius:12px; --radius-lg:20px;
+  --shadow:0 6px 28px rgba(26,26,26,.08); --shadow-lg:0 16px 60px rgba(26,26,26,.14);
+  --ff-body:"DM Sans",sans-serif; --ff-display:"Cormorant Garamond",Georgia,serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--ff-body);background:var(--ivory);color:var(--charcoal);min-height:100vh}
+button{cursor:pointer;font-family:var(--ff-body);border:none;outline:none;background:none}
+input,textarea,select{font-family:var(--ff-body)}
+input:focus,textarea:focus,select:focus{outline:none}
+
+.pr-header{position:sticky;top:0;z-index:1000;background:var(--white);border-bottom:1px solid var(--mist);padding:0 24px;display:flex;align-items:center;gap:16px;min-height:64px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.pr-logo{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0}
+.pr-logo-icon{width:36px;height:36px;background:var(--sienna);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700}
+.pr-logo-text{font-family:var(--ff-display);font-size:20px;font-weight:700;color:var(--charcoal)}
+.pr-logo-text span{color:var(--sienna)}
+.pr-header-mid{flex:1;font-size:13px;color:#6b7280;font-weight:600}
+
+.progress-wrap{background:var(--white);border-bottom:1px solid var(--mist);padding:16px 24px}
+.progress-steps{display:flex;align-items:center;justify-content:center;gap:0;max-width:760px;margin:0 auto}
+.ps-circle{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;transition:all .3s;border:2px solid var(--mist);background:var(--cream);color:#9ca3af}
+.ps-circle.active{border-color:var(--sienna);background:var(--sienna);color:#fff;box-shadow:0 0 0 4px rgba(196,96,26,.15)}
+.ps-circle.done{border-color:var(--success);background:var(--success);color:#fff}
+.ps-line{flex:1;height:2px;background:var(--mist);transition:background .3s}
+.ps-line.done{background:var(--success)}
+.ps-label{font-size:10px;color:#9ca3af;text-align:center;margin-top:4px;white-space:nowrap}
+.ps-label.active{color:var(--sienna);font-weight:600}
+.ps-label.done{color:var(--success)}
+.ps-col{display:flex;flex-direction:column;align-items:center;flex:1;min-width:0}
+@media(max-width:700px){.ps-label{display:none}.ps-circle{width:24px;height:24px;font-size:10px}}
+
+.pr-body{max-width:720px;margin:0 auto;padding:32px 20px 80px}
+.step-card{background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:36px 40px;animation:slideIn .35s ease}
+@keyframes slideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.step-card{padding:24px 18px}}
+.step-tag{font-size:11px;font-weight:700;color:var(--sienna);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px}
+.step-title{font-family:var(--ff-display);font-size:28px;font-weight:700;color:var(--charcoal);margin-bottom:6px;line-height:1.2}
+.step-sub{font-size:14px;color:#6b7280;margin-bottom:28px;line-height:1.5}
+
+.field{margin-bottom:18px}
+.field label{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+.field label span.req{color:var(--sienna)}
+.field input,.field textarea,.field select{width:100%;padding:13px 16px;border:1.5px solid var(--mist);border-radius:10px;font-size:15px;color:var(--charcoal);background:var(--ivory);transition:border-color .2s,box-shadow .2s}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--sienna);box-shadow:0 0 0 3px rgba(196,96,26,.1);background:#fff}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:500px){.field-row{grid-template-columns:1fr}}
+.field-hint{font-size:11px;color:#9ca3af;margin-top:4px}
+.field-error{font-size:11px;color:var(--error);margin-top:4px}
+
+.otp-row{display:flex;gap:10px;justify-content:center;margin:16px 0}
+.otp-digit{width:54px;height:60px;border:2px solid var(--mist);border-radius:12px;text-align:center;font-size:24px;font-weight:700;color:var(--charcoal);background:var(--ivory);transition:all .2s}
+.otp-digit:focus{border-color:var(--sienna);background:#fff;box-shadow:0 0 0 3px rgba(196,96,26,.1)}
+.otp-digit.filled{border-color:var(--sienna);background:#fff7f3}
+
+.upload-area{border:2px dashed var(--mist);border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--ivory);position:relative;overflow:hidden}
+.upload-area:hover{border-color:var(--sienna);background:#fff7f3}
+.upload-area input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-area .ua-icon{font-size:22px;margin-bottom:4px}
+.upload-area .ua-text{font-size:12.5px;font-weight:600;color:#374151}
+.upload-preview{display:none;padding:10px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;align-items:center;gap:10px;margin-top:8px}
+.upload-preview.show{display:flex}
+.up-thumb{width:40px;height:40px;border-radius:8px;object-fit:cover;background:var(--mist);flex-shrink:0}
+.up-thumb.pdf-icon{display:flex;align-items:center;justify-content:center;font-size:18px;background:#fee2e2}
+.up-info{flex:1;min-width:0}
+.up-name{font-size:11.5px;font-weight:600;color:#166534;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.up-remove{color:#ef4444;font-size:16px;cursor:pointer;flex-shrink:0}
+.doc-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:560px){.doc-grid{grid-template-columns:1fr}}
+.doc-label{font-size:12px;font-weight:700;color:#374151;margin-bottom:6px}
+.doc-label .opt{color:#9ca3af;font-weight:500;text-transform:none;letter-spacing:0}
+
+.btn-primary{width:100%;padding:15px 24px;background:var(--sienna);color:#fff;border-radius:12px;font-size:16px;font-weight:700;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary:hover{background:#b05518;transform:translateY(-1px);box-shadow:0 6px 20px rgba(196,96,26,.3)}
+.btn-primary:disabled{background:#d1d5db;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-outline{padding:13px 20px;border:2px solid var(--mist);border-radius:12px;font-size:15px;font-weight:600;color:#374151;transition:all .2s;background:#fff}
+.btn-outline:hover{border-color:var(--sienna);color:var(--sienna)}
+.btn-row{display:flex;gap:12px;margin-top:28px}
+.btn-row .btn-primary{flex:2}
+.btn-row .btn-outline{flex:1}
+
+.gps-strip{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:13px;color:#1e40af;margin-bottom:14px}
+.gps-strip.success{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.gps-strip.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.gps-btn{padding:8px 16px;background:var(--sienna);color:#fff;border-radius:8px;font-size:13px;font-weight:600;flex-shrink:0;transition:all .2s}
+.gps-btn:hover{background:#b05518}
+
+.pickup-card{border:1.5px solid var(--mist);border-radius:14px;padding:18px;margin-bottom:16px;position:relative}
+.pickup-card.primary{border-color:var(--sienna);background:#fff7f3}
+.pickup-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.pickup-title{font-size:14px;font-weight:700}
+.primary-badge{background:var(--sienna);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px}
+.pickup-actions{display:flex;gap:8px;align-items:center}
+.pickup-actions button{font-size:12px;font-weight:600;color:#6b7280}
+.pickup-actions button.set-primary{color:var(--sienna)}
+.pickup-actions button.remove-pickup{color:var(--error)}
+.leaflet-map{height:220px;border-radius:10px;border:1.5px solid var(--mist);margin-top:6px}
+.add-pickup-btn{width:100%;padding:14px;border:2px dashed var(--mist);border-radius:12px;color:var(--sienna);font-weight:700;font-size:13px;text-align:center;transition:all .2s}
+.add-pickup-btn:hover{border-color:var(--sienna);background:#fff7f3}
+
+.agree-item{display:flex;align-items:flex-start;gap:14px;padding:16px;border:1.5px solid var(--mist);border-radius:12px;margin-bottom:10px;cursor:pointer;transition:all .2s}
+.agree-item.checked{border-color:var(--sienna);background:#fff7f3}
+.agree-checkbox{width:22px;height:22px;border:2px solid var(--mist);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#fff;transition:all .2s;margin-top:1px}
+.agree-item.checked .agree-checkbox{background:var(--sienna);border-color:var(--sienna);color:#fff;font-size:13px}
+.agree-text .at{font-size:13.5px;font-weight:600;color:var(--charcoal);line-height:1.5}
+.agree-text .as{font-size:11.5px;color:#6b7280;margin-top:4px}
+
+.success-screen{display:none;text-align:center;padding:48px 24px}
+.success-screen.show{display:block}
+.success-icon{width:80px;height:80px;background:#f0fdf4;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 24px}
+.success-screen h2{font-family:var(--ff-display);font-size:30px;color:var(--charcoal);margin-bottom:12px}
+.success-screen p{font-size:15px;color:#6b7280;line-height:1.6;max-width:420px;margin:0 auto 24px}
+.reg-id-box{display:inline-block;background:var(--cream);border:2px dashed var(--sienna);border-radius:12px;padding:16px 32px;margin:0 auto 28px}
+.reg-id-box .rid-label{font-size:12px;color:#6b7280;margin-bottom:4px}
+.reg-id-box .rid-val{font-size:22px;font-weight:700;color:var(--sienna);letter-spacing:1px;font-family:monospace}
+
+.spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.map-wrap{border-radius:12px;overflow:hidden;border:1.5px solid var(--mist);margin-top:10px;display:none}
+.map-wrap.show{display:block}
+.map-wrap iframe{display:block;width:100%;height:150px;border:none}
+</style>
+</head>
+<body>
+
+<header class="pr-header">
+  <a href="/" class="pr-logo">
+    <div class="pr-logo-icon">R</div>
+    <span class="pr-logo-text">Remont<span> India</span></span>
+  </a>
+  <div class="pr-header-mid">Seller Registration</div>
+  <a href="/seller.html" class="btn-outline" style="padding:8px 14px;font-size:12.5px">Already applied? Log in →</a>
+</header>
+
+<div class="progress-wrap" id="progress-wrap">
+  <div class="progress-steps" id="progress-steps"></div>
+</div>
+
+<div class="pr-body">
+
+  <!-- STEP 1: BUSINESS DETAILS -->
+  <div id="step-1" class="step-card">
+    <div class="step-tag">Step 1 of 7</div>
+    <div class="step-title">Business Details</div>
+    <div class="step-sub">Tell us about your business to get started.</div>
+
+    <div class="field-row">
+      <div class="field"><label>Business Name <span class="req">*</span></label><input type="text" id="f-business-name" placeholder="e.g. Kumar Electronics"></div>
+      <div class="field"><label>Owner Name <span class="req">*</span></label><input type="text" id="f-owner-name" placeholder="e.g. Ramesh Kumar"></div>
+    </div>
+    <div class="field">
+      <label>Business Type</label>
+      <select id="f-business-type">
+        <option value="">Select…</option>
+        <option>Proprietorship</option><option>Partnership</option>
+        <option>Private Limited</option><option>LLP</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>GST Number</label><input type="text" id="f-gst" placeholder="22AAAAA0000A1Z5" style="text-transform:uppercase"><div class="field-hint">Entered manually — no auto-verification configured yet.</div></div>
+      <div class="field"><label>PAN Number</label><input type="text" id="f-pan" placeholder="ABCDE1234F" style="text-transform:uppercase"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Aadhaar Number <span class="opt">(optional)</span></label><input type="text" id="f-aadhaar" maxlength="12" placeholder="12-digit number"></div>
+      <div class="field"><label>CIN <span class="opt">(optional)</span></label><input type="text" id="f-cin" placeholder="Company Identification No."></div>
+    </div>
+    <div class="field"><label>MSME Registration <span class="opt">(optional)</span></label><input type="text" id="f-msme" placeholder="Udyam Registration No."></div>
+
+    <div id="step1-msg" class="field-error" style="margin-bottom:12px"></div>
+    <button class="btn-primary" onclick="handleStep1()">Continue →</button>
+  </div>
+
+  <!-- STEP 2: CONTACT DETAILS -->
+  <div id="step-2" class="step-card" style="display:none">
+    <div class="step-tag">Step 2 of 7</div>
+    <div class="step-title">Contact Details</div>
+    <div class="step-sub">Verify your primary mobile number to continue.</div>
+
+    <div class="field">
+      <label>Primary Mobile Number <span class="req">*</span></label>
+      <div style="display:flex;gap:8px">
+        <input type="tel" id="f-phone" placeholder="10-digit mobile number" maxlength="10" style="flex:1" oninput="this.value=this.value.replace(/\D/g,'')">
+        <button id="otp-send-btn" class="gps-btn" onclick="sendOtp()" style="padding:0 18px;height:100%;min-height:50px">Send OTP</button>
+      </div>
+      <div class="field-hint">OTP will be sent via WhatsApp</div>
+    </div>
+
+    <div id="otp-section" style="display:none">
+      <div class="field">
+        <label>Enter OTP <span class="req">*</span></label>
+        <div class="otp-row">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-0">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-1">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-2">
+          <input class="otp-digit" type="tel" maxlength="1" id="otp-3">
+        </div>
+        <div id="otp-msg" style="text-align:center;font-size:13px;color:#6b7280">
+          Didn't receive? <button id="resend-btn" style="color:var(--sienna);font-weight:600;font-size:13px" onclick="sendOtp(true)">Resend OTP</button>
+          <span id="otp-timer" style="color:#9ca3af"></span>
+        </div>
+        <div id="otp-verify-msg" class="field-error" style="text-align:center"></div>
+      </div>
+    </div>
+
+    <div id="otp-verified-badge" style="display:none;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:12px 16px;align-items:center;gap:10px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600">✅ Mobile verified!</div>
+
+    <div id="step2-extra" style="display:none">
+      <div class="field-row">
+        <div class="field"><label>Alternate Mobile</label><input type="tel" id="f-alt-phone" maxlength="10" placeholder="Optional" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+        <div class="field"><label>WhatsApp Number</label><input type="tel" id="f-whatsapp" maxlength="10" placeholder="If different from primary" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      </div>
+      <div class="field"><label>Email Address</label><input type="email" id="f-email" placeholder="business@example.com"></div>
+    </div>
+
+    <div id="step2-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(1)">← Back</button>
+      <button class="btn-primary" onclick="handleStep2()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: BUSINESS ADDRESS -->
+  <div id="step-3" class="step-card" style="display:none">
+    <div class="step-tag">Step 3 of 7</div>
+    <div class="step-title">Business Address</div>
+    <div class="step-sub">Where is your business registered and located?</div>
+
+    <div class="field"><label>Registered Address <span class="req">*</span></label><textarea id="f-reg-address" rows="2" placeholder="As per GST/business registration"></textarea></div>
+    <div class="field"><label>Office Address</label><textarea id="f-office-address" rows="2" placeholder="If different from registered address"></textarea></div>
+    <div class="field"><label>Warehouse Address <span class="opt">(optional)</span></label><textarea id="f-warehouse-address" rows="2" placeholder="Primary stock location, if any"></textarea></div>
+    <div class="field-row">
+      <div class="field"><label>City <span class="req">*</span></label><input type="text" id="f-city" placeholder="Bhopal"></div>
+      <div class="field"><label>State <span class="req">*</span></label><input type="text" id="f-state" placeholder="Madhya Pradesh"></div>
+    </div>
+    <div class="field"><label>PIN Code <span class="req">*</span></label><input type="tel" id="f-pincode" maxlength="6" placeholder="462023"></div>
+
+    <div id="step3-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(2)">← Back</button>
+      <button class="btn-primary" onclick="handleStep3()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: PICKUP LOCATIONS -->
+  <div id="step-4" class="step-card" style="display:none">
+    <div class="step-tag">Step 4 of 7</div>
+    <div class="step-title">Pickup Locations</div>
+    <div class="step-sub">Add at least one pickup location. Drag the pin or use current location to set it precisely — mark one as Primary.</div>
+
+    <div id="pickup-list"></div>
+    <div class="add-pickup-btn" onclick="addPickupLocation()">+ Add Pickup Location</div>
+
+    <div id="step4-msg" class="field-error" style="margin:16px 0 12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(3)">← Back</button>
+      <button class="btn-primary" id="step4-btn" onclick="handleStep4()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 5: DOCUMENTS -->
+  <div id="step-5" class="step-card" style="display:none">
+    <div class="step-tag">Step 5 of 7</div>
+    <div class="step-title">Documents</div>
+    <div class="step-sub">Upload clear photos/scans. Max 5MB per file. JPG, PNG, PDF accepted.</div>
+
+    <div class="doc-grid" id="doc-grid"></div>
+
+    <div id="step5-msg" class="field-error" style="margin:16px 0 12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(4)">← Back</button>
+      <button class="btn-primary" id="step5-btn" onclick="handleStep5()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 6: BANK DETAILS -->
+  <div id="step-6" class="step-card" style="display:none">
+    <div class="step-tag">Step 6 of 7</div>
+    <div class="step-title">Bank Details</div>
+    <div class="step-sub">Your settlement payouts will be credited to this account.</div>
+
+    <div class="field"><label>Account Holder Name <span class="req">*</span></label><input type="text" id="f-bank-holder" placeholder="As per bank records"></div>
+    <div class="field"><label>Bank Name <span class="req">*</span></label><input type="text" id="f-bank-name" placeholder="e.g. HDFC Bank"></div>
+    <div class="field-row">
+      <div class="field"><label>Account Number <span class="req">*</span></label><input type="text" id="f-acc-num" placeholder="Account number"></div>
+      <div class="field"><label>IFSC Code <span class="req">*</span></label><input type="text" id="f-ifsc" placeholder="HDFC0001234" style="text-transform:uppercase"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Branch</label><input type="text" id="f-bank-branch" placeholder="Branch name"></div>
+      <div class="field"><label>UPI ID <span class="opt">(optional)</span></label><input type="text" id="f-upi" placeholder="name@bank"></div>
+    </div>
+
+    <div id="step6-msg" class="field-error" style="margin-bottom:12px"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(5)">← Back</button>
+      <button class="btn-primary" onclick="handleStep6()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 7: REVIEW & SUBMIT -->
+  <div id="step-7" class="step-card" style="display:none">
+    <div class="step-tag">Step 7 of 7 — Final</div>
+    <div class="step-title">Review &amp; Submit</div>
+    <div class="step-sub">Please read and accept our policies to complete your application.</div>
+
+    <div class="agree-item" id="agree-item" onclick="toggleAgree()">
+      <div class="agree-checkbox" id="agree-checkbox"></div>
+      <div class="agree-text">
+        <div class="at">I agree to Remont India's Terms &amp; Conditions, Privacy Policy, Marketplace Policy, Commission Policy, Return Policy, Cancellation Policy and Data Usage Policy.</div>
+        <div class="as">Your application will be reviewed by our team within 24-48 hours. You'll be notified via WhatsApp once a decision is made.</div>
+      </div>
+    </div>
+
+    <div id="step7-msg" class="field-error" style="margin:12px 0"></div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="goStep(6)">← Back</button>
+      <button class="btn-primary" id="submit-btn" onclick="submitApplication()">Submit Application</button>
+    </div>
+  </div>
+
+  <!-- SUCCESS SCREEN -->
+  <div id="success-screen" class="step-card success-screen">
+    <div class="success-icon">✅</div>
+    <h2>Application Submitted!</h2>
+    <p>Our team will review your documents and contact you within 24-48 hours via WhatsApp. Keep your application ID for reference.</p>
+    <div class="reg-id-box">
+      <div class="rid-label">Application ID</div>
+      <div class="rid-val" id="success-reg-id"></div>
+    </div>
+    <div><a href="/" class="btn-outline" style="display:inline-block;padding:12px 24px">← Back to Home</a></div>
+  </div>
+
+</div>
+
+<script>
+var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+var currentStep = 1;
+var registrationId = localStorage.getItem('sr_reg_id') || null;
+var regStatus = null;
+var otpVerified = false;
+var files = {};
+var agreedTerms = false;
+var pickups = []; // { id, name, contactPerson, mobile, alternateMobile, address, landmark, city, state, pincode, latitude, longitude, isPrimary, _map, _marker }
+
+var STEP_LABELS = ['Business','Contact','Address','Pickup','Documents','Bank','Submit'];
+
+// ── PROGRESS BAR ──
+function buildProgress(active) {
+  var html = '';
+  for (var s = 1; s <= 7; s++) {
+    var isDone = s < active, isActive = s === active;
+    html += '<div class="ps-col">';
+    html += '<div class="ps-circle ' + (isDone?'done':(isActive?'active':'')) + '">' + (isDone?'✓':s) + '</div>';
+    html += '<div class="ps-label ' + (isDone?'done':(isActive?'active':'')) + '">' + STEP_LABELS[s-1] + '</div>';
+    html += '</div>';
+    if (s < 7) html += '<div class="ps-line' + (s < active ? ' done' : '') + '"></div>';
+  }
+  document.getElementById('progress-steps').innerHTML = html;
+}
+
+function goStep(n) {
+  document.querySelectorAll('[id^="step-"]').forEach(function(el) { el.style.display = 'none'; });
+  document.getElementById('step-' + n).style.display = '';
+  document.getElementById('success-screen').classList.remove('show');
+  currentStep = n;
+  buildProgress(n);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  autoSave(n);
+  if (n === 4) setTimeout(renderPickupMaps, 50);
+}
+
+function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function showMsg(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg || ''; el.style.display = msg ? '' : 'none'; } }
+
+// ── AUTOSAVE ──
+function autoSave(step) {
+  if (!registrationId) return;
+  fetch(API_BASE + '/api/v1/seller-registration/save-step', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: step, data: collectStepData(step)})
+  }).catch(function(){});
+}
+
+function collectStepData(step) {
+  var d = {};
+  if (step >= 1) {
+    d.businessName = val('f-business-name'); d.ownerName = val('f-owner-name');
+    d.businessType = val('f-business-type'); d.gstNumber = val('f-gst');
+    d.panNumber = val('f-pan'); d.aadhaarNumber = val('f-aadhaar');
+    d.cin = val('f-cin'); d.msmeNumber = val('f-msme');
+  }
+  if (step >= 2) {
+    d.alternatePhone = val('f-alt-phone') ? '+91' + val('f-alt-phone') : undefined;
+    d.whatsappNumber = val('f-whatsapp') ? '+91' + val('f-whatsapp') : undefined;
+    d.email = val('f-email');
+  }
+  if (step >= 3) {
+    d.registeredAddress = val('f-reg-address'); d.officeAddress = val('f-office-address');
+    d.warehouseAddress = val('f-warehouse-address'); d.city = val('f-city');
+    d.state = val('f-state'); d.pincode = val('f-pincode');
+  }
+  if (step >= 6) {
+    d.bankAccountHolder = val('f-bank-holder'); d.bankName = val('f-bank-name');
+    d.bankAccountNumber = val('f-acc-num'); d.bankIfsc = val('f-ifsc');
+    d.bankBranch = val('f-bank-branch'); d.upiId = val('f-upi');
+  }
+  return d;
+}
+
+// ── STEP 1 ──
+function handleStep1() {
+  if (!val('f-business-name')) { showMsg('step1-msg', 'Business name is required'); return; }
+  if (!val('f-owner-name')) { showMsg('step1-msg', 'Owner name is required'); return; }
+  showMsg('step1-msg', '');
+  goStep(2);
+}
+
+// ── STEP 2: OTP ──
+var otpTimer = null, otpResendCooldown = 0;
+function sendOtp(isResend) {
+  var phone = val('f-phone');
+  if (phone.length !== 10) { showMsg('step2-msg', 'Enter a valid 10-digit mobile number'); return; }
+  var btn = document.getElementById('otp-send-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  showMsg('step2-msg', '');
+  document.getElementById('otp-section').style.display = '';
+  document.getElementById('otp-0').focus();
+  startOtpTimer(60);
+  btn.disabled = false; btn.textContent = 'Resend';
+
+  fetch(API_BASE + '/api/v1/auth/send-otp', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({phone: '+91' + phone, role: 'PRODUCT_VENDOR'})
+  }).then(function(){
+    return fetch(API_BASE + '/api/v1/seller-registration/init', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone: '+91' + phone})
+    });
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    var d = res.data || res;
+    if (d && d.registrationId) { registrationId = d.registrationId; localStorage.setItem('sr_reg_id', registrationId); }
+    regStatus = d;
+  }).catch(function(){});
+}
+
+function startOtpTimer(sec) {
+  if (otpTimer) clearInterval(otpTimer);
+  otpResendCooldown = sec;
+  document.getElementById('resend-btn').style.display = 'none';
+  var timerEl = document.getElementById('otp-timer');
+  function tick() {
+    timerEl.textContent = ' (' + otpResendCooldown + 's)';
+    if (--otpResendCooldown <= 0) { clearInterval(otpTimer); document.getElementById('resend-btn').style.display = ''; timerEl.textContent = ''; }
+  }
+  tick(); otpTimer = setInterval(tick, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  for (var i = 0; i < 4; i++) {
+    (function(idx) {
+      var el = document.getElementById('otp-' + idx);
+      el.addEventListener('input', function() {
+        this.value = this.value.replace(/\D/g,'').slice(-1);
+        if (this.value && idx < 3) document.getElementById('otp-' + (idx+1)).focus();
+        el.classList.toggle('filled', !!this.value);
+        if ([0,1,2,3].every(function(j){ return document.getElementById('otp-'+j).value; })) verifyOtp();
+      });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && !this.value && idx > 0) document.getElementById('otp-' + (idx-1)).focus();
+      });
+    })(i);
+  }
+  buildDocGrid();
+  buildProgress(1);
+});
+
+function verifyOtp() {
+  var otp = [0,1,2,3].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
+  if (otp.length < 4) return;
+  showMsg('otp-verify-msg', 'Verifying…');
+  var phone = '+91' + val('f-phone');
+  fetch(API_BASE + '/api/v1/auth/verify-otp', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({phone: phone, otp: otp, name: val('f-owner-name') || 'Seller', role: 'PRODUCT_VENDOR'})
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    var d = res.data || res;
+    if (d.accessToken || (d.user && d.user.id)) { markOtpVerified(); }
+    else { showMsg('otp-verify-msg', d.message || 'Invalid OTP'); }
+  }).catch(function(){ showMsg('otp-verify-msg', 'Verification error. Try again.'); });
+}
+
+function markOtpVerified() {
+  otpVerified = true;
+  showMsg('otp-verify-msg', '');
+  document.getElementById('otp-section').style.display = 'none';
+
+  if (regStatus && (regStatus.alreadyApproved || regStatus.alreadySubmitted)) {
+    document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
+    var s = document.getElementById('success-screen');
+    s.classList.add('show');
+    if (regStatus.alreadyApproved) {
+      s.querySelector('h2').textContent = "You're already an approved seller!";
+      s.querySelector('p').textContent = 'Please log in at the Seller Portal — you will be taken straight to your dashboard.';
+    } else {
+      s.querySelector('h2').textContent = 'Application already submitted';
+      s.querySelector('p').textContent = 'Your application is already under review. Our team will contact you within 24-48 hours.';
+    }
+    document.getElementById('success-reg-id').textContent = registrationId || '';
+    window.scrollTo({top:0, behavior:'smooth'});
+    return;
+  }
+
+  document.getElementById('otp-verified-badge').style.display = 'flex';
+  document.getElementById('step2-extra').style.display = '';
+}
+
+function handleStep2() {
+  if (!otpVerified) { showMsg('step2-msg', 'Please verify your mobile number first.'); return; }
+  showMsg('step2-msg', '');
+  goStep(3);
+}
+
+// ── STEP 3 ──
+function handleStep3() {
+  if (!val('f-reg-address')) { showMsg('step3-msg', 'Registered address is required'); return; }
+  if (!val('f-city') || !val('f-state') || !val('f-pincode')) { showMsg('step3-msg', 'City, state and PIN code are required'); return; }
+  showMsg('step3-msg', '');
+  goStep(4);
+}
+
+// ── STEP 4: PICKUP LOCATIONS ──
+function addPickupLocation() {
+  var p = {
+    id: 'pk' + Date.now() + Math.random().toString(36).slice(2,6),
+    name: '', contactPerson: '', mobile: '', alternateMobile: '',
+    address: '', landmark: '', city: val('f-city') || '', state: val('f-state') || '', pincode: val('f-pincode') || '',
+    latitude: 23.2599, longitude: 77.4126, // sensible India default until GPS/drag sets a real one
+    isPrimary: pickups.length === 0,
+  };
+  pickups.push(p);
+  renderPickupList();
+  setTimeout(renderPickupMaps, 50);
+}
+
+function removePickup(id) {
+  pickups = pickups.filter(function(p){ return p.id !== id; });
+  if (pickups.length && !pickups.some(function(p){ return p.isPrimary; })) pickups[0].isPrimary = true;
+  renderPickupList();
+  setTimeout(renderPickupMaps, 50);
+}
+
+function setPrimaryPickup(id) {
+  pickups.forEach(function(p){ p.isPrimary = (p.id === id); });
+  renderPickupList();
+  setTimeout(renderPickupMaps, 50);
+}
+
+function updatePickupField(id, field, value) {
+  var p = pickups.filter(function(x){ return x.id === id; })[0];
+  if (p) p[field] = value;
+}
+
+function renderPickupList() {
+  var el = document.getElementById('pickup-list');
+  if (!pickups.length) { el.innerHTML = '<div class="field-hint" style="margin-bottom:14px">No pickup locations added yet.</div>'; return; }
+  el.innerHTML = pickups.map(function(p, i) {
+    return '<div class="pickup-card' + (p.isPrimary ? ' primary' : '') + '">' +
+      '<div class="pickup-head"><span class="pickup-title">Pickup Location ' + (i+1) + (p.isPrimary ? '<span class="primary-badge">PRIMARY</span>' : '') + '</span>' +
+      '<div class="pickup-actions">' +
+        (!p.isPrimary ? '<button class="set-primary" onclick="setPrimaryPickup(\'' + p.id + '\')">Set Primary</button>' : '') +
+        (pickups.length > 1 ? '<button class="remove-pickup" onclick="removePickup(\'' + p.id + '\')">Remove</button>' : '') +
+      '</div></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Pickup Name</label><input value="' + esc(p.name) + '" placeholder="e.g. Main Warehouse" oninput="updatePickupField(\'' + p.id + '\',\'name\',this.value)"></div>' +
+        '<div class="field"><label>Contact Person</label><input value="' + esc(p.contactPerson) + '" oninput="updatePickupField(\'' + p.id + '\',\'contactPerson\',this.value)"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Mobile Number</label><input value="' + esc(p.mobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'mobile\',this.value)"></div>' +
+        '<div class="field"><label>Alternate Mobile</label><input value="' + esc(p.alternateMobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'alternateMobile\',this.value)"></div>' +
+      '</div>' +
+      '<div class="field"><label>Complete Address</label><textarea rows="2" oninput="updatePickupField(\'' + p.id + '\',\'address\',this.value)">' + esc(p.address) + '</textarea></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Landmark</label><input value="' + esc(p.landmark) + '" oninput="updatePickupField(\'' + p.id + '\',\'landmark\',this.value)"></div>' +
+        '<div class="field"><label>City</label><input value="' + esc(p.city) + '" oninput="updatePickupField(\'' + p.id + '\',\'city\',this.value)"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>State</label><input value="' + esc(p.state) + '" oninput="updatePickupField(\'' + p.id + '\',\'state\',this.value)"></div>' +
+        '<div class="field"><label>Pincode</label><input value="' + esc(p.pincode) + '" maxlength="6" oninput="updatePickupField(\'' + p.id + '\',\'pincode\',this.value)"></div>' +
+      '</div>' +
+      '<label style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">GPS Location <span class="req" style="color:var(--sienna)">*</span></label>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+        '<button type="button" class="gps-btn" onclick="useCurrentLocation(\'' + p.id + '\')">📡 Use Current Location</button>' +
+        '<span class="field-hint" style="align-self:center">or drag the pin below</span>' +
+      '</div>' +
+      '<div id="map-' + p.id + '" class="leaflet-map"></div>' +
+    '</div>';
+  }).join('');
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// Free, keyless interactive map (Leaflet + OpenStreetMap tiles) — satisfies "drag pin / search
+// / current location" without a paid Google Maps API key, per the confirmed no-external-API
+// constraint for this build.
+function renderPickupMaps() {
+  pickups.forEach(function(p) {
+    var mapEl = document.getElementById('map-' + p.id);
+    if (!mapEl || mapEl._leaflet_id) return; // already initialized
+    var map = L.map('map-' + p.id).setView([p.latitude, p.longitude], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    var marker = L.marker([p.latitude, p.longitude], { draggable: true }).addTo(map);
+    marker.on('dragend', function() {
+      var pos = marker.getLatLng();
+      p.latitude = pos.lat; p.longitude = pos.lng;
+      reverseGeocodePickup(p, pos.lat, pos.lng);
+    });
+    map.on('click', function(e) {
+      marker.setLatLng(e.latlng);
+      p.latitude = e.latlng.lat; p.longitude = e.latlng.lng;
+      reverseGeocodePickup(p, e.latlng.lat, e.latlng.lng);
+    });
+    p._map = map; p._marker = marker;
+  });
+}
+
+function useCurrentLocation(id) {
+  if (!navigator.geolocation) { alert('GPS not supported on this device/browser'); return; }
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    var p = pickups.filter(function(x){ return x.id === id; })[0];
+    if (!p) return;
+    p.latitude = pos.coords.latitude; p.longitude = pos.coords.longitude;
+    if (p._map && p._marker) {
+      p._map.setView([p.latitude, p.longitude], 16);
+      p._marker.setLatLng([p.latitude, p.longitude]);
+    }
+    reverseGeocodePickup(p, p.latitude, p.longitude);
+  }, function() { alert('Location permission denied. Please drag the pin on the map instead.'); }, { enableHighAccuracy: true, timeout: 12000 });
+}
+
+function reverseGeocodePickup(p, lat, lng) {
+  fetch(API_BASE + '/api/v1/location/reverse-geocode?lat=' + lat + '&lng=' + lng)
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      var geo = res.data || res;
+      p.formattedAddress = geo && geo.fullAddress ? geo.fullAddress : undefined;
+      if (geo && geo.city && !p.city) p.city = geo.city;
+    }).catch(function(){});
+}
+
+function handleStep4() {
+  if (!pickups.length) { showMsg('step4-msg', 'Add at least one pickup location'); return; }
+  for (var i = 0; i < pickups.length; i++) {
+    var p = pickups[i];
+    if (!p.name || !p.address || !p.city || !p.state || !p.pincode) {
+      showMsg('step4-msg', 'Fill in all required fields for Pickup Location ' + (i+1));
+      return;
+    }
+  }
+  showMsg('step4-msg', '');
+  var btn = document.getElementById('step4-btn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  fetch(API_BASE + '/api/v1/seller-registration/pickup-locations', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ registrationId: registrationId, locations: pickups.map(function(p){
+      return { name: p.name, contactPerson: p.contactPerson, mobile: p.mobile ? '+91'+p.mobile : undefined,
+        alternateMobile: p.alternateMobile ? '+91'+p.alternateMobile : undefined, address: p.address, landmark: p.landmark,
+        city: p.city, state: p.state, pincode: p.pincode, latitude: p.latitude, longitude: p.longitude,
+        formattedAddress: p.formattedAddress, isPrimary: p.isPrimary };
+    }) })
+  }).then(function(r){ return r.json(); }).then(function() {
+    goStep(5);
+  }).catch(function() { showMsg('step4-msg', 'Could not save pickup locations. Please try again.'); })
+    .then(function(){ btn.disabled = false; btn.textContent = 'Continue →'; });
+}
+
+// ── STEP 5: DOCUMENTS ──
+var DOC_FIELDS = [
+  {key:'gstCertificateUrl', label:'GST Certificate'},
+  {key:'panCardUrl', label:'PAN Card'},
+  {key:'cancelledChequeUrl', label:'Cancelled Cheque'},
+  {key:'bankPassbookUrl', label:'Bank Passbook'},
+  {key:'businessProofUrl', label:'Business Proof'},
+  {key:'addressProofUrl', label:'Address Proof'},
+  {key:'ownerPhotoUrl', label:'Owner Photo'},
+  {key:'ownerAadhaarUrl', label:'Owner Aadhaar', opt:true},
+];
+function buildDocGrid() {
+  var html = DOC_FIELDS.map(function(d) {
+    return '<div>' +
+      '<div class="doc-label">' + d.label + (d.opt ? ' <span class="opt">(optional)</span>' : '') + '</div>' +
+      '<div class="upload-area" onclick="document.getElementById(\'file-' + d.key + '\').click()">' +
+        '<input type="file" id="file-' + d.key + '" accept="image/*,.pdf" onchange="handleFile(this,\'' + d.key + '\')">' +
+        '<div class="ua-icon">📎</div><div class="ua-text">Tap to upload</div>' +
+      '</div>' +
+      '<div class="upload-preview" id="preview-' + d.key + '"><img class="up-thumb" id="thumb-' + d.key + '"><div class="up-info"><div class="up-name" id="name-' + d.key + '"></div></div><span class="up-remove" onclick="removeFile(\'' + d.key + '\')">✕</span></div>' +
+    '</div>';
+  }).join('');
+  html += '<div><div class="doc-label">Warehouse Images <span class="opt">(optional, multiple)</span></div><div class="upload-area" onclick="document.getElementById(\'file-warehouseImages\').click()"><input type="file" id="file-warehouseImages" accept="image/*" multiple onchange="handleMultiFile(this,\'warehouseImages\')"><div class="ua-icon">🏭</div><div class="ua-text">Tap to upload</div></div><div id="count-warehouseImages" class="field-hint"></div></div>';
+  html += '<div><div class="doc-label">Store Images <span class="opt">(optional, multiple)</span></div><div class="upload-area" onclick="document.getElementById(\'file-storeImages\').click()"><input type="file" id="file-storeImages" accept="image/*" multiple onchange="handleMultiFile(this,\'storeImages\')"><div class="ua-icon">🏪</div><div class="ua-text">Tap to upload</div></div><div id="count-storeImages" class="field-hint"></div></div>';
+  document.getElementById('doc-grid').innerHTML = html;
+}
+
+function handleFile(input, key) {
+  var f = input.files[0]; if (!f) return;
+  if (f.size > 5*1024*1024) { alert('File too large — max 5MB'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    files[key] = e.target.result;
+    var isImg = f.type.startsWith('image/');
+    document.getElementById('preview-' + key).classList.add('show');
+    var thumb = document.getElementById('thumb-' + key);
+    if (isImg) { thumb.src = e.target.result; thumb.classList.remove('pdf-icon'); thumb.style.display=''; thumb.textContent=''; }
+    else { thumb.removeAttribute('src'); thumb.classList.add('pdf-icon'); thumb.textContent = '📄'; }
+    document.getElementById('name-' + key).textContent = f.name;
+  };
+  reader.readAsDataURL(f);
+}
+function removeFile(key) { delete files[key]; document.getElementById('preview-' + key).classList.remove('show'); document.getElementById('file-' + key).value=''; }
+
+function handleMultiFile(input, key) {
+  files[key] = files[key] || [];
+  var fs = Array.from(input.files);
+  var loaded = 0;
+  fs.forEach(function(f) {
+    if (f.size > 5*1024*1024) { loaded++; return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      files[key].push(e.target.result);
+      loaded++;
+      if (loaded === fs.length) document.getElementById('count-' + key).textContent = files[key].length + ' image(s) uploaded';
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+function handleStep5() {
+  if (!files['gstCertificateUrl']) { showMsg('step5-msg', 'GST Certificate is required'); return; }
+  if (!files['panCardUrl']) { showMsg('step5-msg', 'PAN Card is required'); return; }
+  if (!files['ownerPhotoUrl']) { showMsg('step5-msg', 'Owner photo is required'); return; }
+  showMsg('step5-msg', '');
+  var btn = document.getElementById('step5-btn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  var data = {};
+  DOC_FIELDS.forEach(function(d) { if (files[d.key]) data[d.key] = files[d.key]; });
+  if (files.warehouseImages) data.warehouseImages = files.warehouseImages;
+  if (files.storeImages) data.storeImages = files.storeImages;
+  fetch(API_BASE + '/api/v1/seller-registration/save-step', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: 5, data: data})
+  }).then(function(){ goStep(6); })
+    .catch(function(){ showMsg('step5-msg', 'Could not save documents. Please try again.'); })
+    .then(function(){ btn.disabled = false; btn.textContent = 'Continue →'; });
+}
+
+// ── STEP 6 ──
+function handleStep6() {
+  if (!val('f-bank-holder') || !val('f-bank-name') || !val('f-acc-num') || !val('f-ifsc')) {
+    showMsg('step6-msg', 'Account holder, bank name, account number and IFSC are required'); return;
+  }
+  showMsg('step6-msg', '');
+  goStep(7);
+}
+
+// ── STEP 7: SUBMIT ──
+function toggleAgree() {
+  agreedTerms = !agreedTerms;
+  document.getElementById('agree-item').classList.toggle('checked', agreedTerms);
+  document.getElementById('agree-checkbox').textContent = agreedTerms ? '✓' : '';
+}
+
+function submitApplication() {
+  if (!agreedTerms) { showMsg('step7-msg', 'Please accept the policies to continue'); return; }
+  var btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  fetch(API_BASE + '/api/v1/seller-registration/save-step', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({registrationId: registrationId, step: 7, data: { agreedTerms: true }})
+  }).then(function() {
+    return fetch(API_BASE + '/api/v1/seller-registration/submit', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({registrationId: registrationId})
+    });
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    var d = res.data || res;
+    if (d && d.status === 'PENDING') {
+      document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
+      document.getElementById('progress-wrap').style.display = 'none';
+      document.getElementById('success-reg-id').textContent = d.registrationId || registrationId;
+      document.getElementById('success-screen').classList.add('show');
+      window.scrollTo({top:0, behavior:'smooth'});
+    } else {
+      showMsg('step7-msg', (d && d.message) || 'Submission failed. Please try again.');
+      btn.disabled = false; btn.textContent = 'Submit Application';
+    }
+  }).catch(function() {
+    showMsg('step7-msg', 'Submission failed. Please check your connection and try again.');
+    btn.disabled = false; btn.textContent = 'Submit Application';
+  });
+}
+</script>
+</body>
+</html>
