@@ -12,7 +12,7 @@
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>Cities</h1><p>Manage serviceable cities</p></div>
+    <div class="topbar-left"><h1>Cities</h1><p>City activation is entirely database-driven — no code change or redeploy needed to launch or pause a city</p></div>
     <div class="topbar-right">
       <button class="btn btn-primary btn-sm" onclick="openAddCity()">+ Add City</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
@@ -20,8 +20,25 @@
     </div>
   </div>
   <div class="content">
+
+    <!-- STATS STRIP -->
+    <div id="stats-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      <div class="card" style="padding:14px 18px"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase">Total Cities</div><div id="st-total" style="font-size:26px;font-weight:800">—</div></div>
+      <div class="card" style="padding:14px 18px"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase">Active</div><div id="st-active" style="font-size:26px;font-weight:800;color:#22c55e">—</div></div>
+      <div class="card" style="padding:14px 18px"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase">Inactive</div><div id="st-inactive" style="font-size:26px;font-weight:800;color:#ef4444">—</div></div>
+      <div class="card" style="padding:14px 18px"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase">Launch Mode</div><div id="st-mode" style="font-size:20px;font-weight:800">—</div></div>
+    </div>
+
     <div class="card">
-      <div class="card-header"><span class="card-title">All Cities</span></div>
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">All Cities</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="toggleSelected(true)">Activate Selected</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleSelected(false)">Deactivate Selected</button>
+          <button class="btn btn-success btn-sm" onclick="toggleAll(true)">Enable All Cities</button>
+          <button class="btn btn-warning btn-sm" onclick="toggleAll(false)">Disable All Cities</button>
+        </div>
+      </div>
       <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
     </div>
   </div>
@@ -77,19 +94,31 @@ renderSidebar('cities');
 if (!requireAuth()) {}
 
 function load() {
-  api('GET', '/admin/cities').then(function(cities) {
+  Promise.all([api('GET', '/admin/cities'), api('GET', '/admin/cities/stats')]).then(function(results) {
+    var cities = results[0], stats = results[1];
+    document.getElementById('st-total').textContent = stats.totalCities;
+    document.getElementById('st-active').textContent = stats.activeCities;
+    document.getElementById('st-inactive').textContent = stats.inactiveCities;
+    document.getElementById('st-mode').textContent = stats.launchMode === 'SINGLE_CITY' ? '🏙 Single-City' : '🌍 Multi-City';
+
     if (!cities || !cities.length) {
       document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🏙</div><h3>No cities configured</h3><p>Click "+ Add City" to add your first city.</p></div>';
       return;
     }
+    var statsByName = {};
+    (stats.cities || []).forEach(function(s) { statsByName[s.name] = s; });
+
     var rows = cities.map(function(c) {
+      var s = statsByName[c.name] || { sellerCount: 0, technicianCount: 0, productCount: 0, serviceAvailability: 0 };
       return '<tr>' +
+        '<td><input type="checkbox" class="city-chk" value="' + escape(c.name) + '"></td>' +
         '<td><strong>' + escape(c.name) + '</strong></td>' +
         '<td>' + escape(c.state) + '</td>' +
-        '<td>' + (c.pincodes||[]).length + ' pincodes</td>' +
-        '<td>' + (c.activeServiceKeys||[]).map(function(k){ return '<span class="badge badge-blue" style="margin:1px;font-size:10px">' + escape(k) + '</span>'; }).join('') + '</td>' +
+        '<td style="text-align:center">' + s.sellerCount + '</td>' +
+        '<td style="text-align:center">' + s.technicianCount + '</td>' +
+        '<td style="text-align:center">' + s.productCount + '</td>' +
+        '<td style="text-align:center">' + s.serviceAvailability + '</td>' +
         '<td>' + c.priceMultiplier + 'x</td>' +
-        '<td>' + c.activeVendors + '</td>' +
         '<td><span class="badge ' + (c.isActive?'badge-green':'badge-gray') + '">' + (c.isActive?'Active':'Inactive') + '</span></td>' +
         '<td>' +
           '<button class="btn btn-xs ' + (c.isActive?'btn-warning':'btn-success') + '" onclick="toggle(\'' + c.name + '\',' + !c.isActive + ',this)">' + (c.isActive?'Disable':'Enable') + '</button>' +
@@ -97,10 +126,14 @@ function load() {
       '</tr>';
     }).join('');
     document.getElementById('tbl').innerHTML =
-      '<table><thead><tr><th>City</th><th>State</th><th>Pincodes</th><th>Active Services</th><th>Price Multiplier</th><th>Vendors</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      '<table><thead><tr><th><input type="checkbox" onclick="toggleCheckAll(this)"></th><th>City</th><th>State</th><th>Sellers</th><th>Technicians</th><th>Products</th><th>Services</th><th>Price Mult.</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e){
     document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
   });
+}
+
+function toggleCheckAll(master) {
+  document.querySelectorAll('.city-chk').forEach(function(chk) { chk.checked = master.checked; });
 }
 
 function toggle(name, active, btn) {
@@ -108,6 +141,28 @@ function toggle(name, active, btn) {
   api('PATCH', '/admin/cities/' + encodeURIComponent(name) + '/toggle', { isActive: active }).then(function(){
     toast(active ? name + ' enabled' : name + ' disabled', active ? 'success' : 'warning'); load();
   }).catch(function(e){ toast(e.message,'error'); btn.disabled=false; });
+}
+
+function selectedCityNames() {
+  return Array.from(document.querySelectorAll('.city-chk:checked')).map(function(chk) { return chk.value; });
+}
+
+function toggleSelected(active) {
+  var names = selectedCityNames();
+  if (!names.length) { toast('Select at least one city first', 'error'); return; }
+  if (!confirm((active ? 'Activate' : 'Deactivate') + ' ' + names.length + ' selected cit' + (names.length === 1 ? 'y' : 'ies') + '?')) return;
+  api('PATCH', '/admin/cities/bulk', { cityNames: names, isActive: active }).then(function() {
+    toast(names.length + ' cit' + (names.length === 1 ? 'y' : 'ies') + ' ' + (active ? 'activated' : 'deactivated'), active ? 'success' : 'warning');
+    load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleAll(active) {
+  if (!confirm((active ? 'Enable' : 'Disable') + ' ALL cities? This affects every city in the system.')) return;
+  api('PATCH', '/admin/cities/all', { isActive: active }).then(function() {
+    toast('All cities ' + (active ? 'enabled' : 'disabled'), active ? 'success' : 'warning');
+    load();
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 function openAddCity() {

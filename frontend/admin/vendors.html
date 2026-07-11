@@ -113,6 +113,10 @@
       <input id="cs-business" class="form-control" placeholder="e.g. Kumar Electronics">
     </div>
     <div class="form-group">
+      <label class="form-label">City</label>
+      <select id="cs-city" class="form-control"><option value="">Select city…</option></select>
+    </div>
+    <div class="form-group">
       <label class="form-label">GST Number (optional)</label>
       <input id="cs-gst" class="form-control" placeholder="22AAAAA0000A1Z5">
     </div>
@@ -271,6 +275,7 @@ function loadSellers() {
       return '<tr>' +
         '<td><strong>' + escape(u.name || '—') + '</strong><br><small style="color:#6b7280">' + escape(u.phone || '') + '</small></td>' +
         '<td>' + escape(s.businessName || '—') + '</td>' +
+        '<td>' + escape(s.city || '—') + '</td>' +
         '<td>' + escape(s.gstNumber || '—') + '</td>' +
         '<td style="text-align:center">' + productCount + '</td>' +
         '<td style="text-align:center">' + escape(String(s.rating || '—')) + ' ★</td>' +
@@ -282,15 +287,26 @@ function loadSellers() {
         '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('sellers-tbl').innerHTML = '<table><thead><tr><th>Seller</th><th>Business</th><th>GST</th><th>Products</th><th>Rating</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.getElementById('sellers-tbl').innerHTML = '<table><thead><tr><th>Seller</th><th>Business</th><th>City</th><th>GST</th><th>Products</th><th>Rating</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e) { document.getElementById('sellers-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
+var sellerCitiesLoaded = false;
 function openCreateSeller() {
   document.getElementById('cs-phone').value = '';
   document.getElementById('cs-name').value = '';
   document.getElementById('cs-business').value = '';
   document.getElementById('cs-gst').value = '';
+  document.getElementById('cs-city').value = '';
+  if (!sellerCitiesLoaded) {
+    api('GET', '/admin/cities').then(function(cities) {
+      sellerCitiesLoaded = true;
+      var sel = document.getElementById('cs-city');
+      sel.innerHTML = '<option value="">Select city…</option>' + (cities || []).map(function(c) {
+        return '<option value="' + escape(c.name) + '">' + escape(c.name) + (c.isActive ? '' : ' (inactive)') + '</option>';
+      }).join('');
+    }).catch(function() {});
+  }
   document.getElementById('create-seller-overlay').style.display = 'flex';
 }
 
@@ -298,12 +314,13 @@ function submitCreateSeller() {
   var phone = document.getElementById('cs-phone').value.trim();
   var name = document.getElementById('cs-name').value.trim();
   var business = document.getElementById('cs-business').value.trim();
+  var city = document.getElementById('cs-city').value;
   var gst = document.getElementById('cs-gst').value.trim();
   if (!phone || !name || !business) { toast('Phone, name and business name are required', 'error'); return; }
   if (phone.charAt(0) !== '+') phone = '+91' + phone.replace(/\D/g, '');
   var btn = document.getElementById('cs-submit-btn');
   btn.disabled = true; btn.textContent = 'Creating…';
-  api('POST', '/admin/product-vendors', { phone: phone, name: name, businessName: business, gstNumber: gst || undefined })
+  api('POST', '/admin/product-vendors', { phone: phone, name: name, businessName: business, city: city || undefined, gstNumber: gst || undefined })
     .then(function() {
       toast('Seller account created', 'success');
       closeModal('create-seller-overlay');

@@ -227,6 +227,7 @@ a{color:inherit;text-decoration:none}
           <div class="profile-phone" id="prof-phone">—</div>
         </div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">🏢</span><span>Business Name</span></div><div class="pr-right" id="prof-business">—</div></div>
+        <div class="profile-row"><div class="pr-left"><span class="pr-icon">📍</span><span>City</span></div><div class="pr-right" id="prof-city">—</div></div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">🧾</span><span>GST Number</span></div><div class="pr-right" id="prof-gst">—</div></div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">⭐</span><span>Rating</span></div><div class="pr-right" id="prof-rating">—</div></div>
         <div class="profile-row" onclick="doLogout()"><div class="pr-left"><span class="pr-icon">🚪</span><span>Logout</span></div><div class="pr-right"></div></div>
@@ -387,6 +388,7 @@ function enterDashboard(){
   document.getElementById('prof-name').textContent = (sellerProfile.user && sellerProfile.user.name) || 'Seller';
   document.getElementById('prof-phone').textContent = (sellerProfile.user && sellerProfile.user.phone) || '';
   document.getElementById('prof-business').textContent = sellerProfile.businessName || '—';
+  document.getElementById('prof-city').textContent = sellerProfile.city || '—';
   document.getElementById('prof-gst').textContent = sellerProfile.gstNumber || '—';
   document.getElementById('prof-rating').textContent = '⭐ ' + Number(sellerProfile.rating||0).toFixed(1);
   var pill = document.getElementById('status-pill');
