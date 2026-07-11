@@ -31,6 +31,7 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthModule } from './modules/health/health.module';
 import { LocationModule } from './modules/location/location.module';
 import { PartnerRegistrationModule } from './modules/partner-registration/partner-registration.module';
+import { SellerRegistrationModule } from './modules/seller-registration/seller-registration.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { PartnerRegistrationModule } from './modules/partner-registration/partne
     HealthModule,
     LocationModule,
     PartnerRegistrationModule,
+    SellerRegistrationModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

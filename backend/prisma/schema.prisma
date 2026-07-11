@@ -536,18 +536,178 @@ model ProductVendor {
   id             String       @id @default(cuid())
   userId         String       @unique
   businessName   String
+  ownerName      String?
+  businessType   String?
   gstNumber      String?
+  panNumber      String?
+  aadhaarNumber  String?
+  cin            String?
+  msmeNumber     String?
+  alternatePhone String?
+  whatsappNumber String?
+  email          String?
   city           String?
-  address        String?
-  pickupAddress  String?
+  address        String?      // registered address
+  officeAddress  String?
+  warehouseAddress String?
+  pickupAddress  String?      // legacy free-text field, predates the PickupLocation model below — kept for the handful of sellers created before it existed, not written to by new code
+  bankAccountHolder String?
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankBranch        String?
+  upiId             String?
+  rejectionReason   String?
   status         VendorStatus @default(PENDING_VERIFICATION)
   rating         Float        @default(0)
   createdAt      DateTime     @default(now())
 
-  user     User      @relation(fields: [userId], references: [id])
-  products Product[]
+  user            User              @relation(fields: [userId], references: [id])
+  products        Product[]
+  documents       SellerDocument[]
+  pickupLocations PickupLocation[]
 
   @@index([city])
+}
+
+model SellerDocument {
+  id         String   @id @default(cuid())
+  vendorId   String
+  type       String   // GST_CERTIFICATE | PAN_CARD | CANCELLED_CHEQUE | BANK_PASSBOOK | BUSINESS_PROOF | ADDRESS_PROOF | OWNER_PHOTO | OWNER_AADHAAR | WAREHOUSE_IMAGE | STORE_IMAGE | ADDITIONAL
+  url        String   @db.Text
+  verified   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
+
+  vendor ProductVendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+}
+
+// One seller can have multiple pickup/warehouse locations, each with its own GPS pin and
+// (via IssuedInventory-style per-location stock, built in the next module) its own stock.
+// Exactly one location per seller should have isPrimary:true — enforced at the application
+// layer (setPrimaryPickupLocation()), not a DB constraint, matching this codebase's existing
+// "loose" Prisma-level constraints elsewhere (no partial unique index support needed).
+model PickupLocation {
+  id               String  @id @default(cuid())
+  vendorId         String
+  name             String
+  contactPerson    String?
+  mobile           String?
+  alternateMobile  String?
+  address          String
+  landmark         String?
+  city             String
+  state            String
+  pincode          String
+  latitude         Float
+  longitude        Float
+  placeId          String?
+  formattedAddress String?
+  isPrimary        Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  vendor ProductVendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([city])
+}
+
+// ─── Seller Registration (public application, reviewed by admin before a real
+// ProductVendor is provisioned) — mirrors PartnerRegistration's proven shape/flow exactly. ───
+
+model SellerRegistration {
+  id             String   @id @default(cuid())
+  registrationId String   @unique // SR-YYYYMMDD-XXXX
+
+  // Contact
+  phone          String
+  alternatePhone String?
+  whatsappNumber String?
+  email          String?
+  userId         String?
+
+  // Business Details
+  businessName  String  @default("")
+  ownerName     String  @default("")
+  businessType  String?
+  gstNumber     String?
+  panNumber     String?
+  aadhaarNumber String?
+  cin           String?
+  msmeNumber    String?
+
+  // Business Address
+  registeredAddress String?
+  officeAddress     String?
+  warehouseAddress  String?
+  city              String?
+  state             String?
+  pincode           String?
+
+  // Documents (base64 data-URLs or CDN URLs, same pattern as PartnerRegistration)
+  gstCertificateUrl  String?  @db.Text
+  panCardUrl         String?  @db.Text
+  cancelledChequeUrl String?  @db.Text
+  bankPassbookUrl    String?  @db.Text
+  businessProofUrl   String?  @db.Text
+  addressProofUrl    String?  @db.Text
+  ownerPhotoUrl      String?  @db.Text
+  ownerAadhaarUrl    String?  @db.Text
+  warehouseImages    String[]
+  storeImages        String[]
+  additionalDocuments String[]
+
+  // Bank Details
+  bankAccountHolder String?
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankBranch        String?
+  upiId             String?
+
+  // Agreements — one combined acceptance covering Terms, Privacy, Marketplace, Commission,
+  // Return, Cancellation and Data Usage policies (named individually in the UI copy).
+  agreedTerms Boolean   @default(false)
+  agreedAt    DateTime?
+
+  // Meta
+  currentStep Int      @default(1)
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_INFO
+  adminNotes  String?
+
+  pickupLocations SellerRegistrationPickup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SellerRegistrationPickup {
+  id               String  @id @default(cuid())
+  registrationId   String
+  name             String
+  contactPerson    String?
+  mobile           String?
+  alternateMobile  String?
+  address          String
+  landmark         String?
+  city             String
+  state            String
+  pincode          String
+  latitude         Float
+  longitude        Float
+  placeId          String?
+  formattedAddress String?
+  isPrimary        Boolean @default(false)
+
+  registration SellerRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([registrationId])
 }
 
 model IssuedInventory {

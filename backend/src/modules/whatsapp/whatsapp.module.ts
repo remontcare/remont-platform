@@ -74,6 +74,13 @@ export class WhatsappService {
     return this.send(phone, body, WhatsappMessageType.PAYMENT_RECEIVED);
   }
 
+  /** Plain-text message with no template — used by flows (like seller-registration review
+   * outcomes) that don't have a dedicated multilingual template yet. No email/SMS provider
+   * is configured, so this is the only real notification channel for those flows today. */
+  async sendCustom(phone: string, body: string) {
+    return this.send(phone, body, WhatsappMessageType.CUSTOM);
+  }
+
   // ─── Internal helpers ───
   private async send(
     toPhone: string, body: string, type: WhatsappMessageType,
