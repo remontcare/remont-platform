@@ -18,6 +18,8 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 3. ✔ Seller Orders Management
 4. ✔ Dynamic City Activation Management (bulk actions, stats dashboard, order-creation enforcement fix)
 5. ✔ Dynamic Product Coverage System (Pan India / Selected Cities / Store Pickup / Zones-schema-ready)
+6. ✔ Proper seller onboarding form (address + pickup address, edit support) and attractive seller dashboard (sales banner, order-status tiles)
+7. ✔ **Critical fix**: `vendor.html` and `seller.html`'s own OTP login screens were broken (apiFetch never unwrapped the response envelope) — found via live browser testing, not assumed
 
 ## Completed This Phase
 
@@ -44,6 +46,11 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 - [x] Deliberately did NOT fire `PATCH /admin/cities/all` against production during testing — verified by code review only, since it has no scoping and would affect all 13 real cities. Documented so the admin knows to trigger it consciously.
 - [x] Built the Product Coverage System (Pan India/Selected Cities/Store Pickup/Zones-schema-only) on top of the city system — reused the existing `CityProduct` table (previously written by 2 admin endpoints with zero frontend using them) rather than building a parallel mechanism — commits `7006ad8`, `53d83a3`.
 - [x] E2E verified live: 6 scenarios (Pan India both-cities, Selected-Cities scoping, Store-Pickup scoping, priority ordering, edit-coverage replace-not-accumulate, myProducts() prefill data) all passed against throwaway test cities/seller/products, cleaned up after.
+- [x] `ProductVendor.address`/`pickupAddress` schema + admin edit endpoint (`PATCH /admin/product-vendors/:id`) — commit `c3cdb45`.
+- [x] Admin seller form restructured into a proper sectioned form (Contact/Business/Address) with Edit support — commit `e295bc8`.
+- [x] Seller dashboard redesigned: gradient sales banner (today/month/total) + 4 tappable order-status tiles, Orders view tabs — backend `dashboard()` extended, no new endpoint needed for bucketing — commit `dd2ea16`.
+- [x] **Critical bug found via live browser testing** (not API-only testing): `seller.html`'s own OTP login threw "Cannot read properties of undefined (reading 'role')". Root cause: `apiFetch()` in both `seller.html` and `vendor.html` never unwrapped the backend's `{success,data,...}` response envelope. Confirmed the identical failure live on `vendor.html`'s login screen too, before fixing — this was a pre-existing bug, not something introduced today. Fixed both files — commit `f17b581`.
+- [x] Re-verified both login screens live via real browser UI (not API calls) after the fix — both now work; seller lands directly on the dashboard.
 
 ## In Progress
 
@@ -56,6 +63,11 @@ still active in production. The city-management tooling to fix this now exists �
 someone needs to actually decide which city (or cities) to launch with and use the
 new admin/cities.html bulk actions to deactivate the rest.
 
+**Recommended follow-up (not started):** the apiFetch bug was only checked in
+`vendor.html`/`seller.html`. Worth a quick pass confirming `index.html`'s and
+`admin/common.js`'s own API helpers don't have any analogous edge case, given how
+long this one went unnoticed.
+
 ## Bugs Found
 
 (all found this session were fixed immediately — see below; none outstanding)
@@ -66,5 +78,6 @@ new admin/cities.html bulk actions to deactivate the rest.
 2. **Dispatch: vendor skill vocabulary mismatch** — `backend/src/common/index.ts` + `partner-registration.module.ts` + `vendors.module.ts` + one-off prod backfill, commit `2640701`, 2026-07-11.
 3. **Products: `vendorId` spoofable via PATCH** — `backend/src/modules/products/products.module.ts`, commit `5dc7c86`, 2026-07-11. Pre-existing gap, found while building the seller portal on top of it.
 4. **Admin: no phone validation on seller creation** — `backend/src/modules/admin/admin.module.ts`, commit `c2f33fa`, 2026-07-11. Found by the E2E verification test itself.
+5. **`vendor.html` + `seller.html`: OTP login broken, `apiFetch()` never unwrapped the response envelope** — `frontend/vendor.html`, `frontend/seller.html`, commit `f17b581`, 2026-07-11. Pre-existing in `vendor.html` (vendors have apparently only ever logged in via the redirect from `index.html`, never via this screen directly); found only because this session finally drove the real login UI in a browser instead of testing purely at the API level.
 
 (Earlier-session bugs — admin role lockout, services-display cap, mobile-audit 8-fixes — are documented in memory, not repeated here; this file starts fresh from the seller-marketplace phase.)

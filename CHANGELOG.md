@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-07-11 — Proper seller form, attractive seller dashboard, critical login fix
+
+**Summary:** Three asks in one: (1) a proper sectioned admin seller-creation form
+with business/pickup address, (2) an attractive individual seller dashboard with
+sales + order-status breakdown, (3) confirm direct-to-dashboard login. Building #3
+surfaced a severe pre-existing bug affecting both `vendor.html` and `seller.html`'s
+own OTP login screens, fixed as part of this same pass.
+
+**GST auto-fetch:** intentionally not built — no GST verification API/provider is
+configured (confirmed with user). Field stays manual entry, structured so a real
+provider can be wired in later without a schema change.
+
+**Files modified:**
+- `backend/prisma/schema.prisma` — `ProductVendor.address` / `pickupAddress` (additive nullable)
+- `backend/src/modules/admin/admin.module.ts` — `CreateProductVendorDto`/new `UpdateProductVendorDto` gain address fields; new `updateProductVendor()` + `PATCH /admin/product-vendors/:id` (previously only suspend/activate existed — no way to fix a typo after creation)
+- `backend/src/modules/vendors/vendors.module.ts` — `ProductVendorsService.dashboard()` gains `todayRevenue`/`monthRevenue`, mirroring the proven today/month/lifetime pattern already used by `ServiceVendorsService.earnings()`; bucketed by `createdAt` since product orders don't reliably set `completedAt`
+- `frontend/admin/vendors.html` — seller modal restructured into Contact/Business/Address sections with a "pickup same as business address" shortcut; Edit action added per seller row
+- `frontend/admin/style.css` — new `.form-section-label` utility class
+- `frontend/seller.html` — Home view redesigned with a gradient sales banner (Today/Month/Total) and 4 tappable status tiles (Pending/Ongoing/Completed/Returns); Orders view gets matching tabs; bucketing is pure client-side grouping of existing `OrderStatus` values, no new endpoint
+- **`frontend/seller.html` + `frontend/vendor.html`** — critical fix: `apiFetch()` never unwrapped the backend's `{success, statusCode, data, timestamp}` response envelope (from the global `TransformInterceptor`), so every call site reading fields directly off the response (`res.user`, `res.accessToken`, a returned profile's own fields) was broken. **This means `vendor.html`'s own OTP login screen has been broken this whole time** — vendors have apparently only ever reached the app via the redirect from `index.html`'s login (which unwraps defensively on its own side). `seller.html` inherited the same bug by starting from `vendor.html`'s pattern.
+
+**DB changes:** `ProductVendor.address`, `ProductVendor.pickupAddress` (additive nullable columns)
+
+**API changes:**
+```
+PATCH /admin/product-vendors/:id   [ADMIN]  edit businessName/gstNumber/city/address/pickupAddress
+```
+`GET /vendors/product/me/dashboard` response gains `todayRevenue`, `monthRevenue` (additive fields, existing consumers unaffected)
+
+**UI changes:** admin seller form restructured (additive fields + edit capability); `seller.html` Home/Orders views redesigned. No customer-facing UI touched.
+
+**Verified live:** full E2E via direct API calls (create-with-address, edit, dashboard field presence) — all passed. Then browser-driven verification of the actual login UI caught the apiFetch bug (screenshot: "Cannot read properties of undefined (reading 'role')"); confirmed the same failure live on `vendor.html`'s login screen before concluding it was pre-existing and not new-code-only; fixed; re-verified both `vendor.html` and `seller.html` login live via the real UI (not just the API) — seller now lands directly on `screen-app`/`view-home` after OTP verification, sales banner and status tiles render with live data, tapping a status tile correctly jumps to the matching Orders tab. All test accounts/data cleaned from production afterward.
+
+**Commits:** `c3cdb45` (backend address fields), `e295bc8` (admin form), `dd2ea16` (seller dashboard), `f17b581` (apiFetch fix)
+
+---
+
 ## 2026-07-11 — Dynamic Product Coverage System
 
 **Summary:** Every product (admin-owned, seller-owned, or "Remont Direct") now

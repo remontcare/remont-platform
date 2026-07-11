@@ -52,6 +52,20 @@ the launch city when ready.
 enforcement — it currently behaves identically to `SELECTED_CITIES`. Build real
 pincode/area-level filtering only when the business actually needs it.
 
+## Phase 1 — Proper seller form + attractive dashboard (added 2026-07-11, complete)
+
+| # | Task | Priority | Status |
+|---|---|---|---|
+| 1 | `ProductVendor.address`/`pickupAddress` schema + admin edit endpoint | High | ✅ |
+| 2 | Admin sectioned seller form (Contact/Business/Address) + Edit action | High | ✅ |
+| 3 | Seller dashboard: sales banner (today/month/total), 4 order-status tiles, Orders tabs | High | ✅ |
+| 4 | GST auto-fetch | Deferred | ⛔ No provider/API key available — manual entry only |
+| 5 | **Fix critical apiFetch bug in vendor.html + seller.html** | Critical | ✅ (found via live browser testing) |
+| 6 | Live E2E + browser verification of both login screens | High | ✅ |
+
+**Recommended, not started:** spot-check `index.html`'s and `admin/common.js`'s own
+API helpers for any similar edge case, given how long the apiFetch bug went unnoticed.
+
 ## Possible follow-on items (not started, not committed to — raise with user before building)
 
 - Seller can't currently see order-detail (customer address/phone) beyond what `myOrders()` returns — may want a detail view if sellers ask for it.

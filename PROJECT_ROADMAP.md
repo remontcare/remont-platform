@@ -38,6 +38,8 @@ number of admin-onboarded local sellers).
 | Automatic order dispatch (service side) | ✔ Done | Vendor skill-vocabulary bug fixed 2026-07-11. |
 | Dynamic City Activation Management | ✔ Done | Bulk/all/stats endpoints, admin dashboard, order-creation enforcement fix. Verified live 2026-07-11. Business still needs to actually pick a launch city and deactivate the rest via this tooling — see `TODO.md`. |
 | Dynamic Product Coverage System | ✔ Done | Pan India / Selected Cities / Store Pickup / Zones (schema-ready). Verified live 2026-07-11 — 6 scenarios including priority ordering and edit-replace semantics. |
+| Proper seller form + attractive dashboard | ✔ Done | Address/pickup-address fields, edit support, sales banner, order-status tiles. Verified live 2026-07-11. |
+| **Fix: vendor.html/seller.html OTP login broken** | ✔ Done | Pre-existing bug, not caught until this session finally browser-tested the actual login UI instead of only the API. See `CHANGELOG.md`. |
 
 **Explicitly out of scope for Phase 1** (do not build without new instruction):
 - Seller KYC documents (PAN/Aadhar/bank/cancelled cheque/trade license/MSME)
