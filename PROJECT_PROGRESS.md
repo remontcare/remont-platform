@@ -7,7 +7,12 @@
 
 ## Current Phase
 
-**Phase 1 — Single-City Service + Product Marketplace MVP** (see `PROJECT_ROADMAP.md`)
+**Phase 2 — Enterprise Seller Module (multi-vendor marketplace)** — started 2026-07-11,
+explicitly supersedes the "lean MVP only" framing for the seller module specifically
+(see `PROJECT_ROADMAP.md` and `feedback_remont_scope_discipline.md` memory for the
+full reasoning/reversal). Building one module at a time, each tested live and
+committed before the next, per explicit instruction. Module 1 (below) is done;
+~13 more modules remain — see `TODO.md` for the full backlog.
 
 ## Current Status
 
@@ -20,6 +25,7 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 5. ✔ Dynamic Product Coverage System (Pan India / Selected Cities / Store Pickup / Zones-schema-ready)
 6. ✔ Proper seller onboarding form (address + pickup address, edit support) and attractive seller dashboard (sales banner, order-status tiles)
 7. ✔ **Critical fix**: `vendor.html` and `seller.html`'s own OTP login screens were broken (apiFetch never unwrapped the response envelope) — found via live browser testing, not assumed
+8. ✔ **Module 1 of the Enterprise Seller Module: Public Registration + Admin Approval** — full public application wizard, admin review (approve/reject/hold/more-info), real ProductVendor+PickupLocation+SellerDocument provisioning on approval. Verified live with 2 full test applications (one approved, one rejected).
 
 ## Completed This Phase
 
@@ -51,17 +57,22 @@ All 3 seller-marketplace objectives AND the dynamic city-activation system appro
 - [x] Seller dashboard redesigned: gradient sales banner (today/month/total) + 4 tappable order-status tiles, Orders view tabs — backend `dashboard()` extended, no new endpoint needed for bucketing — commit `dd2ea16`.
 - [x] **Critical bug found via live browser testing** (not API-only testing): `seller.html`'s own OTP login threw "Cannot read properties of undefined (reading 'role')". Root cause: `apiFetch()` in both `seller.html` and `vendor.html` never unwrapped the backend's `{success,data,...}` response envelope. Confirmed the identical failure live on `vendor.html`'s login screen too, before fixing — this was a pre-existing bug, not something introduced today. Fixed both files — commit `f17b581`.
 - [x] Re-verified both login screens live via real browser UI (not API calls) after the fix — both now work; seller lands directly on the dashboard.
+- [x] **Enterprise Seller Module Part 1 (Public Registration + Approval)** — schema (`SellerRegistration`, `SellerRegistrationPickup`, `PickupLocation`, `SellerDocument`, extended `ProductVendor`), backend (mirrors `PartnerRegistration` pattern exactly), admin review UI, public 7-step wizard with Leaflet/OSM interactive maps, `seller.html` login updates. Verified live end-to-end (register → approve → login; register → reject → blocked-with-reason). Commits `e3d9f38`, `681a08b`, `a30c33d`, `bbc09dd`.
 
 ## In Progress
 
-(none — all objectives approved so far are done; see `TODO.md` for any follow-on items)
+(none — Module 1 of the Enterprise Seller Module is done; see `TODO.md` for the full remaining module backlog)
 
 ## Next Task
 
-None queued. **Open decision for the business, not a dev task:** all 13 cities are
-still active in production. The city-management tooling to fix this now exists —
-someone needs to actually decide which city (or cities) to launch with and use the
-new admin/cities.html bulk actions to deactivate the rest.
+**Module 2 of the Enterprise Seller Module: Location-Based Inventory.** `PickupLocation`
+rows now exist (from Module 1) but carry no per-location stock yet, and there's no
+nearest-location/fastest-delivery/lowest-cost order-routing logic. This is the next
+module to build — see `TODO.md` for its scope.
+
+**Also open, unrelated to the seller module (business decision, not a dev task):**
+all 13 cities are still active in production; someone needs to pick a launch city
+and use admin/cities.html's bulk actions to deactivate the rest.
 
 **Recommended follow-up (not started):** the apiFetch bug was only checked in
 `vendor.html`/`seller.html`. Worth a quick pass confirming `index.html`'s and

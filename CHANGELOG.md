@@ -5,6 +5,75 @@
 
 ---
 
+## 2026-07-11 — Enterprise Seller Module, Part 1: Public Registration + Approval
+
+**Summary:** Full reversal of the earlier "admin-only seller creation" rule, per
+explicit instruction — seller registration is now a public multi-step application
+that lands in PENDING status and requires admin approval before login is possible.
+First module of a larger "enterprise-grade multi-vendor marketplace" build; ~13 more
+modules (location-based inventory routing, order management, returns, wallet/
+settlement, reports, notifications) remain, to be built one at a time per the user's
+explicit "one module, tested and committed, before the next" instruction.
+
+Built by mirroring the proven `PartnerRegistration`/`partner-registration.module.ts`
+pattern exactly (same init/save-step/submit/status/draft API shape, same admin
+review flow, same activate-on-approval mechanism) rather than inventing a new one —
+satisfies the "clean architecture, reusable components, don't duplicate" requirement.
+
+**Confirmed external-API constraints** (no fabricated integrations): no GST
+verification provider → GST number is manual entry only. No Google Maps API key →
+pickup-location GPS uses free Leaflet + OpenStreetMap (interactive drag-pin,
+click-to-place, and browser-geolocation "current location", all keyless) instead.
+No email/SMS provider → WhatsApp (MSG91, already integrated) is the only real
+notification channel; a new generic `WhatsappService.sendCustom()` was added for
+this and future flows that don't have a dedicated template yet.
+
+**Files added:**
+- `backend/src/modules/seller-registration/seller-registration.module.ts` — public wizard API (`init`/`save-step`/`pickup-locations`/`submit`/`status`/`draft`) + admin review API (`list`/`detail`/`status` with PENDING/APPROVED/REJECTED/HOLD/MORE_INFO) + `_activateSeller()` (provisions the real `User`+`ProductVendor`+`PickupLocation`+`SellerDocument` rows on approval)
+- `frontend/seller-register.html` — 7-step public application wizard (Business Details → Contact/OTP → Address → Pickup Locations w/ interactive map → Documents → Bank → Review/Submit)
+
+**Files modified:**
+- `backend/prisma/schema.prisma` — `SellerRegistration` + `SellerRegistrationPickup` (the draft application), `PickupLocation` + `SellerDocument` (the real, approved entities — one seller can have multiple pickup locations, each independently geocoded), `ProductVendor` extended with the full KYC/bank field set (ownerName, businessType, panNumber, aadhaarNumber, cin, msmeNumber, alternatePhone, whatsappNumber, email, officeAddress, warehouseAddress, bank fields, rejectionReason)
+- `backend/src/modules/whatsapp/whatsapp.module.ts` — added `sendCustom(phone, body)`
+- `backend/src/app.module.ts` — registered `SellerRegistrationModule`
+- `frontend/admin/vendors.html` — new "Seller Applications" tab mirroring the Partner Registrations review UI exactly (document previews, GPS map previews per pickup location, Approve/Reject/Hold/Request-More-Info); corrected the now-stale "public registration is disabled" copy on the Product Sellers tab
+- `frontend/admin/common.js` — sidebar nav entry
+- `frontend/seller.html` — login screen links to the new public wizard; a failed login now checks application status and shows a specific reason (pending/hold/more-info/rejected-with-note) instead of a generic dead end
+
+**Security note (unchanged mechanism, just confirming it holds here too):** a seller's
+`User.role` only becomes `PRODUCT_VENDOR`-with-a-real-profile inside `_activateSeller()`,
+which only runs on admin APPROVED — exactly the same gate already proven for service
+vendors. A pending/rejected applicant's OTP-verified session has no `ProductVendor`
+row, so `GET /vendors/product/me` 404s and no dashboard access is possible, with zero
+new gating logic required.
+
+**DB changes:** all additive (new tables + nullable columns on `ProductVendor`)
+
+**API changes:**
+```
+POST /seller-registration/init | save-step | pickup-locations | submit    [Public]
+GET  /seller-registration/status | draft/:id | pickup-locations/:id      [Public]
+GET  /admin/seller-registrations | /:id                                   [ADMIN]
+PATCH /admin/seller-registrations/:id/status                              [ADMIN]
+```
+
+**Verified live** (throwaway test applications, cleaned up after): registered two
+full applications end-to-end (all 7 steps, real pickup-location coordinates, real
+base64 document uploads, bank details); confirmed both landed correctly for admin
+review with pickup locations and documents intact; approved one — confirmed a real
+`ProductVendor` + `PickupLocation` were provisioned and that seller could immediately
+log in and reach `/vendors/product/me`; rejected the other with a reason — confirmed
+that phone number could NOT reach a seller profile (404) and that
+`/seller-registration/status` correctly surfaces the rejection reason. Separately
+confirmed the `submit` endpoint's terms-acceptance validation actually blocks
+(caught by the test itself skipping that field) and separately confirmed the true
+happy path succeeds. Browser-verified the wizard's Leaflet map actually initializes
+on the live page and `seller.html`'s updated login screen renders correctly.
+
+**Commits:** `e3d9f38` (backend + schema), `681a08b` (admin review UI), `a30c33d` (public wizard), `bbc09dd` (seller.html login updates)
+
+---
+
 ## 2026-07-11 — Proper seller form, attractive seller dashboard, critical login fix
 
 **Summary:** Three asks in one: (1) a proper sectioned admin seller-creation form

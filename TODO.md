@@ -66,6 +66,36 @@ pincode/area-level filtering only when the business actually needs it.
 **Recommended, not started:** spot-check `index.html`'s and `admin/common.js`'s own
 API helpers for any similar edge case, given how long the apiFetch bug went unnoticed.
 
+## Phase 2 — Enterprise Seller Module (started 2026-07-11)
+
+Explicit instruction: one module at a time, tested and committed before the next.
+Reverses the earlier "admin-only seller" decision — see `PROJECT_ROADMAP.md` Phase 2.
+
+### Module 1 — Public Registration + Admin Approval (complete)
+
+| # | Task | Status |
+|---|---|---|
+| 1 | Schema: `SellerRegistration`, `SellerRegistrationPickup`, `PickupLocation`, `SellerDocument`, extended `ProductVendor` | ✅ |
+| 2 | Backend: `seller-registration.module.ts` (public wizard API + admin review + `_activateSeller()`) | ✅ |
+| 3 | Admin UI: Seller Applications review tab | ✅ |
+| 4 | Public frontend: 7-step `seller-register.html` wizard w/ Leaflet map | ✅ |
+| 5 | `seller.html`: apply link + status-aware login messaging | ✅ |
+| 6 | Live E2E verification (2 full applications: 1 approved, 1 rejected) | ✅ |
+
+### Module 2 — Location-Based Inventory (next)
+
+- [ ] Per-`PickupLocation` stock (likely a new `LocationInventory` join table: pickupLocationId + productId + stock, mirroring `CityProduct`'s shape)
+- [ ] Nearest-pickup-location resolution given a customer address (haversine, same pattern as `DispatchService`/`haversineKm` already used for service dispatch)
+- [ ] Order-routing logic: pick the pickup location by distance + stock availability + (later) delivery time/cost — start with distance + stock, defer full cost/ETA optimization unless asked
+- [ ] Seller-facing UI: assign/edit stock per pickup location
+- [ ] Live E2E verification before moving to Module 3
+
+### Modules 3–9 (not started — see `PROJECT_ROADMAP.md` Phase 2 table for full list)
+
+Seller Dashboard (full) · Product Management (full) · Order Management actions ·
+Returns/Replacement/Refund · Wallet & Settlement · Reports · Notifications (partial —
+WhatsApp only, no email/SMS provider).
+
 ## Possible follow-on items (not started, not committed to — raise with user before building)
 
 - Seller can't currently see order-detail (customer address/phone) beyond what `myOrders()` returns — may want a detail view if sellers ask for it.

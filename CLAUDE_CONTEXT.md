@@ -10,14 +10,18 @@
 
 ## 1. What Remont India is (current phase)
 
-A home & property services marketplace launching in **one city first**, with a
-**hybrid product-seller model**:
+A home & property services marketplace launching in **one city first** (Phase 1,
+done), now building an **enterprise-grade multi-vendor marketplace seller module**
+(Phase 2, in progress — started 2026-07-11, ~1 of ~9 modules done):
 - Remont sells products directly (admin-managed catalog — already fully supported, `Product.vendorId` is nullable).
-- A small number of manually-onboarded, admin-verified local sellers, each managing only their own products/stock/pricing/orders.
-- **No public seller self-registration.** Only Admin can create a seller account.
+- Sellers **self-register publicly** via a 7-step wizard (`seller-register.html`) and land in `PENDING` status; Admin reviews and Approves/Rejects/Holds/Requests-more-info before login is possible.
+- Admin can *also* still create a seller account directly (the Phase-1 shortcut) — both paths converge on the same `ProductVendor` entity.
+- Once approved, a seller manages only their own products, pickup locations, stock, pricing, orders.
 
-Goal: quality control, fast launch, customer trust — not seller count or feature count.
-See `PROJECT_ROADMAP.md` for the full phase plan and what's explicitly deferred.
+**Public registration was previously disabled, then explicitly reversed 2026-07-11** —
+see `feedback_remont_scope_discipline.md` memory for the full reasoning. Building
+module-by-module per explicit instruction: each module tested live and committed
+before the next starts. See `PROJECT_ROADMAP.md` Phase 2 for the module list/status.
 
 ---
 
@@ -49,8 +53,9 @@ backend/
 frontend/
   index.html                    — main customer site (desktop + mobile, one file)
   vendor.html                   — service-vendor app shell (login, jobs, earnings)
-  seller.html                   — product-seller portal (login, products, orders) — NEW this phase
-  partner-register.html         — service-vendor onboarding wizard
+  seller.html                   — product-seller portal (login, products, orders, dashboard)
+  seller-register.html          — NEW: public 7-step seller application wizard (Leaflet/OSM maps, no Google Maps key)
+  partner-register.html         — service-vendor onboarding wizard (the proven pattern seller-register.html mirrors)
   admin/*.html                  — admin panel, one file per page, shared admin/common.js + admin/style.css
 ```
 
@@ -75,7 +80,7 @@ No separate controller/service/dto files. Do not split an existing module into m
 - Single `User` table, phone is the identity. Login is always `POST /auth/send-otp` → `POST /auth/verify-otp`, same flow for every role — **no separate password system for sellers or vendors.**
 - A `User` row can be created directly with a target role (e.g. by an admin endpoint doing `prisma.user.upsert({ where: { phone }, create: { role: 'PRODUCT_VENDOR', isVerified: true, ... } })`) and that person can log in immediately via the standard OTP flow — no extra auth plumbing needed. This is how admin-created sellers log in.
 - `AuthService.verifyOtp()` has a narrow self-elevation path (`ELEVATABLE_ROLES`) that only lets a `CUSTOMER` upgrade themselves to `SERVICE_VENDOR`/`PRODUCT_VENDOR` — **never** touches `ADMIN`/`SUPER_ADMIN`, never downgrades. Do not widen this without explicit instruction (a prior incident had this logic accidentally demoting an admin — see `PROJECT_PROGRESS.md` history).
-- Public seller self-registration is intentionally **not exposed** — `POST /vendors/product/register` exists (used internally / for future phase) but no frontend page links to it as a public signup path.
+- **Public seller self-registration is live** (`seller-register.html` → `seller-registration.module.ts`). Critical nuance: `verify-otp` during registration DOES set `role: PRODUCT_VENDOR` immediately (mirrors `partner-registration`'s exact pattern) — but that alone grants **no** dashboard access, because `GET /vendors/product/me` 404s until a real `ProductVendor` row exists, and that row is only created by `_activateSeller()` on admin APPROVED. The actual security boundary is profile-row existence, not the role value — don't "fix" the role-timing without understanding this, it's intentional and proven (same mechanism as service-vendor partner registration).
 
 ---
 
@@ -86,7 +91,10 @@ Full source of truth: `backend/prisma/schema.prisma` (44+ models). Highlights re
 - **`City` / `CityService` / `CityProduct`** — per-city activation, stock override, custom price, price multiplier. Already supports multi-city; launching in one city means activating exactly one `City` row and leaving others `isActive: false`. **No schema change needed to expand cities later.**
 - **`Product`** — `vendorId String?` (nullable → admin-owned when null; in practice all current products are attributed to a "Remont Direct" seller account rather than actually null), `categoryId`, price/mrp/stock, images, SEO fields (unpopulated placeholders for now), `isActive`, `coverageType` (`PAN_INDIA` default / `SELECTED_CITIES` / `STORE_PICKUP` / `ZONES`-schema-only) — see §8 for the coverage business rules.
 - **`ProductZone`** — pincode/areaName per product. Schema exists for future zone-level coverage; nothing reads it yet (`ZONES` coverage type currently falls back to city-level `CityProduct` matching).
-- **`ProductVendor`** — `id, userId (unique), businessName, gstNumber?, status (VendorStatus), rating`. Deliberately thin — no KYC documents, no wallet/ledger yet (explicitly deferred, see roadmap).
+- **`ProductVendor`** — now the full KYC/bank profile: identity (ownerName, businessType, gstNumber, panNumber, aadhaarNumber, cin, msmeNumber), contact (alternatePhone, whatsappNumber, email), address (address/officeAddress/warehouseAddress — `pickupAddress` is a **legacy field**, superseded by `PickupLocation`, do not write to it from new code), bank (bankAccountHolder/bankName/bankAccountNumber/bankIfsc/bankBranch/upiId), `status (VendorStatus)`, `rating`.
+- **`PickupLocation`** — one seller can have multiple; each has its own lat/lng, address fields, `isPrimary` flag (enforced at the application layer, not a DB constraint). Created from `SellerRegistrationPickup` drafts on approval. No per-location stock yet — that's Phase 2 Module 2.
+- **`SellerDocument`** — mirrors the older `VendorDocument` (service-vendor) pattern; one row per uploaded document type per seller.
+- **`SellerRegistration` / `SellerRegistrationPickup`** — the draft public application, mirrors `PartnerRegistration` exactly (`status`: PENDING/APPROVED/REJECTED/HOLD/MORE_INFO). **Note:** `status` defaults to `"PENDING"` at record creation (before `submit()` is ever called) — an abandoned draft looks identical to a genuinely-submitted one in the admin queue. This is inherited from `PartnerRegistration`'s identical pre-existing behavior, not a new bug — don't "fix" only the seller side without revisiting the service-vendor side too.
 - **`Order` / `OrderItem`** — one `Order` can carry both a service booking (`serviceId`) and product line items (`items: OrderItem[]`) in the same checkout. This already works end-to-end (`orders.module.ts`).
 - **`VendorStatus` enum**: `PENDING_VERIFICATION · ACTIVE · SUSPENDED · REJECTED`.
 
@@ -103,7 +111,16 @@ Key existing routes this phase builds on:
 POST  /products                    [JWT + PRODUCT_VENDOR]  — seller creates own product
 PATCH /products/:id                [JWT + PRODUCT_VENDOR]  — seller updates own product (ownership-checked)
 GET   /products/vendor/mine        [JWT + PRODUCT_VENDOR]  — seller's product list
-GET   /vendors/product/me/dashboard [JWT + PRODUCT_VENDOR]  — 4 stats: products, orders, revenue, low-stock
+GET   /vendors/product/me/dashboard [JWT + PRODUCT_VENDOR]  — todayRevenue/monthRevenue/totalRevenue + products/orders/lowStock
+GET   /vendors/product/me/orders    [JWT + PRODUCT_VENDOR]  — orders containing this seller's products only
+```
+
+Seller registration (Phase 2 Module 1):
+```
+POST /seller-registration/init | save-step | pickup-locations | submit    [Public]
+GET  /seller-registration/status | draft/:id | pickup-locations/:id       [Public]
+GET  /admin/seller-registrations | /:id                                    [ADMIN]
+PATCH /admin/seller-registrations/:id/status                               [ADMIN]
 ```
 
 ---
@@ -111,13 +128,14 @@ GET   /vendors/product/me/dashboard [JWT + PRODUCT_VENDOR]  — 4 stats: product
 ## 8. Business rules (never violate without explicit new instruction)
 
 1. Remont is the primary seller — admin-managed catalog always works with zero seller involvement.
-2. **Only Admin can create product-seller accounts.** No public seller registration UI.
+2. **Sellers can self-register publicly** (`seller-register.html`), and land in `PENDING` until admin approves. Admin can also still create a seller account directly. Either way, a seller **cannot log in / reach a dashboard until `ProductVendor.status = ACTIVE`** — see §5's role-vs-profile-row nuance.
 3. Every seller manages only their own products, stock, pricing, and can only see orders containing their own products — enforced at the query layer (`vendorId` scoping), not just UI-hidden.
-4. Admin controls commissions (mechanism deferred until needed — not built yet, see roadmap).
+4. Admin controls commissions (mechanism deferred until needed — not built yet, see roadmap Phase 2 Module 7).
 5. **Customer-facing UI (`index.html`) must remain visually unchanged** unless a task explicitly calls for a customer-facing change.
 6. Existing functionality must never break — verify against real data before considering a task done (this repo's established pattern: headless-browser smoke test against local-serving-real-API or live site, not just typecheck).
-7. Everything stays modular, additive, and scoped to what the current phase actually needs — see `PROJECT_ROADMAP.md`'s "guardrails" section. Do not build enterprise-scale features (bulk upload, KYC documents, multi-warehouse, courier aggregators, AI image search) until a future phase explicitly calls for them.
+7. **The Enterprise Seller Module (Phase 2) is an explicit, deliberate exception to "lean MVP only"** — build it module-by-module, each tested live and committed before the next. Everything *outside* the seller module still follows the lean-MVP discipline (see `PROJECT_ROADMAP.md`'s guardrails). Don't use Phase 2's scope as license to over-build elsewhere.
 8. **Product coverage**: Pan India products must appear automatically in any city activated later — no manual per-city update, ever (enforced by the filtering *rule*, not by writing rows: a Pan India product with zero `CityProduct` rows is eligible everywhere by default). Selected-Cities/Store-Pickup products are opt-in and only show where explicitly assigned. One product row serves every city it's eligible in — never duplicate a product to cover multiple cities.
+9. **No fabricated external integrations.** GST verification, Google Maps, email/SMS sending — none are configured (no provider/API key). Manual entry / Leaflet+OpenStreetMap / WhatsApp-only are the confirmed real substitutes. Do not build a UI that implies a live external integration exists when it doesn't.
 
 ---
 
