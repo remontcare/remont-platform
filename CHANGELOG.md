@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-07-11 — Dynamic City Activation Management System
+
+**Summary:** Found (via direct production DB query) that all 13 configured cities were
+active simultaneously — contradicting the single-city-launch goal — and that the
+existing single-city toggle wasn't actually enforced consistently at order creation.
+Built a full configuration-driven, no-redeploy-required city management system per
+explicit spec, and fixed the enforcement gap it surfaced.
+
+**Files modified/added:**
+- `backend/prisma/schema.prisma` — `ProductVendor.city` (additive, nullable String, indexed) — sellers now have a city association, needed for real city-wise seller counts
+- `backend/src/modules/admin/admin.module.ts` — `bulkToggleCities()`, `toggleAllCities()`, `cityStats()` + routes; `createProductVendor` accepts `city`
+- `backend/src/modules/orders/orders.module.ts` — **bug fix**: of 3 order-creation paths, only guest service booking checked `city.isActive`; the authenticated `/orders` endpoint and guest product checkout had no city gate at all. Both now block with a clear error when the named city resolves to a deactivated managed city; unresolvable city text is left unchanged (no regression)
+- `frontend/admin/cities.html` — stats strip (total/active/inactive/launch mode), per-city Sellers/Technicians/Products/Services columns, per-row checkboxes + bulk activate/deactivate, global Enable-All/Disable-All (confirm-gated)
+- `frontend/admin/vendors.html` — City dropdown on seller-creation form; City column on sellers table
+- `frontend/seller.html` — City shown on seller Profile view
+
+**DB changes:** `ProductVendor.city` (additive nullable column, `db push` applied to production)
+
+**API changes:**
+```
+GET   /admin/cities/stats                        [ADMIN]
+PATCH /admin/cities/bulk                          [ADMIN]  { cityNames: string[], isActive: boolean }
+PATCH /admin/cities/all                           [ADMIN]  { isActive: boolean }
+```
+(existing `GET /admin/cities`, `POST /admin/cities`, `PATCH /admin/cities/:name`, `PATCH /admin/cities/:name/toggle` unchanged)
+
+**UI changes:** `admin/cities.html` substantially extended (additive — existing single-toggle button untouched); small additive fields on `admin/vendors.html` and `seller.html`. No customer-facing UI touched.
+
+**Bug found + fixed during E2E verification:** confirmed via a real deactivate→attempt-order→reactivate test against production (using a throwaway test city, cleaned up after) that both previously-unguarded order-creation paths are now correctly blocked with a 400 and the expected message when the target city is inactive, and correctly succeed when active.
+
+**Deliberately not tested against production:** `PATCH /admin/cities/all` (global enable/disable-all) — it has no scoping and would have flipped all 13 real live cities. Verified by code review only (a straightforward `prisma.city.updateMany`); the admin should trigger this consciously when actually needed, not have it fired as a test.
+
+**Commits:** `03fbafd` (bulk endpoints + stats + schema), `543da2b` (order enforcement fix), `8658a51` (frontend)
+
+---
+
 ## 2026-07-11 — Phase 1: Admin-managed Product Sellers + Seller Portal + Orders
 
 **Summary:** Implemented all 3 approved Phase 1 objectives — hybrid seller model

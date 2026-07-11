@@ -11,10 +11,12 @@
 
 ## Current Status
 
-All 3 objectives approved 2026-07-11 are **complete and verified live**:
+All 3 seller-marketplace objectives AND the dynamic city-activation system approved
+2026-07-11 are **complete and verified live**:
 1. ✔ Admin-managed Product Sellers
 2. ✔ Lightweight Seller Portal
 3. ✔ Seller Orders Management
+4. ✔ Dynamic City Activation Management (bulk actions, stats dashboard, order-creation enforcement fix)
 
 ## Completed This Phase
 
@@ -33,14 +35,23 @@ All 3 objectives approved 2026-07-11 are **complete and verified live**:
 - [x] Visual smoke test: `seller.html` and `admin/vendors.html` load with zero JS errors on live Vercel deploy.
 - [x] Full changelog entry recorded in `CHANGELOG.md`.
 
+- [x] Found (via production DB query, not assumption): all 13 cities were simultaneously active, contradicting the single-city launch goal — this was the trigger for building the city management system.
+- [x] Backend: `ProductVendor.city` schema addition, bulk/all/stats city endpoints — commit `03fbafd`
+- [x] Backend: fixed a real enforcement gap — 2 of 3 order-creation paths never checked `city.isActive` at all — commit `543da2b`
+- [x] Frontend: `admin/cities.html` stats dashboard + bulk actions + global switch; city field added to seller creation and seller profile — commit `8658a51`
+- [x] E2E verified live: deactivate a (throwaway test) city → both order-creation paths correctly blocked → reactivate → both succeed. Visually confirmed the new admin dashboard renders correctly with live data (13 cities, real per-city technician counts).
+- [x] Deliberately did NOT fire `PATCH /admin/cities/all` against production during testing — verified by code review only, since it has no scoping and would affect all 13 real cities. Documented so the admin knows to trigger it consciously.
+
 ## In Progress
 
-(none — Phase 1's 3 objectives are done; see `TODO.md` for any follow-on polish items)
+(none — all objectives approved so far are done; see `TODO.md` for any follow-on items)
 
 ## Next Task
 
-None queued. Awaiting next instruction — likely either polish/iterate on the seller
-portal based on real usage, or move to another Phase 1 item if one emerges.
+None queued. **Open decision for the business, not a dev task:** all 13 cities are
+still active in production. The city-management tooling to fix this now exists —
+someone needs to actually decide which city (or cities) to launch with and use the
+new admin/cities.html bulk actions to deactivate the rest.
 
 ## Bugs Found
 

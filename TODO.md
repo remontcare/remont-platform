@@ -22,6 +22,21 @@ All original tasks complete — see `CHANGELOG.md` 2026-07-11 entry for full det
 | 10 | End-to-end smoke test against live production (13 steps, all passed; test data cleaned up) | High | 1–8 | ✅ |
 | 11 | Update `CHANGELOG.md`, `PROJECT_PROGRESS.md`, this file; commit + push | High | 10 | ✅ |
 
+## Phase 1 — Dynamic City Activation (added 2026-07-11, complete)
+
+| # | Task | Priority | Status |
+|---|---|---|---|
+| 1 | `ProductVendor.city` schema addition | High | ✅ |
+| 2 | Bulk city endpoints (`/admin/cities/bulk`, `/admin/cities/all`) + stats endpoint | High | ✅ |
+| 3 | Fix city.isActive enforcement gap in the 2 unguarded order-creation paths | High | ✅ |
+| 4 | `admin/cities.html` stats dashboard + bulk UI | High | ✅ |
+| 5 | City field on seller creation + seller profile | Medium | ✅ |
+| 6 | Live E2E verification (throwaway test city, cleaned up) | High | ✅ |
+
+**⚠ Business action needed, not a dev task:** all 13 cities are still active in
+production. Use the new bulk actions in `admin/cities.html` to deactivate all but
+the launch city when ready.
+
 ## Possible follow-on items (not started, not committed to — raise with user before building)
 
 - Seller can't currently see order-detail (customer address/phone) beyond what `myOrders()` returns — may want a detail view if sellers ask for it.
