@@ -190,6 +190,67 @@ export class AdminService {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { status: VendorStatus.SUSPENDED, isOnline: false } });
   }
 
+  // ─── Product Vendors (Sellers) ────────────────────────────────────────
+  // Admin-managed only for this phase — no public self-registration.
+  // See PROJECT_ROADMAP.md "Phase 1" for the hybrid seller model this implements.
+
+  async listProductVendors(opts: { status?: VendorStatus; q?: string; limit?: number }) {
+    return this.prisma.productVendor.findMany({
+      where: {
+        ...(opts.status ? { status: opts.status } : {}),
+        ...(opts.q ? { businessName: { contains: opts.q, mode: 'insensitive' } } : {}),
+      },
+      include: {
+        user: { select: { name: true, phone: true, email: true, isBlocked: true } },
+        _count: { select: { products: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+    });
+  }
+
+  async createProductVendor(data: { phone: string; name: string; businessName: string; gstNumber?: string }) {
+    if (!data.phone || !data.name || !data.businessName) {
+      throw new BadRequestException('phone, name and businessName are required');
+    }
+
+    const existingUser = await this.prisma.user.findUnique({ where: { phone: data.phone } });
+    if (existingUser && existingUser.role !== UserRole.CUSTOMER && existingUser.role !== UserRole.PRODUCT_VENDOR) {
+      throw new BadRequestException(`This phone number is already registered as ${existingUser.role}`);
+    }
+    if (existingUser?.role === UserRole.PRODUCT_VENDOR) {
+      const already = await this.prisma.productVendor.findUnique({ where: { userId: existingUser.id } });
+      if (already) throw new BadRequestException('A seller account already exists for this phone number');
+    }
+
+    // Same pattern as AuthService.adminPinLogin(): upsert the User directly with the target
+    // role, isVerified:true. The seller then logs in through the normal /auth/send-otp +
+    // /auth/verify-otp flow — no separate password system needed for sellers.
+    const user = await this.prisma.user.upsert({
+      where: { phone: data.phone },
+      update: { role: UserRole.PRODUCT_VENDOR, isVerified: true, name: data.name },
+      create: { phone: data.phone, name: data.name, role: UserRole.PRODUCT_VENDOR, isVerified: true },
+    });
+
+    return this.prisma.productVendor.create({
+      data: {
+        userId: user.id,
+        businessName: data.businessName,
+        gstNumber: data.gstNumber || null,
+        status: VendorStatus.ACTIVE,
+      },
+      include: { user: { select: { name: true, phone: true } } },
+    });
+  }
+
+  async suspendProductVendor(id: string) {
+    return this.prisma.productVendor.update({ where: { id }, data: { status: VendorStatus.SUSPENDED } });
+  }
+
+  async activateProductVendor(id: string) {
+    return this.prisma.productVendor.update({ where: { id }, data: { status: VendorStatus.ACTIVE } });
+  }
+
   // ─── Orders ─────────────────────────────────────────────────────────
 
   async orderStats() {
@@ -1514,6 +1575,15 @@ export class AdminController {
   @Patch('vendors/:id/approve') approve(@Param('id') id: string) { return this.admin.approveVendor(id); }
   @Patch('vendors/:id/reject') reject(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.rejectVendor(id, b.reason); }
   @Patch('vendors/:id/suspend') suspend(@Param('id') id: string) { return this.admin.suspendVendor(id); }
+
+  @Get('product-vendors') listProductVendors(@Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number) {
+    return this.admin.listProductVendors({ status, q, limit });
+  }
+  @Post('product-vendors') createProductVendor(@Body() b: { phone: string; name: string; businessName: string; gstNumber?: string }) {
+    return this.admin.createProductVendor(b);
+  }
+  @Patch('product-vendors/:id/suspend') suspendProductVendor(@Param('id') id: string) { return this.admin.suspendProductVendor(id); }
+  @Patch('product-vendors/:id/activate') activateProductVendor(@Param('id') id: string) { return this.admin.activateProductVendor(id); }
 
   // Orders
   // Orders — stats + list + management
