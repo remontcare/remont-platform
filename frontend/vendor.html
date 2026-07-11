@@ -523,7 +523,14 @@ function apiFetch(path, opts){
         var msg = (data && (data.message || data.error)) || ('Request failed (' + res.status + ')');
         throw new Error(Array.isArray(msg) ? msg.join(', ') : msg);
       }
-      return data;
+      // Every backend response is wrapped by the global TransformInterceptor as
+      // {success, statusCode, data, timestamp} — unwrap it here so every caller gets the
+      // real payload directly (res.user, res.accessToken, the profile object itself, etc.),
+      // same as admin/common.js's api() helper already does. This was previously missing,
+      // which broke this file's own OTP login screen (res.user was always undefined) —
+      // vendors only ever worked via the redirect-from-index.html path, which unwraps
+      // defensively on the index.html side instead.
+      return data.data !== undefined ? data.data : data;
     });
   });
 }

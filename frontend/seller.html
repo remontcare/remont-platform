@@ -388,7 +388,11 @@ function apiFetch(path, opts){
         var msg = (data && (data.message || data.error)) || ('Request failed (' + res.status + ')');
         throw new Error(Array.isArray(msg) ? msg.join(', ') : msg);
       }
-      return data;
+      // Every backend response is wrapped by the global TransformInterceptor as
+      // {success, statusCode, data, timestamp} — unwrap it here so every caller gets the
+      // real payload directly (e.g. res.user, res.accessToken), same as admin/common.js's
+      // api() helper already does.
+      return data.data !== undefined ? data.data : data;
     });
   });
 }
