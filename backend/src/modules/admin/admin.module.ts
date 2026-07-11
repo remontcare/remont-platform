@@ -710,7 +710,11 @@ export class AdminService {
         ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
         ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { sku: { contains: opts.q, mode: 'insensitive' } }, { brand: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
-      include: { vendor: { select: { businessName: true, status: true } }, category: { select: { name: true, key: true } } },
+      include: {
+        vendor: { select: { businessName: true, status: true } },
+        category: { select: { name: true, key: true } },
+        _count: { select: { cityProducts: { where: { isActive: true } } } },
+      },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
       skip: opts.offset || 0,
@@ -720,16 +724,48 @@ export class AdminService {
   async adminCreateProduct(data: any) {
     const slug = slugify(data.name) + '-' + Date.now();
     const sku = data.sku || 'RMNT-' + Date.now();
-    return this.prisma.product.create({
-      data: { ...data, slug, sku, images: data.images || [], seoKeywords: data.seoKeywords || [], aiEnhancedImgs: [] },
+    // cityIds isn't a Product column — it drives CityProduct rows via the products module's
+    // syncCityCoverage (same helper the seller-facing create/update endpoints use).
+    const { cityIds, ...productData } = data;
+    const product = await this.prisma.product.create({
+      data: { ...productData, slug, sku, images: data.images || [], seoKeywords: data.seoKeywords || [], aiEnhancedImgs: [] },
       include: { category: { select: { name: true } } },
     });
+    if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
+      await this.syncProductCityCoverage(product.id, cityIds);
+    }
+    return product;
   }
 
   async adminUpdateProduct(id: string, data: any) {
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product not found');
-    return this.prisma.product.update({ where: { id }, data, include: { category: { select: { name: true } } } });
+    const { cityIds, ...productData } = data;
+    const updated = await this.prisma.product.update({ where: { id }, data: productData, include: { category: { select: { name: true } } } });
+    if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
+      await this.syncProductCityCoverage(id, cityIds);
+    }
+    return updated;
+  }
+
+  // Same replace-semantics helper as ProductsService.syncCityCoverage in products.module.ts
+  // (duplicated rather than cross-module-imported — these are separate domain modules by
+  // this codebase's established single-file-per-module convention).
+  async syncProductCityCoverage(productId: string, cityIds: string[]) {
+    const existing = await this.prisma.cityProduct.findMany({ where: { productId } });
+    const desired = new Set(cityIds);
+    for (const e of existing) {
+      if (!desired.has(e.cityId) && e.isActive) {
+        await this.prisma.cityProduct.update({ where: { id: e.id }, data: { isActive: false } });
+      }
+    }
+    for (const cityId of cityIds) {
+      await this.prisma.cityProduct.upsert({
+        where: { cityId_productId: { cityId, productId } },
+        create: { cityId, productId, isActive: true },
+        update: { isActive: true },
+      });
+    }
   }
 
   async adminDeleteProduct(id: string) {

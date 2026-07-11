@@ -86,6 +86,17 @@ enum VendorStatus {
   REJECTED
 }
 
+// Where a product is available. PAN_INDIA is the default so all pre-existing products
+// keep behaving exactly as they did before this feature (visible everywhere) with zero
+// migration needed. SELECTED_CITIES/ZONES both key off CityProduct — ZONES falls back to
+// the same city-level table until pincode/area-level enforcement is actually built.
+enum ProductCoverageType {
+  PAN_INDIA
+  SELECTED_CITIES
+  ZONES
+  STORE_PICKUP
+}
+
 enum DeliveryPartnerType {
   COURIER
   TECHNICIAN
@@ -437,6 +448,7 @@ model Product {
   views           Int      @default(0)
   rating          Float    @default(0)
   reviewCount     Int      @default(0)
+  coverageType    ProductCoverageType @default(PAN_INDIA)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -446,10 +458,28 @@ model Product {
   cityProducts CityProduct[]
   reviews      Review[]
   inventory    IssuedInventory[]
+  zones        ProductZone[]
 
   @@index([vendorId])
   @@index([categoryId])
   @@index([isActive])
+  @@index([coverageType])
+}
+
+// Pincode/area-level coverage — schema exists now per the "future ready" requirement,
+// but nothing in products.module.ts's filtering logic reads this yet. When zone-level
+// enforcement is actually built, ProductCoverageType.ZONES should start consulting this
+// table instead of falling back to CityProduct like it does today.
+model ProductZone {
+  id        String   @id @default(cuid())
+  productId String
+  pincode   String?
+  areaName  String?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

