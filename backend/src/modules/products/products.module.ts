@@ -68,6 +68,17 @@ export class ProductsService {
     return grouped;
   }
 
+  // Public read of active product categories — needed for any category picker (seller
+  // product form today; a customer-facing product catalog later) without requiring ADMIN.
+  // Full CRUD stays admin-only (admin.module.ts) since it directly gates checkout mapping.
+  async listCategories() {
+    return this.prisma.productCategory.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: 'asc' },
+      select: { id: true, key: true, name: true, icon: true },
+    });
+  }
+
   async getBySlug(slug: string) {
     const product = await this.prisma.product.findUnique({
       where: { slug },
@@ -147,6 +158,10 @@ export class ProductsController {
     const keys = (categories || '').split(',').map((k) => k.trim()).filter(Boolean);
     return this.products.listGroupedByCategories(keys, Number(limitPerCategory) || 4);
   }
+
+  // Must also come before @Get(':slug') for the same reason as by-categories above.
+  @Public() @Get('categories')
+  categories() { return this.products.listCategories(); }
 
   @Public() @Get(':slug')
   one(@Param('slug') slug: string) { return this.products.getBySlug(slug); }
