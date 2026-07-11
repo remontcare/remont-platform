@@ -204,6 +204,16 @@ export class OrdersService {
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
+    // City activation gate: if the order names a city that resolves to a managed City row
+    // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
+    // allowed through unchanged — this only tightens the case we can actually verify.
+    if (dto.city) {
+      const city = await this.cities.getByName(dto.city);
+      if (city && !city.isActive) {
+        throw new BadRequestException(`${city.name} is not currently accepting orders`);
+      }
+    }
+
     let serviceAmount = 0;
     let productsAmount = 0;
     const itemInputs: any[] = [];
@@ -478,7 +488,12 @@ export class OrdersService {
 @Injectable()
 export class GuestBookingService {
   private readonly logger = new Logger(GuestBookingService.name);
-  constructor(private prisma: PrismaService, private dispatch: DispatchService, private payments: PaymentsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private dispatch: DispatchService,
+    private payments: PaymentsService,
+    private cities: CitiesService,
+  ) {}
 
   async book(dto: GuestBookingDto) {
     // Find or create customer by phone
@@ -601,6 +616,13 @@ export class GuestBookingService {
     }
 
     if (!dto.items?.length) throw new BadRequestException('No items in order');
+
+    if (dto.city) {
+      const city = await this.cities.getByName(dto.city);
+      if (city && !city.isActive) {
+        throw new BadRequestException(`${city.name} is not currently accepting orders`);
+      }
+    }
 
     let productsAmount = 0;
     const itemInputs: any[] = [];
