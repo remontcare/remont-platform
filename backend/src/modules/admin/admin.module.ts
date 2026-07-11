@@ -20,6 +20,16 @@ export class CreateProductVendorDto {
   @IsString() businessName: string;
   @IsOptional() @IsString() gstNumber?: string;
   @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsString() pickupAddress?: string;
+}
+
+export class UpdateProductVendorDto {
+  @IsOptional() @IsString() businessName?: string;
+  @IsOptional() @IsString() gstNumber?: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsString() pickupAddress?: string;
 }
 
 @Injectable()
@@ -246,8 +256,18 @@ export class AdminService {
         businessName: data.businessName,
         gstNumber: data.gstNumber || null,
         city: data.city || null,
+        address: data.address || null,
+        pickupAddress: data.pickupAddress || null,
         status: VendorStatus.ACTIVE,
       },
+      include: { user: { select: { name: true, phone: true } } },
+    });
+  }
+
+  async updateProductVendor(id: string, data: UpdateProductVendorDto) {
+    return this.prisma.productVendor.update({
+      where: { id },
+      data,
       include: { user: { select: { name: true, phone: true } } },
     });
   }
@@ -1681,6 +1701,9 @@ export class AdminController {
   }
   @Post('product-vendors') createProductVendor(@Body() b: CreateProductVendorDto) {
     return this.admin.createProductVendor(b);
+  }
+  @Patch('product-vendors/:id') updateProductVendor(@Param('id') id: string, @Body() b: UpdateProductVendorDto) {
+    return this.admin.updateProductVendor(id, b);
   }
   @Patch('product-vendors/:id/suspend') suspendProductVendor(@Param('id') id: string) { return this.admin.suspendProductVendor(id); }
   @Patch('product-vendors/:id/activate') activateProductVendor(@Param('id') id: string) { return this.admin.activateProductVendor(id); }

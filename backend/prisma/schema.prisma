@@ -533,14 +533,16 @@ model VendorDocument {
 }
 
 model ProductVendor {
-  id           String       @id @default(cuid())
-  userId       String       @unique
-  businessName String
-  gstNumber    String?
-  city         String?
-  status       VendorStatus @default(PENDING_VERIFICATION)
-  rating       Float        @default(0)
-  createdAt    DateTime     @default(now())
+  id             String       @id @default(cuid())
+  userId         String       @unique
+  businessName   String
+  gstNumber      String?
+  city           String?
+  address        String?
+  pickupAddress  String?
+  status         VendorStatus @default(PENDING_VERIFICATION)
+  rating         Float        @default(0)
+  createdAt      DateTime     @default(now())
 
   user     User      @relation(fields: [userId], references: [id])
   products Product[]
