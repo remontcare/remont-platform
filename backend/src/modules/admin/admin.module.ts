@@ -19,6 +19,7 @@ export class CreateProductVendorDto {
   @IsString() name: string;
   @IsString() businessName: string;
   @IsOptional() @IsString() gstNumber?: string;
+  @IsOptional() @IsString() city?: string;
 }
 
 @Injectable()
@@ -244,6 +245,7 @@ export class AdminService {
         userId: user.id,
         businessName: data.businessName,
         gstNumber: data.gstNumber || null,
+        city: data.city || null,
         status: VendorStatus.ACTIVE,
       },
       include: { user: { select: { name: true, phone: true } } },
@@ -467,6 +469,61 @@ export class AdminService {
 
   async listCities() {
     return this.prisma.city.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  // Bulk activation — the single-city toggleCityActive() above still works for one-off
+  // changes; these cover "activate multiple", "activate all", "deactivate all" from the
+  // admin city-management UI without needing a code change or redeploy per city.
+  async bulkToggleCities(cityNames: string[], isActive: boolean) {
+    return this.prisma.city.updateMany({ where: { name: { in: cityNames } }, data: { isActive } });
+  }
+
+  async toggleAllCities(isActive: boolean) {
+    return this.prisma.city.updateMany({ data: { isActive } });
+  }
+
+  // Per-city counts for the admin city-management dashboard. Sellers/technicians are matched
+  // by their stored city string against City.name (case-insensitive) — the same loose-matching
+  // approach already used elsewhere in this codebase (e.g. vendors.module.ts availableJobs()).
+  async cityStats() {
+    const cities = await this.prisma.city.findMany({ orderBy: { name: 'asc' } });
+    const [sellers, technicians, products] = await Promise.all([
+      this.prisma.productVendor.findMany({ where: { city: { not: null } }, select: { city: true } }),
+      this.prisma.serviceVendor.findMany({ select: { baseCity: true } }),
+      this.prisma.product.findMany({ where: { vendor: { city: { not: null } } }, select: { vendor: { select: { city: true } } } }),
+    ]);
+
+    const norm = (s: string | null | undefined) => (s || '').trim().toLowerCase();
+    const countBy = <T,>(items: T[], keyFn: (item: T) => string) => {
+      const map = new Map<string, number>();
+      for (const item of items) {
+        const key = keyFn(item);
+        if (!key) continue;
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+      return map;
+    };
+    const sellerMap = countBy(sellers, (s) => norm(s.city));
+    const technicianMap = countBy(technicians, (t) => norm(t.baseCity));
+    const productMap = countBy(products, (p) => norm(p.vendor?.city));
+
+    const perCity = cities.map((c) => ({
+      name: c.name,
+      isActive: c.isActive,
+      sellerCount: sellerMap.get(norm(c.name)) || 0,
+      technicianCount: technicianMap.get(norm(c.name)) || 0,
+      productCount: productMap.get(norm(c.name)) || 0,
+      serviceAvailability: (c.activeServiceKeys || []).length,
+    }));
+
+    const activeCities = cities.filter((c) => c.isActive).length;
+    return {
+      totalCities: cities.length,
+      activeCities,
+      inactiveCities: cities.length - activeCities,
+      launchMode: activeCities <= 1 ? 'SINGLE_CITY' : 'MULTI_CITY',
+      cities: perCity,
+    };
   }
 
   // ─── Service Categories ──────────────────────────────────────────────
@@ -1611,7 +1668,14 @@ export class AdminController {
 
   // Cities
   @Get('cities') cities() { return this.admin.listCities(); }
+  @Get('cities/stats') citiesStats() { return this.admin.cityStats(); }
   @Post('cities') createCity(@Body() b: any) { return this.admin.createCity(b); }
+  // 'bulk' and 'all' must come before ':name' — same path depth, would otherwise be
+  // swallowed as a city name (same gotcha as the :slug routes elsewhere in this codebase).
+  @Patch('cities/bulk') bulkToggleCities(@Body() b: { cityNames: string[]; isActive: boolean }) {
+    return this.admin.bulkToggleCities(b.cityNames, b.isActive);
+  }
+  @Patch('cities/all') toggleAllCities(@Body() b: { isActive: boolean }) { return this.admin.toggleAllCities(b.isActive); }
   @Patch('cities/:name') updateCity(@Param('name') name: string, @Body() b: any) { return this.admin.updateCity(name, b); }
   @Patch('cities/:name/toggle') toggleCity(@Param('name') name: string, @Body() b: { isActive: boolean }) { return this.admin.toggleCityActive(name, b.isActive); }
 
