@@ -3212,14 +3212,18 @@
     <span data-setting="support-label">🕐 24/7 AI Chat Support</span>
   </div>
   <div class="right">
-    <span class="lang-toggle">🌐 EN / हिं</span>
+    <span class="lang-toggle">🌐
+      <button type="button" class="lang-btn active" id="lang-btn-en" onclick="setSiteLang('EN')" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0 2px">EN</button>
+      /
+      <button type="button" class="lang-btn" id="lang-btn-hi" onclick="setSiteLang('HI')" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0 2px">हिं</button>
+    </span>
     <span class="strip-divider"></span>
-    <a href="#vendor" class="strip-btn">🛠️ Become a Partner</a>
+    <a href="#vendor" class="strip-btn" data-en="🛠️ Become a Partner" data-hi="🛠️ पार्टनर बनें">🛠️ Become a Partner</a>
     <span class="strip-divider"></span>
-    <a href="#corporate" class="strip-btn">🏢 Corporate Login</a>
+    <a href="#corporate" class="strip-btn" data-en="🏢 Corporate Login" data-hi="🏢 कॉर्पोरेट लॉगिन">🏢 Corporate Login</a>
     <span class="strip-divider"></span>
-    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp" data-setting="whatsapp-link">💬 WhatsApp Book</a>
-    <a href="#" class="strip-btn highlight">📱 Download App</a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp" data-setting="whatsapp-link" data-en="💬 WhatsApp Book" data-hi="💬 WhatsApp पर बुक करें">💬 WhatsApp Book</a>
+    <a href="#" class="strip-btn highlight" data-en="📱 Download App" data-hi="📱 ऐप डाउनलोड करें">📱 Download App</a>
   </div>
 </div>
 
@@ -3236,10 +3240,10 @@
 
   <div class="header-search">
     <div class="cat-select" onclick="toggleSearchScope(this)" title="Switch between services and products">
-      <span id="searchScope">All Services</span>
+      <span id="searchScope" data-en="All Services" data-hi="सभी सेवाएं">All Services</span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
-    <input type="text" id="headerSearchInput" placeholder='Try "AC not cooling" or browse "modular kitchen"...' />
+    <input type="text" id="headerSearchInput" placeholder='Try "AC not cooling" or browse "modular kitchen"...' data-en-ph='Try "AC not cooling" or browse "modular kitchen"...' data-hi-ph='जैसे "AC ठंडा नहीं हो रहा" या "मॉड्यूलर किचन" खोजें...' />
     <button class="ai-mic-btn" aria-label="Voice search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
     </button>
@@ -3252,7 +3256,7 @@
   <div class="header-right">
     <div id="loc-indicator" onclick="openLocModal()" title="Your location — click to update" style="display:none">
       <span class="loc-dot" id="loc-dot"></span>
-      <span id="loc-indicator-text" style="font-size:11px;color:#6b7280;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Set location</span>
+      <span id="loc-indicator-text" style="font-size:11px;color:#6b7280;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-en="Set location" data-hi="स्थान चुनें">Set location</span>
     </div>
     <button class="icon-btn city-selector" onclick="openCityModal()" title="Change your city">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -3261,16 +3265,16 @@
     </button>
     <button class="icon-btn" onclick="openMyOrdersModal()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      <span class="label">My Orders</span>
+      <span class="label" data-en="My Orders" data-hi="मेरे ऑर्डर">My Orders</span>
     </button>
     <button class="icon-btn cart-btn" onclick="openCart()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-      <span class="label">Cart</span>
+      <span class="label" data-en="Cart" data-hi="कार्ट">Cart</span>
       <span class="badge" id="cartBadgeHeader"></span>
     </button>
     <button class="icon-btn profile-btn" onclick="openAccountSection()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span class="label">Account</span>
+      <span class="label" data-en="Account" data-hi="खाता">Account</span>
     </button>
     <button class="menu-icon" onclick="toggleMenu()" aria-label="Menu">
       <span></span><span></span><span></span>
@@ -3287,15 +3291,15 @@
   <!-- Location bar -->
   <div class="m-loc-bar">
     <span>📍</span>
-    <span>Delivering to: <strong id="m-loc-display">Set your location</strong></span>
-    <button class="m-loc-change" onclick="openLocModal()">Change</button>
+    <span><span data-en="Delivering to:" data-hi="डिलीवरी:">Delivering to:</span> <strong id="m-loc-display">Set your location</strong></span>
+    <button class="m-loc-change" onclick="openLocModal()" data-en="Change" data-hi="बदलें">Change</button>
   </div>
 
   <!-- Three Tabs -->
   <div class="m-tabs">
-    <button class="m-tab active" onclick="switchMTab('services',this)">🔧 Services</button>
-    <button class="m-tab" onclick="switchMTab('products',this)">🛒 Products</button>
-    <button class="m-tab" onclick="switchMTab('amc',this)">🛡 AMC Plans</button>
+    <button class="m-tab active" onclick="switchMTab('services',this)" data-en="🔧 Services" data-hi="🔧 सेवाएं">🔧 Services</button>
+    <button class="m-tab" onclick="switchMTab('products',this)" data-en="🛒 Products" data-hi="🛒 प्रोडक्ट्स">🛒 Products</button>
+    <button class="m-tab" onclick="switchMTab('amc',this)" data-en="🛡 AMC Plans" data-hi="🛡 AMC प्लान">🛡 AMC Plans</button>
   </div>
 
   <!-- ══ SERVICES TAB ══ -->
@@ -3303,42 +3307,42 @@
 
     <!-- Service Categories -->
     <div class="m-section">
-      <div class="m-sec-hd"><span>Service Categories</span><a onclick="openMobileCatalogPicker()">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Service Categories" data-hi="सर्विस कैटेगरी">Service Categories</span><a onclick="openMobileCatalogPicker()" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-cat-grid" id="m-cat-grid">
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('ac'))openBookingModal('','AC Service & Repair','₹399');closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name">AC Repair</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('plumbing'))openBookingModal('','Plumbing','₹299')"><div class="m-cat-icon">🔧</div><div class="m-cat-name">Plumbing</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('electrical'))openBookingModal('','Electrical Work','₹249')"><div class="m-cat-icon">⚡</div><div class="m-cat-name">Electrical</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('cleaning'))openBookingModal('','Deep Cleaning','₹699')"><div class="m-cat-icon">🧹</div><div class="m-cat-name">Cleaning</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('pest-control'))openBookingModal('','Pest Control','₹499')"><div class="m-cat-icon">🐛</div><div class="m-cat-name">Pest Control</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('painting'))openBookingModal('','Painting','₹1999')"><div class="m-cat-icon">🎨</div><div class="m-cat-name">Painting</div></div>
-        <div class="m-cat-item" onclick="if(!openMobileCatalog('appliance'))openBookingModal('','Appliance Repair','')"><div class="m-cat-icon">🔌</div><div class="m-cat-name">Appliance Repair</div></div>
-        <div class="m-cat-item" onclick="openMobileCatalogPicker()"><div class="m-cat-icon" style="background:#f0ede8">➕</div><div class="m-cat-name">More</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('ac'))openBookingModal('','AC Service & Repair','₹399');closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name" data-en="AC Repair" data-hi="AC रिपेयर">AC Repair</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('plumbing'))openBookingModal('','Plumbing','₹299')"><div class="m-cat-icon">🔧</div><div class="m-cat-name" data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('electrical'))openBookingModal('','Electrical Work','₹249')"><div class="m-cat-icon">⚡</div><div class="m-cat-name" data-en="Electrical" data-hi="इलेक्ट्रिकल">Electrical</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('cleaning'))openBookingModal('','Deep Cleaning','₹699')"><div class="m-cat-icon">🧹</div><div class="m-cat-name" data-en="Cleaning" data-hi="सफाई">Cleaning</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('pest-control'))openBookingModal('','Pest Control','₹499')"><div class="m-cat-icon">🐛</div><div class="m-cat-name" data-en="Pest Control" data-hi="पेस्ट कंट्रोल">Pest Control</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('painting'))openBookingModal('','Painting','₹1999')"><div class="m-cat-icon">🎨</div><div class="m-cat-name" data-en="Painting" data-hi="पेंटिंग">Painting</div></div>
+        <div class="m-cat-item" onclick="if(!openMobileCatalog('appliance'))openBookingModal('','Appliance Repair','')"><div class="m-cat-icon">🔌</div><div class="m-cat-name" data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</div></div>
+        <div class="m-cat-item" onclick="openMobileCatalogPicker()"><div class="m-cat-icon" style="background:#f0ede8">➕</div><div class="m-cat-name" data-en="More" data-hi="और">More</div></div>
       </div>
     </div>
 
     <!-- Popular Services -->
     <div class="m-section">
-      <div class="m-sec-hd"><span>Popular Services</span><a>View all</a></div>
+      <div class="m-sec-hd"><span data-en="Popular Services" data-hi="लोकप्रिय सेवाएं">Popular Services</span><a data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-svc-scroll" id="m-svc-scroll">
         <div class="m-svc-card" onclick="openBookingModal('','AC Service & Repair','₹399')">
           <div class="m-svc-img">❄️</div>
-          <div class="m-svc-body"><div class="m-svc-name">AC Repair</div><div class="m-svc-stars">⭐ 4.7 (12K+)</div><div class="m-svc-price">Starts at ₹399</div><button class="m-svc-btn">Book Now</button></div>
+          <div class="m-svc-body"><div class="m-svc-name" data-en="AC Repair" data-hi="AC रिपेयर">AC Repair</div><div class="m-svc-stars">⭐ 4.7 (12K+)</div><div class="m-svc-price" data-en="Starts at ₹399" data-hi="₹399 से शुरू">Starts at ₹399</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
         </div>
         <div class="m-svc-card" onclick="openBookingModal('','Plumbing','₹299')">
           <div class="m-svc-img">🔧</div>
-          <div class="m-svc-body"><div class="m-svc-name">Plumbing</div><div class="m-svc-stars">⭐ 4.6 (8K+)</div><div class="m-svc-price">Starts at ₹299</div><button class="m-svc-btn">Book Now</button></div>
+          <div class="m-svc-body"><div class="m-svc-name" data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</div><div class="m-svc-stars">⭐ 4.6 (8K+)</div><div class="m-svc-price" data-en="Starts at ₹299" data-hi="₹299 से शुरू">Starts at ₹299</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
         </div>
         <div class="m-svc-card" onclick="openBookingModal('','Electrical Work','₹249')">
           <div class="m-svc-img">⚡</div>
-          <div class="m-svc-body"><div class="m-svc-name">Electrical Repair</div><div class="m-svc-stars">⭐ 4.6 (7K+)</div><div class="m-svc-price">Starts at ₹249</div><button class="m-svc-btn">Book Now</button></div>
+          <div class="m-svc-body"><div class="m-svc-name" data-en="Electrical Repair" data-hi="इलेक्ट्रिकल रिपेयर">Electrical Repair</div><div class="m-svc-stars">⭐ 4.6 (7K+)</div><div class="m-svc-price" data-en="Starts at ₹249" data-hi="₹249 से शुरू">Starts at ₹249</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
         </div>
         <div class="m-svc-card" onclick="openBookingModal('','Deep Cleaning','₹699')">
           <div class="m-svc-img">🧹</div>
-          <div class="m-svc-body"><div class="m-svc-name">Deep Cleaning</div><div class="m-svc-stars">⭐ 4.5 (5K+)</div><div class="m-svc-price">Starts at ₹699</div><button class="m-svc-btn">Book Now</button></div>
+          <div class="m-svc-body"><div class="m-svc-name" data-en="Deep Cleaning" data-hi="डीप क्लीनिंग">Deep Cleaning</div><div class="m-svc-stars">⭐ 4.5 (5K+)</div><div class="m-svc-price" data-en="Starts at ₹699" data-hi="₹699 से शुरू">Starts at ₹699</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
         </div>
         <div class="m-svc-card" onclick="openBookingModal('','Pest Control','₹499')">
           <div class="m-svc-img">🐛</div>
-          <div class="m-svc-body"><div class="m-svc-name">Pest Control</div><div class="m-svc-stars">⭐ 4.8 (3K+)</div><div class="m-svc-price">Starts at ₹499</div><button class="m-svc-btn">Book Now</button></div>
+          <div class="m-svc-body"><div class="m-svc-name" data-en="Pest Control" data-hi="पेस्ट कंट्रोल">Pest Control</div><div class="m-svc-stars">⭐ 4.8 (3K+)</div><div class="m-svc-price" data-en="Starts at ₹499" data-hi="₹499 से शुरू">Starts at ₹499</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
         </div>
       </div>
     </div>
@@ -3346,17 +3350,17 @@
     <!-- Promo Banner -->
     <div class="m-promo">
       <div class="m-promo-body">
-        <div class="m-promo-tag">SUMMER OFFER</div>
-        <div class="m-promo-title">AC Service<br>Starting ₹399</div>
-        <div class="m-promo-sub">Expert Technicians | 60 Min Service</div>
-        <button class="m-promo-btn" onclick="openBookingModal('','AC Service & Repair','₹399')">Book Now</button>
+        <div class="m-promo-tag" data-en="SUMMER OFFER" data-hi="समर ऑफर">SUMMER OFFER</div>
+        <div class="m-promo-title" data-en="AC Service&lt;br&gt;Starting ₹399" data-hi="AC सर्विस&lt;br&gt;₹399 से शुरू">AC Service<br>Starting ₹399</div>
+        <div class="m-promo-sub" data-en="Expert Technicians | 60 Min Service" data-hi="एक्सपर्ट टेक्नीशियन | 60 मिनट सर्विस">Expert Technicians | 60 Min Service</div>
+        <button class="m-promo-btn" onclick="openBookingModal('','AC Service & Repair','₹399')" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button>
       </div>
       <div class="m-promo-img-wrap">❄️</div>
     </div>
 
     <!-- Top Selling Products (mini scroll, inside services tab) -->
     <div class="m-section">
-      <div class="m-sec-hd"><span>Top Selling Products</span><a onclick="switchMTab('products',null)">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a onclick="switchMTab('products',null)" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-prod-scroll" id="m-prod-scroll-svc"></div>
     </div>
     <div style="height:16px"></div>
@@ -3488,16 +3492,16 @@
 <!-- ═══ CATEGORY NAV ═══ -->
 <div class="cat-nav">
   <div class="cat-nav-inner">
-    <a href="#shop" class="cat-link active"><span class="ic">⚡</span> Quick Repair</a>
-    <a href="#shop" class="cat-link"><span class="ic">❄️</span> AC Service</a>
-    <a href="#shop" class="cat-link"><span class="ic">🔧</span> Plumbing</a>
-    <a href="#shop" class="cat-link"><span class="ic">💡</span> Electrical</a>
-    <a href="#shop" class="cat-link"><span class="ic">📺</span> Appliance Repair</a>
-    <a href="#shop" class="cat-link"><span class="ic">🧹</span> Cleaning</a>
-    <a href="#premium" class="cat-link premium-link"><span class="ic">✨</span> Interior · Renovation · Construction</a>
-    <a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>
-    <a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>
-    <a href="#corporate" class="cat-link"><span class="ic">🏢</span> For Business</a>
+    <a href="#shop" class="cat-link active"><span class="ic">⚡</span> <span data-en="Quick Repair" data-hi="त्वरित रिपेयर">Quick Repair</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">❄️</span> <span data-en="AC Service" data-hi="AC सर्विस">AC Service</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">🔧</span> <span data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">💡</span> <span data-en="Electrical" data-hi="इलेक्ट्रिकल">Electrical</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">📺</span> <span data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">🧹</span> <span data-en="Cleaning" data-hi="सफाई">Cleaning</span></a>
+    <a href="#premium" class="cat-link premium-link"><span class="ic">✨</span> <span data-en="Interior · Renovation · Construction" data-hi="इंटीरियर · रेनोवेशन · कंस्ट्रक्शन">Interior · Renovation · Construction</span></a>
+    <a href="#products" class="cat-link"><span class="ic">🛍️</span> <span data-en="Shop Products" data-hi="प्रोडक्ट्स खरीदें">Shop Products</span></a>
+    <a href="#amc" class="cat-link amc"><span class="ic">📅</span> <span data-en="AMC Plans" data-hi="AMC प्लान">AMC Plans</span></a>
+    <a href="#corporate" class="cat-link"><span class="ic">🏢</span> <span data-en="For Business" data-hi="बिज़नेस के लिए">For Business</span></a>
   </div>
 </div>
 
@@ -3511,20 +3515,20 @@
 
   <div class="hero-grid">
     <div class="slide-content">
-      <div class="slide-tag">AI-Powered Marketplace</div>
-      <h1 class="slide-h1">India's Smartest <em>Home Service</em><br>Platform — Book in 3 Clicks</h1>
-      <p class="slide-p">Tell our AI what's wrong — in Hindi, English, or Hinglish. We auto-match the best verified vendor near you. Live tracking, transparent GST invoices, secure payments.</p>
+      <div class="slide-tag" data-en="AI-Powered Marketplace" data-hi="AI-संचालित मार्केटप्लेस">AI-Powered Marketplace</div>
+      <h1 class="slide-h1" data-en="India's Smartest &lt;em&gt;Home Service&lt;/em&gt;&lt;br&gt;Platform — Book in 3 Clicks" data-hi="भारत का सबसे स्मार्ट &lt;em&gt;होम सर्विस&lt;/em&gt;&lt;br&gt;प्लेटफॉर्म — सिर्फ 3 क्लिक में बुक करें">India's Smartest <em>Home Service</em><br>Platform — Book in 3 Clicks</h1>
+      <p class="slide-p" data-en="Tell our AI what's wrong — in Hindi, English, or Hinglish. We auto-match the best verified vendor near you. Live tracking, transparent GST invoices, secure payments." data-hi="हमारी AI को बताएं क्या समस्या है — हिंदी, इंग्लिश या हिंग्लिश में। हम आपके पास के सबसे बेहतरीन वेरिफाइड वेंडर से तुरंत मैच करते हैं। लाइव ट्रैकिंग, पारदर्शी GST इनवॉइस, सुरक्षित पेमेंट।">Tell our AI what's wrong — in Hindi, English, or Hinglish. We auto-match the best verified vendor near you. Live tracking, transparent GST invoices, secure payments.</p>
       <div class="slide-actions">
         <button class="btn-hero">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          Try AI Chat Booking
+          <span data-en="Try AI Chat Booking" data-hi="AI चैट से बुक करें">Try AI Chat Booking</span>
         </button>
-        <button class="btn-ghost">Browse Services →</button>
+        <button class="btn-ghost" data-en="Browse Services →" data-hi="सेवाएं देखें →">Browse Services →</button>
       </div>
       <div class="slide-trust">
-        <div>⭐ <strong>4.8/5</strong> · 50K+ reviews</div>
-        <div>🛡️ <strong>Verified</strong> vendors</div>
-        <div>📍 <strong>32+</strong> cities</div>
+        <div>⭐ <strong>4.8/5</strong> · <span data-en="50K+ reviews" data-hi="50K+ रिव्यू">50K+ reviews</span></div>
+        <div>🛡️ <strong>Verified</strong> <span data-en="vendors" data-hi="वेंडर">vendors</span></div>
+        <div>📍 <strong>32+</strong> <span data-en="cities" data-hi="शहर">cities</span></div>
       </div>
     </div>
 
@@ -3576,14 +3580,14 @@
 <!-- ═══ BOOKING CHANNELS BANNER ═══ -->
 <div class="booking-channels">
   <div class="bc-inner">
-    <div class="bc-title">📡 Book via Any Channel</div>
+    <div class="bc-title" data-en="📡 Book via Any Channel" data-hi="📡 किसी भी चैनल से बुक करें">📡 Book via Any Channel</div>
     <div class="bc-channels">
-      <a href="#" class="bc-channel"><span class="icn">🌐</span> Website</a>
-      <a href="#" class="bc-channel"><span class="icn">📱</span> Mobile App</a>
+      <a href="#" class="bc-channel"><span class="icn">🌐</span> <span data-en="Website" data-hi="वेबसाइट">Website</span></a>
+      <a href="#" class="bc-channel"><span class="icn">📱</span> <span data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</span></a>
       <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
-      <a href="#" class="bc-channel"><span class="icn">🤖</span> AI Chat</a>
-      <a href="tel:+919876543210" class="bc-channel"><span class="icn">📞</span> Call Us</a>
-      <a href="#" class="bc-channel"><span class="icn">🎙️</span> Voice (Alexa)</a>
+      <a href="#" class="bc-channel"><span class="icn">🤖</span> <span data-en="AI Chat" data-hi="AI चैट">AI Chat</span></a>
+      <a href="tel:+919876543210" class="bc-channel"><span class="icn">📞</span> <span data-en="Call Us" data-hi="कॉल करें">Call Us</span></a>
+      <a href="#" class="bc-channel"><span class="icn">🎙️</span> <span data-en="Voice (Alexa)" data-hi="वॉइस (Alexa)">Voice (Alexa)</span></a>
     </div>
   </div>
 </div>
@@ -3593,76 +3597,76 @@
   <div class="shop-inner">
     <div class="shop-header reveal">
       <div>
-        <div class="section-label">Services + Products</div>
-        <h2>Pick a Service, <strong>Shop Related Products</strong></h2>
+        <div class="section-label" data-en="Services + Products" data-hi="सेवाएं + प्रोडक्ट्स">Services + Products</div>
+        <h2 data-en="Pick a Service, &lt;strong&gt;Shop Related Products&lt;/strong&gt;" data-hi="सेवा चुनें, &lt;strong&gt;संबंधित प्रोडक्ट्स खरीदें&lt;/strong&gt;">Pick a Service, <strong>Shop Related Products</strong></h2>
       </div>
-      <a href="#" class="btn-outline">Browse All →</a>
+      <a href="#" class="btn-outline" data-en="Browse All →" data-hi="सभी देखें →">Browse All →</a>
     </div>
 
     <div class="shop-grid reveal">
       <div class="svc-panel">
-        <div class="svc-panel-title">Select a Service</div>
+        <div class="svc-panel-title" data-en="Select a Service" data-hi="सेवा चुनें">Select a Service</div>
         <div class="svc-item active" data-svc="ac" onclick="switchService(this)">
           <div class="svc-icon-box"><span>❄️</span></div>
           <div class="svc-text">
-            <h4>AC Service & Repair</h4>
-            <p>Installation, gas refill, deep clean</p>
+            <h4 data-en="AC Service & Repair" data-hi="AC सर्विस और रिपेयर">AC Service & Repair</h4>
+            <p data-en="Installation, gas refill, deep clean" data-hi="इंस्टॉलेशन, गैस रिफिल, डीप क्लीन">Installation, gas refill, deep clean</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="plumbing" onclick="switchService(this)">
           <div class="svc-icon-box"><span>🚿</span></div>
           <div class="svc-text">
-            <h4>Plumbing</h4>
-            <p>Leaks, fittings, bathroom</p>
+            <h4 data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</h4>
+            <p data-en="Leaks, fittings, bathroom" data-hi="लीकेज, फिटिंग, बाथरूम">Leaks, fittings, bathroom</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="electrical" onclick="switchService(this)">
           <div class="svc-icon-box"><span>💡</span></div>
           <div class="svc-text">
-            <h4>Electrical Work</h4>
-            <p>Wiring, fittings, smart home</p>
+            <h4 data-en="Electrical Work" data-hi="इलेक्ट्रिकल वर्क">Electrical Work</h4>
+            <p data-en="Wiring, fittings, smart home" data-hi="वायरिंग, फिटिंग, स्मार्ट होम">Wiring, fittings, smart home</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="appliance" onclick="switchService(this)">
           <div class="svc-icon-box"><span>📺</span></div>
           <div class="svc-text">
-            <h4>Appliance Repair</h4>
-            <p>TV, fridge, washing machine</p>
+            <h4 data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</h4>
+            <p data-en="TV, fridge, washing machine" data-hi="TV, फ्रिज, वाशिंग मशीन">TV, fridge, washing machine</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="interior" onclick="switchService(this)">
           <div class="svc-icon-box"><span>🛋️</span></div>
           <div class="svc-text">
-            <h4>Interior Design</h4>
-            <p>Full home, room makeovers</p>
+            <h4 data-en="Interior Design" data-hi="इंटीरियर डिज़ाइन">Interior Design</h4>
+            <p data-en="Full home, room makeovers" data-hi="फुल होम, रूम मेकओवर">Full home, room makeovers</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="renovation" onclick="switchService(this)">
           <div class="svc-icon-box"><span>🔨</span></div>
           <div class="svc-text">
-            <h4>Renovation</h4>
-            <p>Kitchen, bathroom, full home</p>
+            <h4 data-en="Renovation" data-hi="रेनोवेशन">Renovation</h4>
+            <p data-en="Kitchen, bathroom, full home" data-hi="किचन, बाथरूम, फुल होम">Kitchen, bathroom, full home</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="construction" onclick="switchService(this)">
           <div class="svc-icon-box"><span>🏗️</span></div>
           <div class="svc-text">
-            <h4>Construction</h4>
-            <p>Site visits, full project mgmt</p>
+            <h4 data-en="Construction" data-hi="कंस्ट्रक्शन">Construction</h4>
+            <p data-en="Site visits, full project mgmt" data-hi="साइट विज़िट, फुल प्रोजेक्ट मैनेजमेंट">Site visits, full project mgmt</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
         <div class="svc-item" data-svc="cleaning" onclick="switchService(this)">
           <div class="svc-icon-box"><span>🧹</span></div>
           <div class="svc-text">
-            <h4>Home Cleaning</h4>
-            <p>Deep clean, sofa, pest control</p>
+            <h4 data-en="Home Cleaning" data-hi="होम क्लीनिंग">Home Cleaning</h4>
+            <p data-en="Deep clean, sofa, pest control" data-hi="डीप क्लीन, सोफा, पेस्ट कंट्रोल">Deep clean, sofa, pest control</p>
           </div>
           <span class="svc-arrow">→</span>
         </div>
@@ -3677,71 +3681,71 @@
 <section id="premium" class="std">
   <div class="inner">
     <div class="premium-head reveal">
-      <div class="premium-badge">✨ Premium Services</div>
-      <h2 class="section-title">When You Want<br><strong>Something Extraordinary</strong></h2>
-      <p class="section-sub" style="margin: 14px auto 0;">From bespoke interiors to ground-up construction — premium projects delivered by hand-picked designers, architects, and master craftsmen.</p>
+      <div class="premium-badge" data-en="✨ Premium Services" data-hi="✨ प्रीमियम सेवाएं">✨ Premium Services</div>
+      <h2 class="section-title" data-en="When You Want&lt;br&gt;&lt;strong&gt;Something Extraordinary&lt;/strong&gt;" data-hi="जब आपको चाहिए&lt;br&gt;&lt;strong&gt;कुछ असाधारण&lt;/strong&gt;">When You Want<br><strong>Something Extraordinary</strong></h2>
+      <p class="section-sub" style="margin: 14px auto 0;" data-en="From bespoke interiors to ground-up construction — premium projects delivered by hand-picked designers, architects, and master craftsmen." data-hi="कस्टम इंटीरियर से लेकर ग्राउंड-अप कंस्ट्रक्शन तक — प्रीमियम प्रोजेक्ट्स, चुनिंदा डिज़ाइनर, आर्किटेक्ट और मास्टर क्राफ्ट्समैन द्वारा।">From bespoke interiors to ground-up construction — premium projects delivered by hand-picked designers, architects, and master craftsmen.</p>
     </div>
 
     <div class="premium-grid">
       <div class="premium-card interior reveal">
         <div class="premium-card-img">
-          <span class="premium-card-tag">Interior</span>
+          <span class="premium-card-tag" data-en="Interior" data-hi="इंटीरियर">Interior</span>
           <span class="premium-availability">Available in your city</span>
         </div>
         <div class="premium-card-body">
-          <h3>Interior Design<br>& Makeover</h3>
-          <p>Full-home interior design with 3D visualization, modular furniture, and turnkey execution.</p>
+          <h3 data-en="Interior Design&lt;br&gt;& Makeover" data-hi="इंटीरियर डिज़ाइन&lt;br&gt;और मेकओवर">Interior Design<br>& Makeover</h3>
+          <p data-en="Full-home interior design with 3D visualization, modular furniture, and turnkey execution." data-hi="फुल-होम इंटीरियर डिज़ाइन, 3D विज़ुअलाइज़ेशन, मॉड्यूलर फर्नीचर और टर्नकी एग्ज़ीक्यूशन के साथ।">Full-home interior design with 3D visualization, modular furniture, and turnkey execution.</p>
           <ul class="premium-features">
-            <li>Free 3D design consultation</li>
-            <li>Dedicated interior designer</li>
-            <li>Premium materials & finishes</li>
-            <li>10-year structural warranty</li>
+            <li data-en="Free 3D design consultation" data-hi="फ्री 3D डिज़ाइन कंसल्टेशन">Free 3D design consultation</li>
+            <li data-en="Dedicated interior designer" data-hi="डेडिकेटेड इंटीरियर डिज़ाइनर">Dedicated interior designer</li>
+            <li data-en="Premium materials & finishes" data-hi="प्रीमियम मटीरियल और फिनिश">Premium materials & finishes</li>
+            <li data-en="10-year structural warranty" data-hi="10-साल स्ट्रक्चरल वारंटी">10-year structural warranty</li>
           </ul>
           <div class="premium-meta">
-            <div class="premium-price">₹2L<small> onwards</small></div>
-            <button class="premium-cta">Book Consultation →</button>
+            <div class="premium-price">₹2L<small data-en=" onwards" data-hi=" से शुरू"> onwards</small></div>
+            <button class="premium-cta" data-en="Book Consultation →" data-hi="कंसल्टेशन बुक करें →">Book Consultation →</button>
           </div>
         </div>
       </div>
 
       <div class="premium-card renovation reveal reveal-d2">
         <div class="premium-card-img">
-          <span class="premium-card-tag">Renovation</span>
+          <span class="premium-card-tag" data-en="Renovation" data-hi="रेनोवेशन">Renovation</span>
           <span class="premium-availability">Available in your city</span>
         </div>
         <div class="premium-card-body">
-          <h3>Kitchen & Bath<br>Renovation</h3>
-          <p>Premium modular kitchens, luxury bathrooms, and full-home renovations done by master craftsmen.</p>
+          <h3 data-en="Kitchen & Bath&lt;br&gt;Renovation" data-hi="किचन और बाथ&lt;br&gt;रेनोवेशन">Kitchen & Bath<br>Renovation</h3>
+          <p data-en="Premium modular kitchens, luxury bathrooms, and full-home renovations done by master craftsmen." data-hi="प्रीमियम मॉड्यूलर किचन, लग्ज़री बाथरूम और फुल-होम रेनोवेशन, मास्टर क्राफ्ट्समैन द्वारा।">Premium modular kitchens, luxury bathrooms, and full-home renovations done by master craftsmen.</p>
           <ul class="premium-features">
-            <li>Modular kitchen specialists</li>
-            <li>Italian marble & premium tiles</li>
-            <li>Project manager assigned</li>
-            <li>On-time delivery guarantee</li>
+            <li data-en="Modular kitchen specialists" data-hi="मॉड्यूलर किचन स्पेशलिस्ट">Modular kitchen specialists</li>
+            <li data-en="Italian marble & premium tiles" data-hi="इटैलियन मार्बल और प्रीमियम टाइल्स">Italian marble & premium tiles</li>
+            <li data-en="Project manager assigned" data-hi="प्रोजेक्ट मैनेजर असाइन्ड">Project manager assigned</li>
+            <li data-en="On-time delivery guarantee" data-hi="ऑन-टाइम डिलीवरी गारंटी">On-time delivery guarantee</li>
           </ul>
           <div class="premium-meta">
-            <div class="premium-price">₹1.2L<small> onwards</small></div>
-            <button class="premium-cta">Get Free Quote →</button>
+            <div class="premium-price">₹1.2L<small data-en=" onwards" data-hi=" से शुरू"> onwards</small></div>
+            <button class="premium-cta" data-en="Get Free Quote →" data-hi="फ्री कोटेशन पाएं →">Get Free Quote →</button>
           </div>
         </div>
       </div>
 
       <div class="premium-card construction reveal reveal-d3">
         <div class="premium-card-img">
-          <span class="premium-card-tag">Construction</span>
+          <span class="premium-card-tag" data-en="Construction" data-hi="कंस्ट्रक्शन">Construction</span>
           <span class="premium-availability">Available in your city</span>
         </div>
         <div class="premium-card-body">
-          <h3>New Build<br>Construction</h3>
-          <p>Ground-up construction with architects, structural engineers, and complete project management.</p>
+          <h3 data-en="New Build&lt;br&gt;Construction" data-hi="नया निर्माण&lt;br&gt;कंस्ट्रक्शन">New Build<br>Construction</h3>
+          <p data-en="Ground-up construction with architects, structural engineers, and complete project management." data-hi="ग्राउंड-अप कंस्ट्रक्शन, आर्किटेक्ट्स, स्ट्रक्चरल इंजीनियर्स और कम्प्लीट प्रोजेक्ट मैनेजमेंट के साथ।">Ground-up construction with architects, structural engineers, and complete project management.</p>
           <ul class="premium-features">
-            <li>Architect-led design</li>
-            <li>Vastu-compliant planning</li>
-            <li>BBMP/local approvals support</li>
-            <li>Milestone-based payments</li>
+            <li data-en="Architect-led design" data-hi="आर्किटेक्ट-लेड डिज़ाइन">Architect-led design</li>
+            <li data-en="Vastu-compliant planning" data-hi="वास्तु-अनुकूल प्लानिंग">Vastu-compliant planning</li>
+            <li data-en="BBMP/local approvals support" data-hi="BBMP/लोकल अप्रूवल सपोर्ट">BBMP/local approvals support</li>
+            <li data-en="Milestone-based payments" data-hi="माइलस्टोन-आधारित पेमेंट">Milestone-based payments</li>
           </ul>
           <div class="premium-meta">
-            <div class="premium-price">₹1500<small>/sqft onwards</small></div>
-            <button class="premium-cta">Schedule Site Visit →</button>
+            <div class="premium-price">₹1500<small data-en="/sqft onwards" data-hi="/sqft से शुरू">/sqft onwards</small></div>
+            <button class="premium-cta" data-en="Schedule Site Visit →" data-hi="साइट विज़िट शेड्यूल करें →">Schedule Site Visit →</button>
           </div>
         </div>
       </div>
@@ -3749,10 +3753,10 @@
 
     <div class="premium-strip reveal reveal-d4">
       <div>
-        <h4>Not sure where to start?</h4>
-        <p>Talk to our senior project consultant — 30-minute free consultation, no obligation.</p>
+        <h4 data-en="Not sure where to start?" data-hi="शुरुआत कहां से करें, समझ नहीं आ रहा?">Not sure where to start?</h4>
+        <p data-en="Talk to our senior project consultant — 30-minute free consultation, no obligation." data-hi="हमारे सीनियर प्रोजेक्ट कंसल्टेंट से बात करें — 30-मिनट की फ्री कंसल्टेशन, कोई बाध्यता नहीं।">Talk to our senior project consultant — 30-minute free consultation, no obligation.</p>
       </div>
-      <a href="#" class="ps-btn">Book Free Consultation →</a>
+      <a href="#" class="ps-btn" data-en="Book Free Consultation →" data-hi="फ्री कंसल्टेशन बुक करें →">Book Free Consultation →</a>
     </div>
   </div>
 </section>
@@ -5211,6 +5215,36 @@
 
   function toggleMenu() { document.getElementById('mobileNav').classList.toggle('open'); }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // SITE LANGUAGE TOGGLE (EN / हिंदी) — static UI text only.
+  // "Remont" / "Remont India" brand name is never translated.
+  // ═══════════════════════════════════════════════════════════════════
+  var siteLang = localStorage.getItem('remont_lang') || 'EN';
+
+  function applySiteLang() {
+    var btnEn = document.getElementById('lang-btn-en');
+    var btnHi = document.getElementById('lang-btn-hi');
+    if (btnEn) btnEn.classList.toggle('active', siteLang === 'EN');
+    if (btnHi) btnHi.classList.toggle('active', siteLang === 'HI');
+    document.querySelectorAll('[data-en]').forEach(function (el) {
+      var val = siteLang === 'HI' ? el.getAttribute('data-hi') : el.getAttribute('data-en');
+      if (val !== null) el.innerHTML = val;
+    });
+    document.querySelectorAll('[data-en-ph]').forEach(function (el) {
+      var val = siteLang === 'HI' ? el.getAttribute('data-hi-ph') : el.getAttribute('data-en-ph');
+      if (val !== null) el.placeholder = val;
+    });
+    document.documentElement.setAttribute('lang', siteLang === 'HI' ? 'hi' : 'en');
+  }
+
+  function setSiteLang(l) {
+    siteLang = l;
+    localStorage.setItem('remont_lang', l);
+    applySiteLang();
+  }
+
+  applySiteLang();
+
   function toggleFaq(btn) {
     const item = btn.closest('.faq-item');
     const wasOpen = item.classList.contains('open');
@@ -5345,13 +5379,21 @@
   function toggleSearchScope(el) {
     const scope = document.getElementById('searchScope');
     const input = document.getElementById('headerSearchInput');
-    if (scope.textContent === 'All Services') {
-      scope.textContent = 'All Products';
-      input.placeholder = 'Search products — "Daikin AC", "modular kitchen"...';
+    const toProducts = scope.dataset.scope !== 'products';
+    scope.dataset.scope = toProducts ? 'products' : 'services';
+    if (toProducts) {
+      scope.setAttribute('data-en', 'All Products');
+      scope.setAttribute('data-hi', 'सभी प्रोडक्ट्स');
+      input.setAttribute('data-en-ph', 'Search products — "Daikin AC", "modular kitchen"...');
+      input.setAttribute('data-hi-ph', 'जैसे "Daikin AC" या "मॉड्यूलर किचन" खोजें...');
     } else {
-      scope.textContent = 'All Services';
-      input.placeholder = 'Try "AC not cooling" or "tap leaking"...';
+      scope.setAttribute('data-en', 'All Services');
+      scope.setAttribute('data-hi', 'सभी सेवाएं');
+      input.setAttribute('data-en-ph', 'Try "AC not cooling" or "tap leaking"...');
+      input.setAttribute('data-hi-ph', 'जैसे "AC ठंडा नहीं हो रहा" या "टोंटी लीक हो रही" खोजें...');
     }
+    scope.textContent = (typeof siteLang !== 'undefined' && siteLang === 'HI') ? scope.getAttribute('data-hi') : scope.getAttribute('data-en');
+    input.placeholder = (typeof siteLang !== 'undefined' && siteLang === 'HI') ? input.getAttribute('data-hi-ph') : input.getAttribute('data-en-ph');
   }
 </script>
 
