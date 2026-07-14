@@ -96,6 +96,27 @@ Seller Dashboard (full) · Product Management (full) · Order Management actions
 Returns/Replacement/Refund · Wallet & Settlement · Reports · Notifications (partial —
 WhatsApp only, no email/SMS provider).
 
+## Bug fix — Cart billing showing ₹0 (deployed & verified, 2026-07-13)
+
+Root cause: fallback `serviceData` (rendered before the live API responds)
+had no `pNum` numeric field on its 32 `subServices` entries — the "+ Cart"
+button sent `price: 0`. First fix commit (`39012d7`) was only committed
+locally per instruction to wait for approval; live site kept failing until
+pushed. **Pushed and verified against the actual production URL**
+(`remont-platform-five.vercel.app`) via a real button click, not just a
+local file check — Subtotal ₹999 / GST ₹179.82 / Total ₹1,178.82.
+
+**Separate finding, not a code bug:** the custom domain `remontindia.com`
+does not point at this Vercel project at all — it currently serves an
+unrelated legacy PHP/CodeIgniter site. If that's the URL being used to
+test, no frontend fix here will ever be visible there until DNS/domain
+is repointed to the Vercel deployment. Flagged to the user; not touched.
+
+**Also noted, not fixed (out of scope for this task):** fallback
+`subServices` entries have no `id` field, so cart items sourced from
+fallback data get `id: "undefined"` (string) — doesn't affect billing but
+could cause incorrect item de-duplication in `addToCart()`.
+
 ## Bug fix — Language toggle (complete, 2026-07-13)
 
 | # | Task | Status |
