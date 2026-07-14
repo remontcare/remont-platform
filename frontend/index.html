@@ -8493,8 +8493,14 @@ function cancelOrderFromList(orderId) {
         '<div class="m-prod-name">' + p.name + '</div>' +
         '<div class="m-prod-stars">' + p.rating + '</div>' +
         '<div class="m-prod-prices"><span class="m-prod-price">' + p.price + '</span><span class="m-prod-mrp">' + p.mrp + '</span></div>' +
-        '<button class="m-prod-cart-btn" onclick="showToast(\'Added to cart\',\'success\')">Add to Cart</button>' +
+        '<button class="m-prod-cart-btn">Add to Cart</button>' +
       '</div>';
+    var priceNum = parseFloat(String(p.price).replace(/[^0-9.]/g, '')) || 0;
+    var prodId = p.id || ('mprod-' + String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+    el.querySelector('.m-prod-cart-btn').onclick = function(e) {
+      e.stopPropagation();
+      addToCart({ id: prodId, name: p.name, price: priceNum, type: 'product' });
+    };
     return el;
   }
 
@@ -8536,8 +8542,12 @@ function cancelOrderFromList(orderId) {
             '<div class="m-prod-name">' + (p.name||'') + '</div>' +
             '<div class="m-prod-prices"><span class="m-prod-price">₹' + Number(p.price||0).toLocaleString('en-IN') + '</span>' +
             (p.mrp ? '<span class="m-prod-mrp">₹' + Number(p.mrp).toLocaleString('en-IN') + '</span>' : '') + '</div>' +
-            '<button class="m-prod-cart-btn" onclick="showToast(\'Added to cart\',\'success\')">Add to Cart</button>' +
+            '<button class="m-prod-cart-btn">Add to Cart</button>' +
           '</div>';
+        card.querySelector('.m-prod-cart-btn').onclick = function(e) {
+          e.stopPropagation();
+          addToCart({ id: p.id || ('mprod-' + String(p.name||'').toLowerCase().replace(/[^a-z0-9]+/g, '-')), name: p.name || 'Product', price: Number(p.price || 0), type: 'product' });
+        };
         container.appendChild(card);
       });
     });
