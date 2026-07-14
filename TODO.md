@@ -96,14 +96,30 @@ Seller Dashboard (full) · Product Management (full) · Order Management actions
 Returns/Replacement/Refund · Wallet & Settlement · Reports · Notifications (partial —
 WhatsApp only, no email/SMS provider).
 
+## Bug fix — Language toggle (complete, 2026-07-13)
+
+| # | Task | Status |
+|---|---|---|
+| 1 | Wire up `EN/हिं` toggle (`setSiteLang`/`applySiteLang`) + `localStorage` persistence | ✅ |
+| 2 | `data-en`/`data-hi` coverage across the entire static landing page (394 elements) | ✅ |
+| 3 | Fix `innerHTML` vs `textContent` so embedded `<em>`/`<br>`/`<strong>` render correctly | ✅ |
+| 4 | Keep "Remont India" brand name untranslated in Hindi | ✅ |
+| 5 | Syntax check + Playwright local render/toggle verification | ✅ |
+
+**Known gap, not started:** dynamic/API-rendered content (service display panel,
+product cards inside it) has no translation — would need real i18n on the API
+response, not a static toggle. Modals beyond the footer (cart, checkout, login,
+city picker) are also not yet covered — raise with user if they want that extended.
+
 ## Possible follow-on items (not started, not committed to — raise with user before building)
 
 - Seller can't currently see order-detail (customer address/phone) beyond what `myOrders()` returns — may want a detail view if sellers ask for it.
 - No email/SMS notification to a seller when a new order containing their product arrives — currently they must check the portal.
 - No password/PIN recovery UI needed (OTP-only login has no such concept) — non-issue, noting for completeness.
 
-## Explicitly not on this list (deferred — see `PROJECT_ROADMAP.md`)
+## Explicitly still deferred (see `PROJECT_ROADMAP.md`)
 
-Seller KYC documents, public seller registration, bulk upload, commission
-automation/wallet/ledger, multi-warehouse, courier integration, AI product
-enrichment, fuzzy/voice/image search, bundling engine.
+Bulk product upload, third-party courier integration, AI product enrichment,
+fuzzy/voice/image search, bundling engine. (Seller KYC documents, public seller
+registration, and multi-warehouse/location inventory are **no longer deferred** —
+reversed 2026-07-11, see Phase 2 above.)

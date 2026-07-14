@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-07-13 — Fix: EN/Hindi language toggle on customer site
+
+**Summary:** The header's `🌐 EN / हिं` language toggle was pure static markup —
+no click handler, no `data-en`/`data-hi` infrastructure, nothing (confirmed via
+grep: zero matches in `index.html` prior to this fix, unlike the working
+implementations already present in `vendor.html`/`partner-register.html`). Rebuilt
+it to a real clickable EN/हिं button pair wired to a new `setSiteLang()` /
+`applySiteLang()` pair (mirrors the proven `vendor.html` pattern), with
+`localStorage` persistence (`remont_lang`). Added `data-en`/`data-hi` attributes
+across the entire static landing page — top strip, header/search, mobile app UI,
+category nav, hero, premium showcase, 3-click promise, dispatch/live-tracking demo,
+budget estimator, hot deals, AMC plans, corporate portal, trust section, partner/
+vendor section, cities, FAQ, app download CTA, and footer (394 translated elements
+total). "Remont India" brand name is never translated in Hindi, per explicit
+instruction. `applySiteLang()` swaps `innerHTML` (not `textContent`) so headings
+that embed `<em>`/`<br>`/`<strong>` inside their translated string render correctly
+instead of showing literal tags.
+
+**Known scope limit (unchanged, by design):** content rendered dynamically from the
+live API — the service display panel, product listings inside it, city-filtered
+availability badges — is not covered by this static toggle; only genuinely static
+UI chrome is translated. `data-setting`-driven admin-configurable text (site name/
+tagline/description, support phone/email) is untouched — those elements only ever
+render whatever the admin configured, never a translated variant.
+
+**Files modified:** `frontend/index.html`
+**DB/API changes:** none (pure frontend/static change)
+**Verified:** all 6 inline `<script>` blocks syntax-checked (0 errors); local
+Playwright render test confirmed toggling to Hindi correctly translates header/hero/
+FAQ/vendor-section text, keeps "Remont India" untranslated, keeps `<em>`/`<br>`
+formatting intact, persists via `localStorage`, and toggling back to English
+restores the original text with zero console errors. Screenshot-verified visually.
+
+---
+
 ## 2026-07-11 — UI: "Join as Seller Partner" button
 
 **Summary:** Single additive UI change per explicit narrow-scope instruction — added
