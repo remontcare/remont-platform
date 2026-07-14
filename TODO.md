@@ -96,6 +96,24 @@ Seller Dashboard (full) · Product Management (full) · Order Management actions
 Returns/Replacement/Refund · Wallet & Settlement · Reports · Notifications (partial —
 WhatsApp only, no email/SMS provider).
 
+## Bug fix — Mobile product Add to Cart doing nothing (deployed & verified, 2026-07-13)
+
+Root cause: both mobile product card renderers (`makeProdCard()` fallback
++ the API-loaded product list, inside the `window.innerWidth > 768`-guarded
+mobile IIFE) had their "Add to Cart" button wired to
+`onclick="showToast('Added to cart','success')"` only — a fake success
+toast, no actual `addToCart()` call. Nothing was ever written to
+`localStorage`, so price never appeared and a second product never showed
+either (nothing was ever really added in the first place). Desktop's
+`.product-cta` path was verified separately and was never affected.
+
+Fixed by wiring a real click handler that calls the existing
+`addToCart({id, name, price, type:'product'})` — same function the working
+desktop path already uses. Pushed (`eda15cd`) and verified against the
+live production URL (`remont-platform-five.vercel.app`) with real clicks
+in mobile emulation: two different products added correctly with real
+prices (₹32,999 and ₹11,499), no console errors.
+
 ## Bug fix — Cart billing showing ₹0 (deployed & verified, 2026-07-13)
 
 Root cause: fallback `serviceData` (rendered before the live API responds)
