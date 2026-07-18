@@ -5,45 +5,109 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Remont Admin — Login</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<div class="login-page">
-  <div class="login-beams"></div>
-  <div class="login-orb orb-1"></div>
-  <div class="login-orb orb-2"></div>
-  <div class="login-floor"></div>
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="ll-circle">R</div>
-      <h1>Remont India</h1>
-      <p>Platform Administration</p>
-      <div class="badge-admin">ADMIN PANEL</div>
-    </div>
 
-    <div id="err" class="error-msg"></div>
+<div class="admin-landing">
+  <!-- Background scenes — pure CSS, no photos, crossfade every ~9s -->
+  <div class="scene scene-office active"></div>
+  <div class="scene scene-architecture"></div>
+  <div class="scene scene-interior"></div>
+  <div class="scene scene-construction"></div>
+  <div class="scene scene-homes"></div>
+  <div class="scene scene-smart"></div>
+  <div class="scene-overlay"></div>
 
-    <div class="form-group">
-      <label class="form-label">Phone Number</label>
-      <div class="login-input-wrap">
-        <span class="li-icon">📱</span>
-        <input id="phone" class="form-control" type="tel" placeholder="Enter phone number">
+  <header class="hero-topbar">
+    <div class="hero-brand">
+      <div class="ll-circle"><svg viewBox="0 0 24 24"><path d="M12 3.2 3 10.5V21h6v-6h6v6h6V10.5L12 3.2z"/></svg></div>
+      <div class="hero-brand-text">
+        <strong>Remont India</strong>
+        <span>Platform Administration</span>
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Admin PIN</label>
-      <div class="login-input-wrap">
-        <span class="li-icon">🔒</span>
-        <input id="pin" class="form-control" type="password" placeholder="Enter Admin PIN">
-      </div>
+    <div class="secure-badge">
+      <span class="dot-live"></span> Secure Access · 24×7 Protected
     </div>
-    <button id="login-btn" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">
-      Login to Admin Panel
+  </header>
+
+  <main class="hero-center">
+    <p class="hero-eyebrow">Enterprise Admin Portal</p>
+    <h1 class="hero-title">Building India's Smart Property Platform</h1>
+    <p class="hero-subtitle">One Platform. All Solutions.</p>
+
+    <div class="service-row">
+      <span class="service-chip">🏗️ Construction</span>
+      <span class="service-chip">🔨 Renovation</span>
+      <span class="service-chip">🛋️ Interiors</span>
+      <span class="service-chip">🔧 Maintenance</span>
+      <span class="service-chip">💧 Waterproofing</span>
+      <span class="service-chip">🏢 Property Management</span>
+    </div>
+
+    <button class="admin-login-cta" onclick="openLoginModal()">
+      <span>ADMIN LOGIN</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </button>
+  </main>
 
-    <div class="login-footer" style="margin-top:16px">
-      🔐 Uses Phone + Admin PIN (set ADMIN_PIN on Railway)
+  <div class="stats-bar">
+    <div class="stat-pill"><strong>5000+</strong><span>Projects</span></div>
+    <div class="stat-pill"><strong>2500+</strong><span>Happy Clients</span></div>
+    <div class="stat-pill"><strong>1200+</strong><span>Partners</span></div>
+    <div class="stat-pill"><strong>24×7</strong><span>Support</span></div>
+    <div class="stat-pill"><strong>100%</strong><span>Secure</span></div>
+  </div>
+
+  <footer class="hero-footer">
+    © 2026 Remont India Pvt Ltd &nbsp;·&nbsp; Version 3.0 Enterprise &nbsp;·&nbsp; Powered by Remont AI
+  </footer>
+</div>
+
+<!-- Login modal — hidden until "ADMIN LOGIN" is clicked -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="login-modal-frame">
+    <div class="login-modal">
+      <button type="button" class="modal-close" onclick="closeLoginModal()" aria-label="Close">✕</button>
+
+      <div class="login-logo">
+        <div class="ll-circle"><svg viewBox="0 0 24 24"><path d="M12 3.2 3 10.5V21h6v-6h6v6h6V10.5L12 3.2z"/></svg></div>
+      </div>
+      <h2>Welcome Back, Admin</h2>
+      <p class="modal-sub">Building India's Smart Property Platform</p>
+
+      <div id="err" class="error-msg"></div>
+
+      <div class="form-group">
+        <label class="form-label">Phone Number</label>
+        <div class="login-input-wrap">
+          <span class="li-icon">📱</span>
+          <input id="phone" class="form-control" type="tel" placeholder="Enter phone number">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Admin PIN</label>
+        <div class="login-input-wrap">
+          <span class="li-icon">🔒</span>
+          <input id="pin" class="form-control" type="password" placeholder="Enter Admin PIN">
+          <button type="button" class="pin-toggle" id="pin-toggle" onclick="togglePin()" aria-label="Show PIN">👁</button>
+        </div>
+      </div>
+
+      <div class="modal-row">
+        <label class="remember-check"><input type="checkbox" checked> Remember me</label>
+        <a href="#" class="forgot-link" onclick="showForgotHint(event)">Forgot PIN?</a>
+      </div>
+
+      <button id="login-btn" class="btn btn-primary" onclick="doLogin()">
+        LOGIN TO ADMIN DASHBOARD →
+      </button>
+
+      <div class="modal-trust-row">
+        <span>🔒 SSL Protected</span><span>🛡️ AES-256 Encryption</span><span>✅ Secure Access</span>
+      </div>
     </div>
   </div>
 </div>
@@ -52,23 +116,24 @@
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 
 // Logo — admin-configurable from Settings → Brand & General → "Logo Image URL".
-// Falls back to the "R" mark (default markup) if unset, unreachable, or the image fails to load.
+// Updates every ".ll-circle" on the page (top bar + modal). Falls back to the
+// default house/pin mark if unset, unreachable, or the image fails to load.
 (function(){
   fetch(API_BASE + '/api/v1/cms/settings?group=general')
     .then(function(r){ return r.json(); })
     .then(function(d){
       var url = d && d.data && d.data.logo_url;
       if (!url) return;
-      var circle = document.querySelector('.ll-circle');
-      if (!circle) return;
-      var img = new Image();
-      img.onload = function(){
-        img.alt = 'Logo';
-        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:inherit';
-        circle.textContent = '';
-        circle.appendChild(img);
-      };
-      img.src = url;
+      document.querySelectorAll('.ll-circle').forEach(function(circle){
+        var img = new Image();
+        img.onload = function(){
+          img.alt = 'Logo';
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+          circle.textContent = '';
+          circle.appendChild(img);
+        };
+        img.src = url;
+      });
     })
     .catch(function(){ /* keep default "R" mark */ });
 })();
@@ -83,6 +148,47 @@ var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001
   }
 })();
 
+// ─── Landing / modal chrome (presentation only — no auth logic here) ───
+function openLoginModal(){
+  document.getElementById('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  setTimeout(function(){ var p = document.getElementById('phone'); if (p) p.focus(); }, 200);
+}
+function closeLoginModal(){
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.getElementById('modal-overlay').addEventListener('click', function(e){
+  if (e.target === this) closeLoginModal();
+});
+
+function togglePin(){
+  var input = document.getElementById('pin');
+  var btn = document.getElementById('pin-toggle');
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = '🙈'; }
+  else { input.type = 'password'; btn.textContent = '👁'; }
+}
+
+function showForgotHint(e){
+  e.preventDefault();
+  showErr('Contact your platform super-admin to reset your PIN.');
+}
+
+// Background scene rotation — pure opacity crossfade, pauses for reduced-motion users
+(function(){
+  var scenes = document.querySelectorAll('.scene');
+  if (scenes.length < 2) return;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) return;
+  var i = 0;
+  setInterval(function(){
+    scenes[i].classList.remove('active');
+    i = (i + 1) % scenes.length;
+    scenes[i].classList.add('active');
+  }, 9000);
+})();
+
+// ─── Auth — unchanged from before ───
 function showErr(msg) {
   var el = document.getElementById('err');
   el.textContent = msg;
@@ -112,7 +218,7 @@ function doLogin() {
   .then(function(r){ return r.json(); })
   .then(function(d) {
     btn.disabled = false;
-    btn.textContent = 'Login to Admin Panel';
+    btn.textContent = 'LOGIN TO ADMIN DASHBOARD →';
 
     var payload = (d && d.data) ? d.data : d;
 
@@ -133,13 +239,14 @@ function doLogin() {
   })
   .catch(function() {
     btn.disabled = false;
-    btn.textContent = 'Login to Admin Panel';
+    btn.textContent = 'LOGIN TO ADMIN DASHBOARD →';
     showErr('Cannot connect to server. Check your network or Railway status.');
   });
 }
 
 document.addEventListener('keydown', function(e){
-  if (e.key === 'Enter') doLogin();
+  if (e.key === 'Escape') closeLoginModal();
+  if (e.key === 'Enter' && document.getElementById('modal-overlay').classList.contains('open')) doLogin();
 });
 </script>
 </body>
