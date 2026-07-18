@@ -4,6 +4,6 @@
   "scripts": {
     "dev": "npx http-server . -p 3000 --cors -c-1 -o",
     "start": "npx http-server . -p 3000 --cors -c-1",
-    "build": "mkdir -p public && cp *.html public/ && cp -r admin public/"
+    "build": "mkdir -p public && cp *.html public/ && cp -r admin public/ && cp -r services public/ && cp -r cities public/ && cp robots.txt sitemap.xml public/"
   }
 }
