@@ -10,8 +10,13 @@
 </head>
 <body>
 <div class="login-page">
+  <div class="login-beams"></div>
+  <div class="login-orb orb-1"></div>
+  <div class="login-orb orb-2"></div>
+  <div class="login-floor"></div>
   <div class="login-card">
     <div class="login-logo">
+      <div class="ll-circle">R</div>
       <h1>Remont India</h1>
       <p>Platform Administration</p>
       <div class="badge-admin">ADMIN PANEL</div>
@@ -21,24 +26,52 @@
 
     <div class="form-group">
       <label class="form-label">Phone Number</label>
-      <input id="phone" class="form-control" type="tel" placeholder="Enter phone number">
+      <div class="login-input-wrap">
+        <span class="li-icon">📱</span>
+        <input id="phone" class="form-control" type="tel" placeholder="Enter phone number">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Admin PIN</label>
-      <input id="pin" class="form-control" type="password" placeholder="Enter Admin PIN">
+      <div class="login-input-wrap">
+        <span class="li-icon">🔒</span>
+        <input id="pin" class="form-control" type="password" placeholder="Enter Admin PIN">
+      </div>
     </div>
     <button id="login-btn" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">
       Login to Admin Panel
     </button>
 
     <div class="login-footer" style="margin-top:16px">
-      Uses Phone + Admin PIN (set ADMIN_PIN on Railway)
+      🔐 Uses Phone + Admin PIN (set ADMIN_PIN on Railway)
     </div>
   </div>
 </div>
 
 <script>
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+
+// Logo — admin-configurable from Settings → Brand & General → "Logo Image URL".
+// Falls back to the "R" mark (default markup) if unset, unreachable, or the image fails to load.
+(function(){
+  fetch(API_BASE + '/api/v1/cms/settings?group=general')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var url = d && d.data && d.data.logo_url;
+      if (!url) return;
+      var circle = document.querySelector('.ll-circle');
+      if (!circle) return;
+      var img = new Image();
+      img.onload = function(){
+        img.alt = 'Logo';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:inherit';
+        circle.textContent = '';
+        circle.appendChild(img);
+      };
+      img.src = url;
+    })
+    .catch(function(){ /* keep default "R" mark */ });
+})();
 
 // Already logged in → go to dashboard
 (function(){
