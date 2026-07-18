@@ -266,6 +266,9 @@ function loadAll() {
           (v.status==='PENDING_VERIFICATION'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Approve</button>':'')+
           (v.status==='ACTIVE'?'<button class="btn btn-xs btn-warning" onclick="suspend(\''+v.id+'\')">Suspend</button>':'')+
           (v.status==='SUSPENDED'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Reactivate</button>':'')+
+          (isSuperAdmin()?
+            '<button class="btn btn-xs btn-danger" onclick="deleteVendor(\''+v.id+'\')">🗑 Delete</button>':
+            '<button class="btn btn-xs btn-outline" onclick="requestDeleteVendor(\''+v.id+'\')">Request Delete</button>')+
         '</div></td>'+
       '</tr>';
     }).join('');
@@ -279,6 +282,17 @@ function approve(id) {
 function suspend(id) {
   if (!confirm('Suspend this vendor?')) return;
   api('PATCH','/admin/vendors/'+id+'/suspend').then(function(){ toast('Vendor suspended','warning'); loadAll(); }).catch(function(e){toast(e.message,'error');});
+}
+function deleteVendor(id) {
+  if (!confirm('Permanently delete this partner? This cannot be undone.')) return;
+  api('DELETE','/admin/vendors/'+id).then(function(){ toast('Partner deleted','warning'); loadAll(); }).catch(function(e){toast(e.message,'error');});
+}
+function requestDeleteVendor(id) {
+  var reason = prompt('Reason for delete request (sent to Master Admin for approval):');
+  if (reason === null) return;
+  api('POST','/admin/delete-requests',{targetType:'SERVICE_VENDOR',targetId:id,reason:reason}).then(function(){
+    toast('Delete request sent to Master Admin. Partner suspended in the meantime.','warning'); loadAll();
+  }).catch(function(e){toast(e.message,'error');});
 }
 function openReject(id) { rejectVendorId=id; document.getElementById('reject-reason').value=''; document.getElementById('reject-overlay').style.display='flex'; }
 function confirmReject() {
@@ -347,6 +361,9 @@ function loadSellers() {
           '<button class="btn btn-xs btn-outline" onclick="openEditSeller(\'' + s.id + '\')">Edit</button>' +
           (s.status === 'ACTIVE' ? '<button class="btn btn-xs btn-warning" onclick="suspendSeller(\'' + s.id + '\')">Suspend</button>' : '') +
           (s.status === 'SUSPENDED' ? '<button class="btn btn-xs btn-success" onclick="activateSeller(\'' + s.id + '\')">Reactivate</button>' : '') +
+          (isSuperAdmin() ?
+            '<button class="btn btn-xs btn-danger" onclick="deleteSeller(\'' + s.id + '\')">🗑 Delete</button>' :
+            '<button class="btn btn-xs btn-outline" onclick="requestDeleteSeller(\'' + s.id + '\')">Request Delete</button>') +
         '</div></td>' +
       '</tr>';
     }).join('');
@@ -445,6 +462,17 @@ function suspendSeller(id) {
 }
 function activateSeller(id) {
   api('PATCH', '/admin/product-vendors/' + id + '/activate').then(function() { toast('Seller reactivated', 'success'); loadSellers(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+function deleteSeller(id) {
+  if (!confirm('Permanently delete this seller? This cannot be undone.')) return;
+  api('DELETE', '/admin/product-vendors/' + id).then(function() { toast('Seller deleted', 'warning'); loadSellers(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+function requestDeleteSeller(id) {
+  var reason = prompt('Reason for delete request (sent to Master Admin for approval):');
+  if (reason === null) return;
+  api('POST', '/admin/delete-requests', { targetType: 'PRODUCT_VENDOR', targetId: id, reason: reason }).then(function() {
+    toast('Delete request sent to Master Admin. Seller suspended in the meantime.', 'warning'); loadSellers();
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 // ── SELLER APPLICATIONS (public registration review) ──

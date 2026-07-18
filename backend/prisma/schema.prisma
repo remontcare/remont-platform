@@ -86,6 +86,18 @@ enum VendorStatus {
   REJECTED
 }
 
+enum DeleteTargetType {
+  SERVICE_VENDOR
+  PRODUCT_VENDOR
+  SERVICE
+}
+
+enum DeleteRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // Where a product is available. PAN_INDIA is the default so all pre-existing products
 // keep behaving exactly as they did before this feature (visible everywhere) with zero
 // migration needed. SELECTED_CITIES/ZONES both key off CityProduct — ZONES falls back to
@@ -239,6 +251,8 @@ model User {
   leadsCreated        Lead[]             @relation("LeadCustomer")
   crmActivities       CrmActivity[]
   amcSubscriptions    AmcSubscription[]
+  deleteRequestsMade     DeleteRequest[] @relation("DeleteRequester")
+  deleteRequestsReviewed DeleteRequest[] @relation("DeleteReviewer")
 
   @@index([phone])
   @@index([role])
@@ -1446,4 +1460,23 @@ model PartnerRegistration {
   @@index([status])
   @@index([city])
   @@index([createdAt])
+}
+
+model DeleteRequest {
+  id          String               @id @default(cuid())
+  targetType  DeleteTargetType
+  targetId    String
+  targetLabel String
+  reason      String?
+  requestedBy String
+  requester   User                 @relation("DeleteRequester", fields: [requestedBy], references: [id])
+  status      DeleteRequestStatus  @default(PENDING)
+  reviewedBy  String?
+  reviewer    User?                @relation("DeleteReviewer", fields: [reviewedBy], references: [id])
+  reviewNote  String?
+  createdAt   DateTime             @default(now())
+  reviewedAt  DateTime?
+
+  @@index([status])
+  @@index([targetType, targetId])
 }

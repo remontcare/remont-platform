@@ -5,9 +5,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
-import { UserRole, VendorStatus, OrderStatus } from '@prisma/client';
+import { UserRole, VendorStatus, OrderStatus, DeleteTargetType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, slugify } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 
@@ -212,6 +212,14 @@ export class AdminService {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { status: VendorStatus.SUSPENDED, isOnline: false } });
   }
 
+  // Permanent removal — SUPER_ADMIN only at the route level. Regular admins use
+  // suspendVendor() + createDeleteRequest() instead; see the Delete Request workflow below.
+  async deleteServiceVendorDirect(vendorId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    return this.prisma.serviceVendor.delete({ where: { id: vendorId } });
+  }
+
   // ─── Product Vendors (Sellers) ────────────────────────────────────────
   // Admin-managed only for this phase — no public self-registration.
   // See PROJECT_ROADMAP.md "Phase 1" for the hybrid seller model this implements.
@@ -274,6 +282,14 @@ export class AdminService {
 
   async suspendProductVendor(id: string) {
     return this.prisma.productVendor.update({ where: { id }, data: { status: VendorStatus.SUSPENDED } });
+  }
+
+  // Permanent removal — SUPER_ADMIN only at the route level. Regular admins use
+  // suspendProductVendor() + createDeleteRequest() instead.
+  async deleteProductVendorDirect(id: string) {
+    const seller = await this.prisma.productVendor.findUnique({ where: { id } });
+    if (!seller) throw new NotFoundException('Seller not found');
+    return this.prisma.productVendor.delete({ where: { id } });
   }
 
   async activateProductVendor(id: string) {
@@ -659,6 +675,81 @@ export class AdminService {
     const orderCount = await this.prisma.order.count({ where: { serviceId: id } });
     if (orderCount > 0) return this.prisma.service.update({ where: { id }, data: { isActive: false } });
     return this.prisma.service.delete({ where: { id } });
+  }
+
+  // Regular admins use this instead of deleteService() directly.
+  async suspendService(id: string) {
+    const service = await this.prisma.service.findUnique({ where: { id } });
+    if (!service) throw new NotFoundException('Service not found');
+    return this.prisma.service.update({ where: { id }, data: { isActive: false } });
+  }
+
+  // ─── Delete Requests — regular admins request, SUPER_ADMIN approves ──────
+
+  private async resolveDeleteTargetLabel(targetType: DeleteTargetType, targetId: string): Promise<string> {
+    if (targetType === DeleteTargetType.SERVICE_VENDOR) {
+      const v = await this.prisma.serviceVendor.findUnique({ where: { id: targetId } });
+      if (!v) throw new NotFoundException('Partner not found');
+      return v.businessName || v.fullName;
+    }
+    if (targetType === DeleteTargetType.PRODUCT_VENDOR) {
+      const v = await this.prisma.productVendor.findUnique({ where: { id: targetId } });
+      if (!v) throw new NotFoundException('Seller not found');
+      return v.businessName;
+    }
+    const s = await this.prisma.service.findUnique({ where: { id: targetId } });
+    if (!s) throw new NotFoundException('Service not found');
+    return s.name;
+  }
+
+  private async hardDeleteTarget(targetType: DeleteTargetType, targetId: string) {
+    if (targetType === DeleteTargetType.SERVICE_VENDOR) return this.deleteServiceVendorDirect(targetId);
+    if (targetType === DeleteTargetType.PRODUCT_VENDOR) return this.deleteProductVendorDirect(targetId);
+    return this.deleteService(targetId);
+  }
+
+  async createDeleteRequest(requestedBy: string, targetType: DeleteTargetType, targetId: string, reason?: string) {
+    const targetLabel = await this.resolveDeleteTargetLabel(targetType, targetId);
+    // Suspend immediately — a pending delete request should stop the entity from
+    // being used/booked while it's awaiting the master admin's decision.
+    if (targetType === DeleteTargetType.SERVICE_VENDOR) await this.suspendVendor(targetId);
+    if (targetType === DeleteTargetType.PRODUCT_VENDOR) await this.suspendProductVendor(targetId);
+    if (targetType === DeleteTargetType.SERVICE) await this.suspendService(targetId);
+    return this.prisma.deleteRequest.create({
+      data: { targetType, targetId, targetLabel, reason: reason || null, requestedBy },
+    });
+  }
+
+  async listDeleteRequests(status?: string) {
+    return this.prisma.deleteRequest.findMany({
+      where: status ? { status: status as any } : {},
+      include: {
+        requester: { select: { name: true, phone: true } },
+        reviewer: { select: { name: true, phone: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async approveDeleteRequest(id: string, reviewedBy: string, reviewNote?: string) {
+    const req = await this.prisma.deleteRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Delete request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    await this.hardDeleteTarget(req.targetType, req.targetId);
+    return this.prisma.deleteRequest.update({
+      where: { id },
+      data: { status: 'APPROVED', reviewedBy, reviewNote: reviewNote || null, reviewedAt: new Date() },
+    });
+  }
+
+  async rejectDeleteRequest(id: string, reviewedBy: string, reviewNote?: string) {
+    const req = await this.prisma.deleteRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Delete request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    return this.prisma.deleteRequest.update({
+      where: { id },
+      data: { status: 'REJECTED', reviewedBy, reviewNote: reviewNote || null, reviewedAt: new Date() },
+    });
   }
 
   async bulkUpdateServices(ids: string[], data: { isActive?: boolean }) {
@@ -1695,6 +1786,8 @@ export class AdminController {
   @Patch('vendors/:id/approve') approve(@Param('id') id: string) { return this.admin.approveVendor(id); }
   @Patch('vendors/:id/reject') reject(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.rejectVendor(id, b.reason); }
   @Patch('vendors/:id/suspend') suspend(@Param('id') id: string) { return this.admin.suspendVendor(id); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Delete('vendors/:id') deleteVendorDirect(@Param('id') id: string) { return this.admin.deleteServiceVendorDirect(id); }
 
   @Get('product-vendors') listProductVendors(@Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number) {
     return this.admin.listProductVendors({ status, q, limit });
@@ -1707,6 +1800,27 @@ export class AdminController {
   }
   @Patch('product-vendors/:id/suspend') suspendProductVendor(@Param('id') id: string) { return this.admin.suspendProductVendor(id); }
   @Patch('product-vendors/:id/activate') activateProductVendor(@Param('id') id: string) { return this.admin.activateProductVendor(id); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Delete('product-vendors/:id') deleteProductVendorDirect(@Param('id') id: string) { return this.admin.deleteProductVendorDirect(id); }
+
+  // Delete Requests — regular admins request, only SUPER_ADMIN approves/rejects/lists
+  @Post('delete-requests')
+  createDeleteRequest(@CurrentUser() u: JwtPayload, @Body() b: { targetType: DeleteTargetType; targetId: string; reason?: string }) {
+    return this.admin.createDeleteRequest(u.sub, b.targetType, b.targetId, b.reason);
+  }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('delete-requests')
+  listDeleteRequests(@Query('status') status?: string) { return this.admin.listDeleteRequests(status); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Patch('delete-requests/:id/approve')
+  approveDeleteRequest(@Param('id') id: string, @CurrentUser() u: JwtPayload, @Body() b: { reviewNote?: string }) {
+    return this.admin.approveDeleteRequest(id, u.sub, b?.reviewNote);
+  }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Patch('delete-requests/:id/reject')
+  rejectDeleteRequest(@Param('id') id: string, @CurrentUser() u: JwtPayload, @Body() b: { reviewNote?: string }) {
+    return this.admin.rejectDeleteRequest(id, u.sub, b?.reviewNote);
+  }
 
   // Orders
   // Orders — stats + list + management
@@ -1762,8 +1876,11 @@ export class AdminController {
   @Post('services') createService(@Body() b: any) { return this.admin.createService(b); }
   @Post('services/bulk') bulkServices(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateServices(b.ids, { isActive: b.isActive }); }
   @Patch('services/:id') updateService(@Param('id') id: string, @Body() b: any) { return this.admin.updateService(id, b); }
+  @Roles(UserRole.SUPER_ADMIN)
   @Delete('services/all') deleteAllServices() { return this.admin.deleteAllServices(); }
+  @Roles(UserRole.SUPER_ADMIN)
   @Delete('services/:id') deleteService(@Param('id') id: string) { return this.admin.deleteService(id); }
+  @Patch('services/:id/suspend') suspendService(@Param('id') id: string) { return this.admin.suspendService(id); }
   @Get('services/:id/cities') serviceCities(@Param('id') id: string) { return this.admin.listServiceCities(id); }
   @Patch('services/:id/cities/:cityId') upsertServiceCity(@Param('id') sid: string, @Param('cityId') cid: string, @Body() b: { isActive: boolean; customPrice?: number }) {
     return this.admin.upsertServiceCity(sid, cid, b);

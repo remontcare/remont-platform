@@ -568,7 +568,9 @@ function loadServices() {
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick="editService(\'' + s.id + '\')">Edit</button>' +
           '<button class="btn btn-xs btn-warning" onclick="toggleSvc(\'' + s.id + '\',' + (!s.isActive) + ')">' + (s.isActive?'Disable':'Enable') + '</button>' +
-          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteSvc(\'' + s.id + '\',\'' + escape(s.name) + '\')">Del</button>' +
+          (isSuperAdmin() ?
+            '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteSvc(\'' + s.id + '\',\'' + escape(s.name) + '\')">Del</button>' :
+            '<button class="btn btn-xs btn-outline" onclick="requestDeleteSvc(\'' + s.id + '\',\'' + escape(s.name) + '\')">Request Delete</button>') +
         '</div></td>' +
       '</tr>';
     }).join('');
@@ -669,6 +671,13 @@ function toggleSvc(id, active) {
 function deleteSvc(id, name) {
   if (!confirm('Delete "' + name + '"? If it has orders it will be deactivated instead.')) return;
   api('DELETE','/admin/services/'+id).then(function(){ toast('Done','warning'); loadServices(); }).catch(function(e){ toast(e.message,'error'); });
+}
+function requestDeleteSvc(id, name) {
+  var reason = prompt('Reason for deleting "' + name + '" (sent to Master Admin for approval):');
+  if (reason === null) return;
+  api('POST','/admin/delete-requests',{targetType:'SERVICE',targetId:id,reason:reason}).then(function(){
+    toast('Delete request sent to Master Admin. Service disabled in the meantime.','warning'); loadServices();
+  }).catch(function(e){ toast(e.message,'error'); });
 }
 
 function toggleSvcSel(id, checked) {

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Delete Requests</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Delete Requests</h1><p>Partner, seller & service deletions awaiting your approval</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="filter-bar">
+      <select id="status-filter" class="form-select" onchange="load()">
+        <option value="PENDING">Pending</option>
+        <option value="APPROVED">Approved</option>
+        <option value="REJECTED">Rejected</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="requests-container" class="loading">Loading…</div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('delete-requests');
+requireAuth();
+
+if (!isSuperAdmin()) {
+  document.querySelector('.content').innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h3>Master Admin only</h3><p>Only the Master Admin can review delete requests.</p></div>';
+} else {
+  load();
+}
+
+var TYPE_LABEL = { SERVICE_VENDOR: 'Partner', PRODUCT_VENDOR: 'Seller', SERVICE: 'Service' };
+
+function load() {
+  var status = document.getElementById('status-filter').value;
+  api('GET', '/admin/delete-requests' + (status ? '?status=' + status : '')).then(function(list) {
+    if (!list || !list.length) {
+      document.getElementById('requests-container').innerHTML = '<div class="empty-state"><div class="empty-icon">🗑️</div><h3>No requests</h3><p>Nothing here right now.</p></div>';
+      return;
+    }
+    var rows = list.map(function(r) {
+      var badgeClass = r.status === 'PENDING' ? 'badge-yellow' : r.status === 'APPROVED' ? 'badge-red' : 'badge-gray';
+      var actions = r.status === 'PENDING'
+        ? '<button class="btn btn-xs btn-danger" onclick="approveReq(\'' + r.id + '\')">Approve &amp; Delete</button> ' +
+          '<button class="btn btn-xs btn-outline" onclick="rejectReq(\'' + r.id + '\')">Reject</button>'
+        : '<span class="text-muted">' + (r.reviewer ? 'by ' + escape(r.reviewer.name || r.reviewer.phone) : '') + '</span>';
+      return '<tr>' +
+        '<td><span class="badge badge-blue">' + (TYPE_LABEL[r.targetType] || r.targetType) + '</span></td>' +
+        '<td class="td-bold">' + escape(r.targetLabel) + '</td>' +
+        '<td>' + escape(r.reason || '—') + '</td>' +
+        '<td>' + escape((r.requester && (r.requester.name || r.requester.phone)) || '—') + '</td>' +
+        '<td>' + fmtDateShort(r.createdAt) + '</td>' +
+        '<td><span class="badge ' + badgeClass + '">' + r.status + '</span></td>' +
+        '<td>' + actions + '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('requests-container').innerHTML =
+      '<div class="card"><div class="table-wrap"><table><thead><tr>' +
+      '<th>Type</th><th>Item</th><th>Reason</th><th>Requested By</th><th>Date</th><th>Status</th><th>Action</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }).catch(function(e) {
+    document.getElementById('requests-container').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>';
+  });
+}
+
+function approveReq(id) {
+  if (!confirm('Approve this and permanently delete the item? This cannot be undone.')) return;
+  api('PATCH', '/admin/delete-requests/' + id + '/approve').then(function() {
+    toast('Deleted', 'warning'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+function rejectReq(id) {
+  var note = prompt('Reason for rejecting (optional):') || '';
+  api('PATCH', '/admin/delete-requests/' + id + '/reject', { reviewNote: note }).then(function() {
+    toast('Request rejected', 'success'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+</script>
+</body>
+</html>

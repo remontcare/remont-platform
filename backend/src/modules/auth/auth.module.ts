@@ -142,9 +142,11 @@ export class AuthService {
     const adminPin = process.env.ADMIN_PIN;
     if (!adminPin || pin !== adminPin) throw new UnauthorizedException('Invalid admin PIN');
 
+    // Role is only set on first creation. A returning admin keeps whatever role they
+    // already have (e.g. SUPER_ADMIN) instead of being reset to ADMIN on every login.
     const user = await this.prisma.user.upsert({
       where: { phone },
-      update: { role: UserRole.ADMIN, isVerified: true, lastLoginAt: new Date() },
+      update: { isVerified: true, lastLoginAt: new Date() },
       create: { phone, name: 'Admin', role: UserRole.ADMIN, isVerified: true, lastLoginAt: new Date() },
     });
 

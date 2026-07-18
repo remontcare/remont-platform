@@ -5,6 +5,7 @@ function getToken() { return localStorage.getItem('remont_admin_token'); }
 function getAdminUser() {
   try { return JSON.parse(localStorage.getItem('remont_admin_user') || '{}'); } catch(e) { return {}; }
 }
+function isSuperAdmin() { return getAdminUser().role === 'SUPER_ADMIN'; }
 
 function requireAuth() {
   var token = getToken();
@@ -173,6 +174,7 @@ var SIDEBAR_NAV = [
     { key:'payment-gateways', label:'Payment Gateways', icon:'💳', href:'/admin/payment-gateways.html' },
     { key:'cities', label:'Cities', icon:'🏙', href:'/admin/cities.html' },
     { key:'users', label:'Users & Roles', icon:'👤', href:'/admin/users.html' },
+    { key:'delete-requests', label:'Delete Requests', icon:'🗑️', href:'/admin/delete-requests.html', superAdminOnly:true },
     { key:'settings', label:'Website Settings', icon:'🌐', href:'/admin/settings.html' },
     { key:'ai-tools', label:'AI Chat Settings', icon:'🤖', href:'/admin/ai-tools.html' },
     { key:'staff', label:'System Settings', icon:'⚙️', href:'/admin/staff.html' },
@@ -193,6 +195,7 @@ function renderSidebar(page) {
     html += '<div class="nav-section">';
     html += '<div class="nav-section-label">' + section.section + '</div>';
     section.items.forEach(function(item) {
+      if (item.superAdminOnly && !isSuperAdmin()) return;
       var isActive = item.key === page;
       html += '<a class="nav-item' + (isActive ? ' active' : '') + '" href="' + item.href + '" data-page="' + item.key + '">';
       html += '<span class="nav-icon">' + item.icon + '</span>';
