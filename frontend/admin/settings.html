@@ -47,6 +47,27 @@ function load() {
     Object.keys(grouped).forEach(function(grp){
       html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">'+(groups[grp]||grp)+'</span></div><div class="card-body"><table><tbody>';
       grouped[grp].forEach(function(s){
+        if (s.key === 'logo_url') {
+          var isDataUrl = (s.value||'').indexOf('data:') === 0;
+          html += '<tr>'+
+            '<td style="width:220px;font-weight:500;color:#374151">'+escape(s.label||s.key)+'</td>'+
+            '<td>'+
+              '<div style="display:flex;align-items:center;gap:10px">'+
+                '<div id="logo-preview" style="width:44px;height:44px;border-radius:10px;background:#f1f5f9;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid #e2e8f0;flex-shrink:0;font-size:18px">'+
+                  (s.value ? '<img src="'+s.value+'" style="width:100%;height:100%;object-fit:cover">' : '🏢')+
+                '</div>'+
+                '<div>'+
+                  '<input type="file" accept="image/*" id="logo-file-input" onchange="uploadLogo(this)">'+
+                  '<div style="font-size:11px;color:#94a3b8;margin-top:3px">PNG/JPG, auto-resized to a small icon so it stays fast</div>'+
+                '</div>'+
+                (s.value ? '<button type="button" class="btn btn-outline btn-sm" onclick="clearLogo()">Remove</button>' : '')+
+              '</div>'+
+              '<input class="form-control" id="setting-logo_url" value="'+(isDataUrl?'':escape(s.value))+'" placeholder="or paste an image URL instead" style="max-width:360px;font-size:11px;margin-top:8px" onblur="saveSetting(\'logo_url\')" onkeydown="if(event.key===\'Enter\')saveSetting(\'logo_url\')">'+
+            '</td>'+
+            '<td style="width:80px;color:#9ca3af;font-size:11px"><code>'+escape(s.key)+'</code></td>'+
+          '</tr>';
+          return;
+        }
         html += '<tr>'+
           '<td style="width:220px;font-weight:500;color:#374151">'+escape(s.label||s.key)+'</td>'+
           '<td><input class="form-control" id="setting-'+escape(s.key)+'" value="'+escape(s.value)+'" style="max-width:360px" onblur="saveSetting(\''+escape(s.key)+'\')" onkeydown="if(event.key===\'Enter\')saveSetting(\''+escape(s.key)+'\')"></td>'+
@@ -68,6 +89,54 @@ function load() {
     document.getElementById('settings-container').innerHTML = html;
     document.getElementById('settings-container').className = '';
   }).catch(function(e){document.getElementById('settings-container').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
+}
+
+function updateLogoPreview(url) {
+  var el = document.getElementById('logo-preview');
+  if (!el) return;
+  el.innerHTML = url ? '<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">' : '🏢';
+}
+
+function uploadLogo(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (file.type.indexOf('image/') !== 0) { toast('Please choose an image file','error'); input.value=''; return; }
+  if (file.size > 5*1024*1024) { toast('Image is too large — pick one under 5MB','error'); input.value=''; return; }
+
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      // Downscale to a small square icon — this is a ~60px login-page mark, not a banner.
+      var size = 160;
+      var canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      var ctx = canvas.getContext('2d');
+      var side = Math.min(img.width, img.height);
+      var sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      var dataUrl = canvas.toDataURL('image/png');
+
+      updateLogoPreview(dataUrl);
+      var urlField = document.getElementById('setting-logo_url');
+      if (urlField) urlField.value = '';
+      input.value = '';
+
+      api('PATCH','/admin/settings/logo_url',{value:dataUrl}).then(function(){
+        toast('Logo updated','success');
+      }).catch(function(e){ toast(e.message,'error'); });
+    };
+    img.onerror = function(){ toast('Could not read that image','error'); };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearLogo() {
+  updateLogoPreview('');
+  api('PATCH','/admin/settings/logo_url',{value:''}).then(function(){
+    toast('Logo removed — back to the default mark','success'); load();
+  }).catch(function(e){ toast(e.message,'error'); });
 }
 
 function saveSetting(key) {
