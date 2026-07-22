@@ -70,6 +70,42 @@ export class UsersService {
     await this.prisma.address.deleteMany({ where: { id: addressId, userId } });
     return { deleted: true };
   }
+
+  async updateAddress(userId: string, addressId: string, data: any) {
+    const existing = await this.prisma.address.findFirst({ where: { id: addressId, userId } });
+    if (!existing) throw new NotFoundException('Address not found');
+    if (data.isDefault) {
+      await this.prisma.address.updateMany({ where: { userId }, data: { isDefault: false } });
+    }
+    const lat = data.latitude !== undefined ? parseFloat(data.latitude) : undefined;
+    const lng = data.longitude !== undefined ? parseFloat(data.longitude) : undefined;
+    const validCoords = lat !== undefined && lng !== undefined
+      && lat !== 0 && lng !== 0 && lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
+    return this.prisma.address.update({
+      where: { id: addressId },
+      data: {
+        ...(data.label !== undefined ? { label: data.label } : {}),
+        ...(data.fullAddress !== undefined ? { fullAddress: data.fullAddress } : {}),
+        ...(data.area !== undefined ? { area: data.area } : {}),
+        ...(data.landmark !== undefined ? { landmark: data.landmark } : {}),
+        ...(data.city !== undefined ? { city: data.city } : {}),
+        ...(data.state !== undefined ? { state: data.state } : {}),
+        ...(data.country !== undefined ? { country: data.country } : {}),
+        ...(data.pincode !== undefined ? { pincode: data.pincode } : {}),
+        ...(validCoords ? { latitude: lat, longitude: lng } : {}),
+        ...(data.accuracy !== undefined ? { accuracy: data.accuracy } : {}),
+        ...(data.locationSource !== undefined ? { locationSource: data.locationSource } : {}),
+        ...(data.isDefault !== undefined ? { isDefault: data.isDefault } : {}),
+      },
+    });
+  }
+
+  async setDefaultAddress(userId: string, addressId: string) {
+    const existing = await this.prisma.address.findFirst({ where: { id: addressId, userId } });
+    if (!existing) throw new NotFoundException('Address not found');
+    await this.prisma.address.updateMany({ where: { userId }, data: { isDefault: false } });
+    return this.prisma.address.update({ where: { id: addressId }, data: { isDefault: true } });
+  }
 }
 
 @ApiTags('Users')
@@ -81,6 +117,8 @@ export class UsersController {
   @Patch('me') update(@CurrentUser() u: JwtPayload, @Body() body: any) { return this.users.updateProfile(u.sub, body); }
   @Get('me/addresses') addresses(@CurrentUser() u: JwtPayload) { return this.users.listAddresses(u.sub); }
   @Post('me/addresses') addAddr(@CurrentUser() u: JwtPayload, @Body() body: any) { return this.users.addAddress(u.sub, body); }
+  @Patch('me/addresses/:id') updateAddr(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() body: any) { return this.users.updateAddress(u.sub, id, body); }
+  @Patch('me/addresses/:id/default') setDefaultAddr(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.users.setDefaultAddress(u.sub, id); }
   @Delete('me/addresses/:id') delAddr(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.users.deleteAddress(u.sub, id); }
 }
 
