@@ -27,12 +27,35 @@
           <select id="filter-role" class="form-control" style="width:180px" onchange="load()">
             <option value="">All Roles</option>
             <option>CUSTOMER</option><option>SERVICE_VENDOR</option><option>PRODUCT_VENDOR</option>
+            <option>DELIVERY_PARTNER</option><option>CORPORATE_USER</option>
             <option>CRM_AGENT</option><option>ADMIN</option><option>SUPER_ADMIN</option>
           </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
       <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="role-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Change Role</span>
+      <button class="modal-close" onclick="closeModal('role-overlay')">×</button>
+    </div>
+    <p style="margin:0 0 12px;font-size:14px;color:#6b7280">For <strong id="role-user-name"></strong></p>
+    <div class="form-group">
+      <label class="form-label">New Role</label>
+      <select id="role-select" class="form-control">
+        <option>CUSTOMER</option><option>SERVICE_VENDOR</option><option>PRODUCT_VENDOR</option>
+        <option>DELIVERY_PARTNER</option><option>CORPORATE_USER</option><option>CRM_AGENT</option>
+        <option>ADMIN</option><option>SUPER_ADMIN</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('role-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmRole()">Apply</button>
     </div>
   </div>
 </div>
@@ -87,6 +110,7 @@ function load() {
           '<button class="btn btn-xs btn-outline" onclick="openWallet(\''+u.id+'\',\''+escape(u.name||u.phone||'User')+'\')">Wallet</button>'+
           '<button class="btn btn-xs '+(u.isBlocked?'btn-success':'btn-warning')+'" onclick="toggleBlock(\''+u.id+'\','+(!u.isBlocked)+')">'+
             (u.isBlocked?'Unblock':'Block')+'</button>'+
+          (isSuperAdmin() ? '<button class="btn btn-xs btn-outline" onclick="openRole(\''+u.id+'\',\''+escape(u.name||u.phone||'User')+'\',\''+u.role+'\')">Role</button>' : '')+
         '</div></td>'+
       '</tr>';
     }).join('');
@@ -97,6 +121,22 @@ function load() {
 function toggleBlock(id, block) {
   if (!confirm(block?'Block this user?':'Unblock this user?')) return;
   api('PATCH','/admin/users/'+id+'/block',{block:block}).then(function(){toast(block?'User blocked':'User unblocked',block?'warning':'success');load();}).catch(function(e){toast(e.message,'error');});
+}
+
+var roleUserId = null;
+function openRole(id, name, currentRole) {
+  roleUserId = id;
+  document.getElementById('role-user-name').textContent = name;
+  document.getElementById('role-select').value = currentRole;
+  document.getElementById('role-overlay').style.display = 'flex';
+}
+
+function confirmRole() {
+  var role = document.getElementById('role-select').value;
+  if (!confirm('Change this user\'s role to ' + role + '?')) return;
+  api('PATCH', '/admin/users/' + roleUserId + '/role', { role: role }).then(function() {
+    toast('Role updated to ' + role, 'success'); closeModal('role-overlay'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 function openWallet(id, name) {

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>CRM Agent Portal – Remont India</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --sienna:#C4601A; --amber:#E8A650; --ivory:#FDFAF5; --cream:#F5F0E8;
+  --charcoal:#1A1A1A; --mist:#E8E3DA; --white:#fff;
+  --success:#22c55e; --error:#ef4444; --blue:#3b82f6;
+  --ff-body:"DM Sans",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--ff-body);background:var(--cream);color:var(--charcoal);min-height:100vh}
+button{cursor:pointer;font-family:var(--ff-body);border:none;outline:none}
+input,select,textarea{font-family:var(--ff-body)}
+.app{max-width:560px;margin:0 auto;min-height:100vh;background:var(--ivory);box-shadow:0 0 60px rgba(0,0,0,.08)}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.active{display:flex}
+.auth-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 28px}
+.auth-logo-icon{width:44px;height:44px;background:var(--sienna);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:700;margin:0 auto 16px}
+.auth-title{font-size:24px;font-weight:800;text-align:center;margin-bottom:6px}
+.auth-sub{font-size:13px;color:#6b7280;text-align:center;margin-bottom:28px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+.field input{width:100%;padding:14px 16px;border:1.5px solid var(--mist);border-radius:10px;font-size:15px;background:#fff}
+.field input:focus{outline:none;border-color:var(--sienna)}
+.btn-primary{width:100%;padding:15px;background:var(--sienna);color:#fff;border-radius:12px;font-size:15px;font-weight:700}
+.btn-primary:disabled{background:#d1d5db}
+.btn-outline{padding:10px 16px;border:1.5px solid var(--mist);border-radius:10px;font-size:13px;font-weight:600;color:#374151;background:#fff}
+.link{text-align:center;font-size:13px;color:var(--sienna);margin-top:14px;display:block;cursor:pointer}
+.auth-error{font-size:13px;color:var(--error);text-align:center;margin-bottom:10px;min-height:16px}
+.app-header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--mist);padding:14px 18px;display:flex;align-items:center;gap:12px}
+.app-header .name{flex:1;font-size:14px;font-weight:700}
+.app-header .sub{font-size:11px;color:#9ca3af}
+.content{flex:1;padding:16px}
+.card{background:#fff;border:1px solid var(--mist);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+.card .top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.card .cname{font-size:14px;font-weight:700}
+.card .cinfo{font-size:12px;color:#6b7280;margin-bottom:8px}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8}
+select.status-select{padding:8px 10px;border:1.5px solid var(--mist);border-radius:8px;font-size:12px;font-weight:600;flex:1}
+.card .row{display:flex;gap:8px;margin-top:8px}
+.card textarea{width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--mist);border-radius:8px;font-size:12px;min-height:50px}
+.empty{text-align:center;padding:50px 20px;color:#9ca3af;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div id="screen-login" class="screen active">
+    <div class="auth-wrap">
+      <div class="auth-logo-icon">📞</div>
+      <div class="auth-title">CRM Agent Portal</div>
+      <div class="auth-sub">Remont India — Sign in with your mobile number</div>
+      <div class="auth-error" id="login-err"></div>
+
+      <div id="login-phone-step">
+        <div class="field"><label>Mobile Number</label><input id="login-phone" type="tel" maxlength="10" placeholder="10-digit mobile number"></div>
+        <button class="btn-primary" id="send-otp-btn" onclick="sendLoginOtp()">Send OTP →</button>
+      </div>
+      <div id="login-otp-step" style="display:none">
+        <div class="auth-sub" id="otp-sent-to" style="margin-bottom:14px"></div>
+        <div class="field"><label>Enter OTP</label><input id="login-otp" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit OTP"></div>
+        <button class="btn-primary" id="verify-otp-btn" onclick="verifyLoginOtp()">Verify & Continue</button>
+        <span class="link" onclick="backToPhone()">← Change number</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-app" class="screen">
+    <div class="app-header">
+      <div><div class="name" id="hdr-name">Agent</div><div class="sub">My Leads</div></div>
+      <button class="btn-outline" onclick="doLogout()">Logout</button>
+    </div>
+    <div class="content" id="content">Loading…</div>
+  </div>
+
+</div>
+
+<script src="/shared/remont-auth.js"></script>
+<script>
+var pendingPhone = '';
+var STATUSES = ['NEW','CONTACTED','QUALIFIED','PROPOSAL_SENT','NEGOTIATION','CONVERTED','LOST','ON_HOLD'];
+
+function backToPhone(){
+  document.getElementById('login-otp-step').style.display='none';
+  document.getElementById('login-phone-step').style.display='block';
+}
+
+function sendLoginOtp(){
+  var digits = document.getElementById('login-phone').value.replace(/\D/g,'');
+  var err = document.getElementById('login-err'); err.textContent='';
+  if (digits.length !== 10) { err.textContent='Enter a valid 10-digit mobile number'; return; }
+  pendingPhone = '+91'+digits;
+  var btn = document.getElementById('send-otp-btn'); btn.disabled=true; btn.textContent='Sending…';
+  RemontAuth.sendOtp(pendingPhone).then(function(){
+    document.getElementById('otp-sent-to').textContent = 'OTP sent to ' + pendingPhone;
+    document.getElementById('login-phone-step').style.display='none';
+    document.getElementById('login-otp-step').style.display='block';
+    document.getElementById('login-otp').focus();
+  }).catch(function(e){ err.textContent = e.message; })
+  .then(function(){ btn.disabled=false; btn.textContent='Send OTP →'; });
+}
+
+function verifyLoginOtp(){
+  var otp = document.getElementById('login-otp').value.trim();
+  var err = document.getElementById('login-err'); err.textContent='';
+  if (!otp) { err.textContent='Enter the OTP'; return; }
+  var btn = document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
+  RemontAuth.verifyOtp(pendingPhone, otp).then(function(res){
+    if (res.user.role !== 'CRM_AGENT') {
+      RemontAuth.clearSession();
+      throw new Error('This number is registered as ' + res.user.role.toLowerCase().replace('_',' ') + ', not a CRM agent.');
+    }
+    document.getElementById('hdr-name').textContent = res.user.name || 'Agent';
+    showScreen('screen-app');
+    loadLeads();
+  }).catch(function(e){ err.textContent = e.message; })
+  .then(function(){ btn.disabled=false; btn.textContent='Verify & Continue'; });
+}
+
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+}
+
+function doLogout(){
+  RemontAuth.clearSession();
+  showScreen('screen-login');
+  document.getElementById('login-phone-step').style.display='block';
+  document.getElementById('login-otp-step').style.display='none';
+}
+
+function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '—'; }
+
+function loadLeads(){
+  RemontAuth.apiFetch('/crm/leads/mine').then(function(leads){
+    if (!leads || !leads.length) { document.getElementById('content').innerHTML = '<div class="empty">No leads assigned yet</div>'; return; }
+    document.getElementById('content').innerHTML = leads.map(function(l){
+      var statusOptions = STATUSES.map(function(s){ return '<option value="' + s + '"' + (s===l.status?' selected':'') + '>' + s.replace(/_/g,' ') + '</option>'; }).join('');
+      return '<div class="card">' +
+        '<div class="top-row"><span class="cname">' + escHtml(l.customerName) + '</span><span class="badge">' + l.source.replace(/_/g,' ') + '</span></div>' +
+        '<div class="cinfo">' + escHtml(l.customerPhone) + (l.serviceInterested ? ' · ' + escHtml(l.serviceInterested) : '') + ' · ' + fmtDate(l.createdAt) + '</div>' +
+        '<div class="row">' +
+          '<select class="status-select" id="status-' + l.id + '">' + statusOptions + '</select>' +
+          '<button class="btn-outline" onclick="updateStatus(\'' + l.id + '\')">Update</button>' +
+        '</div>' +
+        '<textarea id="note-' + l.id + '" placeholder="Add a call note…"></textarea>' +
+        '<div class="row"><button class="btn-outline" style="flex:1" onclick="addActivity(\'' + l.id + '\')">Log Activity</button></div>' +
+      '</div>';
+    }).join('');
+  }).catch(function(e){
+    document.getElementById('content').innerHTML = '<div class="empty">' + e.message + '</div>';
+  });
+}
+
+function updateStatus(id){
+  var status = document.getElementById('status-' + id).value;
+  RemontAuth.apiFetch('/crm/leads/' + id + '/status', { method:'PATCH', body: JSON.stringify({ status: status }) })
+    .then(loadLeads)
+    .catch(function(e){ alert(e.message); });
+}
+
+function addActivity(id){
+  var notes = document.getElementById('note-' + id).value.trim();
+  if (!notes) { alert('Enter a note first'); return; }
+  RemontAuth.apiFetch('/crm/leads/' + id + '/activity', { method:'POST', body: JSON.stringify({ type: 'CALL', notes: notes }) })
+    .then(loadLeads)
+    .catch(function(e){ alert(e.message); });
+}
+
+if (RemontAuth.getToken()) {
+  RemontAuth.apiFetch('/auth/me').then(function(me){
+    if (me.role !== 'CRM_AGENT') { doLogout(); return; }
+    document.getElementById('hdr-name').textContent = me.name || 'Agent';
+    showScreen('screen-app');
+    loadLeads();
+  }).catch(function(){ doLogout(); });
+}
+</script>
+</body>
+</html>

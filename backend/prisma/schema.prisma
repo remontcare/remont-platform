@@ -98,6 +98,18 @@ enum DeleteRequestStatus {
   REJECTED
 }
 
+enum Platform {
+  WEB
+  ANDROID
+  IOS
+  ADMIN
+}
+
+enum AuthAction {
+  SEND_OTP
+  VERIFY_OTP
+}
+
 // Where a product is available. PAN_INDIA is the default so all pre-existing products
 // keep behaving exactly as they did before this feature (visible everywhere) with zero
 // migration needed. SELECTED_CITIES/ZONES both key off CityProduct — ZONES falls back to
@@ -216,43 +228,49 @@ enum AmcStatus {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model User {
-  id              String    @id @default(cuid())
-  phone           String    @unique
-  email           String?   @unique
-  name            String
-  avatarUrl       String?
-  role            UserRole  @default(CUSTOMER)
-  language        Language  @default(EN)
-  isVerified      Boolean   @default(false)
-  isBlocked       Boolean   @default(false)
-  otpCode         String?
-  otpExpiresAt    DateTime?
-  walletBalance   Decimal   @default(0) @db.Decimal(10, 2)
-  referralCode    String?   @unique
-  referredById    String?
-  cityId          String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  lastLoginAt     DateTime?
+  id            String    @id @default(cuid())
+  phone         String    @unique
+  email         String?   @unique
+  name          String
+  avatarUrl     String?
+  role          UserRole  @default(CUSTOMER)
+  language      Language  @default(EN)
+  isVerified    Boolean   @default(false)
+  isBlocked     Boolean   @default(false)
+  otpCode       String?
+  otpExpiresAt  DateTime?
+  otpAttempts   Int       @default(0)
+  otpLastSentAt DateTime?
+  walletBalance Decimal   @default(0) @db.Decimal(10, 2)
+  referralCode  String?   @unique
+  referredById  String?
+  cityId        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
 
-  addresses           Address[]
-  membership          UserMembership?
-  orders              Order[]
-  walletTransactions  WalletTransaction[]
-  reviews             Review[]
-  notifications       Notification[]
-  serviceVendor       ServiceVendor?
-  productVendor       ProductVendor?
-  deliveryPartner     DeliveryPartner?
-  corporateMembership CorporateMember?
-  aiSessions          AiSession[]
-  city                City?              @relation(fields: [cityId], references: [id])
-  leadsAssigned       Lead[]             @relation("LeadAgent")
-  leadsCreated        Lead[]             @relation("LeadCustomer")
-  crmActivities       CrmActivity[]
-  amcSubscriptions    AmcSubscription[]
-  deleteRequestsMade     DeleteRequest[] @relation("DeleteRequester")
-  deleteRequestsReviewed DeleteRequest[] @relation("DeleteReviewer")
+  addresses              Address[]
+  membership             UserMembership?
+  orders                 Order[]
+  masterOrders           MasterOrder[]
+  walletTransactions     WalletTransaction[]
+  reviews                Review[]
+  notifications          Notification[]
+  serviceVendor          ServiceVendor?
+  productVendor          ProductVendor?
+  deliveryPartner        DeliveryPartner?
+  corporateMembership    CorporateMember?
+  aiSessions             AiSession[]
+  city                   City?               @relation(fields: [cityId], references: [id])
+  leadsAssigned          Lead[]              @relation("LeadAgent")
+  leadsCreated           Lead[]              @relation("LeadCustomer")
+  crmActivities          CrmActivity[]
+  amcSubscriptions       AmcSubscription[]
+  deleteRequestsMade     DeleteRequest[]     @relation("DeleteRequester")
+  deleteRequestsReviewed DeleteRequest[]     @relation("DeleteReviewer")
+  loginHistory           LoginHistory[]
+  refreshSessions        RefreshSession[]
+  auditLogs              AuditLog[]
 
   @@index([phone])
   @@index([role])
@@ -260,29 +278,97 @@ model User {
 }
 
 model Address {
-  id             String    @id @default(cuid())
-  userId         String
-  label          String    @default("Home")
-  fullAddress    String
-  area           String    @default("")   // locality / suburb
-  landmark       String    @default("")
-  city           String
-  state          String
-  country        String    @default("India")
-  pincode        String
-  latitude       Float     @default(0)
-  longitude      Float     @default(0)
-  accuracy       Float?                  // GPS accuracy in metres
-  locationSource String    @default("MANUAL")  // GPS | MANUAL
-  capturedAt     DateTime?               // when GPS was captured
-  isDefault      Boolean   @default(false)
-  createdAt      DateTime  @default(now())
+  id               String    @id @default(cuid())
+  userId           String
+  label            String    @default("Home")
+  fullAddress      String
+  area             String    @default("") // locality / suburb
+  landmark         String    @default("")
+  city             String
+  state            String
+  country          String    @default("India")
+  pincode          String
+  latitude         Float     @default(0)
+  longitude        Float     @default(0)
+  accuracy         Float? // GPS accuracy in metres
+  locationSource   String    @default("MANUAL") // GPS | MANUAL
+  capturedAt       DateTime? // when GPS was captured
+  placeId          String? // Google Place ID — unused until Places Autocomplete is enabled
+  formattedAddress String? // Google-formatted address — unused until Places Autocomplete is enabled
+  isDefault        Boolean   @default(false)
+  createdAt        DateTime  @default(now())
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orders Order[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  masterOrders MasterOrder[]
 
   @@index([userId])
   @@index([locationSource])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH INFRASTRUCTURE — login history, refresh-token sessions, audit trail
+// ═══════════════════════════════════════════════════════════════════════════
+
+model LoginHistory {
+  id            String     @id @default(cuid())
+  userId        String?
+  phone         String
+  role          UserRole?
+  platform      Platform   @default(WEB)
+  action        AuthAction
+  success       Boolean
+  failureReason String?
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime   @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([phone])
+  @@index([createdAt])
+}
+
+// Backs refresh-token rotation + "logout this device" / "logout all devices".
+// tokenHash is a sha256 of the raw refresh JWT — never store the raw token.
+model RefreshSession {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenId    String    @unique // the JWT's jti claim
+  tokenHash  String
+  platform   Platform  @default(WEB)
+  deviceInfo String?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenId])
+}
+
+// Scoped to RBAC-relevant admin actions (role grants, blocks, delete-request
+// decisions) — not a general-purpose activity log for the whole platform.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  actorRole  UserRole
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -290,21 +376,21 @@ model Address {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model City {
-  id            String   @id @default(cuid())
-  name          String   @unique
+  id            String    @id @default(cuid())
+  name          String    @unique
   state         String
   latitude      Float
   longitude     Float
   pincodes      String[]
-  isActive      Boolean  @default(true)
-  activeVendors Int      @default(0)
+  isActive      Boolean   @default(true)
+  activeVendors Int       @default(0)
   launchDate    DateTime?
 
   // Which service categories are active in this city
   activeServiceKeys String[]
 
   // City-wise multiplier on base prices (0.8 = 20% cheaper, 1.2 = 20% costlier)
-  priceMultiplier   Decimal @default(1.0) @db.Decimal(4, 2)
+  priceMultiplier Decimal @default(1.0) @db.Decimal(4, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -316,12 +402,12 @@ model City {
 
 // City-wise service pricing & availability override
 model CityService {
-  id               String  @id @default(cuid())
-  cityId           String
-  serviceId        String
-  isActive         Boolean @default(true)
-  customPrice      Decimal? @db.Decimal(10, 2)
-  customDiscountPct Int    @default(0)
+  id                String   @id @default(cuid())
+  cityId            String
+  serviceId         String
+  isActive          Boolean  @default(true)
+  customPrice       Decimal? @db.Decimal(10, 2)
+  customDiscountPct Int      @default(0)
 
   city    City    @relation(fields: [cityId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -332,11 +418,11 @@ model CityService {
 
 // City-wise product availability
 model CityProduct {
-  id        String  @id @default(cuid())
-  cityId    String
-  productId String
-  isActive  Boolean @default(true)
-  stock     Int     @default(0)
+  id          String   @id @default(cuid())
+  cityId      String
+  productId   String
+  isActive    Boolean  @default(true)
+  stock       Int      @default(0)
   customPrice Decimal? @db.Decimal(10, 2)
 
   city    City    @relation(fields: [cityId], references: [id], onDelete: Cascade)
@@ -351,33 +437,33 @@ model CityProduct {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ServiceCategory {
-  id           String   @id @default(cuid())
-  key          String   @unique
-  slug         String?  @unique
-  name         String
-  icon         String
-  description  String?
-  sortOrder    Int      @default(0)
-  isActive     Boolean  @default(true)
-  isPremium    Boolean  @default(false)
-  seoTitle     String?
-  seoDesc      String?
-  seoKeywords  String[]
+  id          String   @id @default(cuid())
+  key         String   @unique
+  slug        String?  @unique
+  name        String
+  icon        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  isPremium   Boolean  @default(false)
+  seoTitle    String?
+  seoDesc     String?
+  seoKeywords String[]
 
   services      Service[]
   subCategories SubCategory[]
 }
 
 model SubCategory {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   categoryId  String
   key         String
-  slug        String?  @unique
+  slug        String? @unique
   name        String
   icon        String?
   description String?
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
 
   category ServiceCategory @relation(fields: [categoryId], references: [id])
   services Service[]
@@ -428,51 +514,52 @@ model Service {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ProductCategory {
-  id          String    @id @default(cuid())
-  key         String    @unique
-  name        String
-  icon        String?
-  sortOrder   Int       @default(0)
-  isActive    Boolean   @default(true)
+  id        String  @id @default(cuid())
+  key       String  @unique
+  name      String
+  icon      String?
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
 
   products Product[]
 }
 
 model Product {
-  id              String   @id @default(cuid())
+  id              String              @id @default(cuid())
   vendorId        String?
   categoryId      String
   name            String
-  slug            String   @unique
-  sku             String   @unique
+  slug            String              @unique
+  sku             String              @unique
   brand           String?
   description     String?
   aiGeneratedDesc String?
-  unit            String   @default("piece")
-  price           Decimal  @db.Decimal(10, 2)
-  mrp             Decimal? @db.Decimal(10, 2)
-  stock           Int      @default(0)
+  unit            String              @default("piece")
+  price           Decimal             @db.Decimal(10, 2)
+  mrp             Decimal?            @db.Decimal(10, 2)
+  stock           Int                 @default(0)
   images          String[]
   aiEnhancedImgs  String[]
   specifications  Json?
   seoTitle        String?
   seoDesc         String?
   seoKeywords     String[]
-  isActive        Boolean  @default(true)
-  views           Int      @default(0)
-  rating          Float    @default(0)
-  reviewCount     Int      @default(0)
+  isActive        Boolean             @default(true)
+  views           Int                 @default(0)
+  rating          Float               @default(0)
+  reviewCount     Int                 @default(0)
   coverageType    ProductCoverageType @default(PAN_INDIA)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  vendor       ProductVendor?   @relation(fields: [vendorId], references: [id])
-  category     ProductCategory  @relation(fields: [categoryId], references: [id])
-  orderItems   OrderItem[]
-  cityProducts CityProduct[]
-  reviews      Review[]
-  inventory    IssuedInventory[]
-  zones        ProductZone[]
+  vendor            ProductVendor?      @relation(fields: [vendorId], references: [id])
+  category          ProductCategory     @relation(fields: [categoryId], references: [id])
+  orderItems        OrderItem[]
+  cityProducts      CityProduct[]
+  reviews           Review[]
+  inventory         IssuedInventory[]
+  zones             ProductZone[]
+  locationInventory LocationInventory[]
 
   @@index([vendorId])
   @@index([categoryId])
@@ -501,33 +588,33 @@ model ProductZone {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ServiceVendor {
-  id                  String       @id @default(cuid())
-  userId              String       @unique
-  fullName            String
-  businessName        String?
-  skills              String[]
-  serviceRadius       Int          @default(10)
-  baseCity            String
-  status              VendorStatus @default(PENDING_VERIFICATION)
-  isOnline            Boolean      @default(false)
-  isVipPro            Boolean      @default(false)
-  preferredLanguage   Language     @default(EN)
-  currentLatitude     Float?
-  currentLongitude    Float?
-  lastLocationUpdate  DateTime?
-  rating              Float        @default(0)
-  completedJobs       Int          @default(0)
-  totalEarnings       Decimal      @default(0) @db.Decimal(12, 2)
-  pendingPayout       Decimal      @default(0) @db.Decimal(12, 2)
-  rejectionReason     String?
-  createdAt           DateTime     @default(now())
+  id                 String       @id @default(cuid())
+  userId             String       @unique
+  fullName           String
+  businessName       String?
+  skills             String[]
+  serviceRadius      Int          @default(10)
+  baseCity           String
+  status             VendorStatus @default(PENDING_VERIFICATION)
+  isOnline           Boolean      @default(false)
+  isVipPro           Boolean      @default(false)
+  preferredLanguage  Language     @default(EN)
+  currentLatitude    Float?
+  currentLongitude   Float?
+  lastLocationUpdate DateTime?
+  rating             Float        @default(0)
+  completedJobs      Int          @default(0)
+  totalEarnings      Decimal      @default(0) @db.Decimal(12, 2)
+  pendingPayout      Decimal      @default(0) @db.Decimal(12, 2)
+  rejectionReason    String?
+  createdAt          DateTime     @default(now())
 
-  user             User              @relation(fields: [userId], references: [id])
-  documents        VendorDocument[]
-  orders           Order[]
-  issuedInventory  IssuedInventory[]
-  reviews          Review[]
-  extraWorks       ExtraWorkItem[]
+  user            User              @relation(fields: [userId], references: [id])
+  documents       VendorDocument[]
+  orders          Order[]
+  issuedInventory IssuedInventory[]
+  reviews         Review[]
+  extraWorks      ExtraWorkItem[]
 
   @@index([status, isOnline])
   @@index([baseCity])
@@ -547,24 +634,24 @@ model VendorDocument {
 }
 
 model ProductVendor {
-  id             String       @id @default(cuid())
-  userId         String       @unique
-  businessName   String
-  ownerName      String?
-  businessType   String?
-  gstNumber      String?
-  panNumber      String?
-  aadhaarNumber  String?
-  cin            String?
-  msmeNumber     String?
-  alternatePhone String?
-  whatsappNumber String?
-  email          String?
-  city           String?
-  address        String?      // registered address
-  officeAddress  String?
-  warehouseAddress String?
-  pickupAddress  String?      // legacy free-text field, predates the PickupLocation model below — kept for the handful of sellers created before it existed, not written to by new code
+  id                String       @id @default(cuid())
+  userId            String       @unique
+  businessName      String
+  ownerName         String?
+  businessType      String?
+  gstNumber         String?
+  panNumber         String?
+  aadhaarNumber     String?
+  cin               String?
+  msmeNumber        String?
+  alternatePhone    String?
+  whatsappNumber    String?
+  email             String?
+  city              String?
+  address           String? // registered address
+  officeAddress     String?
+  warehouseAddress  String?
+  pickupAddress     String? // legacy free-text field, predates the PickupLocation model below — kept for the handful of sellers created before it existed, not written to by new code
   bankAccountHolder String?
   bankName          String?
   bankAccountNumber String?
@@ -572,11 +659,11 @@ model ProductVendor {
   bankBranch        String?
   upiId             String?
   rejectionReason   String?
-  status         VendorStatus @default(PENDING_VERIFICATION)
-  rating         Float        @default(0)
-  createdAt      DateTime     @default(now())
+  status            VendorStatus @default(PENDING_VERIFICATION)
+  rating            Float        @default(0)
+  createdAt         DateTime     @default(now())
 
-  user            User              @relation(fields: [userId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
   products        Product[]
   documents       SellerDocument[]
   pickupLocations PickupLocation[]
@@ -587,7 +674,7 @@ model ProductVendor {
 model SellerDocument {
   id         String   @id @default(cuid())
   vendorId   String
-  type       String   // GST_CERTIFICATE | PAN_CARD | CANCELLED_CHEQUE | BANK_PASSBOOK | BUSINESS_PROOF | ADDRESS_PROOF | OWNER_PHOTO | OWNER_AADHAAR | WAREHOUSE_IMAGE | STORE_IMAGE | ADDITIONAL
+  type       String // GST_CERTIFICATE | PAN_CARD | CANCELLED_CHEQUE | BANK_PASSBOOK | BUSINESS_PROOF | ADDRESS_PROOF | OWNER_PHOTO | OWNER_AADHAAR | WAREHOUSE_IMAGE | STORE_IMAGE | ADDITIONAL
   url        String   @db.Text
   verified   Boolean  @default(false)
   uploadedAt DateTime @default(now())
@@ -603,7 +690,7 @@ model SellerDocument {
 // layer (setPrimaryPickupLocation()), not a DB constraint, matching this codebase's existing
 // "loose" Prisma-level constraints elsewhere (no partial unique index support needed).
 model PickupLocation {
-  id               String  @id @default(cuid())
+  id               String   @id @default(cuid())
   vendorId         String
   name             String
   contactPerson    String?
@@ -622,18 +709,39 @@ model PickupLocation {
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
 
-  vendor ProductVendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  vendor         ProductVendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  inventory      LocationInventory[]
+  fulfilledItems OrderItem[]
 
   @@index([vendorId])
   @@index([city])
+}
+
+// Per-pickup-location stock for a product — a seller with 3 warehouses can carry a
+// different quantity of the same product at each one. Mirrors CityProduct's shape
+// (a per-scope override table) but scoped to PickupLocation instead of City.
+model LocationInventory {
+  id               String   @id @default(cuid())
+  pickupLocationId String
+  productId        String
+  stock            Int      @default(0)
+  isActive         Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+
+  pickupLocation PickupLocation @relation(fields: [pickupLocationId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([pickupLocationId, productId])
+  @@index([pickupLocationId])
+  @@index([productId])
 }
 
 // ─── Seller Registration (public application, reviewed by admin before a real
 // ProductVendor is provisioned) — mirrors PartnerRegistration's proven shape/flow exactly. ───
 
 model SellerRegistration {
-  id             String   @id @default(cuid())
-  registrationId String   @unique // SR-YYYYMMDD-XXXX
+  id             String @id @default(cuid())
+  registrationId String @unique // SR-YYYYMMDD-XXXX
 
   // Contact
   phone          String
@@ -661,16 +769,16 @@ model SellerRegistration {
   pincode           String?
 
   // Documents (base64 data-URLs or CDN URLs, same pattern as PartnerRegistration)
-  gstCertificateUrl  String?  @db.Text
-  panCardUrl         String?  @db.Text
-  cancelledChequeUrl String?  @db.Text
-  bankPassbookUrl    String?  @db.Text
-  businessProofUrl   String?  @db.Text
-  addressProofUrl    String?  @db.Text
-  ownerPhotoUrl      String?  @db.Text
-  ownerAadhaarUrl    String?  @db.Text
-  warehouseImages    String[]
-  storeImages        String[]
+  gstCertificateUrl   String?  @db.Text
+  panCardUrl          String?  @db.Text
+  cancelledChequeUrl  String?  @db.Text
+  bankPassbookUrl     String?  @db.Text
+  businessProofUrl    String?  @db.Text
+  addressProofUrl     String?  @db.Text
+  ownerPhotoUrl       String?  @db.Text
+  ownerAadhaarUrl     String?  @db.Text
+  warehouseImages     String[]
+  storeImages         String[]
   additionalDocuments String[]
 
   // Bank Details
@@ -687,8 +795,8 @@ model SellerRegistration {
   agreedAt    DateTime?
 
   // Meta
-  currentStep Int      @default(1)
-  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_INFO
+  currentStep Int     @default(1)
+  status      String  @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_INFO
   adminNotes  String?
 
   pickupLocations SellerRegistrationPickup[]
@@ -725,12 +833,12 @@ model SellerRegistrationPickup {
 }
 
 model IssuedInventory {
-  id           String    @id @default(cuid())
-  vendorId     String
-  productId    String
-  quantity     Int
-  issuedAt     DateTime  @default(now())
-  returnedAt   DateTime?
+  id         String    @id @default(cuid())
+  vendorId   String
+  productId  String
+  quantity   Int
+  issuedAt   DateTime  @default(now())
+  returnedAt DateTime?
 
   vendor  ServiceVendor @relation(fields: [vendorId], references: [id])
   product Product       @relation(fields: [productId], references: [id])
@@ -741,44 +849,102 @@ model IssuedInventory {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model DeliveryPartner {
-  id                  String              @id @default(cuid())
-  userId              String              @unique
-  type                DeliveryPartnerType
-  vehicleType         String?
-  vehicleNumber       String?
-  baseCity            String
-  isAvailable         Boolean             @default(true)
-  status              VendorStatus        @default(PENDING_VERIFICATION)
-  currentLatitude     Float?
-  currentLongitude    Float?
-  lastLocationUpdate  DateTime?
-  totalDeliveries     Int                 @default(0)
-  rating              Float                @default(0)
+  id                 String              @id @default(cuid())
+  userId             String              @unique
+  type               DeliveryPartnerType
+  vehicleType        String?
+  vehicleNumber      String?
+  baseCity           String
+  isAvailable        Boolean             @default(true)
+  status             VendorStatus        @default(PENDING_VERIFICATION)
+  currentLatitude    Float?
+  currentLongitude   Float?
+  lastLocationUpdate DateTime?
+  totalDeliveries    Int                 @default(0)
+  rating             Float               @default(0)
 
   user       User       @relation(fields: [userId], references: [id])
   deliveries Delivery[]
 }
 
 model Delivery {
-  id              String         @id @default(cuid())
-  partnerId       String
-  pickupAddress   String
-  pickupLat       Float
-  pickupLng       Float
-  dropAddress     String
-  dropLat         Float
-  dropLng         Float
-  status          DeliveryStatus
-  trackingNumber  String         @unique
-  receiverOtp     String?
-  proofPhotoUrl   String?
-  earningAmount   Decimal        @db.Decimal(10, 2)
-  pickedUpAt      DateTime?
-  deliveredAt     DateTime?
-  createdAt       DateTime       @default(now())
+  id             String         @id @default(cuid())
+  partnerId      String
+  pickupAddress  String
+  pickupLat      Float
+  pickupLng      Float
+  dropAddress    String
+  dropLat        Float
+  dropLng        Float
+  status         DeliveryStatus
+  trackingNumber String         @unique
+  receiverOtp    String?
+  proofPhotoUrl  String?
+  earningAmount  Decimal        @db.Decimal(10, 2)
+  pickedUpAt     DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime       @default(now())
 
   partner DeliveryPartner @relation(fields: [partnerId], references: [id])
   orders  Order[]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MASTER ORDERS — the customer-facing order wrapper. One cart / one checkout /
+// one payment / one order number for the customer; internally it fans out into
+// one or more `Order` rows (child orders, split by category/vendor/seller —
+// see the split engine landing in a later phase). Existing `Order` rows and
+// every existing order API are untouched — `Order.masterOrderId` is nullable
+// so all current single-order flows keep working exactly as before with a
+// null master reference; only new checkouts populate it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum MasterOrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+model MasterOrder {
+  id                String            @id @default(cuid())
+  masterOrderNumber String            @unique // customer-facing, e.g. RM250724001
+  customerId        String
+  addressId         String?
+  channel           BookingChannel    @default(WEBSITE)
+  status            MasterOrderStatus @default(PENDING_PAYMENT)
+  paymentStatus     PaymentStatus     @default(PENDING)
+  paymentId         String?
+
+  // Pricing — authoritative totals the customer actually pays once against.
+  // Child Orders carry their own allocated share once the split engine exists.
+  grossServiceAmount Decimal @default(0) @db.Decimal(10, 2)
+  grossProductAmount Decimal @default(0) @db.Decimal(10, 2)
+  subtotal           Decimal @default(0) @db.Decimal(10, 2)
+  couponCode         String?
+  couponDiscount     Decimal @default(0) @db.Decimal(10, 2)
+  membershipDiscount Decimal @default(0) @db.Decimal(10, 2)
+  walletUsed         Decimal @default(0) @db.Decimal(10, 2)
+  gstAmount          Decimal @default(0) @db.Decimal(10, 2)
+  totalAmount        Decimal @default(0) @db.Decimal(10, 2)
+
+  // Guest/walk-in customer info (when checking out without an account)
+  guestName  String?
+  guestPhone String?
+  guestEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer    User     @relation(fields: [customerId], references: [id])
+  address     Address? @relation(fields: [addressId], references: [id])
+  childOrders Order[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -786,66 +952,68 @@ model Delivery {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Order {
-  id                  String         @id @default(cuid())
-  orderNumber         String         @unique
-  customerId          String
-  vendorId            String?
-  serviceId           String?
-  addressId           String?
-  deliveryId          String?
-  amcSubscriptionId   String?
-  type                OrderType
-  channel             BookingChannel @default(WEBSITE)
-  status              OrderStatus    @default(PENDING_PAYMENT)
-  paymentStatus       PaymentStatus  @default(PENDING)
-  paymentId           String?
+  id                String         @id @default(cuid())
+  orderNumber       String         @unique
+  masterOrderId     String?
+  customerId        String
+  vendorId          String?
+  serviceId         String?
+  addressId         String?
+  deliveryId        String?
+  amcSubscriptionId String?
+  type              OrderType
+  channel           BookingChannel @default(WEBSITE)
+  status            OrderStatus    @default(PENDING_PAYMENT)
+  paymentStatus     PaymentStatus  @default(PENDING)
+  paymentId         String?
 
   // Pricing breakdown
-  serviceAmount       Decimal  @default(0) @db.Decimal(10, 2)
-  productsAmount      Decimal  @default(0) @db.Decimal(10, 2)
-  extraWorkAmount     Decimal  @default(0) @db.Decimal(10, 2)
-  subtotal            Decimal  @default(0) @db.Decimal(10, 2)
-  couponCode          String?
-  couponDiscount      Decimal  @default(0) @db.Decimal(10, 2)
-  membershipDiscount  Decimal  @default(0) @db.Decimal(10, 2)
-  walletUsed          Decimal  @default(0) @db.Decimal(10, 2)
-  gstAmount           Decimal  @default(0) @db.Decimal(10, 2)
-  totalAmount         Decimal  @default(0) @db.Decimal(10, 2)
-  remontCommission    Decimal  @default(0) @db.Decimal(10, 2)
-  vendorPayout        Decimal  @default(0) @db.Decimal(10, 2)
+  serviceAmount      Decimal @default(0) @db.Decimal(10, 2)
+  productsAmount     Decimal @default(0) @db.Decimal(10, 2)
+  extraWorkAmount    Decimal @default(0) @db.Decimal(10, 2)
+  subtotal           Decimal @default(0) @db.Decimal(10, 2)
+  couponCode         String?
+  couponDiscount     Decimal @default(0) @db.Decimal(10, 2)
+  membershipDiscount Decimal @default(0) @db.Decimal(10, 2)
+  walletUsed         Decimal @default(0) @db.Decimal(10, 2)
+  gstAmount          Decimal @default(0) @db.Decimal(10, 2)
+  totalAmount        Decimal @default(0) @db.Decimal(10, 2)
+  remontCommission   Decimal @default(0) @db.Decimal(10, 2)
+  vendorPayout       Decimal @default(0) @db.Decimal(10, 2)
 
   // Job lifecycle
-  slotStart           DateTime?
-  slotEnd             DateTime?
-  startOtp            String?
-  startOtpVerified    Boolean  @default(false)
-  startedAt           DateTime?
-  completedAt         DateTime?
-  cancelledAt         DateTime?
-  cancelReason        String?
+  slotStart        DateTime?
+  slotEnd          DateTime?
+  startOtp         String?
+  startOtpVerified Boolean   @default(false)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  cancelReason     String?
 
   // Proof artifacts
-  photosBefore        String[]
-  photosAfter         String[]
-  videoUrl            String?
+  photosBefore String[]
+  photosAfter  String[]
+  videoUrl     String?
 
   // Guest/walk-in customer info (when booking without account)
-  guestName           String?
-  guestPhone          String?
-  guestEmail          String?
+  guestName  String?
+  guestPhone String?
+  guestEmail String?
 
   // Admin management
-  adminNotes          String?
-  internalNote        String?
+  adminNotes   String?
+  internalNote String?
 
   // CRM/AI tracking
-  aiSessionId         String?
-  leadId              String?
+  aiSessionId String?
+  leadId      String?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   customer        User             @relation(fields: [customerId], references: [id])
+  masterOrder     MasterOrder?     @relation(fields: [masterOrderId], references: [id])
   vendor          ServiceVendor?   @relation(fields: [vendorId], references: [id])
   service         Service?         @relation(fields: [serviceId], references: [id])
   address         Address?         @relation(fields: [addressId], references: [id])
@@ -858,6 +1026,7 @@ model Order {
   lead            Lead?            @relation(fields: [leadId], references: [id])
 
   @@index([customerId])
+  @@index([masterOrderId])
   @@index([vendorId])
   @@index([status])
   @@index([type])
@@ -865,28 +1034,37 @@ model Order {
 }
 
 model OrderItem {
-  id         String  @id @default(cuid())
-  orderId    String
-  productId  String
-  quantity   Int
-  unitPrice  Decimal @db.Decimal(10, 2)
-  totalPrice Decimal @db.Decimal(10, 2)
+  id               String  @id @default(cuid())
+  orderId          String
+  productId        String
+  quantity         Int
+  unitPrice        Decimal @db.Decimal(10, 2)
+  totalPrice       Decimal @db.Decimal(10, 2)
+  // Which of the seller's pickup locations fulfills this line item — resolved automatically
+  // at order-creation time by distance + stock (see resolvePickupLocation() in
+  // products.module.ts). Nullable: products with no LocationInventory rows yet (i.e. every
+  // product that existed before this module, or any admin-owned product with no seller
+  // pickup locations) simply don't get one — this is additive tracking, never a hard gate
+  // on checkout.
+  pickupLocationId String?
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id])
+  pickupLocation PickupLocation? @relation(fields: [pickupLocationId], references: [id])
 
   @@index([orderId])
+  @@index([pickupLocationId])
 }
 
 model ExtraWorkItem {
-  id                String   @id @default(cuid())
-  orderId           String
-  description       String
-  amount            Decimal  @db.Decimal(10, 2)
-  addedBy           String
-  customerApproved  Boolean  @default(false)
-  approvedAt        DateTime?
-  createdAt         DateTime @default(now())
+  id               String    @id @default(cuid())
+  orderId          String
+  description      String
+  amount           Decimal   @db.Decimal(10, 2)
+  addedBy          String
+  customerApproved Boolean   @default(false)
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
 
   order  Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   vendor ServiceVendor @relation(fields: [addedBy], references: [id])
@@ -897,35 +1075,35 @@ model ExtraWorkItem {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Invoice {
-  id                  String   @id @default(cuid())
-  invoiceNumber       String   @unique
-  orderId             String   @unique
+  id            String @id @default(cuid())
+  invoiceNumber String @unique
+  orderId       String @unique
 
   // Page 1 (Customer)
-  customerSubtotal    Decimal  @db.Decimal(10, 2)
-  customerCgst        Decimal  @db.Decimal(10, 2)
-  customerSgst        Decimal  @db.Decimal(10, 2)
-  customerTotal       Decimal  @db.Decimal(10, 2)
+  customerSubtotal Decimal @db.Decimal(10, 2)
+  customerCgst     Decimal @db.Decimal(10, 2)
+  customerSgst     Decimal @db.Decimal(10, 2)
+  customerTotal    Decimal @db.Decimal(10, 2)
 
   // Page 2 (Vendor)
-  vendorLabor         Decimal  @db.Decimal(10, 2)
-  vendorMaterial      Decimal  @db.Decimal(10, 2)
-  vendorCgst          Decimal  @db.Decimal(10, 2)
-  vendorSgst          Decimal  @db.Decimal(10, 2)
-  vendorTotal         Decimal  @db.Decimal(10, 2)
+  vendorLabor    Decimal @db.Decimal(10, 2)
+  vendorMaterial Decimal @db.Decimal(10, 2)
+  vendorCgst     Decimal @db.Decimal(10, 2)
+  vendorSgst     Decimal @db.Decimal(10, 2)
+  vendorTotal    Decimal @db.Decimal(10, 2)
 
   // Page 3 (Remont)
-  platformCommission  Decimal  @db.Decimal(10, 2)
-  bookingFee          Decimal  @db.Decimal(10, 2)
-  remontCgst          Decimal  @db.Decimal(10, 2)
-  remontSgst          Decimal  @db.Decimal(10, 2)
-  remontTotal         Decimal  @db.Decimal(10, 2)
+  platformCommission Decimal @db.Decimal(10, 2)
+  bookingFee         Decimal @db.Decimal(10, 2)
+  remontCgst         Decimal @db.Decimal(10, 2)
+  remontSgst         Decimal @db.Decimal(10, 2)
+  remontTotal        Decimal @db.Decimal(10, 2)
 
-  pdfUrlPage1         String?
-  pdfUrlPage2         String?
-  pdfUrlPage3         String?
-  pdfUrlCombined      String?
-  generatedAt         DateTime @default(now())
+  pdfUrlPage1    String?
+  pdfUrlPage2    String?
+  pdfUrlPage3    String?
+  pdfUrlCombined String?
+  generatedAt    DateTime @default(now())
 
   order Order @relation(fields: [orderId], references: [id])
 }
@@ -987,15 +1165,15 @@ model MembershipPlan {
 }
 
 model UserMembership {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  planId            String
-  startDate         DateTime @default(now())
-  endDate           DateTime
-  isActive          Boolean  @default(true)
-  freeServicesUsed  Int      @default(0)
-  amountPaid        Decimal  @db.Decimal(10, 2)
-  paymentId         String?
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  planId           String
+  startDate        DateTime @default(now())
+  endDate          DateTime
+  isActive         Boolean  @default(true)
+  freeServicesUsed Int      @default(0)
+  amountPaid       Decimal  @db.Decimal(10, 2)
+  paymentId        String?
 
   user User           @relation(fields: [userId], references: [id])
   plan MembershipPlan @relation(fields: [planId], references: [id])
@@ -1041,26 +1219,26 @@ model CouponUsage {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model CorporateAccount {
-  id            String   @id @default(cuid())
-  companyCode   String   @unique
-  companyName   String
-  gstNumber     String?
-  billingEmail  String
-  creditLimit   Decimal  @default(0) @db.Decimal(12, 2)
-  creditUsed    Decimal  @default(0) @db.Decimal(12, 2)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  companyCode  String   @unique
+  companyName  String
+  gstNumber    String?
+  billingEmail String
+  creditLimit  Decimal  @default(0) @db.Decimal(12, 2)
+  creditUsed   Decimal  @default(0) @db.Decimal(12, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
 
   members CorporateMember[]
 }
 
 model CorporateMember {
-  id          String        @id @default(cuid())
-  accountId   String
-  userId      String        @unique
-  role        CorporateRole @default(EMPLOYEE)
-  department  String?
-  createdAt   DateTime      @default(now())
+  id         String        @id @default(cuid())
+  accountId  String
+  userId     String        @unique
+  role       CorporateRole @default(EMPLOYEE)
+  department String?
+  createdAt  DateTime      @default(now())
 
   account CorporateAccount @relation(fields: [accountId], references: [id])
   user    User             @relation(fields: [userId], references: [id])
@@ -1103,17 +1281,17 @@ model Review {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model AiSession {
-  id                  String   @id @default(cuid())
-  userId              String?
-  channel             BookingChannel
-  messages            Json     @default("[]")
-  resolvedIntent      String?
-  languageDetected    Language?
-  convertedToBooking  Boolean  @default(false)
-  resultOrderId       String?
-  resultLeadId        String?
-  createdAt           DateTime @default(now())
-  endedAt             DateTime?
+  id                 String         @id @default(cuid())
+  userId             String?
+  channel            BookingChannel
+  messages           Json           @default("[]")
+  resolvedIntent     String?
+  languageDetected   Language?
+  convertedToBooking Boolean        @default(false)
+  resultOrderId      String?
+  resultLeadId       String?
+  createdAt          DateTime       @default(now())
+  endedAt            DateTime?
 
   user User? @relation(fields: [userId], references: [id])
 
@@ -1125,42 +1303,42 @@ model AiSession {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Lead {
-  id                  String     @id @default(cuid())
+  id             String  @id @default(cuid())
   // Customer details (may not be a registered user yet)
-  customerName        String
-  customerPhone       String
-  customerEmail       String?
-  customerUserId      String?    // linked once converted to registered user
-  cityName            String?
+  customerName   String
+  customerPhone  String
+  customerEmail  String?
+  customerUserId String? // linked once converted to registered user
+  cityName       String?
 
   // Lead source & status
-  source              LeadSource
-  status              LeadStatus @default(NEW)
-  serviceInterested   String?
-  estimatedValue      Decimal?   @db.Decimal(10, 2)
+  source            LeadSource
+  status            LeadStatus @default(NEW)
+  serviceInterested String?
+  estimatedValue    Decimal?   @db.Decimal(10, 2)
 
   // Tracking
-  assignedAgentId     String?
-  notes               String?
-  lastContactedAt     DateTime?
-  nextFollowUpAt      DateTime?
-  convertedAt         DateTime?
-  convertedOrderId    String?
-  lostReason          String?
+  assignedAgentId  String?
+  notes            String?
+  lastContactedAt  DateTime?
+  nextFollowUpAt   DateTime?
+  convertedAt      DateTime?
+  convertedOrderId String?
+  lostReason       String?
 
   // Source tracking
-  aiSessionId         String?
-  utmSource           String?
-  utmCampaign         String?
-  utmMedium           String?
+  aiSessionId String?
+  utmSource   String?
+  utmCampaign String?
+  utmMedium   String?
 
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  customer    User?         @relation("LeadCustomer", fields: [customerUserId], references: [id])
-  agent       User?         @relation("LeadAgent", fields: [assignedAgentId], references: [id])
-  activities  CrmActivity[]
-  orders      Order[]
+  customer   User?         @relation("LeadCustomer", fields: [customerUserId], references: [id])
+  agent      User?         @relation("LeadAgent", fields: [assignedAgentId], references: [id])
+  activities CrmActivity[]
+  orders     Order[]
 
   @@index([status])
   @@index([assignedAgentId])
@@ -1169,15 +1347,15 @@ model Lead {
 }
 
 model CrmActivity {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   leadId      String
   agentId     String
-  type        String   // CALL, WHATSAPP, EMAIL, MEETING, NOTE
+  type        String // CALL, WHATSAPP, EMAIL, MEETING, NOTE
   notes       String
   outcome     String?
   nextAction  String?
   scheduledAt DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   lead  Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
   agent User @relation(fields: [agentId], references: [id])
@@ -1190,44 +1368,44 @@ model CrmActivity {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model AmcPlan {
-  id                 String      @id @default(cuid())
-  type               AmcPlanType @unique
-  name               String
-  description        String?
-  durationMonths     Int         @default(12)
-  priceYearly        Decimal     @db.Decimal(10, 2)
-  priceMonthly       Decimal?    @db.Decimal(10, 2)
-  includedServices   String[]
-  freeServicesCount  Int         @default(0)
-  discountPercent    Int         @default(0)
-  prioritySupport    Boolean     @default(false)
-  benefitsJson       Json?
-  isActive           Boolean     @default(true)
-  isPopular          Boolean     @default(false)
-  applicableCities   String[]
-  createdAt          DateTime    @default(now())
+  id                String      @id @default(cuid())
+  type              AmcPlanType @unique
+  name              String
+  description       String?
+  durationMonths    Int         @default(12)
+  priceYearly       Decimal     @db.Decimal(10, 2)
+  priceMonthly      Decimal?    @db.Decimal(10, 2)
+  includedServices  String[]
+  freeServicesCount Int         @default(0)
+  discountPercent   Int         @default(0)
+  prioritySupport   Boolean     @default(false)
+  benefitsJson      Json?
+  isActive          Boolean     @default(true)
+  isPopular         Boolean     @default(false)
+  applicableCities  String[]
+  createdAt         DateTime    @default(now())
 
   subscriptions AmcSubscription[]
 }
 
 model AmcSubscription {
-  id                  String    @id @default(cuid())
-  subscriptionNumber  String    @unique
-  userId              String
-  planId              String
-  startDate           DateTime  @default(now())
-  endDate             DateTime
-  status              AmcStatus @default(ACTIVE)
-  amountPaid          Decimal   @db.Decimal(10, 2)
-  paymentId           String?
-  servicesUsed        Int       @default(0)
-  servicesRemaining   Int       @default(0)
-  autoRenew           Boolean   @default(false)
-  renewedFromId       String?
-  cancelledAt         DateTime?
-  cancelReason        String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  subscriptionNumber String    @unique
+  userId             String
+  planId             String
+  startDate          DateTime  @default(now())
+  endDate            DateTime
+  status             AmcStatus @default(ACTIVE)
+  amountPaid         Decimal   @db.Decimal(10, 2)
+  paymentId          String?
+  servicesUsed       Int       @default(0)
+  servicesRemaining  Int       @default(0)
+  autoRenew          Boolean   @default(false)
+  renewedFromId      String?
+  cancelledAt        DateTime?
+  cancelReason       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user   User    @relation(fields: [userId], references: [id])
   plan   AmcPlan @relation(fields: [planId], references: [id])
@@ -1257,18 +1435,18 @@ model WhatsappLog {
 }
 
 model Notification {
-  id         String                @id @default(cuid())
-  userId     String
-  title      String
-  body       String
-  channels   NotificationChannel[]
-  iconUrl    String?
-  imageUrl   String?
-  actionUrl  String?
-  orderId    String?
-  isRead     Boolean               @default(false)
-  readAt     DateTime?
-  createdAt  DateTime              @default(now())
+  id        String                @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  channels  NotificationChannel[]
+  iconUrl   String?
+  imageUrl  String?
+  actionUrl String?
+  orderId   String?
+  isRead    Boolean               @default(false)
+  readAt    DateTime?
+  createdAt DateTime              @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
@@ -1278,118 +1456,118 @@ model Notification {
 // ─── CMS MODELS ────────────────────────────────────────────────────────────
 
 model HomeBanner {
-  id          String   @id @default(cuid())
-  title       String
-  subtitle    String?
-  ctaText     String?
-  ctaUrl      String   @default("#")
-  imageUrl    String?
-  bgColor     String?
-  tag         String?
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
-  cityFilter  String[] // empty = show in all cities
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  title      String
+  subtitle   String?
+  ctaText    String?
+  ctaUrl     String   @default("#")
+  imageUrl   String?
+  bgColor    String?
+  tag        String?
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  cityFilter String[] // empty = show in all cities
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model SiteSetting {
-  id        String  @id @default(cuid())
-  key       String  @unique
-  value     String
-  label     String?
-  group     String  @default("general")
+  id    String  @id @default(cuid())
+  key   String  @unique
+  value String
+  label String?
+  group String  @default("general")
 }
 
 model Newsletter {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  name        String?
-  isActive    Boolean  @default(true)
-  source      String   @default("website") // website, app, whatsapp
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  isActive  Boolean  @default(true)
+  source    String   @default("website") // website, app, whatsapp
+  createdAt DateTime @default(now())
 }
 
 model Faq {
-  id          String   @id @default(cuid())
-  question    String
-  answer      String
-  category    String   @default("general")
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  category  String   @default("general")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model BlogPost {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
-  slug        String   @unique
+  slug        String    @unique
   summary     String?
   content     String
   imageUrl    String?
-  author      String   @default("Remont Team")
+  author      String    @default("Remont Team")
   tags        String[]
-  isPublished Boolean  @default(false)
-  views       Int      @default(0)
+  isPublished Boolean   @default(false)
+  views       Int       @default(0)
   publishedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model TaxConfig {
-  id          String   @id @default(cuid())
-  name        String   // e.g. "GST 18%"
-  type        String   @default("GST") // GST, SERVICE_TAX, CESS
-  rate        Decimal  @db.Decimal(5, 2)
-  hsnCode     String?  // HSN/SAC code
-  appliesTo   String[] // SERVICE, PRODUCT, AMC
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  name      String // e.g. "GST 18%"
+  type      String   @default("GST") // GST, SERVICE_TAX, CESS
+  rate      Decimal  @db.Decimal(5, 2)
+  hsnCode   String? // HSN/SAC code
+  appliesTo String[] // SERVICE, PRODUCT, AMC
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
 
 model SeasonalAd {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   description String?
   imageUrl    String?
   ctaText     String?
-  ctaUrl      String   @default("#")
-  type        String   @default("SEASONAL") // SEASONAL, APP_AD, POPUP, STRIP
+  ctaUrl      String    @default("#")
+  type        String    @default("SEASONAL") // SEASONAL, APP_AD, POPUP, STRIP
   startDate   DateTime?
   endDate     DateTime?
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
   cityFilter  String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model StaffMember {
-  id          String   @id @default(cuid())
-  name        String
-  email       String   @unique
-  phone       String?
-  role        String   @default("STAFF") // STAFF, MANAGER, SUPPORT
-  department  String?
-  isActive    Boolean  @default(true)
-  joinedAt    DateTime @default(now())
+  id         String   @id @default(cuid())
+  name       String
+  email      String   @unique
+  phone      String?
+  role       String   @default("STAFF") // STAFF, MANAGER, SUPPORT
+  department String?
+  isActive   Boolean  @default(true)
+  joinedAt   DateTime @default(now())
 }
 
 // ─── Partner Registration (pre-approval onboarding) ───────────────────────────
 model PartnerRegistration {
-  id             String   @id @default(cuid())
-  registrationId String   @unique // PR-YYYYMMDD-XXXX
+  id             String @id @default(cuid())
+  registrationId String @unique // PR-YYYYMMDD-XXXX
 
   // Contact
-  phone          String
-  userId         String?
+  phone  String
+  userId String?
 
   // Step 2 — Basic Info
-  fullName       String   @default("")
-  email          String?
-  gender         String?
-  dateOfBirth    String?
+  fullName    String  @default("")
+  email       String?
+  gender      String?
+  dateOfBirth String?
 
   // Address
   fullAddress    String?
@@ -1402,8 +1580,8 @@ model PartnerRegistration {
   locationSource String?
 
   // Step 3 — Service Categories
-  categories     String[]
-  categoryOther  String?
+  categories    String[]
+  categoryOther String?
 
   // Step 4 — Experience
   experienceYears    String?
@@ -1415,14 +1593,14 @@ model PartnerRegistration {
   availableEmergency Boolean @default(false)
 
   // Step 5 — Documents (base64 data-URLs or CDN URLs)
-  idProofType            String?
-  idProofFront           String?  @db.Text
-  idProofBack            String?  @db.Text
-  panNumber              String?
-  panCardUrl             String?  @db.Text
-  profilePhotoUrl        String?  @db.Text
-  skillCertificateUrl    String?  @db.Text
-  policeVerificationUrl  String?  @db.Text
+  idProofType              String?
+  idProofFront             String? @db.Text
+  idProofBack              String? @db.Text
+  panNumber                String?
+  panCardUrl               String? @db.Text
+  profilePhotoUrl          String? @db.Text
+  skillCertificateUrl      String? @db.Text
+  policeVerificationUrl    String? @db.Text
   policeVerificationStatus String? // AVAILABLE | NEED_HELP
 
   // Step 6 — Bank Details
@@ -1432,7 +1610,7 @@ model PartnerRegistration {
   bankName           String?
   bankBranch         String?
   upiId              String?
-  cancelledChequeUrl String?  @db.Text
+  cancelledChequeUrl String? @db.Text
 
   // Step 7 — Emergency Contact
   emergencyName     String?
@@ -1448,9 +1626,9 @@ model PartnerRegistration {
   agreedAt         DateTime?
 
   // Meta
-  language    String   @default("EN")
-  currentStep Int      @default(1)
-  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_DOCS
+  language    String  @default("EN")
+  currentStep Int     @default(1)
+  status      String  @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_DOCS
   adminNotes  String?
 
   createdAt DateTime @default(now())
@@ -1463,18 +1641,18 @@ model PartnerRegistration {
 }
 
 model DeleteRequest {
-  id          String               @id @default(cuid())
+  id          String              @id @default(cuid())
   targetType  DeleteTargetType
   targetId    String
   targetLabel String
   reason      String?
   requestedBy String
-  requester   User                 @relation("DeleteRequester", fields: [requestedBy], references: [id])
-  status      DeleteRequestStatus  @default(PENDING)
+  requester   User                @relation("DeleteRequester", fields: [requestedBy], references: [id])
+  status      DeleteRequestStatus @default(PENDING)
   reviewedBy  String?
-  reviewer    User?                @relation("DeleteReviewer", fields: [reviewedBy], references: [id])
+  reviewer    User?               @relation("DeleteReviewer", fields: [reviewedBy], references: [id])
   reviewNote  String?
-  createdAt   DateTime             @default(now())
+  createdAt   DateTime            @default(now())
   reviewedAt  DateTime?
 
   @@index([status])

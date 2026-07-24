@@ -493,15 +493,14 @@ a{color:inherit;text-decoration:none}
   </div>
 </div>
 
+<script src="/shared/remont-auth.js"></script>
 <script>
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 var LANG='EN';
 // Vendors can land here either via this page's own login, or redirected straight from the
-// main site's login (index.html stores the token as 'pr_token'/'remont_token' after seeing
-// role===SERVICE_VENDOR) — accept whichever token is available so that redirect doesn't
-// dead-end back on this page's login screen.
-var accessToken = localStorage.getItem('vendorAccessToken') || localStorage.getItem('pr_token') || localStorage.getItem('remont_token') || null;
-var refreshTok = localStorage.getItem('vendorRefreshToken') || null;
+// main site's login — both now go through RemontAuth's single canonical token pair.
+var accessToken = RemontAuth.getToken();
+var refreshTok = RemontAuth.getRefreshToken();
 var vendorProfile = null, earningsData = null, jobsAll = [];
 var pendingPhone = '';
 var onlineState = false;
@@ -510,7 +509,7 @@ var jfState = {step:1, orderId:null, mock:true, order:null, photosBefore:[], pho
 var JF_STEPS=['Accepted','En Route','Verify','Before','Working','Extra','After','Payment','Done'];
 
 /* ── API HELPER ── */
-function apiFetch(path, opts){
+function apiFetch(path, opts, _isRetry){
   opts = opts || {};
   var headers = {'Content-Type':'application/json'};
   if (opts.headers) for (var k in opts.headers) headers[k]=opts.headers[k];
@@ -518,6 +517,12 @@ function apiFetch(path, opts){
   var fetchOpts = {method: opts.method||'GET', headers: headers};
   if (opts.body) fetchOpts.body = opts.body;
   return fetch(API_BASE + '/api/v1' + path, fetchOpts).then(function(res){
+    if (res.status === 401 && !_isRetry && refreshTok) {
+      return RemontAuth.refresh().then(function(){
+        accessToken = RemontAuth.getToken(); refreshTok = RemontAuth.getRefreshToken();
+        return apiFetch(path, opts, true);
+      }).catch(function(){ doLogout(); throw new Error('Session expired'); });
+    }
     return res.json().catch(function(){ return {}; }).then(function(data){
       if (!res.ok) {
         var msg = (data && (data.message || data.error)) || ('Request failed (' + res.status + ')');
@@ -526,10 +531,7 @@ function apiFetch(path, opts){
       // Every backend response is wrapped by the global TransformInterceptor as
       // {success, statusCode, data, timestamp} — unwrap it here so every caller gets the
       // real payload directly (res.user, res.accessToken, the profile object itself, etc.),
-      // same as admin/common.js's api() helper already does. This was previously missing,
-      // which broke this file's own OTP login screen (res.user was always undefined) —
-      // vendors only ever worked via the redirect-from-index.html path, which unwraps
-      // defensively on the index.html side instead.
+      // same as admin/common.js's api() helper already does.
       return data.data !== undefined ? data.data : data;
     });
   });
@@ -552,7 +554,7 @@ function sendLoginOtp(){
   if(digits.length!==10){err.textContent='Enter a valid 10-digit mobile number';return;}
   pendingPhone = '+91'+digits;
   var btn=document.getElementById('send-otp-btn'); btn.disabled=true; btn.textContent='Sending…';
-  apiFetch('/auth/send-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, role:'SERVICE_VENDOR'})})
+  RemontAuth.sendOtp(pendingPhone, 'SERVICE_VENDOR')
     .then(function(){
       document.getElementById('otp-sent-to').textContent='Code sent to '+pendingPhone;
       document.getElementById('login-phone-step').style.display='none';
@@ -567,11 +569,13 @@ function verifyLoginOtp(){
   var err=document.getElementById('otp-err'); err.textContent='';
   if(code.length!==4){err.textContent='Enter the 4-digit OTP';return;}
   var btn=document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
-  apiFetch('/auth/verify-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, otp: code, role:'SERVICE_VENDOR'})})
+  RemontAuth.verifyOtp(pendingPhone, code, {role:'SERVICE_VENDOR'})
     .then(function(res){
+      if (res.user.role !== 'SERVICE_VENDOR') {
+        RemontAuth.clearSession();
+        throw new Error('This number is registered as ' + res.user.role.toLowerCase().replace('_',' ') + ', not a service partner.');
+      }
       accessToken=res.accessToken; refreshTok=res.refreshToken;
-      localStorage.setItem('vendorAccessToken', accessToken);
-      localStorage.setItem('vendorRefreshToken', refreshTok);
       document.getElementById('prof-phone').textContent = res.user.phone;
       return loadVendorProfile();
     })
@@ -587,7 +591,6 @@ function afterAuth(){
   return apiFetch('/auth/me')
     .then(function(me){
       if (me.role && me.role !== 'SERVICE_VENDOR') { doLogout(); alert('This number is registered as a ' + me.role.toLowerCase() + ', not a service partner.'); return; }
-      localStorage.setItem('vendorAccessToken', accessToken); // normalize key if we got here via a cross-site redirect token
       document.getElementById('prof-phone').textContent = me.phone;
       return loadVendorProfile();
     })
@@ -632,8 +635,7 @@ function enterDashboard(){
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
 function doLogout(){
   accessToken=null; refreshTok=null; vendorProfile=null;
-  localStorage.removeItem('vendorAccessToken'); localStorage.removeItem('vendorRefreshToken');
-  localStorage.removeItem('pr_token'); localStorage.removeItem('remont_token'); localStorage.removeItem('remont_user');
+  RemontAuth.clearSession();
   showScreen('screen-login');
   document.getElementById('login-phone-step').style.display='block';
   document.getElementById('login-otp-step').style.display='none';

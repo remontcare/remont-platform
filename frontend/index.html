@@ -3307,6 +3307,7 @@
 </style>
 <!-- Razorpay SDK — preloaded so payment popup opens instantly -->
 <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+<script src="/shared/remont-auth.js"></script>
 </head>
 <body>
 
@@ -4940,144 +4941,144 @@
       title: "AC Service & Repair",
       subtitle: "Expert technicians, doorstep service",
       subServices: [
-        { ic: "🧊", n: "AC Installation", p: "₹999", pNum: 999, o: "₹1,499" },
-        { ic: "💨", n: "Gas Refill", p: "₹2,199", pNum: 2199, o: "₹2,999" },
-        { ic: "🧼", n: "Deep Cleaning", p: "₹599", pNum: 599, o: "₹899" },
-        { ic: "🔧", n: "AC Repair", p: "₹399", pNum: 399, o: "₹599" }
+        { id: "svc-ac-install", ic: "🧊", n: "AC Installation", p: "₹999", pNum: 999, o: "₹1,499" },
+        { id: "svc-ac-gas-refill", ic: "💨", n: "Gas Refill", p: "₹2,199", pNum: 2199, o: "₹2,999" },
+        { id: "svc-ac-deep-clean", ic: "🧼", n: "Deep Cleaning", p: "₹599", pNum: 599, o: "₹899" },
+        { id: "svc-ac-repair", ic: "🔧", n: "AC Repair", p: "₹399", pNum: 399, o: "₹599" }
       ],
       productTitle: "Related Products",
       productPillText: "Up to 40% off",
       products: [
-        { img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "Daikin", name: "1.5 Ton 5-Star Split AC Inverter", rating: "4.5", count: "2,341", price: "34,990", was: "44,990", off: "22%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "V-Guard", name: "AC Voltage Stabilizer 4kVA", rating: "4.6", count: "1,890", price: "2,799", was: "3,999", off: "30%" },
-        { img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "Honeywell", name: "Smart WiFi AC Remote Control", rating: "4.3", count: "540", price: "1,499", was: "2,499", off: "40%" },
-        { img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "LG", name: "AC Air Filter Pack of 2", rating: "4.4", count: "1,120", price: "899", was: "1,299", off: "31%", badge: "New", badgeGreen: true }
+        { id: "prod-ac-1", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "Daikin", name: "1.5 Ton 5-Star Split AC Inverter", rating: "4.5", count: "2,341", price: "34,990", was: "44,990", off: "22%", badge: "Bestseller" },
+        { id: "prod-ac-2", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "V-Guard", name: "AC Voltage Stabilizer 4kVA", rating: "4.6", count: "1,890", price: "2,799", was: "3,999", off: "30%" },
+        { id: "prod-ac-3", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "Honeywell", name: "Smart WiFi AC Remote Control", rating: "4.3", count: "540", price: "1,499", was: "2,499", off: "40%" },
+        { id: "prod-ac-4", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "LG", name: "AC Air Filter Pack of 2", rating: "4.4", count: "1,120", price: "899", was: "1,299", off: "31%", badge: "New", badgeGreen: true }
       ]
     },
     plumbing: {
       title: "Plumbing Services",
       subtitle: "Leak repair, fittings, full bathroom",
       subServices: [
-        { ic: "🚿", n: "Tap/Leak Fix", p: "₹199", pNum: 199, o: "₹399" },
-        { ic: "🚽", n: "Toilet Install", p: "₹1,499", pNum: 1499, o: "₹1,999" },
-        { ic: "🔧", n: "Pipe Replacement", p: "₹499", pNum: 499, o: "₹799" },
-        { ic: "🛁", n: "Full Bathroom Reno", p: "₹65K+", pNum: 65000, o: "₹85K" }
+        { id: "svc-plumb-tap-leak", ic: "🚿", n: "Tap/Leak Fix", p: "₹199", pNum: 199, o: "₹399" },
+        { id: "svc-plumb-toilet-install", ic: "🚽", n: "Toilet Install", p: "₹1,499", pNum: 1499, o: "₹1,999" },
+        { id: "svc-plumb-pipe-replace", ic: "🔧", n: "Pipe Replacement", p: "₹499", pNum: 499, o: "₹799" },
+        { id: "svc-plumb-bathroom-reno", ic: "🛁", n: "Full Bathroom Reno", p: "₹65K+", pNum: 65000, o: "₹85K" }
       ],
       productTitle: "Related Plumbing Products",
       productPillText: "Brand offers",
       products: [
-        { img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Jaquar", name: "Premium Single-Lever Mixer Tap", rating: "4.7", count: "3,210", price: "2,499", was: "3,999", off: "37%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&q=80", brand: "Kohler", name: "Wall-Mounted Toilet Seat — White", rating: "4.6", count: "1,540", price: "8,999", was: "12,500", off: "28%" },
-        { img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Kajaria", name: "Marble-Finish Floor Tile (sqft)", rating: "4.5", count: "890", price: "89", was: "140", off: "36%" },
-        { img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Hindware", name: "Bathroom Accessories Set (5 pcs)", rating: "4.4", count: "720", price: "1,899", was: "2,999", off: "37%", badge: "Combo", badgeGreen: true }
+        { id: "prod-plumb-1", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Jaquar", name: "Premium Single-Lever Mixer Tap", rating: "4.7", count: "3,210", price: "2,499", was: "3,999", off: "37%", badge: "Bestseller" },
+        { id: "prod-plumb-2", img: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&q=80", brand: "Kohler", name: "Wall-Mounted Toilet Seat — White", rating: "4.6", count: "1,540", price: "8,999", was: "12,500", off: "28%" },
+        { id: "prod-plumb-3", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Kajaria", name: "Marble-Finish Floor Tile (sqft)", rating: "4.5", count: "890", price: "89", was: "140", off: "36%" },
+        { id: "prod-plumb-4", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Hindware", name: "Bathroom Accessories Set (5 pcs)", rating: "4.4", count: "720", price: "1,899", was: "2,999", off: "37%", badge: "Combo", badgeGreen: true }
       ]
     },
     electrical: {
       title: "Electrical Services",
       subtitle: "Wiring, fittings, smart home",
       subServices: [
-        { ic: "⚡", n: "Switch/Socket Fix", p: "₹199", pNum: 199, o: "₹299" },
-        { ic: "💡", n: "Light Installation", p: "₹299", pNum: 299, o: "₹399" },
-        { ic: "🔌", n: "Wiring & Conduit", p: "₹45/pt", pNum: 45, o: "₹65" },
-        { ic: "🏠", n: "Smart Home Setup", p: "₹4,999+", pNum: 4999, o: "₹6,999" }
+        { id: "svc-elec-switch-fix", ic: "⚡", n: "Switch/Socket Fix", p: "₹199", pNum: 199, o: "₹299" },
+        { id: "svc-elec-light-install", ic: "💡", n: "Light Installation", p: "₹299", pNum: 299, o: "₹399" },
+        { id: "svc-elec-wiring", ic: "🔌", n: "Wiring & Conduit", p: "₹45/pt", pNum: 45, o: "₹65" },
+        { id: "svc-elec-smart-home", ic: "🏠", n: "Smart Home Setup", p: "₹4,999+", pNum: 4999, o: "₹6,999" }
       ],
       productTitle: "Related Electrical Products",
       productPillText: "Best price",
       products: [
-        { img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Philips", name: "Smart LED Ceiling Light 18W", rating: "4.6", count: "3,820", price: "1,299", was: "1,899", off: "32%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Anchor", name: "Modular Switch & Socket Set", rating: "4.5", count: "2,140", price: "899", was: "1,499", off: "40%" },
-        { img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Wipro", name: "Smart WiFi Ceiling Fan with Light", rating: "4.4", count: "1,540", price: "5,499", was: "7,999", off: "31%" },
-        { img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Havells", name: "MCB Distribution Box 8-way", rating: "4.5", count: "890", price: "1,499", was: "2,299", off: "35%", badge: "New", badgeGreen: true }
+        { id: "prod-elec-1", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Philips", name: "Smart LED Ceiling Light 18W", rating: "4.6", count: "3,820", price: "1,299", was: "1,899", off: "32%", badge: "Bestseller" },
+        { id: "prod-elec-2", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Anchor", name: "Modular Switch & Socket Set", rating: "4.5", count: "2,140", price: "899", was: "1,499", off: "40%" },
+        { id: "prod-elec-3", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Wipro", name: "Smart WiFi Ceiling Fan with Light", rating: "4.4", count: "1,540", price: "5,499", was: "7,999", off: "31%" },
+        { id: "prod-elec-4", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Havells", name: "MCB Distribution Box 8-way", rating: "4.5", count: "890", price: "1,499", was: "2,299", off: "35%", badge: "New", badgeGreen: true }
       ]
     },
     appliance: {
       title: "Appliance Repair",
       subtitle: "TV, fridge, washing machine, microwave",
       subServices: [
-        { ic: "📺", n: "TV Repair", p: "₹399", pNum: 399, o: "₹599" },
-        { ic: "🧊", n: "Fridge Repair", p: "₹499", pNum: 499, o: "₹799" },
-        { ic: "🌀", n: "Washing Machine", p: "₹399", pNum: 399, o: "₹599" },
-        { ic: "♨️", n: "Microwave/Oven", p: "₹399", pNum: 399, o: "₹599" }
+        { id: "svc-appl-tv-repair", ic: "📺", n: "TV Repair", p: "₹399", pNum: 399, o: "₹599" },
+        { id: "svc-appl-fridge-repair", ic: "🧊", n: "Fridge Repair", p: "₹499", pNum: 499, o: "₹799" },
+        { id: "svc-appl-washing-machine", ic: "🌀", n: "Washing Machine", p: "₹399", pNum: 399, o: "₹599" },
+        { id: "svc-appl-microwave", ic: "♨️", n: "Microwave/Oven", p: "₹399", pNum: 399, o: "₹599" }
       ],
       productTitle: "Related Appliances",
       productPillText: "EMI available",
       products: [
-        { img: "https://images.unsplash.com/photo-1610792516775-01de03eae630?w=300&q=80", brand: "Samsung", name: "55\" 4K Smart UHD TV", rating: "4.6", count: "4,310", price: "44,990", was: "62,990", off: "29%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=300&q=80", brand: "LG", name: "260L Double Door Refrigerator", rating: "4.5", count: "2,140", price: "26,990", was: "34,990", off: "23%" },
-        { img: "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?w=300&q=80", brand: "Bosch", name: "7kg Front Load Washing Machine", rating: "4.7", count: "1,820", price: "32,499", was: "42,999", off: "24%" },
-        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "IFB", name: "25L Convection Microwave Oven", rating: "4.4", count: "1,540", price: "12,499", was: "16,999", off: "26%", badge: "New", badgeGreen: true }
+        { id: "prod-appl-1", img: "https://images.unsplash.com/photo-1610792516775-01de03eae630?w=300&q=80", brand: "Samsung", name: "55\" 4K Smart UHD TV", rating: "4.6", count: "4,310", price: "44,990", was: "62,990", off: "29%", badge: "Bestseller" },
+        { id: "prod-appl-2", img: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=300&q=80", brand: "LG", name: "260L Double Door Refrigerator", rating: "4.5", count: "2,140", price: "26,990", was: "34,990", off: "23%" },
+        { id: "prod-appl-3", img: "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?w=300&q=80", brand: "Bosch", name: "7kg Front Load Washing Machine", rating: "4.7", count: "1,820", price: "32,499", was: "42,999", off: "24%" },
+        { id: "prod-appl-4", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "IFB", name: "25L Convection Microwave Oven", rating: "4.4", count: "1,540", price: "12,499", was: "16,999", off: "26%", badge: "New", badgeGreen: true }
       ]
     },
     interior: {
       title: "Interior Design",
       subtitle: "Full home & room makeovers",
       subServices: [
-        { ic: "🛋️", n: "Full Home Design", p: "₹2L+", pNum: 200000, o: "₹3L" },
-        { ic: "🛏️", n: "Bedroom Makeover", p: "₹85K+", pNum: 85000, o: "₹1.2L" },
-        { ic: "🪑", n: "Living Room", p: "₹95K+", pNum: 95000, o: "₹1.3L" },
-        { ic: "📐", n: "3D Visualization", p: "Free", pNum: 0, o: "₹5K" }
+        { id: "svc-int-full-home-design", ic: "🛋️", n: "Full Home Design", p: "₹2L+", pNum: 200000, o: "₹3L" },
+        { id: "svc-int-bedroom-makeover", ic: "🛏️", n: "Bedroom Makeover", p: "₹85K+", pNum: 85000, o: "₹1.2L" },
+        { id: "svc-int-living-room", ic: "🪑", n: "Living Room", p: "₹95K+", pNum: 95000, o: "₹1.3L" },
+        { id: "svc-int-3d-viz", ic: "📐", n: "3D Visualization", p: "Free", pNum: 0, o: "₹5K" }
       ],
       productTitle: "Related Interior Products",
       productPillText: "Premium quality",
       products: [
-        { img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Remont", name: "Premium Modular Wardrobe — 4 Door", rating: "4.7", count: "1,820", price: "38,990", was: "54,000", off: "28%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=300&q=80", brand: "Wakefit", name: "Queen Bed with Hydraulic Storage", rating: "4.6", count: "2,140", price: "24,999", was: "34,999", off: "29%" },
-        { img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Urban Ladder", name: "Engineered Wood TV Console", rating: "4.5", count: "1,540", price: "18,499", was: "26,999", off: "31%" },
-        { img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&q=80", brand: "Pepperfry", name: "Recliner Lounge Chair Leatherette", rating: "4.4", count: "890", price: "21,499", was: "29,999", off: "28%", badge: "New", badgeGreen: true }
+        { id: "prod-int-1", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Remont", name: "Premium Modular Wardrobe — 4 Door", rating: "4.7", count: "1,820", price: "38,990", was: "54,000", off: "28%", badge: "Bestseller" },
+        { id: "prod-int-2", img: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=300&q=80", brand: "Wakefit", name: "Queen Bed with Hydraulic Storage", rating: "4.6", count: "2,140", price: "24,999", was: "34,999", off: "29%" },
+        { id: "prod-int-3", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Urban Ladder", name: "Engineered Wood TV Console", rating: "4.5", count: "1,540", price: "18,499", was: "26,999", off: "31%" },
+        { id: "prod-int-4", img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&q=80", brand: "Pepperfry", name: "Recliner Lounge Chair Leatherette", rating: "4.4", count: "890", price: "21,499", was: "29,999", off: "28%", badge: "New", badgeGreen: true }
       ]
     },
     renovation: {
       title: "Renovation",
       subtitle: "Kitchen, bathroom, full home",
       subServices: [
-        { ic: "🍳", n: "Modular Kitchen", p: "₹1.2L+", pNum: 120000, o: "₹1.5L" },
-        { ic: "🛁", n: "Bathroom Reno", p: "₹65K+", pNum: 65000, o: "₹85K" },
-        { ic: "🏠", n: "Full Home Reno", p: "₹4L+", pNum: 400000, o: "₹6L" },
-        { ic: "🎨", n: "Wall Paneling", p: "₹250/sqft", pNum: 250, o: "₹350" }
+        { id: "svc-reno-modular-kitchen", ic: "🍳", n: "Modular Kitchen", p: "₹1.2L+", pNum: 120000, o: "₹1.5L" },
+        { id: "svc-reno-bathroom", ic: "🛁", n: "Bathroom Reno", p: "₹65K+", pNum: 65000, o: "₹85K" },
+        { id: "svc-reno-full-home", ic: "🏠", n: "Full Home Reno", p: "₹4L+", pNum: 400000, o: "₹6L" },
+        { id: "svc-reno-wall-paneling", ic: "🎨", n: "Wall Paneling", p: "₹250/sqft", pNum: 250, o: "₹350" }
       ],
       productTitle: "Related Renovation Products",
       productPillText: "Save big",
       products: [
-        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Faber", name: "Auto-Clean Kitchen Chimney 90cm", rating: "4.6", count: "2,890", price: "14,999", was: "22,000", off: "32%", badge: "Bestseller" },
-        { img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Carysil", name: "Stainless Steel Kitchen Sink", rating: "4.5", count: "1,210", price: "6,499", was: "9,999", off: "35%" },
-        { img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Glen", name: "4-Burner Glass Hob Auto Ignition", rating: "4.4", count: "1,540", price: "9,499", was: "13,990", off: "32%" },
-        { img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Sleek", name: "Soft-Close Modular Cabinet Set", rating: "4.7", count: "890", price: "32,990", was: "48,000", off: "31%", badge: "New", badgeGreen: true }
+        { id: "prod-reno-1", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Faber", name: "Auto-Clean Kitchen Chimney 90cm", rating: "4.6", count: "2,890", price: "14,999", was: "22,000", off: "32%", badge: "Bestseller" },
+        { id: "prod-reno-2", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Carysil", name: "Stainless Steel Kitchen Sink", rating: "4.5", count: "1,210", price: "6,499", was: "9,999", off: "35%" },
+        { id: "prod-reno-3", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Glen", name: "4-Burner Glass Hob Auto Ignition", rating: "4.4", count: "1,540", price: "9,499", was: "13,990", off: "32%" },
+        { id: "prod-reno-4", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Sleek", name: "Soft-Close Modular Cabinet Set", rating: "4.7", count: "890", price: "32,990", was: "48,000", off: "31%", badge: "New", badgeGreen: true }
       ]
     },
     construction: {
       title: "Construction Services",
       subtitle: "Full project flow, site visits, milestones",
       subServices: [
-        { ic: "🏗️", n: "New Build (per sqft)", p: "₹1,500+", pNum: 1500, o: "₹2,000" },
-        { ic: "🧱", n: "Structural Work", p: "Custom", pNum: 0, o: "—" },
-        { ic: "📋", n: "Site Visit/Quote", p: "Free", pNum: 0, o: "₹2,000" },
-        { ic: "👷", n: "Project Mgmt", p: "5% of cost", pNum: 0, o: "—" }
+        { id: "svc-const-new-build", ic: "🏗️", n: "New Build (per sqft)", p: "₹1,500+", pNum: 1500, o: "₹2,000" },
+        { id: "svc-const-structural", ic: "🧱", n: "Structural Work", p: "Custom", pNum: 0, o: "—" },
+        { id: "svc-const-site-visit", ic: "📋", n: "Site Visit/Quote", p: "Free", pNum: 0, o: "₹2,000" },
+        { id: "svc-const-project-mgmt", ic: "👷", n: "Project Mgmt", p: "5% of cost", pNum: 0, o: "—" }
       ],
       productTitle: "Construction Materials",
       productPillText: "Bulk rates",
       products: [
-        { img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "UltraTech", name: "PPC Cement 50kg Bag", rating: "4.7", count: "3,400", price: "385", was: "450", off: "14%", badge: "Bulk" },
-        { img: "https://images.unsplash.com/photo-1581094488379-6c2d96a45e1d?w=300&q=80", brand: "TATA TISCON", name: "TMT Steel Bar Fe-500 (per tonne)", rating: "4.6", count: "1,890", price: "62,990", was: "68,000", off: "7%" },
-        { img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "JK Lakshmi", name: "Wall Putty 40kg Bag", rating: "4.5", count: "1,240", price: "1,099", was: "1,350", off: "19%" },
-        { img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Asian Paints", name: "Primer 20L Bucket", rating: "4.4", count: "890", price: "3,499", was: "4,500", off: "22%", badge: "New", badgeGreen: true }
+        { id: "prod-const-1", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "UltraTech", name: "PPC Cement 50kg Bag", rating: "4.7", count: "3,400", price: "385", was: "450", off: "14%", badge: "Bulk" },
+        { id: "prod-const-2", img: "https://images.unsplash.com/photo-1581094488379-6c2d96a45e1d?w=300&q=80", brand: "TATA TISCON", name: "TMT Steel Bar Fe-500 (per tonne)", rating: "4.6", count: "1,890", price: "62,990", was: "68,000", off: "7%" },
+        { id: "prod-const-3", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "JK Lakshmi", name: "Wall Putty 40kg Bag", rating: "4.5", count: "1,240", price: "1,099", was: "1,350", off: "19%" },
+        { id: "prod-const-4", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Asian Paints", name: "Primer 20L Bucket", rating: "4.4", count: "890", price: "3,499", was: "4,500", off: "22%", badge: "New", badgeGreen: true }
       ]
     },
     cleaning: {
       title: "Home Cleaning",
       subtitle: "Deep clean, sofa, pest control",
       subServices: [
-        { ic: "🧽", n: "Deep Home Cleaning", p: "₹1,499", pNum: 1499, o: "₹2,499" },
-        { ic: "🛋️", n: "Sofa Shampooing", p: "₹599", pNum: 599, o: "₹899" },
-        { ic: "🐛", n: "Pest Control", p: "₹799", pNum: 799, o: "₹1,299" },
-        { ic: "🪟", n: "Glass & Facade", p: "₹999", pNum: 999, o: "₹1,599" }
+        { id: "svc-clean-deep-home", ic: "🧽", n: "Deep Home Cleaning", p: "₹1,499", pNum: 1499, o: "₹2,499" },
+        { id: "svc-clean-sofa", ic: "🛋️", n: "Sofa Shampooing", p: "₹599", pNum: 599, o: "₹899" },
+        { id: "svc-clean-pest-control", ic: "🐛", n: "Pest Control", p: "₹799", pNum: 799, o: "₹1,299" },
+        { id: "svc-clean-glass-facade", ic: "🪟", n: "Glass & Facade", p: "₹999", pNum: 999, o: "₹1,599" }
       ],
       productTitle: "Related Cleaning Products",
       productPillText: "Stock up",
       products: [
-        { img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Dyson", name: "V11 Cordless Stick Vacuum Cleaner", rating: "4.8", count: "1,290", price: "44,999", was: "54,990", off: "18%", badge: "Premium" },
-        { img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Eureka Forbes", name: "Robotic Floor Cleaner Smart", rating: "4.5", count: "890", price: "18,499", was: "24,999", off: "26%" },
-        { img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Lifebuoy", name: "Surface Cleaner Disinfectant 1.5L", rating: "4.4", count: "3,210", price: "299", was: "450", off: "33%" },
-        { img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Scotch-Brite", name: "Premium Microfiber Mop Bucket Set", rating: "4.5", count: "2,140", price: "1,499", was: "2,299", off: "35%", badge: "Combo", badgeGreen: true }
+        { id: "prod-clean-1", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Dyson", name: "V11 Cordless Stick Vacuum Cleaner", rating: "4.8", count: "1,290", price: "44,999", was: "54,990", off: "18%", badge: "Premium" },
+        { id: "prod-clean-2", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Eureka Forbes", name: "Robotic Floor Cleaner Smart", rating: "4.5", count: "890", price: "18,499", was: "24,999", off: "26%" },
+        { id: "prod-clean-3", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Lifebuoy", name: "Surface Cleaner Disinfectant 1.5L", rating: "4.4", count: "3,210", price: "299", was: "450", off: "33%" },
+        { id: "prod-clean-4", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Scotch-Brite", name: "Premium Microfiber Mop Bucket Set", rating: "4.5", count: "2,140", price: "1,499", was: "2,299", off: "35%", badge: "Combo", badgeGreen: true }
       ]
     }
   };
@@ -7953,6 +7954,14 @@ function _autosaveProfileFromCheckout(name, phone, address, pincode) {
 }
 
 function logoutAccount() {
+  var rt = RemontAuth.getRefreshToken();
+  if (rt) {
+    fetch(API_BASE + '/api/v1/auth/logout', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ refreshToken: rt })
+    }).catch(function() {});
+  }
+  RemontAuth.clearSession();
   localStorage.removeItem('remont_token');
   localStorage.removeItem('remont_phone');
   closeAccountModal();
@@ -7990,10 +7999,7 @@ function sendOtpAuth() {
   var btn = document.getElementById('auth-send-btn');
   btn.textContent = 'Sending…'; btn.disabled = true;
   document.getElementById('auth-msg').style.display = 'none';
-  fetch(API_BASE + '/api/v1/auth/send-otp', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ phone: phone })
-  }).then(function(r) { return r.json(); }).then(function(d) {
+  RemontAuth.sendOtp(phone).then(function(d) {
     btn.textContent = 'Send OTP →'; btn.disabled = false;
     document.getElementById('auth-phone-display').textContent = phone;
     document.getElementById('auth-step-phone').style.display = 'none';
@@ -8001,7 +8007,7 @@ function sendOtpAuth() {
     document.getElementById('auth-otp').focus();
   }).catch(function(e) {
     btn.textContent = 'Send OTP →'; btn.disabled = false;
-    showAuthMsg('Failed to send OTP. Try again.');
+    showAuthMsg(e.message || 'Failed to send OTP. Try again.');
   });
 }
 
@@ -8014,40 +8020,27 @@ function verifyOtpAuth() {
   var btn = document.getElementById('auth-verify-btn');
   btn.textContent = 'Verifying…'; btn.disabled = true;
   document.getElementById('auth-msg').style.display = 'none';
-  fetch(API_BASE + '/api/v1/auth/verify-otp', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ phone: phone, otp: otp })
-  }).then(function(r) {
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }).then(function(d) {
-    var token = d.accessToken || d.access_token || (d.data && d.data.accessToken);
-    var user = d.user || (d.data && d.data.user) || {};
-    if (!token) throw new Error('No token');
-    localStorage.setItem('remont_token', token);
+  RemontAuth.verifyOtp(phone, otp).then(function(d) {
+    var user = d.user || {};
+    // Mirror into the legacy keys this file's cart/checkout/wallet code reads
+    // directly throughout — RemontAuth already stored the canonical keys.
+    localStorage.setItem('remont_token', d.accessToken);
     localStorage.setItem('remont_phone', phone);
-    if (user && user.id) {
-      localStorage.setItem('remont_user', JSON.stringify({ id: user.id, name: user.name || '', phone: user.phone || phone, email: user.email || '', role: user.role || 'CUSTOMER' }));
-    }
+    localStorage.setItem('remont_user', JSON.stringify({ id: user.id, name: user.name || '', phone: user.phone || phone, email: user.email || '', role: user.role || 'CUSTOMER' }));
+
     btn.textContent = 'Verify OTP →'; btn.disabled = false;
     closeAuthModal();
-    var role = (user && user.role) || '';
-    // Route by role — vendor and admin go to their portals
-    if (role === 'SERVICE_VENDOR') {
-      localStorage.setItem('pr_token', token);
-      window.location.href = '/vendor.html';
-      return;
-    }
-    if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
-      window.location.href = '/admin/dashboard.html';
+    var role = user.role || 'CUSTOMER';
+    if (role !== 'CUSTOMER') {
+      RemontAuth.redirectToPortal(role);
       return;
     }
     // Customer — sync full profile then run callback
     _syncUserProfile();
     if (_authCallback) { var cb = _authCallback; _authCallback = null; cb(); }
-  }).catch(function() {
+  }).catch(function(e) {
     btn.textContent = 'Verify OTP →'; btn.disabled = false;
-    showAuthMsg('Invalid OTP. Try again.');
+    showAuthMsg(e.message || 'Invalid OTP. Try again.');
   });
 }
 

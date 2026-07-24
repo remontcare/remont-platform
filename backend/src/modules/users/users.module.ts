@@ -54,6 +54,8 @@ export class UsersService {
         accuracy:       data.accuracy        || null,
         locationSource: data.locationSource  || 'MANUAL',
         capturedAt:     data.capturedAt ? new Date(data.capturedAt) : null,
+        placeId:          data.placeId          || null,
+        formattedAddress: data.formattedAddress || null,
         isDefault:      data.isDefault       || false,
       },
     });
@@ -95,6 +97,8 @@ export class UsersService {
         ...(validCoords ? { latitude: lat, longitude: lng } : {}),
         ...(data.accuracy !== undefined ? { accuracy: data.accuracy } : {}),
         ...(data.locationSource !== undefined ? { locationSource: data.locationSource } : {}),
+        ...(data.placeId !== undefined ? { placeId: data.placeId } : {}),
+        ...(data.formattedAddress !== undefined ? { formattedAddress: data.formattedAddress } : {}),
         ...(data.isDefault !== undefined ? { isDefault: data.isDefault } : {}),
       },
     });

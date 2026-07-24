@@ -1,15 +1,16 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards,
-  NotFoundException, BadRequestException, Logger,
+  NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
+import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -164,8 +165,42 @@ export class AdminService {
     });
   }
 
-  async blockUser(id: string, block: boolean) {
-    return this.prisma.user.update({ where: { id }, data: { isBlocked: block }, select: { id: true, name: true, phone: true, isBlocked: true } });
+  async blockUser(id: string, block: boolean, actorId: string, actorRole: UserRole) {
+    const updated = await this.prisma.user.update({ where: { id }, data: { isBlocked: block }, select: { id: true, name: true, phone: true, isBlocked: true } });
+    await logAudit(this.prisma, { actorId, actorRole, action: block ? 'USER_BLOCKED' : 'USER_UNBLOCKED', targetType: 'User', targetId: id });
+    return updated;
+  }
+
+  // Only a SUPER_ADMIN may grant a privileged role — these five roles can never be
+  // self-provisioned through the public OTP endpoint (see auth.module.ts SELF_SIGNUP_ROLES),
+  // so this is the only path to becoming an Admin, Delivery Partner, Corporate User, or CRM Agent.
+  async setUserRole(actorId: string, actorRole: UserRole, targetId: string, newRole: UserRole) {
+    if (actorRole !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Only a Super Admin can assign roles');
+    }
+    const target = await this.prisma.user.findUnique({ where: { id: targetId }, select: { id: true, role: true } });
+    if (!target) throw new NotFoundException('User not found');
+
+    const updated = await this.prisma.user.update({
+      where: { id: targetId },
+      data: { role: newRole },
+      select: { id: true, name: true, phone: true, role: true },
+    });
+    await logAudit(this.prisma, {
+      actorId, actorRole, action: 'ROLE_CHANGED', targetType: 'User', targetId,
+      metadata: { from: target.role, to: newRole },
+    });
+    return updated;
+  }
+
+  async listAuditLogs(opts: { action?: string; limit?: number; offset?: number }) {
+    return this.prisma.auditLog.findMany({
+      where: opts.action ? { action: opts.action } : {},
+      include: { actor: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit || 100,
+      skip: opts.offset || 0,
+    });
   }
 
   async adjustWallet(id: string, amount: number, notes: string) {
@@ -249,9 +284,9 @@ export class AdminService {
       if (already) throw new BadRequestException('A seller account already exists for this phone number');
     }
 
-    // Same pattern as AuthService.adminPinLogin(): upsert the User directly with the target
-    // role, isVerified:true. The seller then logs in through the normal /auth/send-otp +
-    // /auth/verify-otp flow — no separate password system needed for sellers.
+    // Admin-provisioned, same as AdminService.setUserRole(): upsert the User directly with
+    // the target role, isVerified:true. The seller then logs in through the normal
+    // /auth/send-otp + /auth/verify-otp flow — no separate password system needed for sellers.
     const user = await this.prisma.user.upsert({
       where: { phone: data.phone },
       update: { role: UserRole.PRODUCT_VENDOR, isVerified: true, name: data.name },
@@ -736,20 +771,30 @@ export class AdminService {
     if (!req) throw new NotFoundException('Delete request not found');
     if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
     await this.hardDeleteTarget(req.targetType, req.targetId);
-    return this.prisma.deleteRequest.update({
+    const updated = await this.prisma.deleteRequest.update({
       where: { id },
       data: { status: 'APPROVED', reviewedBy, reviewNote: reviewNote || null, reviewedAt: new Date() },
     });
+    await logAudit(this.prisma, {
+      actorId: reviewedBy, actorRole: UserRole.SUPER_ADMIN, action: 'DELETE_REQUEST_APPROVED',
+      targetType: req.targetType, targetId: req.targetId, metadata: { deleteRequestId: id, reviewNote },
+    });
+    return updated;
   }
 
   async rejectDeleteRequest(id: string, reviewedBy: string, reviewNote?: string) {
     const req = await this.prisma.deleteRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Delete request not found');
     if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
-    return this.prisma.deleteRequest.update({
+    const updated = await this.prisma.deleteRequest.update({
       where: { id },
       data: { status: 'REJECTED', reviewedBy, reviewNote: reviewNote || null, reviewedAt: new Date() },
     });
+    await logAudit(this.prisma, {
+      actorId: reviewedBy, actorRole: UserRole.SUPER_ADMIN, action: 'DELETE_REQUEST_REJECTED',
+      targetType: req.targetType, targetId: req.targetId, metadata: { deleteRequestId: id, reviewNote },
+    });
+    return updated;
   }
 
   async bulkUpdateServices(ids: string[], data: { isActive?: boolean }) {
@@ -1764,11 +1809,18 @@ Return JSON with:
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController {
-  constructor(private admin: AdminService) {}
+  constructor(private admin: AdminService, private masterOrders: MasterOrdersService) {}
 
   // Dashboard
   @Get('stats') stats() { return this.admin.globalStats(); }
   @Get('analytics') analytics(@Query('days') days?: number) { return this.admin.getAnalytics(days ? +days : 30); }
+
+  // Master Orders (Phase 2 scaffold — flat child-order list per master today;
+  // the split-engine + admin tree view land in a later phase)
+  @Get('master-orders') masterOrdersList(@Query('status') status?: string, @Query('q') q?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+    return this.masterOrders.adminList({ status, q, limit: limit ? +limit : undefined, offset: offset ? +offset : undefined });
+  }
+  @Get('master-orders/:id') masterOrderDetail(@Param('id') id: string) { return this.masterOrders.adminGetById(id); }
 
   // Seed
   @Post('seed') seed() { return this.admin.seedData(); }
@@ -1777,8 +1829,18 @@ export class AdminController {
   @Get('users') users(@Query('role') role?: UserRole, @Query('q') q?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
     return this.admin.listUsers({ role, q, limit, offset });
   }
-  @Patch('users/:id/block') block(@Param('id') id: string, @Body() b: { block: boolean }) { return this.admin.blockUser(id, b.block); }
+  @Patch('users/:id/block') block(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { block: boolean }) { return this.admin.blockUser(id, b.block, u.sub, u.role); }
   @Patch('users/:id/wallet') wallet(@Param('id') id: string, @Body() b: { amount: number; notes: string }) { return this.admin.adjustWallet(id, b.amount, b.notes); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Patch('users/:id/role') setRole(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { role: UserRole }) {
+    return this.admin.setUserRole(u.sub, u.role, id, b.role);
+  }
+
+  // Audit
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('audit-logs') auditLogs(@Query('action') action?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+    return this.admin.listAuditLogs({ action, limit: limit ? +limit : undefined, offset: offset ? +offset : undefined });
+  }
 
   // Vendors
   @Get('vendors/pending') pending() { return this.admin.pendingVendorApprovals(); }
@@ -2062,7 +2124,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule],
+  imports: [PaymentsModule, MasterOrdersModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

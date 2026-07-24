@@ -124,6 +124,30 @@ export function generateOtp(length = 6): string {
   return Math.floor(Math.pow(10, length - 1) + Math.random() * 9 * Math.pow(10, length - 1)).toString();
 }
 
+// Scoped to RBAC-relevant admin actions (role grants, blocks, delete-request
+// decisions) — not a general-purpose activity log for the whole platform.
+export async function logAudit(prisma: any, entry: {
+  actorId: string;
+  actorRole: UserRole;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  metadata?: Record<string, unknown>;
+  ip?: string;
+}): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      actorId: entry.actorId,
+      actorRole: entry.actorRole,
+      action: entry.action,
+      targetType: entry.targetType,
+      targetId: entry.targetId,
+      metadata: entry.metadata,
+      ip: entry.ip,
+    },
+  });
+}
+
 export function generateOrderNumber(prefix: string, count: number): string {
   return `${prefix}-${(count + 10000).toString().padStart(5, '0')}`;
 }

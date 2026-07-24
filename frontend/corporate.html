@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Corporate Portal – Remont India</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --sienna:#C4601A; --amber:#E8A650; --ivory:#FDFAF5; --cream:#F5F0E8;
+  --charcoal:#1A1A1A; --mist:#E8E3DA; --white:#fff;
+  --success:#22c55e; --error:#ef4444; --blue:#3b82f6;
+  --ff-body:"DM Sans",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--ff-body);background:var(--cream);color:var(--charcoal);min-height:100vh}
+button{cursor:pointer;font-family:var(--ff-body);border:none;outline:none}
+input{font-family:var(--ff-body)}
+.app{max-width:560px;margin:0 auto;min-height:100vh;background:var(--ivory);box-shadow:0 0 60px rgba(0,0,0,.08)}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.active{display:flex}
+.auth-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 28px}
+.auth-logo-icon{width:44px;height:44px;background:var(--sienna);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:700;margin:0 auto 16px}
+.auth-title{font-size:24px;font-weight:800;text-align:center;margin-bottom:6px}
+.auth-sub{font-size:13px;color:#6b7280;text-align:center;margin-bottom:28px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+.field input{width:100%;padding:14px 16px;border:1.5px solid var(--mist);border-radius:10px;font-size:15px;background:#fff}
+.field input:focus{outline:none;border-color:var(--sienna)}
+.btn-primary{width:100%;padding:15px;background:var(--sienna);color:#fff;border-radius:12px;font-size:15px;font-weight:700}
+.btn-primary:disabled{background:#d1d5db}
+.btn-outline{padding:10px 16px;border:1.5px solid var(--mist);border-radius:10px;font-size:13px;font-weight:600;color:#374151;background:#fff}
+.link{text-align:center;font-size:13px;color:var(--sienna);margin-top:14px;display:block;cursor:pointer}
+.auth-error{font-size:13px;color:var(--error);text-align:center;margin-bottom:10px;min-height:16px}
+.app-header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--mist);padding:14px 18px;display:flex;align-items:center;gap:12px}
+.app-header .name{flex:1;font-size:14px;font-weight:700}
+.app-header .sub{font-size:11px;color:#9ca3af}
+.content{flex:1;padding:16px}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.stat-card{background:#fff;border:1px solid var(--mist);border-radius:14px;padding:14px}
+.stat-card .val{font-size:20px;font-weight:800}
+.stat-card .lbl{font-size:11px;color:#6b7280;margin-top:2px}
+.card{background:#fff;border:1px solid var(--mist);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+.card .top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.card .oid{font-size:13px;font-weight:700}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8}
+.section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin:18px 0 10px}
+.empty{text-align:center;padding:50px 20px;color:#9ca3af;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div id="screen-login" class="screen active">
+    <div class="auth-wrap">
+      <div class="auth-logo-icon">🏢</div>
+      <div class="auth-title">Corporate Portal</div>
+      <div class="auth-sub">Remont India — Sign in with your mobile number</div>
+      <div class="auth-error" id="login-err"></div>
+
+      <div id="login-phone-step">
+        <div class="field"><label>Mobile Number</label><input id="login-phone" type="tel" maxlength="10" placeholder="10-digit mobile number"></div>
+        <button class="btn-primary" id="send-otp-btn" onclick="sendLoginOtp()">Send OTP →</button>
+      </div>
+      <div id="login-otp-step" style="display:none">
+        <div class="auth-sub" id="otp-sent-to" style="margin-bottom:14px"></div>
+        <div class="field"><label>Enter OTP</label><input id="login-otp" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit OTP"></div>
+        <button class="btn-primary" id="verify-otp-btn" onclick="verifyLoginOtp()">Verify & Continue</button>
+        <span class="link" onclick="backToPhone()">← Change number</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-app" class="screen">
+    <div class="app-header">
+      <div><div class="name" id="hdr-name">Company</div><div class="sub" id="hdr-sub">Corporate Account</div></div>
+      <button class="btn-outline" onclick="doLogout()">Logout</button>
+    </div>
+    <div class="content" id="content">Loading…</div>
+  </div>
+
+</div>
+
+<script src="/shared/remont-auth.js"></script>
+<script>
+var pendingPhone = '';
+var dashboardData = null;
+
+function backToPhone(){
+  document.getElementById('login-otp-step').style.display='none';
+  document.getElementById('login-phone-step').style.display='block';
+}
+
+function sendLoginOtp(){
+  var digits = document.getElementById('login-phone').value.replace(/\D/g,'');
+  var err = document.getElementById('login-err'); err.textContent='';
+  if (digits.length !== 10) { err.textContent='Enter a valid 10-digit mobile number'; return; }
+  pendingPhone = '+91'+digits;
+  var btn = document.getElementById('send-otp-btn'); btn.disabled=true; btn.textContent='Sending…';
+  RemontAuth.sendOtp(pendingPhone).then(function(){
+    document.getElementById('otp-sent-to').textContent = 'OTP sent to ' + pendingPhone;
+    document.getElementById('login-phone-step').style.display='none';
+    document.getElementById('login-otp-step').style.display='block';
+    document.getElementById('login-otp').focus();
+  }).catch(function(e){ err.textContent = e.message; })
+  .then(function(){ btn.disabled=false; btn.textContent='Send OTP →'; });
+}
+
+function verifyLoginOtp(){
+  var otp = document.getElementById('login-otp').value.trim();
+  var err = document.getElementById('login-err'); err.textContent='';
+  if (!otp) { err.textContent='Enter the OTP'; return; }
+  var btn = document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
+  RemontAuth.verifyOtp(pendingPhone, otp).then(function(res){
+    if (res.user.role !== 'CORPORATE_USER') {
+      RemontAuth.clearSession();
+      throw new Error('This number is registered as ' + res.user.role.toLowerCase().replace('_',' ') + ', not a corporate account.');
+    }
+    showScreen('screen-app');
+    loadDashboard();
+  }).catch(function(e){ err.textContent = e.message; })
+  .then(function(){ btn.disabled=false; btn.textContent='Verify & Continue'; });
+}
+
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+}
+
+function doLogout(){
+  RemontAuth.clearSession();
+  showScreen('screen-login');
+  document.getElementById('login-phone-step').style.display='block';
+  document.getElementById('login-otp-step').style.display='none';
+}
+
+function fmtCur(n){ return '₹' + Number(n||0).toLocaleString('en-IN'); }
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '—'; }
+
+function loadDashboard(){
+  RemontAuth.apiFetch('/corporate/dashboard').then(function(d){
+    dashboardData = d;
+    document.getElementById('hdr-name').textContent = d.account.companyName || 'Company';
+    document.getElementById('hdr-sub').textContent = d.account.companyCode + ' · ' + d.memberRole;
+
+    var canApprove = d.memberRole === 'MANAGER' || d.memberRole === 'ADMIN';
+    var html = '<div class="stat-grid">' +
+      '<div class="stat-card"><div class="val">' + d.stats.activeOrders + '</div><div class="lbl">Active Orders</div></div>' +
+      '<div class="stat-card"><div class="val">' + d.stats.pendingApproval + '</div><div class="lbl">Pending Approval</div></div>' +
+      '<div class="stat-card"><div class="val">' + fmtCur(d.stats.mtdSpend) + '</div><div class="lbl">This Month Spend</div></div>' +
+      '<div class="stat-card"><div class="val">' + fmtCur(d.stats.creditAvailable) + '</div><div class="lbl">Credit Available</div></div>' +
+    '</div>';
+    html += '<div class="section-title">Recent Orders</div>';
+    if (!d.recentOrders || !d.recentOrders.length) {
+      html += '<div class="empty">No orders yet</div>';
+    } else {
+      html += d.recentOrders.map(function(o){
+        var approveBtn = (canApprove && o.status === 'PENDING_PAYMENT')
+          ? '<button class="btn-outline" style="margin-top:8px" onclick="approveOrder(\'' + o.id + '\')">Approve Order</button>' : '';
+        return '<div class="card">' +
+          '<div class="top-row"><span class="oid">' + (o.service ? o.service.name : 'Order') + '</span><span class="badge">' + o.status.replace(/_/g,' ') + '</span></div>' +
+          '<div style="font-size:12px;color:#6b7280">' + (o.customer ? o.customer.name : '') + ' · ' + fmtDate(o.createdAt) + ' · ' + fmtCur(o.totalAmount) + '</div>' +
+          approveBtn +
+        '</div>';
+      }).join('');
+    }
+    document.getElementById('content').innerHTML = html;
+  }).catch(function(e){
+    document.getElementById('content').innerHTML = '<div class="empty">' + e.message + '</div>';
+  });
+}
+
+function approveOrder(id){
+  RemontAuth.apiFetch('/corporate/orders/' + id + '/approve', { method:'POST' })
+    .then(loadDashboard)
+    .catch(function(e){ alert(e.message); });
+}
+
+if (RemontAuth.getToken()) {
+  RemontAuth.apiFetch('/auth/me').then(function(me){
+    if (me.role !== 'CORPORATE_USER') { doLogout(); return; }
+    showScreen('screen-app');
+    loadDashboard();
+  }).catch(function(){ doLogout(); });
+}
+</script>
+</body>
+</html>

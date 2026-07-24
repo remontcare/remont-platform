@@ -14,6 +14,7 @@ import { ProductsModule } from './modules/products/products.module';
 import { VendorsModule } from './modules/vendors/vendors.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { MasterOrdersModule } from './modules/master-orders/master-orders.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
@@ -55,6 +56,7 @@ import { SellerRegistrationModule } from './modules/seller-registration/seller-r
     VendorsModule,
     DeliveryModule,
     OrdersModule,
+    MasterOrdersModule,
     InvoicesModule,
 
     // Wallet & Pricing

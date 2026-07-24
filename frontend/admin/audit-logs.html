@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Audit Logs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Audit Logs</h1><p>RBAC-relevant admin actions — role grants, blocks, delete decisions</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Recent Actions</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-action" class="form-control" style="width:220px" onchange="load()">
+            <option value="">All Actions</option>
+            <option value="ROLE_CHANGED">Role Changed</option>
+            <option value="USER_BLOCKED">User Blocked</option>
+            <option value="USER_UNBLOCKED">User Unblocked</option>
+            <option value="DELETE_REQUEST_APPROVED">Delete Request Approved</option>
+            <option value="DELETE_REQUEST_REJECTED">Delete Request Rejected</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('audit-logs');
+requireAuth();
+
+function load() {
+  var action = document.getElementById('filter-action').value;
+  var p = ['limit=100'];
+  if (action) p.push('action=' + encodeURIComponent(action));
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/audit-logs?' + p.join('&')).then(function(logs) {
+    if (!logs || !logs.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><h3>No audit entries found</h3></div>'; return; }
+    var rows = logs.map(function(l) {
+      return '<tr>' +
+        '<td>' + fmtDate(l.createdAt) + '</td>' +
+        '<td>' + badge(l.action, 'blue') + '</td>' +
+        '<td>' + escape((l.actor && l.actor.name) || '—') + '<br><span style="font-size:11px;color:#9ca3af">' + escape((l.actor && l.actor.phone) || '') + '</span></td>' +
+        '<td>' + badge(l.actorRole, 'purple') + '</td>' +
+        '<td>' + escape(l.targetType || '—') + (l.targetId ? '<br><span style="font-size:11px;color:#9ca3af">' + escape(l.targetId) + '</span>' : '') + '</td>' +
+        '<td style="font-size:11px;color:#6b7280;max-width:260px;overflow-wrap:anywhere">' + (l.metadata ? escape(JSON.stringify(l.metadata)) : '—') + '</td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Actor Role</th><th>Target</th><th>Details</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,9 +1,16 @@
-/* Remont Admin — Shared Auth + API + Sidebar */
+/* Remont Admin — Shared Auth + API + Sidebar
+ * Uses the same canonical token keys as every other portal (see
+ * frontend/shared/remont-auth.js) — this file stays self-contained (no
+ * <script> dependency added to the ~35 admin pages that include it) but
+ * reads/writes the identical localStorage keys admin/index.html's OTP login
+ * already writes via RemontAuth.
+ */
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 
-function getToken() { return localStorage.getItem('remont_admin_token'); }
+function getToken() { return localStorage.getItem('remont_access_token'); }
+function getRefreshToken() { return localStorage.getItem('remont_refresh_token'); }
 function getAdminUser() {
-  try { return JSON.parse(localStorage.getItem('remont_admin_user') || '{}'); } catch(e) { return {}; }
+  try { return JSON.parse(localStorage.getItem('remont_user') || '{}'); } catch(e) { return {}; }
 }
 function isSuperAdmin() { return getAdminUser().role === 'SUPER_ADMIN'; }
 
@@ -24,16 +31,44 @@ function requireAuth() {
 }
 
 function logout() {
-  localStorage.removeItem('remont_admin_token');
-  localStorage.removeItem('remont_admin_user');
+  var rt = getRefreshToken();
+  if (rt) {
+    fetch(API_BASE + '/api/v1/auth/logout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rt }),
+    }).catch(function(){});
+  }
+  localStorage.removeItem('remont_access_token');
+  localStorage.removeItem('remont_refresh_token');
+  localStorage.removeItem('remont_user');
   window.location.replace('/admin/index.html');
 }
 
-function api(method, path, body) {
+function _refreshAdminToken() {
+  var rt = getRefreshToken();
+  if (!rt) return Promise.reject(new Error('No refresh token'));
+  return fetch(API_BASE + '/api/v1/auth/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: rt }),
+  }).then(function(r){ return r.json(); }).then(function(d){
+    var payload = d && d.data !== undefined ? d.data : d;
+    if (!payload || !payload.accessToken) throw new Error('Refresh failed');
+    localStorage.setItem('remont_access_token', payload.accessToken);
+    localStorage.setItem('remont_refresh_token', payload.refreshToken);
+    return payload;
+  });
+}
+
+function api(method, path, body, _isRetry) {
   var token = getToken();
   var opts = { method: method.toUpperCase(), headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } };
   if (body !== undefined) opts.body = JSON.stringify(body);
   return fetch(API_BASE + '/api/v1' + path, opts).then(function(r) {
+    if (r.status === 401 && !_isRetry && getRefreshToken()) {
+      return _refreshAdminToken().then(function(){
+        return api(method, path, body, true);
+      }).catch(function(){ logout(); });
+    }
     return r.json().then(function(d) {
       if (r.status === 401) { logout(); return; }
       if (!r.ok) throw new Error((d && d.message) ? (Array.isArray(d.message) ? d.message.join(', ') : d.message) : ('HTTP ' + r.status));
@@ -175,6 +210,7 @@ var SIDEBAR_NAV = [
     { key:'cities', label:'Cities', icon:'🏙', href:'/admin/cities.html' },
     { key:'users', label:'Users & Roles', icon:'👤', href:'/admin/users.html' },
     { key:'delete-requests', label:'Delete Requests', icon:'🗑️', href:'/admin/delete-requests.html', superAdminOnly:true },
+    { key:'audit-logs', label:'Audit Logs', icon:'📜', href:'/admin/audit-logs.html', superAdminOnly:true },
     { key:'settings', label:'Website Settings', icon:'🌐', href:'/admin/settings.html' },
     { key:'ai-tools', label:'AI Chat Settings', icon:'🤖', href:'/admin/ai-tools.html' },
     { key:'staff', label:'System Settings', icon:'⚙️', href:'/admin/staff.html' },

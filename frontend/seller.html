@@ -367,16 +367,18 @@ a{color:inherit;text-decoration:none}
   </div>
 </div>
 
+<script src="/shared/remont-auth.js"></script>
 <script>
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
-var accessToken = localStorage.getItem('sellerAccessToken') || null;
+var accessToken = RemontAuth.getToken();
+var refreshTok = RemontAuth.getRefreshToken();
 var pendingPhone = '';
 var sellerProfile = null;
 var categories = [];
 var myProducts = [];
 
 /* ── API HELPER (same shape as vendor.html) ── */
-function apiFetch(path, opts){
+function apiFetch(path, opts, _isRetry){
   opts = opts || {};
   var headers = {'Content-Type':'application/json'};
   if (opts.headers) for (var k in opts.headers) headers[k]=opts.headers[k];
@@ -384,6 +386,12 @@ function apiFetch(path, opts){
   var fetchOpts = {method: opts.method||'GET', headers: headers};
   if (opts.body) fetchOpts.body = opts.body;
   return fetch(API_BASE + '/api/v1' + path, fetchOpts).then(function(res){
+    if (res.status === 401 && !_isRetry && refreshTok) {
+      return RemontAuth.refresh().then(function(){
+        accessToken = RemontAuth.getToken(); refreshTok = RemontAuth.getRefreshToken();
+        return apiFetch(path, opts, true);
+      }).catch(function(){ doLogout(); throw new Error('Session expired'); });
+    }
     return res.json().catch(function(){ return {}; }).then(function(data){
       if (!res.ok) {
         var msg = (data && (data.message || data.error)) || ('Request failed (' + res.status + ')');
@@ -409,7 +417,7 @@ function sendLoginOtp(){
   if(digits.length!==10){err.textContent='Enter a valid 10-digit mobile number';return;}
   pendingPhone = '+91'+digits;
   var btn=document.getElementById('send-otp-btn'); btn.disabled=true; btn.textContent='Sending…';
-  apiFetch('/auth/send-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone})})
+  RemontAuth.sendOtp(pendingPhone, 'PRODUCT_VENDOR')
     .then(function(){
       document.getElementById('otp-sent-to').textContent='Code sent to '+pendingPhone;
       document.getElementById('login-phone-step').style.display='none';
@@ -424,13 +432,13 @@ function verifyLoginOtp(){
   var err=document.getElementById('otp-err'); err.textContent='';
   if(code.length!==4){err.textContent='Enter the 4-digit OTP';return;}
   var btn=document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
-  apiFetch('/auth/verify-otp', {method:'POST', body: JSON.stringify({phone: pendingPhone, otp: code})})
+  RemontAuth.verifyOtp(pendingPhone, code, {role:'PRODUCT_VENDOR'})
     .then(function(res){
       if (res.user.role !== 'PRODUCT_VENDOR') {
+        RemontAuth.clearSession();
         throw new Error('This number is registered as ' + res.user.role.toLowerCase().replace('_',' ') + ', not a product seller.');
       }
-      accessToken=res.accessToken;
-      localStorage.setItem('sellerAccessToken', accessToken);
+      accessToken=res.accessToken; refreshTok=res.refreshToken;
       document.getElementById('prof-phone').textContent = res.user.phone;
       return loadSellerProfile();
     })
@@ -484,8 +492,8 @@ function enterDashboard(){
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
 function doLogout(){
-  accessToken=null; sellerProfile=null;
-  localStorage.removeItem('sellerAccessToken');
+  accessToken=null; refreshTok=null; sellerProfile=null;
+  RemontAuth.clearSession();
   showScreen('screen-login');
   document.getElementById('login-phone-step').style.display='block';
   document.getElementById('login-otp-step').style.display='none';

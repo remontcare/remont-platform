@@ -66,6 +66,7 @@ async function bootstrap() {
       .addTag('Services')
       .addTag('Products')
       .addTag('Orders')
+      .addTag('Master Orders')
       .addTag('Vendors')
       .addTag('CRM')
       .addTag('AMC')
