@@ -7406,15 +7406,16 @@ function renderCartDrawer() {
     '</div>';
   });
 
-  // Show multi-order notice if needed
+  // One order, one payment, one order number — this preview just shows how it'll be
+  // tracked underneath (by category/seller), not separate checkouts.
   if (multiOrder) {
     var orderInfo = '<div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12px;color:#92400e">' +
-      '📋 <strong>' + groups.length + ' separate bookings</strong> will be created:<br>' +
-      groups.map(function(g, i) {
+      '📋 One order, tracked in <strong>' + groups.length + ' parts</strong>:<br>' +
+      groups.map(function(g) {
         var isProducts = g[0] && g[0].type !== 'service';
-        var label = isProducts ? '🛍️ Product Order' : '🔧 ' + (g[0].categoryKey || 'Service').replace(/_/g,' ');
+        var label = isProducts ? '🛍️ Products' : '🔧 ' + (g[0].categoryKey || 'Service').replace(/_/g,' ');
         var groupTotal = g.reduce(function(s,x){ return s + (parseFloat(String(x.price).replace(/[^0-9.]/g,''))||0)*(x.qty||1); }, 0);
-        return '<span style="display:block;margin-top:4px">Order ' + (i+1) + ': ' + label + ' — ₹' + groupTotal.toLocaleString('en-IN') + '</span>';
+        return '<span style="display:block;margin-top:4px">' + label + ' — ₹' + groupTotal.toLocaleString('en-IN') + '</span>';
       }).join('') +
     '</div>';
     html += orderInfo;
@@ -7464,54 +7465,11 @@ function cartClear() {
 function cartCheckout() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) return;
-
-  var groups = _cartOrderGroups(cart);
   closeCart();
-
-  // Process each group sequentially with a small delay between them
-  function processGroup(idx) {
-    if (idx >= groups.length) return;
-    var group = groups[idx];
-    var isProducts = group[0] && group[0].type !== 'service';
-    var delay = idx === 0 ? 400 : 600;
-
-    setTimeout(function() {
-      if (isProducts) {
-        // Product checkout
-        var token = localStorage.getItem('remont_token');
-        if (!token) {
-          openAuthModal(function() { setTimeout(function() { openCheckoutModal(); }, 300); });
-        } else {
-          openCheckoutModal();
-        }
-        // Don't chain more groups after product checkout (modal handles flow)
-      } else {
-        // Service group — book with first service, combine names if multiple
-        var svc = group[0];
-        var name = group.length > 1
-          ? group.map(function(s){ return s.name; }).join(' + ')
-          : svc.name;
-        var totalPrice = group.reduce(function(sum, s) {
-          return sum + (parseFloat(String(s.price).replace(/[^0-9.]/g,''))||0) * (s.qty||1);
-        }, 0);
-        if (typeof openBookingModal === 'function') {
-          openBookingModal(svc.id, name, '₹' + totalPrice.toLocaleString('en-IN'));
-        }
-        // Queue next group after user would complete booking (show notice)
-        if (idx + 1 < groups.length) {
-          var nextGroup = groups[idx + 1];
-          var nextIsProducts = nextGroup[0] && nextGroup[0].type !== 'service';
-          var nextLabel = nextIsProducts ? 'product order' : (nextGroup[0].categoryKey||'next service').replace(/_/g,' ').toLowerCase() + ' booking';
-          setTimeout(function() {
-            showToast('✅ Booking submitted. Opening ' + nextLabel + '…', 'success');
-            setTimeout(function() { processGroup(idx + 1); }, 2000);
-          }, 1500);
-        }
-      }
-    }, delay);
-  }
-
-  processGroup(0);
+  // One combined checkout regardless of how many categories/sellers are in the cart —
+  // the backend's Child Order Engine splits it server-side into linked child orders under
+  // one Master Order; the customer only ever sees one order number and pays once.
+  setTimeout(function() { openCheckoutModal(); }, 300);
 }
 
 // Sync badge on page load
@@ -8153,9 +8111,20 @@ function submitCheckoutOrder() {
   btn.disabled = true;
   document.getElementById('co-msg').style.display = 'none';
 
-  var items = cart.filter(function(i){ return i.type === 'product'; }).map(function(i){
-    return { productId: i.id, quantity: i.qty || 1 };
+  // Whole cart in one payload — services and products together. The backend's Child Order
+  // Engine splits this into one child order per distinct service and one per distinct
+  // product seller, all linked under a single Master Order the customer sees as one order.
+  var items = cart.map(function(i){
+    return i.type === 'service'
+      ? { type: 'SERVICE', serviceId: i.id, quantity: i.qty || 1 }
+      : { type: 'PRODUCT', productId: i.id, quantity: i.qty || 1 };
   });
+
+  if (paymentMethod === 'COD' && items.some(function(i){ return i.type === 'SERVICE'; })) {
+    showCoMsg('Cash on delivery is only available for product-only orders');
+    btn.textContent = 'Pay Online →'; btn.disabled = false;
+    return;
+  }
 
   // Merge saved GPS/location data into payload
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
@@ -8171,13 +8140,10 @@ function submitCheckoutOrder() {
     pincode:       pincode  || (savedLoc ? savedLoc.pincode : '') || undefined,
     latitude:      savedLoc ? (savedLoc.latitude  || 0) : 0,
     longitude:     savedLoc ? (savedLoc.longitude || 0) : 0,
-    accuracy:      savedLoc ? (savedLoc.accuracy  || null) : null,
-    locationSource: savedLoc ? (savedLoc.source || 'MANUAL') : 'MANUAL',
-    capturedAt:    savedLoc ? (savedLoc.capturedAt || null) : null,
     paymentMethod: paymentMethod
   };
 
-  fetch((API_BASE || '') + '/api/v1/orders/public/checkout', {
+  fetch((API_BASE || '') + '/api/v1/master-orders/public/checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -8190,9 +8156,9 @@ function submitCheckoutOrder() {
   })
   .then(function(result) {
     var d = result.data || result; // NestJS wraps response in { data: {...} }
-    var orderNumber = d.orderNumber;
+    var orderNumber = d.masterOrderNumber;
     var totalAmount = Number(d.totalAmount || 0);
-    _checkoutOrderId = d.orderId;
+    _checkoutOrderId = d.masterOrderId;
 
     if (d.isCOD) {
       _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
@@ -8207,14 +8173,14 @@ function submitCheckoutOrder() {
       if (d.gateway === 'PHONEPE') {
         btn.textContent = 'Redirecting to PhonePe…';
         // PhonePe: redirect-based flow — save cart state then redirect
-        localStorage.setItem('remont_pending_order', JSON.stringify({ orderNumber: orderNumber, totalAmount: totalAmount, orderId: d.orderId }));
+        localStorage.setItem('remont_pending_order', JSON.stringify({ orderNumber: orderNumber, totalAmount: totalAmount, orderId: d.masterOrderId }));
         window.location.href = d.redirectUrl;
       } else {
         // Razorpay: popup flow
         btn.textContent = 'Initiating payment…';
         var rzpOrder = { orderNumber: orderNumber };
         var rzpPayment = { gatewayOrderId: d.gatewayOrderId, amount: totalAmount, currency: 'INR', keyId: d.razorpayKeyId };
-        launchRazorpay(rzpPayment, rzpOrder, totalAmount, btn).catch(function() {
+        launchRazorpay(rzpPayment, rzpOrder, totalAmount, btn, true).catch(function() {
           btn.textContent = 'Pay Online →'; btn.disabled = false;
         });
       }
@@ -8241,7 +8207,8 @@ function _getRzpKey(cb) {
     .catch(function() { cb(''); });
 }
 
-function launchRazorpay(payment, order, totalAmount, btn) {
+function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
+  var confirmPath = isMaster ? '/api/v1/master-orders/public/confirm-payment' : '/api/v1/orders/public/confirm-payment';
   return new Promise(function(resolve, reject) {
     // Resolve key: prefer what came from order response, fallback to config endpoint
     var resolvedKey = (payment.keyId && payment.keyId !== 'dev') ? payment.keyId : null;
@@ -8273,7 +8240,7 @@ function launchRazorpay(payment, order, totalAmount, btn) {
         handler: function(response) {
           btn.textContent = 'Confirming payment…'; btn.disabled = true;
           // Single atomic call — backend re-verifies HMAC and confirms order in one transaction
-          fetch((API_BASE || '') + '/api/v1/orders/public/confirm-payment', {
+          fetch((API_BASE || '') + confirmPath, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -8412,6 +8379,41 @@ var STATUS_COLORS_MO = {
   CLOSED: '#9ca3af', CANCELLED: '#ef4444', REFUNDED: '#6b7280',
 };
 
+function _renderOrderCard(o) {
+  var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
+  var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
+  var date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
+  var total = o.totalAmount ? '₹' + Number(o.totalAmount).toLocaleString('en-IN') : '—';
+  var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
+  var isCompleted = o.status === 'COMPLETED' || o.status === 'INVOICED' || o.status === 'CLOSED';
+  var reviewed = _reviewedOrderIds[o.id];
+  // Payment lives at the Master Order level once one exists — retry against that (and its
+  // full total, covering every sibling child order), not this one child's partial amount.
+  var payRetryId = o.masterOrderId || o.id;
+  var payRetryAmount = o.masterOrderId && o.masterOrder ? Number(o.masterOrder.totalAmount || 0) : Number(o.totalAmount || 0);
+  var payRetryNumber = (o.masterOrderId && o.masterOrder && o.masterOrder.masterOrderNumber) || o.orderNumber || '';
+  var payRetryIsMaster = !!o.masterOrderId;
+  return '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px;background:#fff">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
+      '<div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(serviceName) + '</div>' +
+        '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + ' · ' + date + '</div></div>' +
+      '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
+      (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + payRetryId + '\',' + payRetryAmount + ',\'' + payRetryNumber + '\',this,' + payRetryIsMaster + ')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
+       (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'IN_PROGRESS') && o.vendor ?
+         '<div style="display:flex;gap:6px">' +
+           '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
+           (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
+         '</div>'
+       : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' :
+       isCompleted && reviewed ? '<span style="font-size:12px;font-weight:600;color:#22c55e">✅ Reviewed</span>' :
+       isCompleted ? '<button onclick="openRateModal(\'' + o.id + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⭐ Rate Service</button>' : '') +
+    '</div>' +
+  '</div>';
+}
+
 var myOrdersPollTimer = null;
 function openMyOrdersModal() {
   var token = localStorage.getItem('remont_token');
@@ -8461,34 +8463,34 @@ function loadMyOrders() {
       if (emptyHtml !== _lastOrdersHtml) { body.innerHTML = emptyHtml; _lastOrdersHtml = emptyHtml; }
       return;
     }
-    var html = '';
+    // Group by masterOrderId (present on every order created via the Child Order Engine)
+    // so a customer's one checkout renders as one "Master Order" card with its category/
+    // seller breakdown nested inside — orders with no masterOrderId (everything created
+    // before this, and anything still using the old single-order APIs) render exactly as
+    // a standalone card, unchanged.
+    var groups = [];
+    var byMaster = {};
     orders.forEach(function(o) {
-      var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
-      var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
-      var date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
-      var total = o.totalAmount ? '₹' + Number(o.totalAmount).toLocaleString('en-IN') : '—';
-      var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
-      var isCompleted = o.status === 'COMPLETED' || o.status === 'INVOICED' || o.status === 'CLOSED';
-      var reviewed = _reviewedOrderIds[o.id];
-      html += '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px">' +
-        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
-          '<div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(serviceName) + '</div>' +
-            '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + ' · ' + date + '</div></div>' +
-          '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
-        '</div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center">' +
-          '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
-          (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + o.id + '\',' + Number(o.totalAmount||0) + ',\'' + (o.orderNumber||'') + '\',this)" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
-           (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'IN_PROGRESS') && o.vendor ?
-             '<div style="display:flex;gap:6px">' +
-               '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
-               (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
-             '</div>'
-           : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' :
-           isCompleted && reviewed ? '<span style="font-size:12px;font-weight:600;color:#22c55e">✅ Reviewed</span>' :
-           isCompleted ? '<button onclick="openRateModal(\'' + o.id + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⭐ Rate Service</button>' : '') +
-        '</div>' +
-      '</div>';
+      if (!o.masterOrderId) { groups.push({ masterOrderNumber: null, orders: [o] }); return; }
+      if (!byMaster[o.masterOrderId]) {
+        var g = { masterOrderNumber: (o.masterOrder && o.masterOrder.masterOrderNumber) || null, orders: [] };
+        byMaster[o.masterOrderId] = g;
+        groups.push(g);
+      }
+      byMaster[o.masterOrderId].orders.push(o);
+    });
+
+    var html = '';
+    groups.forEach(function(group) {
+      var inner = group.orders.map(_renderOrderCard).join('');
+      if (group.masterOrderNumber) {
+        html += '<div style="border:1.5px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:14px;background:#fafafa">' +
+          '<div style="font-size:12px;font-weight:700;color:#6b7280;letter-spacing:.03em;text-transform:uppercase;padding:0 4px 10px">Order ' + escHtml(group.masterOrderNumber) + (group.orders.length > 1 ? ' · ' + group.orders.length + ' parts' : '') + '</div>' +
+          inner +
+        '</div>';
+      } else {
+        html += inner;
+      }
     });
     if (html !== _lastOrdersHtml) { body.innerHTML = html; _lastOrdersHtml = html; }
   }).catch(function(e) {
@@ -8534,7 +8536,7 @@ function submitReview() {
     });
 }
 
-function retryPayment(orderId, totalAmount, orderNumber, btnEl) {
+function retryPayment(orderId, totalAmount, orderNumber, btnEl, isMaster) {
   _checkoutOrderId = orderId;
   // Use the real tapped button (when available) so Razorpay's own loading/disabled
   // states actually reach the DOM — a plain placeholder object here meant the button
@@ -8543,7 +8545,7 @@ function retryPayment(orderId, totalAmount, orderNumber, btnEl) {
   var originalText = btn.textContent;
   if (btnEl) { btn.disabled = true; btn.textContent = 'Processing…'; }
   apiPost('/api/v1/payments/create-order', { amount: totalAmount, orderId: orderId }).then(function(payment) {
-    return launchRazorpay(payment, { orderNumber: orderNumber }, totalAmount, btn);
+    return launchRazorpay(payment, { orderNumber: orderNumber }, totalAmount, btn, isMaster);
   }).catch(function(e) {
     showToast('Payment initiation failed: ' + (e && e.message || 'unknown error'), 'error');
     if (btnEl) { btn.disabled = false; btn.textContent = originalText; }
@@ -8631,7 +8633,7 @@ function cancelOrderFromList(orderId) {
     var prodId = p.id || ('mprod-' + String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     el.querySelector('.m-prod-cart-btn').onclick = function(e) {
       e.stopPropagation();
-      addToCart({ id: prodId, name: p.name, price: priceNum, type: 'product' });
+      addToCart({ id: prodId, name: p.name, price: priceNum, type: 'product', vendorId: p.vendorId || null });
     };
     return el;
   }
@@ -8678,7 +8680,7 @@ function cancelOrderFromList(orderId) {
           '</div>';
         card.querySelector('.m-prod-cart-btn').onclick = function(e) {
           e.stopPropagation();
-          addToCart({ id: p.id || ('mprod-' + String(p.name||'').toLowerCase().replace(/[^a-z0-9]+/g, '-')), name: p.name || 'Product', price: Number(p.price || 0), type: 'product' });
+          addToCart({ id: p.id || ('mprod-' + String(p.name||'').toLowerCase().replace(/[^a-z0-9]+/g, '-')), name: p.name || 'Product', price: Number(p.price || 0), type: 'product', vendorId: p.vendorId || null });
         };
         container.appendChild(card);
       });

@@ -1024,6 +1024,7 @@ model Order {
   invoice         Invoice?
   reviews         Review[]
   lead            Lead?            @relation(fields: [leadId], references: [id])
+  timeline        OrderTimeline[]
 
   @@index([customerId])
   @@index([masterOrderId])
@@ -1047,6 +1048,10 @@ model OrderItem {
   // pickup locations) simply don't get one — this is additive tracking, never a hard gate
   // on checkout.
   pickupLocationId String?
+  // Denormalized Product.vendorId, set once at split-time by the Child Order Engine so
+  // seller order queries and the split engine don't have to join through Product every
+  // time. Nullable for items created before this field existed.
+  vendorId         String?
 
   order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product        Product         @relation(fields: [productId], references: [id])
@@ -1054,6 +1059,24 @@ model OrderItem {
 
   @@index([orderId])
   @@index([pickupLocationId])
+  @@index([vendorId])
+}
+
+// Append-only status-change log per Order — not the general event-driven architecture
+// (explicitly deferred); just a plain audit trail written directly by order-lifecycle code
+// via the writeOrderTimeline() helper in common/index.ts, no event bus involved.
+model OrderTimeline {
+  id        String    @id @default(cuid())
+  orderId   String
+  status    String
+  note      String?
+  actorId   String?
+  actorRole UserRole?
+  createdAt DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model ExtraWorkItem {

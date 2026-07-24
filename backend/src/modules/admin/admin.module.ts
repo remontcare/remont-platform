@@ -7,7 +7,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -444,15 +444,17 @@ export class AdminService {
     });
   }
 
-  async forceAssignVendor(orderId: string, vendorId: string) {
-    return this.prisma.order.update({
+  async forceAssignVendor(orderId: string, vendorId: string, actorId?: string, actorRole?: UserRole) {
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
       include: { vendor: { include: { user: { select: { name: true, phone: true } } } } },
     });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: 'Force-assigned by admin' });
+    return updated;
   }
 
-  async adminUpdateStatus(orderId: string, status: string, note?: string) {
+  async adminUpdateStatus(orderId: string, status: string, note?: string, actorId?: string, actorRole?: UserRole) {
     const validStatuses = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED', 'COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'];
     if (!validStatuses.includes(status)) throw new BadRequestException(`Invalid status: ${status}`);
     const data: any = { status };
@@ -461,6 +463,7 @@ export class AdminService {
     if (status === 'CANCELLED') { data.cancelledAt = new Date(); if (note) data.cancelReason = note; }
     if (status === 'REFUNDED') data.paymentStatus = 'REFUNDED';
     const updated = await this.prisma.order.update({ where: { id: orderId }, data });
+    await writeOrderTimeline(this.prisma, { orderId, status, note, actorId, actorRole });
     if (status === 'COMPLETED') this.autoGenerateInvoice(orderId).catch(() => {});
     return updated;
   }
@@ -516,12 +519,16 @@ export class AdminService {
     });
   }
 
-  async adminCancelOrder(orderId: string, reason: string) {
-    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+  async adminCancelOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CANCELLED, note: reason, actorId, actorRole });
+    return updated;
   }
 
-  async refundOrder(orderId: string, reason: string) {
-    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}`, adminNotes: reason } });
+  async refundOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}`, adminNotes: reason } });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.REFUNDED, note: reason, actorId, actorRole });
+    return updated;
   }
 
   // ─── Cities ─────────────────────────────────────────────────────────
@@ -1894,11 +1901,11 @@ export class AdminController {
   ) { return this.admin.listOrders({ status, city, q, channel, limit, offset }); }
   @Post('orders') adminCreateOrder(@Body() b: any) { return this.admin.adminCreateOrder(b); }
   @Get('orders/:id') adminGetOrder(@Param('id') id: string) { return this.admin.adminGetOrder(id); }
-  @Patch('orders/:id/status') updateOrderStatus(@Param('id') id: string, @Body() b: { status: string; note?: string }) { return this.admin.adminUpdateStatus(id, b.status, b.note); }
+  @Patch('orders/:id/status') updateOrderStatus(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { status: string; note?: string }) { return this.admin.adminUpdateStatus(id, b.status, b.note, u.sub, u.role); }
   @Patch('orders/:id/note') updateOrderNote(@Param('id') id: string, @Body() b: { note: string }) { return this.admin.adminUpdateNote(id, b.note); }
-  @Patch('orders/:id/assign-vendor') assignVendor(@Param('id') id: string, @Body() b: { vendorId: string }) { return this.admin.forceAssignVendor(id, b.vendorId); }
-  @Patch('orders/:id/cancel') cancelOrder(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.adminCancelOrder(id, b.reason); }
-  @Patch('orders/:id/refund') refund(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason); }
+  @Patch('orders/:id/assign-vendor') assignVendor(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { vendorId: string }) { return this.admin.forceAssignVendor(id, b.vendorId, u.sub, u.role); }
+  @Patch('orders/:id/cancel') cancelOrder(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) { return this.admin.adminCancelOrder(id, b.reason, u.sub, u.role); }
+  @Patch('orders/:id/refund') refund(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason, u.sub, u.role); }
   @Delete('orders/all') deleteAllOrders() { return this.admin.deleteAllOrders(); }
 
   // Cities

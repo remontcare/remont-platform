@@ -126,6 +126,26 @@ export function generateOtp(length = 6): string {
 
 // Scoped to RBAC-relevant admin actions (role grants, blocks, delete-request
 // decisions) — not a general-purpose activity log for the whole platform.
+// Plain append-only status-change log per Order — not the general event-driven
+// architecture (explicitly deferred); a direct insert called from order-lifecycle code.
+export async function writeOrderTimeline(prisma: any, entry: {
+  orderId: string;
+  status: string;
+  note?: string;
+  actorId?: string;
+  actorRole?: UserRole;
+}): Promise<void> {
+  await prisma.orderTimeline.create({
+    data: {
+      orderId: entry.orderId,
+      status: entry.status,
+      note: entry.note,
+      actorId: entry.actorId,
+      actorRole: entry.actorRole,
+    },
+  });
+}
+
 export async function logAudit(prisma: any, entry: {
   actorId: string;
   actorRole: UserRole;

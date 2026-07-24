@@ -5,7 +5,7 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 
 // ─── Service Vendor ───
@@ -130,6 +130,7 @@ export class ServiceVendorsService {
       data: { vendorId: v.id, status: 'VENDOR_ASSIGNED' },
       include: { customer: true, address: true, service: true },
     });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'VENDOR_ASSIGNED', actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     await this.wa.sendJobAssigned(v.userId, updated);
     return updated;
   }
@@ -261,6 +262,7 @@ export class ProductVendorsService {
             id: true, orderNumber: true, status: true, paymentStatus: true, createdAt: true,
             customer: { select: { name: true, phone: true } },
             address: { select: { fullAddress: true, city: true, pincode: true } },
+            masterOrder: { select: { masterOrderNumber: true } },
           },
         },
       },

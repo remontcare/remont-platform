@@ -149,6 +149,7 @@ var SIDEBAR_NAV = [
   ]},
   { section: '📦 ORDERS', items: [
     { key:'orders', label:'All Orders', icon:'📋', href:'/admin/orders.html' },
+    { key:'master-orders', label:'Master Orders', icon:'🧩', href:'/admin/master-orders.html' },
     { key:'orders-new', label:'New Orders', icon:'🔵', href:'/admin/orders.html?status=PENDING', badge:'new' },
     { key:'orders-active', label:'Active Orders', icon:'🟡', href:'/admin/orders.html?status=IN_PROGRESS', badge:'active' },
     { key:'orders-done', label:'Completed Orders', icon:'🟢', href:'/admin/orders.html?status=COMPLETED', badge:'completed' },

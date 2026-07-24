@@ -9,7 +9,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -89,8 +89,10 @@ class CreateOrderDto {
 }
 
 // ─── Dispatch (smart vendor matching) ───
+// Exported (and added to this module's `exports:`) so MasterOrdersModule can reuse this
+// exact matching logic per child order, instead of duplicating it.
 @Injectable()
-class DispatchService {
+export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
   constructor(private prisma: PrismaService, private wa: WhatsappService) {}
 
@@ -357,6 +359,7 @@ export class OrdersService {
       where: { id: orderId },
       data: { paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED },
     });
+    await writeOrderTimeline(this.prisma, { orderId: order.id, status: OrderStatus.CONFIRMED });
     if (order.serviceId) {
       this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
     }
@@ -366,10 +369,14 @@ export class OrdersService {
   async markEnRoute(vendorUserId: string, orderId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
-    return this.prisma.order.updateMany({
+    const result = await this.prisma.order.updateMany({
       where: { id: orderId, vendorId: v.id },
       data: { status: OrderStatus.VENDOR_EN_ROUTE },
     });
+    if (result.count > 0) {
+      await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_EN_ROUTE, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
+    }
+    return result;
   }
 
   async verifyStartOtp(vendorUserId: string, orderId: string, otp: string) {
@@ -379,10 +386,12 @@ export class OrdersService {
     if (!order || order.vendorId !== v.id) throw new ForbiddenException();
     if (order.status !== OrderStatus.VENDOR_EN_ROUTE) throw new BadRequestException('Order is not en-route');
     if (order.startOtp !== otp) throw new BadRequestException('Invalid OTP');
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { startOtpVerified: true, startedAt: new Date(), status: OrderStatus.STARTED },
     });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.STARTED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
+    return updated;
   }
 
   async complete(vendorUserId: string, orderId: string, photosAfter: string[], videoUrl?: string) {
@@ -405,6 +414,7 @@ export class OrdersService {
         pendingPayout: { increment: Number(order.vendorPayout) },
       },
     });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     this.autoGenerateInvoice(orderId).catch((e) => this.logger.warn(`Auto-invoice failed: ${e.message}`));
     return completed;
   }
@@ -451,6 +461,7 @@ export class OrdersService {
         service: true, items: { include: { product: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true,
+        masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -477,10 +488,12 @@ export class OrdersService {
     if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
       throw new BadRequestException('Cannot cancel at this stage');
     }
-    return this.prisma.order.update({
+    const cancelled = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
     });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CANCELLED, note: reason, actorId: userId, actorRole: UserRole.CUSTOMER });
+    return cancelled;
   }
 }
 
@@ -807,6 +820,6 @@ export class PublicBookingController {
   imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, ExtraWorkService, GuestBookingService],
-  exports: [OrdersService],
+  exports: [OrdersService, DispatchService],
 })
 export class OrdersModule {}

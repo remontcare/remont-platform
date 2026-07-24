@@ -747,7 +747,7 @@ function orderCardHtml(o){
   return '<div class="item-card">' +
     '<div class="ic-thumb">🧾</div>' +
     '<div class="ic-info"><div class="ic-title">'+escHtml(o.orderNumber)+' — '+escHtml(custName)+'</div>' +
-    '<div class="ic-meta">'+escHtml(itemsTxt)+'</div></div>' +
+    '<div class="ic-meta">'+escHtml(itemsTxt)+(o.masterOrder ? ' · Order '+escHtml(o.masterOrder.masterOrderNumber) : '')+'</div></div>' +
     '<div class="ic-right"><div class="ic-amount">'+fmtMoney(total)+'</div>' +
     '<span class="badge '+badgeClass+'">'+statusLabel(o.status)+'</span></div>' +
   '</div>';
