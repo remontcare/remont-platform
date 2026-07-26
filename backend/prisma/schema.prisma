@@ -935,6 +935,11 @@ model MasterOrder {
   guestPhone String?
   guestEmail String?
 
+  // Optional GST invoice details for business customers — purely informational,
+  // printed on the invoice; does not affect pricing/tax calculation.
+  customerGstin    String?
+  customerGstName  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

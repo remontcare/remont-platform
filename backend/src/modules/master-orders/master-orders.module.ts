@@ -124,6 +124,8 @@ export class CreateMasterOrderDto {
   @IsOptional() @IsString() couponCode?: string;
   @IsOptional() @IsNumber() @Min(0) walletAmount?: number;
   @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() gstin?: string;
+  @IsOptional() @IsString() gstBusinessName?: string;
 }
 
 export class PublicMasterCheckoutDto {
@@ -143,6 +145,9 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsDateString() slotStart?: string;
   @IsOptional() @IsDateString() slotEnd?: string;
   @IsOptional() @IsString() couponCode?: string;
+  @IsOptional() @IsNumber() @Min(0) walletAmount?: number;
+  @IsOptional() @IsString() gstin?: string;
+  @IsOptional() @IsString() gstBusinessName?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -175,6 +180,19 @@ export class MasterOrdersService {
     private payments: PaymentsService,
     private dispatch: DispatchService,
   ) {}
+
+  private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+    if (!user || Number(user.walletBalance) < amount) throw new BadRequestException('Insufficient wallet balance');
+    const newBalance = Number(user.walletBalance) - amount;
+    await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: amount } } });
+    await this.prisma.walletTransaction.create({
+      data: {
+        userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount, balanceAfter: newBalance,
+        orderId: masterOrderId, notes: `Payment for order ${masterOrderNumber}`,
+      },
+    });
+  }
 
   async generateMasterOrderNumber(): Promise<string> {
     const now = new Date();
@@ -309,13 +327,21 @@ export class MasterOrdersService {
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
     const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
 
-    // COD only when every group is a product group — matches today's constraint where
-    // COD only exists on PublicProductCheckoutDto, never on a service booking.
-    const allProducts = pricedGroups.every((g) => g.type === 'PRODUCT');
-    const paymentMethod = opts.paymentMethod || 'ONLINE';
-    if (paymentMethod === 'COD' && !allProducts) {
-      throw new BadRequestException('Cash on delivery is only available for product-only orders');
+    // Checked up front, before any rows are created — the actual debit happens later
+    // (immediately below for COD, or in confirmPayment() for ONLINE) so an abandoned or
+    // failed online payment never takes the customer's wallet money for an order that
+    // never actually got confirmed.
+    if (walletUsed > 0) {
+      const walletUser = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+      if (!walletUser || Number(walletUser.walletBalance) < walletUsed) throw new BadRequestException('Insufficient wallet balance');
     }
+
+    // Cash payment is allowed for any mix of products and services — "Cash on Delivery"
+    // for product groups, "Cash on Service" for service groups (technician collects after
+    // the job, same as COD collects at the door); both just mean "don't charge upfront
+    // online," so one flag covers both. A coupon-applied order is forced to ONLINE by the
+    // frontend (nothing to enforce server-side beyond what's already validated above).
+    const paymentMethod = opts.paymentMethod || 'ONLINE';
     const confirmUpfront = paymentMethod === 'COD';
 
     // Allocate master-level discount/GST/wallet back down to each child group,
@@ -342,6 +368,8 @@ export class MasterOrdersService {
           guestName: isGuest ? opts.guestName : undefined,
           guestPhone: isGuest ? opts.guestPhone : undefined,
           guestEmail: isGuest ? opts.guestEmail : undefined,
+          customerGstin: dto.gstin || undefined,
+          customerGstName: dto.gstBusinessName || undefined,
         },
       });
 
@@ -390,17 +418,11 @@ export class MasterOrdersService {
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, masterOrder.id, couponDiscount);
 
-    if (walletUsed > 0) {
-      const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
-      if (!user || Number(user.walletBalance) < walletUsed) throw new BadRequestException('Insufficient wallet balance');
-      const newBalance = Number(user.walletBalance) - walletUsed;
-      await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: walletUsed } } });
-      await this.prisma.walletTransaction.create({
-        data: {
-          userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount: walletUsed, balanceAfter: newBalance,
-          orderId: masterOrder.id, notes: `Payment for order ${masterOrder.masterOrderNumber}`,
-        },
-      });
+    // COD/Cash confirms immediately, so the wallet portion (if any) is real money owed
+    // right now — debit it now. For ONLINE, the wallet debit happens in confirmPayment()
+    // instead, once the online portion has actually been paid.
+    if (confirmUpfront && walletUsed > 0) {
+      await this.debitWalletForOrder(customerId, walletUsed, masterOrder.id, masterOrder.masterOrderNumber);
     }
 
     if (confirmUpfront) {
@@ -456,6 +478,14 @@ export class MasterOrdersService {
         await tx.orderTimeline.create({ data: { orderId: child.id, status: OrderStatus.CONFIRMED } });
       }
     });
+
+    // The wallet portion (if any) was only reserved-and-checked at checkout time, not
+    // debited — only take the money now that the online payment has actually cleared.
+    // Guarded by the paymentStatus==='PAID' idempotency check above, same as the rest of
+    // this method.
+    if (Number(existing.walletUsed) > 0) {
+      await this.debitWalletForOrder(existing.customerId, Number(existing.walletUsed), existing.id, existing.masterOrderNumber);
+    }
 
     for (const child of existing.childOrders) {
       if (child.serviceId) this.dispatch.dispatch(child.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
@@ -587,6 +617,7 @@ export class PublicMasterOrderController {
     const items = dto.items;
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
+      walletAmount: dto.walletAmount, gstin: dto.gstin, gstBusinessName: dto.gstBusinessName,
       slotStart: dto.slotStart, slotEnd: dto.slotEnd, city: dto.city,
       inlineAddress: {
         fullAddress: dto.fullAddress, city: dto.city, state: dto.state, pincode: dto.pincode,

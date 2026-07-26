@@ -254,11 +254,21 @@ export class PaymentsService implements OnModuleInit {
           where: { id: tx.id },
           data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature },
         });
+        // tx.orderId is a loose, non-FK string — for a wallet top-up it's the literal
+        // 'WALLET_TOPUP' marker (no Order row exists), and for a master-order checkout
+        // it's actually a MasterOrder.id, not an Order.id. Neither has a corresponding
+        // Order row, so swallow the not-found instead of failing the whole webhook;
+        // wallet credit and master-order confirmation both already happen via the
+        // client-driven confirm-payment HMAC re-verify path, not this webhook.
         if (tx.orderId) {
-          await this.prisma.order.update({
-            where: { id: tx.orderId },
-            data: { paymentId: payment.id, paymentStatus: 'PAID', status: 'CONFIRMED' },
-          });
+          try {
+            await this.prisma.order.update({
+              where: { id: tx.orderId },
+              data: { paymentId: payment.id, paymentStatus: 'PAID', status: 'CONFIRMED' },
+            });
+          } catch (e) {
+            this.logger.warn(`Webhook: no single Order row for orderId=${tx.orderId} (${e.message})`);
+          }
         }
         if (tx.amcSubscriptionId) {
           await this.prisma.amcSubscription.update({

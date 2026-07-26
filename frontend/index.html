@@ -7604,19 +7604,60 @@ function cartCheckout() {
       <button class="tap-target-fix" onclick="closeCheckoutModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     </div>
     <div style="padding:20px 24px">
-      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Order Summary</h4>
-      <div id="co-items" style="margin-bottom:16px"></div>
-      <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px">
+        <span style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.6px">ORDER SUMMARY</span>
+      </div>
+      <div id="co-items" style="margin-bottom:14px"></div>
+
+      <!-- Coupon -->
+      <div style="margin-bottom:14px">
+        <div id="co-coupon-collapsed" onclick="toggleCouponInput()" style="cursor:pointer;display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;color:#c4601a;font-weight:600">🎟️ Have a coupon code?</span>
+        </div>
+        <div id="co-coupon-expanded" style="display:none;gap:8px;margin-top:8px">
+          <input id="co-coupon-code" placeholder="Enter coupon code" autocapitalize="characters"
+            style="flex:1;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;text-transform:uppercase;outline:none" />
+          <button onclick="applyCoupon()" id="co-coupon-apply-btn"
+            style="padding:9px 16px;background:#111827;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Apply</button>
+        </div>
+        <div id="co-coupon-applied" style="display:none;align-items:center;justify-content:space-between;gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;margin-top:8px">
+          <span style="font-size:12.5px;color:#15803d;font-weight:600">🎟️ <span id="co-coupon-applied-code"></span> applied — you saved ₹<span id="co-coupon-applied-amt"></span></span>
+          <button onclick="removeCoupon()" style="background:none;border:none;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Remove</button>
+        </div>
+        <p id="co-coupon-msg" style="font-size:12px;color:#ef4444;margin:6px 0 0;display:none"></p>
+      </div>
+
+      <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>Subtotal</span><span id="co-subtotal">₹0</span>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:8px">
+        <div id="co-coupon-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
+          <span>Coupon discount</span><span id="co-coupon-line-amt">−₹0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>GST (18%)</span><span id="co-gst">₹0</span>
         </div>
+        <div id="co-wallet-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
+          <span>Wallet applied</span><span id="co-wallet-line-amt">−₹0</span>
+        </div>
         <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#111;padding-top:8px;border-top:1px solid #e5e7eb">
-          <span>Total</span><span id="co-total" style="color:#c4601a">₹0</span>
+          <span>Total Payable</span><span id="co-total" style="color:#c4601a">₹0</span>
         </div>
       </div>
+
+      <!-- Optional GST invoice details -->
+      <div style="margin-bottom:16px">
+        <div onclick="toggleGstFields()" style="cursor:pointer;display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;color:#6b7280;font-weight:600">🧾 Need a GST invoice? <span style="color:#9ca3af;font-weight:400">(optional)</span></span>
+        </div>
+        <div id="co-gst-fields" style="display:none;margin-top:8px">
+          <input id="co-gstin" placeholder="GSTIN" maxlength="15"
+            style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:8px;outline:none;text-transform:uppercase" />
+          <input id="co-gst-business-name" placeholder="Business / company name"
+            style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none" />
+        </div>
+      </div>
+
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Customer Details</h4>
       <input id="co-name" type="text" placeholder="Full name"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
@@ -7646,23 +7687,60 @@ function cartCheckout() {
         </select>
       </div>
       <p style="font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
+
+      <!-- Wallet (only shown for logged-in customers with a balance) -->
+      <div id="co-wallet-box" style="display:none;margin-bottom:16px">
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:10px 12px;cursor:pointer">
+          <span style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="co-use-wallet" onchange="recalcTotals()" />
+            <span style="font-size:13px;font-weight:600;color:#111">💰 Use wallet balance <span style="color:#6b7280;font-weight:400">(₹<span id="co-wallet-balance">0</span> available)</span></span>
+          </span>
+          <a href="#" onclick="openWalletTopupModal();return false" style="font-size:12px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add Money</a>
+        </label>
+      </div>
+
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:10px">Payment Method</h4>
-      <div style="display:flex;gap:8px;margin-bottom:20px">
+      <div style="display:flex;gap:8px;margin-bottom:6px">
         <label class="co-payment-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
           <input type="radio" name="co-payment" value="ONLINE" checked onchange="updatePaymentUI()">
           <div><div style="font-size:13px;font-weight:600">💳 Pay Online</div><div style="font-size:11px;color:#6b7280">UPI, Card, Net Banking</div></div>
         </label>
-        <label class="co-payment-label" style="flex:1;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+        <label class="co-payment-label" id="co-cod-label" style="flex:1;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
           <input type="radio" name="co-payment" value="COD" onchange="updatePaymentUI()">
-          <div><div style="font-size:13px;font-weight:600">🚗 Cash on Delivery</div><div style="font-size:11px;color:#6b7280">Pay when delivered</div></div>
+          <div><div id="co-cod-title" style="font-size:13px;font-weight:600">🚗 Cash on Delivery</div><div id="co-cod-sub" style="font-size:11px;color:#6b7280">Pay when delivered</div></div>
         </label>
       </div>
+      <p id="co-coupon-cod-note" style="display:none;font-size:11px;color:#9ca3af;margin:0 0 14px">Cash payment isn't available with a coupon applied — pay online to use this coupon.</p>
+
       <button onclick="submitCheckoutOrder()" id="co-submit-btn"
-        style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">
+        style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px">
         Pay Online →
       </button>
       <p id="co-msg" style="margin-top:10px;font-size:13px;color:#ef4444;text-align:center;display:none"></p>
     </div>
+  </div>
+</div>
+
+<!-- ═══ WALLET TOP-UP MODAL ═══ -->
+<div id="wallet-topup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:24px;width:360px;max-width:95vw">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="font-size:16px;font-weight:700;color:#111;margin:0">Add Money to Wallet</h3>
+      <button class="tap-target-fix" onclick="closeWalletTopupModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <input id="wt-amount" type="number" min="1" placeholder="Amount (₹)"
+      style="width:100%;padding:11px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;font-weight:600;margin-bottom:10px;outline:none" />
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button onclick="setWtAmount(200)" style="flex:1;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12.5px;font-weight:600;color:#374151;cursor:pointer">₹200</button>
+      <button onclick="setWtAmount(500)" style="flex:1;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12.5px;font-weight:600;color:#374151;cursor:pointer">₹500</button>
+      <button onclick="setWtAmount(1000)" style="flex:1;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12.5px;font-weight:600;color:#374151;cursor:pointer">₹1000</button>
+      <button onclick="setWtAmount(2000)" style="flex:1;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;font-size:12.5px;font-weight:600;color:#374151;cursor:pointer">₹2000</button>
+    </div>
+    <button onclick="submitWalletTopup()" id="wt-submit-btn"
+      style="width:100%;padding:13px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+      Add Money via UPI/Card →
+    </button>
+    <p id="wt-msg" style="margin-top:10px;font-size:13px;color:#ef4444;text-align:center;display:none"></p>
   </div>
 </div>
 
@@ -8024,29 +8102,61 @@ function verifyOtpAuth() {
 
 // ── Checkout Modal ───────────────────────────────────────────────────
 
+// Checkout-modal state shared by recalcTotals()/applyCoupon()/submitCheckoutOrder()
+var _coCoupon = null;      // { code, discountAmount } once applied
+var _coWalletBalance = 0;  // logged-in customer's wallet balance, fetched on open
+
 function openCheckoutModal() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showToast('Cart is empty', 'error'); return; }
 
-  // Populate order summary
-  var subtotal = 0;
+  // Reset per-open state — coupon/wallet selections don't carry over between opens
+  _coCoupon = null;
+  document.getElementById('co-coupon-code').value = '';
+  document.getElementById('co-coupon-expanded').style.display = 'none';
+  document.getElementById('co-coupon-collapsed').style.display = 'flex';
+  document.getElementById('co-coupon-applied').style.display = 'none';
+  document.getElementById('co-coupon-msg').style.display = 'none';
+  document.getElementById('co-gst-fields').style.display = 'none';
+  document.getElementById('co-gstin').value = '';
+  document.getElementById('co-gst-business-name').value = '';
+  var useWalletBox = document.getElementById('co-use-wallet');
+  if (useWalletBox) useWalletBox.checked = false;
+
+  // Populate order summary line items (pricing totals are computed by recalcTotals())
   var html = '';
   cart.forEach(function(item) {
     var qty = item.qty || 1;
     var lineTotal = (item.price || 0) * qty;
-    subtotal += lineTotal;
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
       '<div><div style="font-size:14px;font-weight:500;color:#111">' + escHtml(item.name) + '</div>' +
       '<div style="font-size:12px;color:#6b7280;margin-top:2px">Qty: ' + qty + ' × ₹' + Number(item.price||0).toLocaleString('en-IN') + '</div></div>' +
       '<div style="font-size:14px;font-weight:600;color:#374151">₹' + lineTotal.toLocaleString('en-IN') + '</div></div>';
   });
-
   document.getElementById('co-items').innerHTML = html;
-  var gst = Math.round(subtotal * 0.18 * 100) / 100;
-  var total = subtotal + gst;
-  document.getElementById('co-subtotal').textContent = '₹' + subtotal.toLocaleString('en-IN');
-  document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
-  document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
+
+  // Wallet — only offered to a logged-in customer, and only if they have a balance
+  var walletBox = document.getElementById('co-wallet-box');
+  var walletToken = localStorage.getItem('remont_token');
+  if (walletToken) {
+    fetch((API_BASE || '') + '/api/v1/wallet/balance', { headers: { 'Authorization': 'Bearer ' + walletToken } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        _coWalletBalance = Number((d && d.data) || 0);
+        if (_coWalletBalance > 0) {
+          document.getElementById('co-wallet-balance').textContent = _coWalletBalance.toLocaleString('en-IN');
+          walletBox.style.display = 'block';
+        } else {
+          walletBox.style.display = 'none';
+        }
+        recalcTotals();
+      })
+      .catch(function() { walletBox.style.display = 'none'; });
+  } else {
+    walletBox.style.display = 'none';
+  }
+
+  recalcTotals();
 
   // Pre-fill contact from saved profile
   var storedUser = null;
@@ -8124,15 +8234,161 @@ function showCoMsg(msg) {
   el.textContent = msg; el.style.display = '';
 }
 
+// Recomputes and renders the price breakdown from the current cart + applied coupon +
+// wallet checkbox — mirrors the backend's exact calc order (subtotal → coupon discount →
+// 18% GST on the remainder → minus wallet) so what's shown here matches what gets charged.
+function recalcTotals() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var subtotal = 0;
+  cart.forEach(function(item) { subtotal += (item.price || 0) * (item.qty || 1); });
+
+  var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal) : 0;
+  var discounted = Math.max(0, subtotal - couponDiscount);
+  var gst = Math.round(discounted * 0.18 * 100) / 100;
+  var preWalletTotal = discounted + gst;
+
+  var useWalletEl = document.getElementById('co-use-wallet');
+  var walletApplied = (useWalletEl && useWalletEl.checked) ? Math.min(_coWalletBalance, preWalletTotal) : 0;
+  var total = Math.max(0, preWalletTotal - walletApplied);
+
+  document.getElementById('co-subtotal').textContent = '₹' + subtotal.toLocaleString('en-IN');
+  var couponLine = document.getElementById('co-coupon-line');
+  if (couponDiscount > 0) {
+    couponLine.style.display = 'flex';
+    document.getElementById('co-coupon-line-amt').textContent = '−₹' + couponDiscount.toLocaleString('en-IN');
+  } else {
+    couponLine.style.display = 'none';
+  }
+  document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+  var walletLine = document.getElementById('co-wallet-line');
+  if (walletApplied > 0) {
+    walletLine.style.display = 'flex';
+    document.getElementById('co-wallet-line-amt').textContent = '−₹' + walletApplied.toLocaleString('en-IN');
+  } else {
+    walletLine.style.display = 'none';
+  }
+  document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
+  return { subtotal: subtotal, couponDiscount: couponDiscount, gst: gst, walletApplied: walletApplied, total: total };
+}
+
+function toggleCouponInput() {
+  document.getElementById('co-coupon-collapsed').style.display = 'none';
+  document.getElementById('co-coupon-expanded').style.display = 'flex';
+  document.getElementById('co-coupon-code').focus();
+}
+
+function applyCoupon() {
+  var code = document.getElementById('co-coupon-code').value.trim().toUpperCase();
+  var msgEl = document.getElementById('co-coupon-msg');
+  msgEl.style.display = 'none';
+  if (!code) { msgEl.textContent = 'Enter a coupon code'; msgEl.style.display = 'block'; return; }
+
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var subtotal = 0;
+  cart.forEach(function(item) { subtotal += (item.price || 0) * (item.qty || 1); });
+
+  var phoneRaw = document.getElementById('co-phone').value.replace(/\D/g,'');
+  var phone = phoneRaw.length >= 10 ? ('+91' + phoneRaw) : undefined;
+
+  var applyBtn = document.getElementById('co-coupon-apply-btn');
+  applyBtn.textContent = 'Checking…'; applyBtn.disabled = true;
+
+  fetch((API_BASE || '') + '/api/v1/coupons/validate-guest', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: code, phone: phone, orderAmount: subtotal })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    applyBtn.textContent = 'Apply'; applyBtn.disabled = false;
+    var d = res.data || res;
+    if (!d.valid) {
+      msgEl.textContent = d.reason || 'Invalid coupon code';
+      msgEl.style.display = 'block';
+      return;
+    }
+    _coCoupon = { code: (d.coupon && d.coupon.code) || code, discountAmount: d.discountAmount || 0 };
+    document.getElementById('co-coupon-applied-code').textContent = _coCoupon.code;
+    document.getElementById('co-coupon-applied-amt').textContent = _coCoupon.discountAmount.toLocaleString('en-IN');
+    document.getElementById('co-coupon-applied').style.display = 'flex';
+    document.getElementById('co-coupon-expanded').style.display = 'none';
+    updatePaymentUI(); // coupon forces Pay Online and recalculates totals
+  })
+  .catch(function() {
+    applyBtn.textContent = 'Apply'; applyBtn.disabled = false;
+    msgEl.textContent = 'Could not validate coupon. Try again.';
+    msgEl.style.display = 'block';
+  });
+}
+
+function removeCoupon() {
+  _coCoupon = null;
+  document.getElementById('co-coupon-applied').style.display = 'none';
+  document.getElementById('co-coupon-collapsed').style.display = 'flex';
+  document.getElementById('co-coupon-code').value = '';
+  updatePaymentUI();
+}
+
+function toggleGstFields() {
+  var el = document.getElementById('co-gst-fields');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
 function updatePaymentUI() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var hasService = cart.some(function(i){ return i.type === 'service'; });
+  var hasProduct = cart.some(function(i){ return i.type === 'product'; });
+  var codTitleEl = document.getElementById('co-cod-title');
+  var codSubEl   = document.getElementById('co-cod-sub');
+  if (codTitleEl && codSubEl) {
+    if (hasService && hasProduct) {
+      codTitleEl.textContent = '💵 Cash on Service/Delivery';
+      codSubEl.textContent   = 'Pay cash when serviced or delivered';
+    } else if (hasService) {
+      codTitleEl.textContent = '💵 Cash on Service';
+      codSubEl.textContent   = 'Pay the technician after the job';
+    } else {
+      codTitleEl.textContent = '🚗 Cash on Delivery';
+      codSubEl.textContent   = 'Pay when delivered';
+    }
+  }
+
+  // A coupon requires an online payment (so the discount can't be walked away from at
+  // the door) — lock the Cash option while one is applied.
+  var codRadio = document.querySelector('input[name="co-payment"][value="COD"]');
+  var codLabel = document.getElementById('co-cod-label');
+  var couponNote = document.getElementById('co-coupon-cod-note');
+  if (_coCoupon) {
+    var onlineRadio = document.querySelector('input[name="co-payment"][value="ONLINE"]');
+    if (onlineRadio) onlineRadio.checked = true;
+    if (codRadio) { codRadio.checked = false; codRadio.disabled = true; }
+    if (codLabel) { codLabel.style.opacity = '0.45'; codLabel.style.pointerEvents = 'none'; }
+    if (couponNote) couponNote.style.display = 'block';
+  } else {
+    if (codRadio) codRadio.disabled = false;
+    if (codLabel) { codLabel.style.opacity = '1'; codLabel.style.pointerEvents = 'auto'; }
+    if (couponNote) couponNote.style.display = 'none';
+  }
+
   var sel = document.querySelector('input[name="co-payment"]:checked');
   var isCOD = sel && sel.value === 'COD';
   var btn = document.getElementById('co-submit-btn');
-  if (btn) btn.textContent = isCOD ? 'Place Order (COD) →' : 'Pay Online →';
+  if (btn) btn.textContent = isCOD ? 'Place Order (Cash) →' : 'Pay Online →';
   document.querySelectorAll('.co-payment-label').forEach(function(l) {
     var inp = l.querySelector('input[type="radio"]');
     l.style.borderColor = (inp && inp.checked) ? '#c4601a' : '#e5e7eb';
   });
+
+  // Wallet only combines with an online payment — COD is already 100% cash at the door.
+  var walletBox = document.getElementById('co-wallet-box');
+  if (walletBox) {
+    walletBox.style.opacity = isCOD ? '0.45' : '1';
+    walletBox.style.pointerEvents = isCOD ? 'none' : 'auto';
+    if (isCOD) {
+      var uw = document.getElementById('co-use-wallet');
+      if (uw && uw.checked) uw.checked = false;
+    }
+  }
+  recalcTotals();
 }
 
 function submitCheckoutOrder() {
@@ -8170,34 +8426,37 @@ function submitCheckoutOrder() {
       : { type: 'PRODUCT', productId: i.id, quantity: i.qty || 1 };
   });
 
-  if (paymentMethod === 'COD' && items.some(function(i){ return i.type === 'SERVICE'; })) {
-    showCoMsg('Cash on delivery is only available for product-only orders');
-    btn.textContent = 'Pay Online →'; btn.disabled = false;
-    return;
-  }
-
   // Merge saved GPS/location data into payload
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
   // Date + time apply to any services in the cart (slotStart is ignored server-side for
   // product-only child orders) — combined into one IST-offset timestamp, same format the
   // old single-service booking flow already sent to the backend.
   var slotStart = (slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
+  var totals = recalcTotals();
+  var useWalletEl = document.getElementById('co-use-wallet');
+  var walletAmount = (useWalletEl && useWalletEl.checked && paymentMethod === 'ONLINE') ? totals.walletApplied : undefined;
+  var gstin = document.getElementById('co-gstin').value.trim();
+  var gstBusinessName = document.getElementById('co-gst-business-name').value.trim();
   var payload = {
-    name:          name,
-    phone:         '+91' + phoneRaw,
-    email:         email || undefined,
-    items:         items,
-    fullAddress:   address + (pincode ? ', ' + pincode : ''),
-    area:          savedLoc ? (savedLoc.area    || '') : '',
-    landmark:      savedLoc ? (savedLoc.landmark || '') : '',
-    city:          cityName,
-    state:         savedLoc ? (savedLoc.state    || '') : '',
-    pincode:       pincode  || (savedLoc ? savedLoc.pincode : '') || undefined,
-    latitude:      savedLoc ? (savedLoc.latitude  || 0) : 0,
-    longitude:     savedLoc ? (savedLoc.longitude || 0) : 0,
-    slotStart:     slotStart,
-    slotEnd:       slotStart,
-    paymentMethod: paymentMethod
+    name:            name,
+    phone:           '+91' + phoneRaw,
+    email:           email || undefined,
+    items:           items,
+    fullAddress:     address + (pincode ? ', ' + pincode : ''),
+    area:            savedLoc ? (savedLoc.area    || '') : '',
+    landmark:        savedLoc ? (savedLoc.landmark || '') : '',
+    city:            cityName,
+    state:           savedLoc ? (savedLoc.state    || '') : '',
+    pincode:         pincode  || (savedLoc ? savedLoc.pincode : '') || undefined,
+    latitude:        savedLoc ? (savedLoc.latitude  || 0) : 0,
+    longitude:       savedLoc ? (savedLoc.longitude || 0) : 0,
+    slotStart:       slotStart,
+    slotEnd:         slotStart,
+    couponCode:      _coCoupon ? _coCoupon.code : undefined,
+    walletAmount:    walletAmount,
+    gstin:           gstin || undefined,
+    gstBusinessName: gstBusinessName || undefined,
+    paymentMethod:   paymentMethod
   };
 
   fetch((API_BASE || '') + '/api/v1/master-orders/public/checkout', {
@@ -8244,8 +8503,8 @@ function submitCheckoutOrder() {
     }
   })
   .catch(function(err) {
-    btn.textContent = paymentMethod === 'COD' ? 'Place Order (COD) →' : 'Pay Online →';
     btn.disabled = false;
+    updatePaymentUI();
     showCoMsg('Error: ' + (err && err.message ? err.message : 'Order creation failed. Please try again.'));
   });
 }
@@ -8385,6 +8644,129 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
       _getRzpKey(doOpen);
     }
   });
+}
+
+// ── Wallet Top-up ────────────────────────────────────────────────────
+
+function openWalletTopupModal() {
+  var token = localStorage.getItem('remont_token');
+  if (!token) {
+    if (typeof openAuthModal === 'function') { openAuthModal(function() { openWalletTopupModal(); }); }
+    else showToast('Please log in to add money to your wallet', 'error');
+    return;
+  }
+  document.getElementById('wt-amount').value = '';
+  document.getElementById('wt-msg').style.display = 'none';
+  document.getElementById('wt-submit-btn').textContent = 'Add Money via UPI/Card →';
+  document.getElementById('wt-submit-btn').disabled = false;
+  document.getElementById('wallet-topup-modal').style.display = 'flex';
+}
+
+function closeWalletTopupModal() {
+  document.getElementById('wallet-topup-modal').style.display = 'none';
+}
+
+function setWtAmount(v) {
+  document.getElementById('wt-amount').value = v;
+}
+
+function submitWalletTopup() {
+  var token = localStorage.getItem('remont_token');
+  var amount = Number(document.getElementById('wt-amount').value);
+  var msgEl = document.getElementById('wt-msg');
+  msgEl.style.display = 'none';
+  if (!amount || amount <= 0) { msgEl.textContent = 'Enter a valid amount'; msgEl.style.display = 'block'; return; }
+
+  var btn = document.getElementById('wt-submit-btn');
+  btn.textContent = 'Creating payment…'; btn.disabled = true;
+
+  fetch((API_BASE || '') + '/api/v1/wallet/add-money', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ amount: amount })
+  })
+  .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || 'Could not start payment'); return d; }); })
+  .then(function(res) {
+    var d = res.data || res;
+    if (d.gateway !== 'RAZORPAY') {
+      btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+      msgEl.textContent = 'Online top-up is temporarily unavailable. Please try again shortly.';
+      msgEl.style.display = 'block';
+      return;
+    }
+    _launchWalletTopupRazorpay(d, amount, btn, msgEl);
+  })
+  .catch(function(err) {
+    btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+    msgEl.textContent = err && err.message ? err.message : 'Could not start payment. Try again.';
+    msgEl.style.display = 'block';
+  });
+}
+
+function _launchWalletTopupRazorpay(payment, amount, btn, msgEl) {
+  var token = localStorage.getItem('remont_token');
+  function doOpen(keyId) {
+    if (!keyId || keyId === 'dev') {
+      btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+      msgEl.textContent = 'Payment gateway not configured. Please contact support.';
+      msgEl.style.display = 'block';
+      return;
+    }
+    var options = {
+      key: keyId,
+      amount: Math.round(amount * 100),
+      currency: 'INR',
+      name: 'Remont India',
+      description: 'Wallet Top-up',
+      order_id: payment.gatewayOrderId,
+      handler: function(response) {
+        btn.textContent = 'Confirming…'; btn.disabled = true;
+        fetch((API_BASE || '') + '/api/v1/wallet/confirm-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({
+            gatewayOrderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature
+          })
+        })
+        .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || 'Confirmation failed'); return d; }); })
+        .then(function(res) {
+          var newBalance = Number((res.data || res).walletBalance || 0);
+          _coWalletBalance = newBalance;
+          var balEl = document.getElementById('co-wallet-balance');
+          if (balEl) balEl.textContent = newBalance.toLocaleString('en-IN');
+          var walletBox = document.getElementById('co-wallet-box');
+          if (walletBox && newBalance > 0) walletBox.style.display = 'block';
+          closeWalletTopupModal();
+          showToast('₹' + amount.toLocaleString('en-IN') + ' added to your wallet', 'success');
+        })
+        .catch(function(e) {
+          msgEl.textContent = 'Payment received but confirmation failed. Contact support with payment ID: ' + response.razorpay_payment_id;
+          msgEl.style.display = 'block';
+          btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+        });
+      },
+      prefill: {},
+      theme: { color: '#c4601a' },
+      modal: { ondismiss: function() { btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false; } }
+    };
+    try {
+      var rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function(resp) {
+        msgEl.textContent = 'Payment failed: ' + (resp.error && resp.error.description || 'Unknown error');
+        msgEl.style.display = 'block';
+        btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+      });
+      rzp.open();
+    } catch (e) {
+      btn.textContent = 'Add Money via UPI/Card →'; btn.disabled = false;
+      msgEl.textContent = 'Payment gateway error: ' + e.message;
+      msgEl.style.display = 'block';
+    }
+  }
+  if (payment.keyId) doOpen(payment.keyId);
+  else _getRzpKey(doOpen);
 }
 
 // ── Order Success Modal ─────────────────────────────────────────────

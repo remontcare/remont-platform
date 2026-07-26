@@ -2,13 +2,16 @@ import { Module, Injectable, Controller, Get, Post, Body, UseGuards } from '@nes
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CouponType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload } from '../../common';
 
 @Injectable()
 export class CouponsService {
   constructor(private prisma: PrismaService) {}
 
-  async validate(code: string, userId: string, orderAmount: number) {
+  // userId is optional so the guest storefront checkout (identified only by phone, no
+  // account/JWT yet) can preview a coupon too — per-user usage limit simply isn't checked
+  // for a not-yet-resolved guest, the same way it's skipped for a brand new account.
+  async validate(code: string, userId: string | undefined, orderAmount: number) {
     const coupon = await this.prisma.coupon.findUnique({ where: { code: code.toUpperCase() } });
     if (!coupon) return { valid: false, reason: 'Invalid coupon code' };
     if (!coupon.isActive) return { valid: false, reason: 'Inactive' };
@@ -21,8 +24,10 @@ export class CouponsService {
     if (coupon.minOrderAmount && orderAmount < Number(coupon.minOrderAmount)) {
       return { valid: false, reason: `Min order ₹${coupon.minOrderAmount}` };
     }
-    const userUsage = await this.prisma.couponUsage.count({ where: { couponId: coupon.id, userId } });
-    if (userUsage >= coupon.perUserLimit) return { valid: false, reason: 'Already used' };
+    if (userId) {
+      const userUsage = await this.prisma.couponUsage.count({ where: { couponId: coupon.id, userId } });
+      if (userUsage >= coupon.perUserLimit) return { valid: false, reason: 'Already used' };
+    }
 
     let discount = 0;
     if (coupon.type === CouponType.PERCENT) {
@@ -37,6 +42,18 @@ export class CouponsService {
       discountAmount: Math.round(discount * 100) / 100,
       coupon: { id: coupon.id, code: coupon.code, type: coupon.type },
     };
+  }
+
+  // Resolves a phone number to its existing user (if any) so a not-yet-logged-in
+  // storefront guest still gets their real per-user usage limit checked once they're a
+  // known customer, and a genuinely new phone just skips that check like any new user.
+  async validateByPhone(code: string, phone: string | undefined, orderAmount: number) {
+    let userId: string | undefined;
+    if (phone) {
+      const user = await this.prisma.user.findUnique({ where: { phone } });
+      if (user) userId = user.id;
+    }
+    return this.validate(code, userId, orderAmount);
   }
 
   async recordUsage(couponId: string, userId: string, orderId: string, discount: number) {
@@ -67,6 +84,12 @@ export class CouponsController {
   @Get('available') list() { return this.c.listAvailable(); }
   @Post('validate') validate(@CurrentUser() u: JwtPayload, @Body() b: { code: string; orderAmount: number }) {
     return this.c.validate(b.code, u.sub, b.orderAmount);
+  }
+
+  // Public preview used by the guest checkout modal (phone-identified, no JWT yet).
+  @Public() @Post('validate-guest')
+  validateGuest(@Body() b: { code: string; phone?: string; orderAmount: number }) {
+    return this.c.validateByPhone(b.code, b.phone, b.orderAmount);
   }
 
   @UseGuards(RolesGuard) @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
