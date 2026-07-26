@@ -386,6 +386,7 @@ export class MasterOrdersService {
         const vendorPayout = serviceAmount - remontCommission;
         const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         const startOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
+        const endOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
 
         const childOrder = await tx.order.create({
           data: {
@@ -396,7 +397,7 @@ export class MasterOrdersService {
             addressId: resolvedAddressId,
             slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
             slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
-            startOtp,
+            startOtp, endOtp,
             status: confirmUpfront ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
             paymentStatus: PaymentStatus.PENDING,
             serviceAmount, productsAmount, subtotal: g.amount,
@@ -499,7 +500,7 @@ export class MasterOrdersService {
       where: { customerId },
       include: {
         address: true,
-        childOrders: { include: { service: true, items: { include: { product: true } } } },
+        childOrders: { include: { service: true, items: { include: { product: true } }, delivery: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -571,7 +572,7 @@ export class MasterOrdersService {
           include: {
             service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
             items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
-            invoice: true,
+            invoice: true, delivery: true,
             timeline: { orderBy: { createdAt: 'asc' } },
           },
         },

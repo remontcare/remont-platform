@@ -868,22 +868,23 @@ model DeliveryPartner {
 }
 
 model Delivery {
-  id             String         @id @default(cuid())
-  partnerId      String
-  pickupAddress  String
-  pickupLat      Float
-  pickupLng      Float
-  dropAddress    String
-  dropLat        Float
-  dropLng        Float
-  status         DeliveryStatus
-  trackingNumber String         @unique
-  receiverOtp    String?
-  proofPhotoUrl  String?
-  earningAmount  Decimal        @db.Decimal(10, 2)
-  pickedUpAt     DateTime?
-  deliveredAt    DateTime?
-  createdAt      DateTime       @default(now())
+  id                  String         @id @default(cuid())
+  partnerId           String
+  pickupAddress       String
+  pickupLat           Float
+  pickupLng           Float
+  dropAddress         String
+  dropLat             Float
+  dropLng             Float
+  status              DeliveryStatus
+  trackingNumber      String         @unique
+  receiverOtp         String?
+  receiverOtpVerified Boolean        @default(false)
+  proofPhotoUrl       String?
+  earningAmount       Decimal        @db.Decimal(10, 2)
+  pickedUpAt          DateTime?
+  deliveredAt         DateTime?
+  createdAt           DateTime       @default(now())
 
   partner DeliveryPartner @relation(fields: [partnerId], references: [id])
   orders  Order[]
@@ -991,6 +992,8 @@ model Order {
   slotEnd          DateTime?
   startOtp         String?
   startOtpVerified Boolean   @default(false)
+  endOtp           String?
+  endOtpVerified   Boolean   @default(false)
   startedAt        DateTime?
   completedAt      DateTime?
   cancelledAt      DateTime?

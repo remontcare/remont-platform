@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Patch, Body, Param, UseGuards, NotFoundException, Logger,
+  Module, Injectable, Controller, Get, Post, Patch, Body, Param, UseGuards, NotFoundException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DeliveryPartnerType, DeliveryStatus, UserRole } from '@prisma/client';
@@ -61,15 +61,29 @@ export class DeliveryService {
     });
   }
 
-  async updateStatus(userId: string, deliveryId: string, status: DeliveryStatus, proofPhotoUrl?: string) {
+  async updateStatus(userId: string, deliveryId: string, status: DeliveryStatus, proofPhotoUrl?: string, otp?: string) {
     const partner = await this.prisma.deliveryPartner.findUnique({ where: { userId } });
     if (!partner) throw new NotFoundException();
+
+    // Marking DELIVERED requires the customer's receiver OTP — same customer-hands-the-code
+    // pattern as the service start/completion OTPs, so a delivery can't be closed out without
+    // the customer actually present to receive it. Deliveries created before this field
+    // existed have receiverOtp === null — skip the check for those rather than locking them.
+    if (status === DeliveryStatus.DELIVERED) {
+      const delivery = await this.prisma.delivery.findFirst({ where: { id: deliveryId, partnerId: partner.id } });
+      if (!delivery) throw new NotFoundException();
+      if (delivery.receiverOtp && delivery.receiverOtp !== otp) throw new BadRequestException('Invalid delivery OTP');
+      return this.prisma.delivery.update({
+        where: { id: deliveryId },
+        data: { status, deliveredAt: new Date(), proofPhotoUrl, receiverOtpVerified: !!delivery.receiverOtp },
+      });
+    }
+
     return this.prisma.delivery.updateMany({
       where: { id: deliveryId, partnerId: partner.id },
       data: {
         status,
         ...(status === DeliveryStatus.PICKED_UP ? { pickedUpAt: new Date() } : {}),
-        ...(status === DeliveryStatus.DELIVERED ? { deliveredAt: new Date(), proofPhotoUrl } : {}),
       },
     });
   }
@@ -114,8 +128,8 @@ export class DeliveryController {
   @Get('me/deliveries') mine(@CurrentUser() u: JwtPayload) { return this.d.myDeliveries(u.sub); }
   @Patch(':id/status') status(
     @CurrentUser() u: JwtPayload, @Param('id') id: string,
-    @Body() b: { status: DeliveryStatus; proofPhotoUrl?: string },
-  ) { return this.d.updateStatus(u.sub, id, b.status, b.proofPhotoUrl); }
+    @Body() b: { status: DeliveryStatus; proofPhotoUrl?: string; otp?: string },
+  ) { return this.d.updateStatus(u.sub, id, b.status, b.proofPhotoUrl, b.otp); }
 }
 
 @Module({

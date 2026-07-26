@@ -903,7 +903,11 @@ function renderJfStep(){
       <div class="cc-detail-row" style="font-size:15px"><span class="cdl">Total</span><span class="cdr" style="color:var(--sienna)">${fmtMoney(total)}</span></div></div>
       ${jfState.mock ? '' : '<div class="demo-note">Payment collection (COD confirm / Razorpay link) is not wired to a backend endpoint yet — the button below only marks the job complete.</div>'}
       <div class="pay-option" id="pay-cod" onclick="selectPay('cod')"><div class="po-icon">💵</div><div><div class="po-name">Cash on Delivery</div><div class="po-sub">Confirm cash received</div></div></div>
-      <div class="pay-option" id="pay-online" onclick="selectPay('online')"><div class="po-icon">🔗</div><div><div class="po-name">Send Payment Link</div><div class="po-sub">Razorpay link via SMS/WhatsApp</div></div></div>`;
+      <div class="pay-option" id="pay-online" onclick="selectPay('online')"><div class="po-icon">🔗</div><div><div class="po-name">Send Payment Link</div><div class="po-sub">Razorpay link via SMS/WhatsApp</div></div></div>
+      <div class="jf-title" style="font-size:15px;margin-top:18px">Verify Completion OTP</div>
+      <div class="jf-sub">${jfState.mock ? 'Ask the customer for their 4-digit completion OTP.' : 'Ask the customer to read out the completion OTP shown on their order screen — this confirms the job before it closes out.'}</div>
+      <div class="otp-row"><input class="otp-digit" maxlength="1" id="cotp-0" oninput="jfCompletionOtpJump(0)"><input class="otp-digit" maxlength="1" id="cotp-1" oninput="jfCompletionOtpJump(1)"><input class="otp-digit" maxlength="1" id="cotp-2" oninput="jfCompletionOtpJump(2)"><input class="otp-digit" maxlength="1" id="cotp-3" oninput="jfCompletionOtpJump(3)"></div>
+      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}`;
     foot = `<button class="btn-primary" id="pay-confirm-btn" onclick="confirmPayment()" disabled>Confirm & Complete Job →</button>`;
   }
   else if(s===9){
@@ -936,6 +940,19 @@ function jfOtpJump(i){
   var el=document.getElementById('jotp-'+i);
   if(el.value){ el.classList.add('filled'); var n=document.getElementById('jotp-'+(i+1)); if(n)n.focus(); }
   else { el.classList.remove('filled'); }
+}
+function jfCompletionOtpJump(i){
+  var el=document.getElementById('cotp-'+i);
+  if(el.value){ el.classList.add('filled'); var n=document.getElementById('cotp-'+(i+1)); if(n)n.focus(); }
+  else { el.classList.remove('filled'); }
+  _jfUpdatePayConfirmBtn();
+}
+function _jfCompletionOtp(){
+  return ['0','1','2','3'].map(function(i){ var el=document.getElementById('cotp-'+i); return el?el.value:''; }).join('');
+}
+function _jfUpdatePayConfirmBtn(){
+  var btn=document.getElementById('pay-confirm-btn'); if(!btn) return;
+  btn.disabled = !(jfState.payMethod && _jfCompletionOtp().length===4);
 }
 function verifyJfOtp(){
   var code=['0','1','2','3'].map(function(i){return document.getElementById('jotp-'+i).value}).join('');
@@ -1010,12 +1027,17 @@ function selectPay(m){
   jfState.payMethod=m;
   document.getElementById('pay-cod').classList.toggle('selected',m==='cod');
   document.getElementById('pay-online').classList.toggle('selected',m==='online');
-  document.getElementById('pay-confirm-btn').disabled=false;
+  _jfUpdatePayConfirmBtn();
 }
 function confirmPayment(){
+  var code=_jfCompletionOtp();
+  if(code.length!==4){ alert('Enter the 4-digit completion OTP from the customer'); return; }
   var btn=document.getElementById('pay-confirm-btn'); btn.disabled=true; btn.textContent='Completing…';
-  if(jfState.mock){ jfGoto(9); return; }
-  apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify({photosAfter: jfState.photosAfter})})
+  if(jfState.mock){
+    if(code!=='1234'){ alert('Incorrect OTP. Try 1234 for this demo.'); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; return; }
+    jfGoto(9); return;
+  }
+  apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify({otp:code, photosAfter: jfState.photosAfter})})
     .then(function(order){ jfState.completedOrder=order; jfGoto(9); })
     .catch(function(e){ alert('Could not complete job: '+e.message); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; });
 }

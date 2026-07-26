@@ -7035,6 +7035,18 @@
         } else {
           document.getElementById('tr-vendor-block').style.display = 'none';
         }
+        var otpBlock = document.getElementById('tr-otp-block');
+        if (d.status === 'VENDOR_EN_ROUTE' && d.startOtp) {
+          document.getElementById('tr-otp-label').textContent = 'Share with your technician on arrival';
+          document.getElementById('tr-otp-display').textContent = d.startOtp;
+          otpBlock.style.display = 'flex';
+        } else if (['STARTED','IN_PROGRESS','EXTRA_WORK_ADDED'].indexOf(d.status) !== -1 && d.endOtp) {
+          document.getElementById('tr-otp-label').textContent = 'Share once the work is finished';
+          document.getElementById('tr-otp-display').textContent = d.endOtp;
+          otpBlock.style.display = 'flex';
+        } else {
+          otpBlock.style.display = 'none';
+        }
         document.getElementById('tracking-result').style.display = '';
         clearInterval(trackPollTimer);
         trackPollTimer = setInterval(trackOrderSubmit, 25000);
@@ -7253,6 +7265,13 @@
 
     <div id="tracking-result" style="display:none">
       <hr style="border:none;border-top:1px solid #f3f4f6;margin-bottom:16px">
+      <div id="tr-otp-block" style="display:none;background:#fef3c7;border:1.5px solid #fbbf24;border-radius:8px;padding:12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div>
+          <div style="font-size:10px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Verification Code</div>
+          <div id="tr-otp-label" style="font-size:12px;color:#92400e"></div>
+        </div>
+        <div id="tr-otp-display" style="font-size:22px;font-weight:800;letter-spacing:3px;color:#92400e;white-space:nowrap"></div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div style="background:#f9fafb;border-radius:8px;padding:12px">
           <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Order</div>
@@ -8822,6 +8841,33 @@ var STATUS_COLORS_MO = {
   CLOSED: '#9ca3af', CANCELLED: '#ef4444', REFUNDED: '#6b7280',
 };
 
+// OTP banner shown prominently on the order card while it's actually needed — the
+// customer reads this out to the technician/delivery partner in person, Ola/Uber-style,
+// to confirm arrival/start, job completion, or delivery. Each OTP only renders for the
+// status window it's relevant to, and disappears once verified server-side.
+function _otpBanner(o) {
+  if (o.status === 'VENDOR_EN_ROUTE' && o.startOtp) {
+    return '<div style="background:#fef3c7;border:1.5px solid #fbbf24;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+      '<span style="font-size:12px;color:#92400e;font-weight:600">🔐 Share this OTP when your technician arrives</span>' +
+      '<span style="font-size:20px;font-weight:800;letter-spacing:3px;color:#92400e;white-space:nowrap">' + escHtml(o.startOtp) + '</span>' +
+    '</div>';
+  }
+  if (['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].indexOf(o.status) !== -1 && o.endOtp) {
+    return '<div style="background:#dcfce7;border:1.5px solid #4ade80;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+      '<span style="font-size:12px;color:#166534;font-weight:600">🔐 Share this OTP once the work is finished</span>' +
+      '<span style="font-size:20px;font-weight:800;letter-spacing:3px;color:#166534;white-space:nowrap">' + escHtml(o.endOtp) + '</span>' +
+    '</div>';
+  }
+  if (o.delivery && o.delivery.receiverOtp && !o.delivery.receiverOtpVerified &&
+      (o.delivery.status === 'PICKED_UP' || o.delivery.status === 'IN_TRANSIT')) {
+    return '<div style="background:#dbeafe;border:1.5px solid #60a5fa;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+      '<span style="font-size:12px;color:#1e40af;font-weight:600">🔐 Share this OTP with your delivery partner</span>' +
+      '<span style="font-size:20px;font-weight:800;letter-spacing:3px;color:#1e40af;white-space:nowrap">' + escHtml(o.delivery.receiverOtp) + '</span>' +
+    '</div>';
+  }
+  return '';
+}
+
 function _renderOrderCard(o) {
   var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
   var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
@@ -8842,10 +8888,11 @@ function _renderOrderCard(o) {
         '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + ' · ' + date + '</div></div>' +
       '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
     '</div>' +
+    _otpBanner(o) +
     '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
       (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + payRetryId + '\',' + payRetryAmount + ',\'' + payRetryNumber + '\',this,' + payRetryIsMaster + ')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
-       (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'IN_PROGRESS') && o.vendor ?
+       (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'VENDOR_EN_ROUTE' || o.status === 'IN_PROGRESS') && o.vendor ?
          '<div style="display:flex;gap:6px">' +
            '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
            (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +

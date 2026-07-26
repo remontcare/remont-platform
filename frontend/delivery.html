@@ -53,6 +53,17 @@ input{font-family:var(--ff-body)}
 .card .actions{display:flex;gap:8px;margin-top:8px}
 .card .actions button{flex:1;padding:8px;border-radius:8px;font-size:12px;font-weight:700}
 .empty{text-align:center;padding:50px 20px;color:#9ca3af;font-size:14px}
+.otp-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;padding:20px}
+.otp-modal-overlay.active{display:flex}
+.otp-modal{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:340px;text-align:center}
+.otp-modal h3{font-size:16px;font-weight:800;margin-bottom:6px}
+.otp-modal p{font-size:13px;color:#6b7280;margin-bottom:18px}
+.otp-digit-row{display:flex;gap:10px;justify-content:center;margin-bottom:8px}
+.otp-digit-row input{width:46px;height:54px;text-align:center;font-size:22px;font-weight:800;border:1.5px solid var(--mist);border-radius:10px}
+.otp-digit-row input:focus{outline:none;border-color:var(--sienna)}
+.otp-modal-err{font-size:12px;color:var(--error);min-height:16px;margin-bottom:10px}
+.otp-modal .actions{display:flex;gap:10px;margin-top:6px}
+.otp-modal .actions button{flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:700}
 </style>
 </head>
 <body>
@@ -91,6 +102,26 @@ input{font-family:var(--ff-body)}
     </div>
   </div>
 
+</div>
+
+<!-- Delivery OTP verification — asked only when marking an order DELIVERED, so a delivery
+     can't be closed out without the customer actually present to hand it off. -->
+<div class="otp-modal-overlay" id="otp-modal-overlay">
+  <div class="otp-modal">
+    <h3>Verify Delivery OTP</h3>
+    <p>Ask the customer for the 4-digit OTP shown on their order screen.</p>
+    <div class="otp-digit-row">
+      <input maxlength="1" inputmode="numeric" id="dotp-0" oninput="dOtpJump(0)">
+      <input maxlength="1" inputmode="numeric" id="dotp-1" oninput="dOtpJump(1)">
+      <input maxlength="1" inputmode="numeric" id="dotp-2" oninput="dOtpJump(2)">
+      <input maxlength="1" inputmode="numeric" id="dotp-3" oninput="dOtpJump(3)">
+    </div>
+    <div class="otp-modal-err" id="dotp-err"></div>
+    <div class="actions">
+      <button class="btn-outline" onclick="closeOtpModal()">Cancel</button>
+      <button class="btn-primary" id="dotp-confirm-btn" onclick="confirmDeliveryOtp()">Confirm Delivery</button>
+    </div>
+  </div>
 </div>
 
 <script src="/shared/remont-auth.js"></script>
@@ -168,9 +199,37 @@ function loadDeliveries(){
 }
 
 function updateStatus(id, status){
+  if (status === 'DELIVERED') { openOtpModal(id); return; }
   RemontAuth.apiFetch('/delivery/' + id + '/status', { method:'PATCH', body: JSON.stringify({ status: status }) })
     .then(loadDeliveries)
     .catch(function(e){ alert(e.message); });
+}
+
+var _otpDeliveryId = null;
+function openOtpModal(id){
+  _otpDeliveryId = id;
+  ['0','1','2','3'].forEach(function(i){ var el=document.getElementById('dotp-'+i); el.value=''; el.classList.remove('filled'); });
+  document.getElementById('dotp-err').textContent = '';
+  var btn = document.getElementById('dotp-confirm-btn'); btn.disabled = false; btn.textContent = 'Confirm Delivery';
+  document.getElementById('otp-modal-overlay').classList.add('active');
+  setTimeout(function(){ document.getElementById('dotp-0').focus(); }, 50);
+}
+function closeOtpModal(){
+  document.getElementById('otp-modal-overlay').classList.remove('active');
+  _otpDeliveryId = null;
+}
+function dOtpJump(i){
+  var el = document.getElementById('dotp-'+i);
+  if (el.value) { var n = document.getElementById('dotp-'+(i+1)); if (n) n.focus(); }
+}
+function confirmDeliveryOtp(){
+  var code = ['0','1','2','3'].map(function(i){ return document.getElementById('dotp-'+i).value; }).join('');
+  var errEl = document.getElementById('dotp-err'); errEl.textContent = '';
+  if (code.length !== 4) { errEl.textContent = 'Enter the 4-digit OTP'; return; }
+  var btn = document.getElementById('dotp-confirm-btn'); btn.disabled = true; btn.textContent = 'Verifying…';
+  RemontAuth.apiFetch('/delivery/' + _otpDeliveryId + '/status', { method:'PATCH', body: JSON.stringify({ status: 'DELIVERED', otp: code }) })
+    .then(function(){ closeOtpModal(); loadDeliveries(); })
+    .catch(function(e){ errEl.textContent = e.message || 'Invalid OTP'; btn.disabled = false; btn.textContent = 'Confirm Delivery'; });
 }
 
 function toggleLocationSharing(on){

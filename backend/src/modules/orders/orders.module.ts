@@ -282,6 +282,7 @@ export class OrdersService {
 
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     const order = await this.prisma.order.create({
       data: {
@@ -290,7 +291,7 @@ export class OrdersService {
         serviceId: dto.serviceId, addressId: resolvedAddressId,
         slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
         slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
-        startOtp, status: OrderStatus.PENDING_PAYMENT,
+        startOtp, endOtp, status: OrderStatus.PENDING_PAYMENT,
         serviceAmount, productsAmount, subtotal,
         couponCode: dto.couponCode, couponDiscount, membershipDiscount,
         walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
@@ -394,7 +395,7 @@ export class OrdersService {
     return updated;
   }
 
-  async complete(vendorUserId: string, orderId: string, photosAfter: string[], videoUrl?: string) {
+  async complete(vendorUserId: string, orderId: string, otp: string, photosAfter: string[], videoUrl?: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
@@ -402,9 +403,14 @@ export class OrdersService {
     if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
       throw new BadRequestException('Order cannot be completed at this stage');
     }
+    // Completion OTP — same customer-hands-the-code-to-the-technician pattern as the start
+    // OTP, so a job can't be marked done without the customer actually present/satisfied.
+    // Orders created before this field existed have endOtp === null — skip the check for
+    // those rather than permanently locking them out of completion.
+    if (order.endOtp && order.endOtp !== otp) throw new BadRequestException('Invalid completion OTP');
     const completed = await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl },
+      data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl, endOtpVerified: !!order.endOtp },
     });
     await this.prisma.serviceVendor.update({
       where: { id: v.id },
@@ -460,7 +466,7 @@ export class OrdersService {
       include: {
         service: true, items: { include: { product: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
-        address: true, extraWorkItems: true,
+        address: true, extraWorkItems: true, delivery: true,
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -474,7 +480,7 @@ export class OrdersService {
         customer: { select: { name: true, phone: true, email: true } },
         service: true, items: { include: { product: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
-        address: true, extraWorkItems: true, invoice: true,
+        address: true, extraWorkItems: true, invoice: true, delivery: true,
       },
     });
     if (!order) throw new NotFoundException();
@@ -552,6 +558,7 @@ export class GuestBookingService {
 
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Create address inline (full address as free text)
     const address = await this.prisma.address.create({
@@ -585,6 +592,7 @@ export class GuestBookingService {
         slotStart,
         slotEnd,
         startOtp,
+        endOtp,
         serviceAmount,
         productsAmount: 0,
         subtotal: serviceAmount,
@@ -758,6 +766,10 @@ export class GuestBookingService {
       totalAmount: order.totalAmount,
       pendingApprovals: order.extraWorkItems.length,
       createdAt: order.createdAt,
+      // Phone ownership already verified above — safe to hand back the OTPs the customer
+      // reads out to the technician to confirm arrival/start and job completion.
+      startOtp: order.startOtpVerified ? undefined : order.startOtp,
+      endOtp: order.startOtpVerified && !order.endOtpVerified ? order.endOtp : undefined,
     };
   }
 }
@@ -785,8 +797,8 @@ export class OrdersController {
   @Patch('extra-work/:extraId/approve') approveExtra(@CurrentUser() u: JwtPayload, @Param('extraId') id: string) {
     return this.extras.approve(u.sub, id);
   }
-  @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { photosAfter: string[]; videoUrl?: string }) {
-    return this.orders.complete(u.sub, id, b.photosAfter, b.videoUrl);
+  @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string }) {
+    return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl);
   }
 }
 
