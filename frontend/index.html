@@ -7617,15 +7617,35 @@ function cartCheckout() {
           <span>Total</span><span id="co-total" style="color:#c4601a">₹0</span>
         </div>
       </div>
-      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Delivery Address</h4>
+      <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px">Customer Details</h4>
       <input id="co-name" type="text" placeholder="Full name"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
       <input id="co-phone" type="tel" placeholder="Phone number"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
+      <input id="co-email" type="email" placeholder="Email (optional)"
+        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none" />
       <textarea id="co-address" placeholder="Full delivery address (house no, street, landmark, city, pincode)"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;height:80px;resize:none;outline:none;margin-bottom:10px"></textarea>
-      <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6"
-        style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:16px;outline:none" />
+      <div style="display:flex;gap:10px;margin-bottom:10px">
+        <select id="co-city" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
+          <option value="">Select city…</option>
+        </select>
+        <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6"
+          style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <input id="co-date" type="date" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
+        <select id="co-time" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
+          <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
+          <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
+          <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
+          <option value="13:00">1:00 PM</option><option value="14:00">2:00 PM</option>
+          <option value="15:00">3:00 PM</option><option value="16:00">4:00 PM</option>
+          <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
+          <option value="19:00">7:00 PM</option>
+        </select>
+      </div>
+      <p style="font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:10px">Payment Method</h4>
       <div style="display:flex;gap:8px;margin-bottom:20px">
         <label class="co-payment-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
@@ -8062,6 +8082,31 @@ function openCheckoutModal() {
     }
   }
 
+  // Populate city dropdown (same source as the single-service booking modal)
+  var coCitySel = document.getElementById('co-city');
+  if (coCitySel && coCitySel.options.length <= 1) {
+    bookingCities.forEach(function(c) {
+      coCitySel.innerHTML += '<option value="' + escHtml(c.name) + '">' + escHtml(c.name) + '</option>';
+    });
+  }
+  if (coCitySel && !coCitySel.value) {
+    var preferCity = (savedLoc && savedLoc.city) || (typeof currentCity !== 'undefined' ? currentCity : '');
+    if (preferCity) {
+      Array.from(coCitySel.options).forEach(function(o) { if (o.value === preferCity) o.selected = true; });
+    }
+  }
+  // Default date to today
+  var coDate = document.getElementById('co-date');
+  if (coDate && !coDate.value) {
+    var today = new Date().toISOString().slice(0, 10);
+    coDate.value = today;
+    coDate.min = today;
+  }
+  if (storedUser && storedUser.email) {
+    var coEmail = document.getElementById('co-email');
+    if (coEmail && !coEmail.value) coEmail.value = storedUser.email;
+  }
+
   document.getElementById('co-msg').style.display = 'none';
   updatePaymentUI();
   document.getElementById('co-submit-btn').disabled = false;
@@ -8093,12 +8138,17 @@ function updatePaymentUI() {
 function submitCheckoutOrder() {
   var name     = document.getElementById('co-name').value.trim();
   var phoneRaw = document.getElementById('co-phone').value.replace(/\D/g,'');
+  var email    = document.getElementById('co-email').value.trim();
   var address  = document.getElementById('co-address').value.trim();
   var pincode  = document.getElementById('co-pincode').value.trim();
+  var cityName = document.getElementById('co-city').value.trim();
+  var slotDate = document.getElementById('co-date').value;
+  var slotTime = document.getElementById('co-time').value;
 
   if (!name)    { showCoMsg('Please enter your name'); return; }
   if (phoneRaw.length < 10) { showCoMsg('Enter a valid 10-digit phone number'); return; }
   if (!address) { showCoMsg('Please enter your delivery address'); return; }
+  if (!cityName) { showCoMsg('Please select your city'); return; }
 
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showCoMsg('Cart is empty'); return; }
@@ -8128,18 +8178,25 @@ function submitCheckoutOrder() {
 
   // Merge saved GPS/location data into payload
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
+  // Date + time apply to any services in the cart (slotStart is ignored server-side for
+  // product-only child orders) — combined into one IST-offset timestamp, same format the
+  // old single-service booking flow already sent to the backend.
+  var slotStart = (slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
   var payload = {
     name:          name,
     phone:         '+91' + phoneRaw,
+    email:         email || undefined,
     items:         items,
     fullAddress:   address + (pincode ? ', ' + pincode : ''),
     area:          savedLoc ? (savedLoc.area    || '') : '',
     landmark:      savedLoc ? (savedLoc.landmark || '') : '',
-    city:          savedLoc ? (savedLoc.city     || '') : '',
+    city:          cityName,
     state:         savedLoc ? (savedLoc.state    || '') : '',
     pincode:       pincode  || (savedLoc ? savedLoc.pincode : '') || undefined,
     latitude:      savedLoc ? (savedLoc.latitude  || 0) : 0,
     longitude:     savedLoc ? (savedLoc.longitude || 0) : 0,
+    slotStart:     slotStart,
+    slotEnd:       slotStart,
     paymentMethod: paymentMethod
   };
 

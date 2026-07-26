@@ -540,7 +540,8 @@ export class MasterOrdersService {
         childOrders: {
           include: {
             service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
-            items: { include: { product: true } }, invoice: true,
+            items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
+            invoice: true,
             timeline: { orderBy: { createdAt: 'asc' } },
           },
         },
@@ -611,7 +612,14 @@ export class PublicMasterOrderController {
 // ─── Module ───
 @Module({
   imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule],
-  controllers: [MasterOrdersController, PublicMasterOrderController],
+  // PublicMasterOrderController MUST be registered before MasterOrdersController —
+  // Express/Nest matches routes in registration order, and MasterOrdersController's
+  // POST /master-orders/:id/confirm-payment (a wildcard :id) would otherwise swallow
+  // POST /master-orders/public/confirm-payment first (treating "public" as the :id),
+  // routing public/guest requests into the JWT-guarded handler and rejecting them with
+  // a 401 before they ever reach the intended public one. Found via a live end-to-end
+  // Razorpay confirm-payment test, not by inspection.
+  controllers: [PublicMasterOrderController, MasterOrdersController],
   providers: [MasterOrdersService],
   exports: [MasterOrdersService],
 })

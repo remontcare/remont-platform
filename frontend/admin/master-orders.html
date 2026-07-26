@@ -89,6 +89,68 @@ function load() {
   }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
+// Flattens child orders into one row per actual item (one per service child order,
+// one per product line within a seller's child order) — the admin sees "Item 1..N"
+// directly, while the vendor/status/GST/timeline underneath still comes from the real
+// child Order each item belongs to.
+function _flattenMasterOrderItems(masterOrder) {
+  var items = [];
+  (masterOrder.childOrders || []).forEach(function(c) {
+    if (c.type === 'SERVICE') {
+      items.push({
+        name: (c.service && c.service.name) || 'Service',
+        vendor: (c.vendor && c.vendor.user && c.vendor.user.name) || '—',
+        status: c.status,
+        qty: 1,
+        price: c.serviceAmount,
+        gst: c.gstAmount,
+        timeline: c.timeline || [],
+        childOrderNumber: c.orderNumber,
+      });
+    } else {
+      var productsAmount = Number(c.productsAmount) || 0;
+      (c.items || []).forEach(function(it) {
+        var share = productsAmount > 0 ? (Number(it.totalPrice) / productsAmount) : 0;
+        items.push({
+          name: (it.product && it.product.name) || 'Product',
+          vendor: (it.product && it.product.vendor && it.product.vendor.businessName) || '—',
+          status: c.status,
+          qty: it.quantity,
+          price: it.totalPrice,
+          gst: Math.round(Number(c.gstAmount) * share * 100) / 100,
+          timeline: c.timeline || [],
+          childOrderNumber: c.orderNumber,
+        });
+      });
+    }
+  });
+  return items;
+}
+
+function _timelineSummary(timeline) {
+  if (!timeline || !timeline.length) return '<span style="color:#9ca3af;font-size:12px">—</span>';
+  var last = timeline[timeline.length - 1];
+  return '<span style="font-size:12px;color:#6b7280">' + escape(last.status) + ' · ' + fmtDateShort(last.createdAt) + '</span>';
+}
+
+function _timelineDetailRows(timeline, colspan) {
+  if (!timeline || !timeline.length) return '';
+  var rows = timeline.map(function(t) {
+    return '<div style="padding:4px 0;font-size:12px;color:#6b7280">' +
+      statusBadge(t.status) + ' <span style="margin-left:6px">' + fmtDate(t.createdAt) + '</span>' +
+      (t.note ? ' — ' + escape(t.note) : '') +
+    '</div>';
+  }).join('');
+  return '<tr class="tl-detail" style="display:none"><td colspan="' + colspan + '" style="background:#fafafa;padding:8px 12px">' + rows + '</td></tr>';
+}
+
+function toggleTimeline(btn) {
+  var row = btn.closest('tr').nextElementSibling;
+  if (row && row.classList.contains('tl-detail')) {
+    row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+  }
+}
+
 function viewDetail(id) {
   document.getElementById('detail-overlay').style.display = 'flex';
   document.getElementById('d-number').textContent = '';
@@ -105,16 +167,23 @@ function viewDetail(id) {
       escape((o.customer && o.customer.phone) || o.guestPhone || '') +
       (o.address ? ' · ' + escape(o.address.fullAddress || '') : '') +
     '</p>';
-    html += '<div class="table-wrap"><table><thead><tr><th>Child Order</th><th>Type</th><th>Status</th><th>Vendor</th><th>Total</th></tr></thead><tbody>';
-    (o.childOrders || []).forEach(function(c) {
-      var vendorName = (c.vendor && c.vendor.user && c.vendor.user.name) || (c.items && c.items.length && c.items[0].product ? '—' : '—');
+
+    var items = _flattenMasterOrderItems(o);
+    var colspan = 7;
+    html += '<div class="table-wrap"><table><thead><tr>' +
+      '<th>Item</th><th>Vendor</th><th>Status</th><th>Qty</th><th>Price</th><th>GST</th><th>Timeline</th>' +
+      '</tr></thead><tbody>';
+    items.forEach(function(item, i) {
       html += '<tr>' +
-        '<td>' + escape(c.orderNumber) + (c.service ? '<br><span style="font-size:11px;color:#9ca3af">' + escape(c.service.name) + '</span>' : '') + '</td>' +
-        '<td>' + badge(c.type, c.type === 'SERVICE' ? 'blue' : 'purple') + '</td>' +
-        '<td>' + statusBadge(c.status) + '</td>' +
-        '<td>' + escape(vendorName) + '</td>' +
-        '<td>' + fmtCur(c.totalAmount) + '</td>' +
+        '<td>Item ' + (i + 1) + ': ' + escape(item.name) + '<br><span style="font-size:11px;color:#9ca3af">' + escape(item.childOrderNumber) + '</span></td>' +
+        '<td>' + escape(item.vendor) + '</td>' +
+        '<td>' + statusBadge(item.status) + '</td>' +
+        '<td>' + item.qty + '</td>' +
+        '<td>' + fmtCur(item.price) + '</td>' +
+        '<td>' + fmtCur(item.gst) + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" onclick="toggleTimeline(this)">' + item.timeline.length + ' event(s)</button><br>' + _timelineSummary(item.timeline) + '</td>' +
       '</tr>';
+      html += _timelineDetailRows(item.timeline, colspan);
     });
     html += '</tbody></table></div>';
     document.getElementById('d-body').innerHTML = html;
