@@ -7566,7 +7566,10 @@ function cartCheckout() {
       <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #f3f4f6">
         <div style="padding:16px 24px;border-right:1px solid #f3f4f6">
           <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Wallet Balance</div>
-          <div id="acct-wallet" style="font-size:20px;font-weight:700;color:#c4601a">₹—</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div id="acct-wallet" style="font-size:20px;font-weight:700;color:#c4601a">₹—</div>
+            <a href="#" onclick="openWalletTopupModal();return false" style="font-size:11px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add</a>
+          </div>
         </div>
         <div style="padding:16px 24px">
           <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Total Orders</div>
@@ -7688,7 +7691,7 @@ function cartCheckout() {
       </div>
       <p style="font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
 
-      <!-- Wallet (only shown for logged-in customers with a balance) -->
+      <!-- Wallet (shown for any logged-in customer, alongside Pay Online, so Add Money is always reachable even at ₹0 balance) -->
       <div id="co-wallet-box" style="display:none;margin-bottom:16px">
         <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:10px 12px;cursor:pointer">
           <span style="display:flex;align-items:center;gap:8px">
@@ -8135,23 +8138,24 @@ function openCheckoutModal() {
   });
   document.getElementById('co-items').innerHTML = html;
 
-  // Wallet — only offered to a logged-in customer, and only if they have a balance
+  // Wallet — shown as a payment mode for any logged-in customer, alongside Pay Online,
+  // regardless of current balance, so "+ Add Money" is always reachable (previously this
+  // box only appeared once a balance already existed, which meant a ₹0 customer had no way
+  // to ever add their first money from checkout).
   var walletBox = document.getElementById('co-wallet-box');
   var walletToken = localStorage.getItem('remont_token');
   if (walletToken) {
+    walletBox.style.display = 'block';
     fetch((API_BASE || '') + '/api/v1/wallet/balance', { headers: { 'Authorization': 'Bearer ' + walletToken } })
       .then(function(r) { return r.json(); })
       .then(function(d) {
         _coWalletBalance = Number((d && d.data) || 0);
-        if (_coWalletBalance > 0) {
-          document.getElementById('co-wallet-balance').textContent = _coWalletBalance.toLocaleString('en-IN');
-          walletBox.style.display = 'block';
-        } else {
-          walletBox.style.display = 'none';
-        }
+        document.getElementById('co-wallet-balance').textContent = _coWalletBalance.toLocaleString('en-IN');
+        var useWalletCb = document.getElementById('co-use-wallet');
+        if (useWalletCb) useWalletCb.disabled = _coWalletBalance <= 0;
         recalcTotals();
       })
-      .catch(function() { walletBox.style.display = 'none'; });
+      .catch(function() { /* balance fetch failed — box stays visible so Add Money still works */ });
   } else {
     walletBox.style.display = 'none';
   }
