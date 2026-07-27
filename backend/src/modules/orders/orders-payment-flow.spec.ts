@@ -11,6 +11,7 @@ function makeService() {
     paymentTransaction: {
       create: jest.fn(async (args: any) => ({ id: 'tx-1', ...args.data })),
       findFirst: jest.fn(),
+      findMany: jest.fn(async () => []),
       update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })),
       aggregate: jest.fn(async () => ({ _sum: { amount: 0 } })),
     },
@@ -178,6 +179,24 @@ describe('OrdersService.getBalance — recalculates automatically as extra work 
     const b = await svc.getBalance('o1');
     expect(b.balanceDue).toBe(0);
   });
+
+  it('rejects a caller who is neither the customer, the assigned vendor, nor an admin', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0, customerId: 'cust-1', vendor: { userId: 'vendor-user-a' },
+    });
+    await expect(svc.getBalance('o1', 'random-user', 'CUSTOMER' as any)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('allows the order\'s own customer, the assigned vendor, and an admin', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0, customerId: 'cust-1', vendor: { userId: 'vendor-user-a' },
+    });
+    await expect(svc.getBalance('o1', 'cust-1', 'CUSTOMER' as any)).resolves.toBeDefined();
+    await expect(svc.getBalance('o1', 'vendor-user-a', 'SERVICE_VENDOR' as any)).resolves.toBeDefined();
+    await expect(svc.getBalance('o1', 'anyone', 'ADMIN' as any)).resolves.toBeDefined();
+  });
 });
 
 describe('OrdersService.collectBalance — Section 6/7 "Collect Payment" at completion / additional work', () => {
@@ -265,5 +284,29 @@ describe('OrdersService.confirmBalancePayment — never moves order.status, only
     prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 1000 } });
     const result = await svc.confirmBalancePayment('o1', paymentId, gatewayOrderId, sig);
     expect(result.paymentStatus).toBe('PAID');
+  });
+});
+
+describe('OrdersService.getPaymentHistory — customer payment dashboard transaction list', () => {
+  it('rejects a caller who is not the customer or the assigned vendor', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', customerId: 'cust-1', vendor: { userId: 'vendor-user-a' } });
+    await expect(svc.getPaymentHistory('random-user', 'o1')).rejects.toThrow(ForbiddenException);
+  });
+
+  it('returns only customer-safe fields — no gatewaySignature or raw gatewayResponse', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', customerId: 'cust-1', vendor: { userId: 'vendor-user-a' } });
+    await svc.getPaymentHistory('cust-1', 'o1');
+    expect(prisma.paymentTransaction.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { orderId: 'o1' },
+      select: expect.objectContaining({
+        amount: true, status: true, gateway: true, collectionMode: true, createdAt: true,
+      }),
+    }));
+    const selectArg = (prisma.paymentTransaction.findMany.mock.calls[0][0] as any).select;
+    expect(selectArg.gatewaySignature).toBeUndefined();
+    expect(selectArg.gatewayResponse).toBeUndefined();
+    expect(selectArg.gatewayPaymentId).toBeUndefined();
   });
 });

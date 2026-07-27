@@ -7,7 +7,7 @@ import { JwtAuthGuard, CurrentUser, JwtPayload, computeInvoiceBreakdown } from '
 export class InvoicesService {
   constructor(private prisma: PrismaService) {}
 
-  async generate(orderId: string) {
+  async generate(userId: string, orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -18,6 +18,9 @@ export class InvoicesService {
       },
     });
     if (!order) throw new NotFoundException();
+    // Previously ungated — any authenticated user could generate (and thereby read, since
+    // the created row is returned directly) another customer's invoice by orderId alone.
+    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
     if (order.invoice) return order.invoice;
 
     const count = await this.prisma.invoice.count();
@@ -52,7 +55,7 @@ export class InvoicesService {
 @Controller('invoices')
 export class InvoicesController {
   constructor(private inv: InvoicesService) {}
-  @Post('orders/:orderId/generate') gen(@Param('orderId') id: string) { return this.inv.generate(id); }
+  @Post('orders/:orderId/generate') gen(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.inv.generate(u.sub, id); }
   @Get('orders/:orderId') get(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) {
     return this.inv.get(u.sub, id);
   }

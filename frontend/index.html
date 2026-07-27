@@ -7931,6 +7931,19 @@ function cartCheckout() {
   </div>
 </div>
 
+<!-- ═══ PAYMENT DETAIL MODAL (Order Amount / Paid / Remaining / History / Pay Remaining / Invoice / Receipt) ═══ -->
+<div id="payment-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10300;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:0;width:460px;max-width:96vw;max-height:88vh;overflow:auto;position:relative">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="font-size:18px;font-weight:700;color:#111">Payment Details</h3>
+      <button class="tap-target-fix" onclick="closePaymentDetailModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <div id="pd-body" style="padding:20px 24px;min-height:150px">
+      <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // CHECKOUT + PAYMENT + MY ORDERS — full flow
@@ -9026,6 +9039,7 @@ function _renderOrderCard(o) {
        isCompleted && reviewed ? '<span style="font-size:12px;font-weight:600;color:#22c55e">✅ Reviewed</span>' :
        isCompleted ? '<button onclick="openRateModal(\'' + o.id + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⭐ Rate Service</button>' : '') +
     '</div>' +
+    (o.status !== 'PENDING_PAYMENT' ? '<div style="margin-top:8px;text-align:right"><button onclick="openPaymentDetailModal(\'' + o.id + '\')" style="background:none;border:none;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;padding:0">💳 Payment Details</button></div>' : '') +
   '</div>';
 }
 
@@ -9149,6 +9163,178 @@ function submitReview() {
     }).catch(function(e) {
       showToast((e && e.message) || 'Could not submit review', 'error');
     });
+}
+
+// ── Payment Detail Modal — Order Amount / Paid / Remaining / History / Pay Remaining / Invoice / Receipt ──
+var _pdOrderId = null;
+var _pdTxnStatusLabel = { PENDING: 'Pending', INITIATED: 'Initiated', PAID: 'Success', PARTIAL: 'Partial', FAILED: 'Failed', CANCELLED: 'Cancelled', REFUNDED: 'Refunded' };
+var _pdModeLabel = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', ONLINE: 'Online', WALLET: 'Wallet' };
+
+function openPaymentDetailModal(orderId) {
+  _pdOrderId = orderId;
+  document.getElementById('payment-detail-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('pd-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>';
+  loadPaymentDetail();
+}
+function closePaymentDetailModal() {
+  document.getElementById('payment-detail-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function loadPaymentDetail() {
+  var orderId = _pdOrderId;
+  Promise.all([
+    apiGet('/api/v1/orders/' + orderId + '/balance'),
+    apiGet('/api/v1/orders/' + orderId + '/payment-history'),
+  ]).then(function(results) {
+    var bal = results[0] && results[0].data ? results[0].data : results[0];
+    var txns = results[1] && results[1].data ? results[1].data : results[1];
+    renderPaymentDetail(bal, txns || []);
+  }).catch(function(e) {
+    document.getElementById('pd-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:40px 0">Could not load payment details.</p>';
+  });
+}
+function renderPaymentDetail(bal, txns) {
+  var total = Number(bal.totalAmount || 0);
+  var paid = Number(bal.paidAmount || 0) + Number(bal.walletUsed || 0);
+  var due = Number(bal.balanceDue || 0);
+  var html = '<div style="background:#f9fafb;border-radius:12px;padding:14px 16px;margin-bottom:16px">' +
+    '<div style="display:flex;justify-content:space-between;font-size:13px;color:#374151;margin-bottom:6px"><span>Order Amount</span><span>₹' + total.toLocaleString('en-IN') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:13px;color:#16a34a;margin-bottom:6px"><span>Paid</span><span>₹' + paid.toLocaleString('en-IN') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:' + (due > 0 ? '#c4601a' : '#16a34a') + ';border-top:1px solid #e5e7eb;padding-top:8px"><span>Remaining</span><span>₹' + due.toLocaleString('en-IN') + '</span></div>' +
+  '</div>';
+
+  if (due > 0) {
+    html += '<button id="pd-pay-remaining-btn" onclick="pdPayRemaining()" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:16px">Pay Remaining (₹' + due.toLocaleString('en-IN') + ')</button>' +
+      '<div id="pd-pay-err" style="color:#ef4444;font-size:12px;margin:-10px 0 12px;text-align:center"></div>';
+  }
+
+  html += '<div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Transaction History</div>';
+  if (!txns.length) {
+    html += '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px 0">No transactions yet</div>';
+  } else {
+    html += txns.map(function(t) {
+      var date = new Date(t.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      var label = _pdTxnStatusLabel[t.status] || t.status;
+      var color = t.status === 'PAID' ? '#16a34a' : (t.status === 'FAILED' ? '#ef4444' : '#6b7280');
+      var mode = t.collectionMode ? _pdModeLabel[t.collectionMode] || t.collectionMode : (t.gateway || '');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
+        '<div><div style="font-size:13px;color:#111;font-weight:600">₹' + Number(t.amount).toLocaleString('en-IN') + ' · ' + escHtml(mode) + '</div>' +
+        '<div style="font-size:11px;color:#9ca3af">' + date + (t.status === 'FAILED' && t.failureReason ? ' · ' + escHtml(t.failureReason) : '') + '</div></div>' +
+        '<span style="font-size:12px;font-weight:600;color:' + color + '">' + label + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  html += '<div style="display:flex;gap:10px;margin-top:18px">' +
+    '<button onclick="pdDownloadInvoice()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">📄 Invoice</button>' +
+    '<button onclick="pdDownloadReceipt()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">🧾 Receipt</button>' +
+  '</div>';
+
+  document.getElementById('pd-body').innerHTML = html;
+}
+
+function pdPayRemaining() {
+  var orderId = _pdOrderId;
+  var btn = document.getElementById('pd-pay-remaining-btn');
+  var errEl = document.getElementById('pd-pay-err');
+  if (errEl) errEl.textContent = '';
+  btn.disabled = true; btn.textContent = 'Opening payment…';
+  apiPost('/api/v1/orders/' + orderId + '/collect-balance', { mode: 'ONLINE' }).then(function(res) {
+    var r = res && res.data ? res.data : res;
+    if (!r.requiresPayment) { loadPaymentDetail(); return; }
+    if (!window.Razorpay || !r.razorpayKeyId) { throw new Error('Payment gateway not available. Please try again later.'); }
+    var rzp = new window.Razorpay({
+      key: r.razorpayKeyId,
+      amount: Math.round(Number(r.balanceDue) * 100),
+      currency: 'INR',
+      name: 'Remont India',
+      description: 'Balance payment',
+      order_id: r.gatewayOrderId,
+      theme: { color: '#c4601a' },
+      handler: function(response) {
+        btn.textContent = 'Confirming payment…';
+        apiPost('/api/v1/orders/' + orderId + '/confirm-balance-payment', {
+          paymentId: response.razorpay_payment_id,
+          gatewayOrderId: response.razorpay_order_id,
+          signature: response.razorpay_signature,
+        }).then(function() {
+          showToast('Payment successful!', 'success');
+          loadPaymentDetail();
+          loadMyOrders();
+        }).catch(function(e) {
+          if (errEl) errEl.textContent = 'Payment received but confirmation failed. Contact support with payment ID: ' + response.razorpay_payment_id;
+          btn.disabled = false; btn.textContent = 'Pay Remaining (₹' + Number(r.balanceDue).toLocaleString('en-IN') + ')';
+        });
+      },
+      modal: { ondismiss: function() {
+        btn.disabled = false; btn.textContent = 'Pay Remaining (₹' + Number(r.balanceDue).toLocaleString('en-IN') + ')';
+      } },
+    });
+    rzp.on('payment.failed', function(resp) {
+      if (errEl) errEl.textContent = 'Payment failed: ' + ((resp.error && resp.error.description) || 'Unknown error');
+      btn.disabled = false; btn.textContent = 'Pay Remaining (₹' + Number(r.balanceDue).toLocaleString('en-IN') + ')';
+    });
+    rzp.open();
+  }).catch(function(e) {
+    if (errEl) errEl.textContent = (e && e.message) || 'Could not start payment. Please try again.';
+    btn.disabled = false; btn.textContent = 'Pay Remaining';
+  });
+}
+
+function _pdPrintWindow(title, bodyHtml) {
+  var win = window.open('', '_blank');
+  if (!win) { showToast('Please allow pop-ups to download.', 'error'); return; }
+  win.document.write('<!doctype html><html><head><title>' + title + '</title><meta charset="utf-8">' +
+    '<style>body{font-family:Arial,sans-serif;padding:32px;color:#111;max-width:620px;margin:0 auto}' +
+    'h1{font-size:20px;margin-bottom:4px}h2{font-size:13px;color:#6b7280;font-weight:400;margin-top:0}' +
+    'table{width:100%;border-collapse:collapse;margin-top:20px}td{padding:8px 0;font-size:14px;border-bottom:1px solid #eee}' +
+    '.total td{font-weight:700;font-size:16px;border-top:2px solid #111;border-bottom:none}' +
+    '.right{text-align:right}</style></head><body>' + bodyHtml + '</body></html>');
+  win.document.close();
+  win.focus();
+  setTimeout(function() { win.print(); }, 300);
+}
+
+function pdDownloadInvoice() {
+  var orderId = _pdOrderId;
+  apiPost('/api/v1/invoices/orders/' + orderId + '/generate', {}).then(function(res) {
+    var inv = res && res.data ? res.data : res;
+    var rows =
+      '<tr><td>Subtotal</td><td class="right">₹' + Number(inv.customerSubtotal).toLocaleString('en-IN') + '</td></tr>' +
+      '<tr><td>CGST</td><td class="right">₹' + Number(inv.customerCgst).toLocaleString('en-IN') + '</td></tr>' +
+      '<tr><td>SGST</td><td class="right">₹' + Number(inv.customerSgst).toLocaleString('en-IN') + '</td></tr>' +
+      '<tr class="total"><td>Total</td><td class="right">₹' + Number(inv.customerTotal).toLocaleString('en-IN') + '</td></tr>';
+    _pdPrintWindow('Invoice ' + inv.invoiceNumber,
+      '<h1>Remont India</h1><h2>GST Invoice · ' + escHtml(inv.invoiceNumber) + '</h2>' +
+      '<div style="font-size:13px;color:#6b7280">' + new Date(inv.generatedAt).toLocaleDateString('en-IN') + '</div>' +
+      '<table>' + rows + '</table>');
+  }).catch(function(e) {
+    showToast((e && e.message) || 'Could not generate invoice', 'error');
+  });
+}
+
+function pdDownloadReceipt() {
+  var orderId = _pdOrderId;
+  Promise.all([
+    apiGet('/api/v1/orders/' + orderId + '/balance'),
+    apiGet('/api/v1/orders/' + orderId + '/payment-history'),
+  ]).then(function(results) {
+    var bal = results[0] && results[0].data ? results[0].data : results[0];
+    var txns = results[1] && results[1].data ? results[1].data : results[1];
+    var paidTxns = (txns || []).filter(function(t) { return t.status === 'PAID'; });
+    var rows = paidTxns.map(function(t) {
+      var date = new Date(t.createdAt).toLocaleDateString('en-IN');
+      var mode = t.collectionMode ? (_pdModeLabel[t.collectionMode] || t.collectionMode) : (t.gateway || '');
+      return '<tr><td>' + date + ' · ' + escHtml(mode) + '</td><td class="right">₹' + Number(t.amount).toLocaleString('en-IN') + '</td></tr>';
+    }).join('');
+    var paid = Number(bal.paidAmount || 0) + Number(bal.walletUsed || 0);
+    _pdPrintWindow('Receipt ' + bal.orderNumber,
+      '<h1>Remont India</h1><h2>Payment Receipt · Order ' + escHtml(bal.orderNumber) + '</h2>' +
+      '<table>' + rows + '<tr class="total"><td>Total Paid</td><td class="right">₹' + paid.toLocaleString('en-IN') + '</td></tr></table>');
+  }).catch(function(e) {
+    showToast((e && e.message) || 'Could not generate receipt', 'error');
+  });
 }
 
 function retryPayment(orderId, totalAmount, orderNumber, btnEl, isMaster) {

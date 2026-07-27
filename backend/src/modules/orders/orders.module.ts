@@ -499,9 +499,16 @@ export class OrdersService {
    * COD/balance collections, prior partial payments) plus any wallet amount applied at
    * booking time.
    */
-  async getBalance(orderId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+  async getBalance(orderId: string, actorUserId?: string, actorRole?: UserRole) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
     if (!order) throw new NotFoundException('Order not found');
+    // Ownership check only applies when called directly from a controller (actorUserId
+    // passed in); collectBalance() already authorized the caller before delegating here.
+    const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+    const isAdmin = !!actorRole && adminRoles.includes(actorRole);
+    if (actorUserId && !isAdmin && order.customerId !== actorUserId && order.vendor?.userId !== actorUserId) {
+      throw new ForbiddenException();
+    }
     const paidAgg = await this.prisma.paymentTransaction.aggregate({
       where: { orderId, status: 'PAID' },
       _sum: { amount: true },
@@ -705,6 +712,26 @@ export class OrdersService {
     if (!order) throw new NotFoundException();
     if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
     return order;
+  }
+
+  /**
+   * Customer-facing transaction history for the payment dashboard — deliberately strips
+   * gatewaySignature/gatewayResponse (internal verification material) and only exposes
+   * fields safe to show a customer: amount, when, status, gateway/collection mode.
+   */
+  async getPaymentHistory(userId: string, orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
+    if (!order) throw new NotFoundException();
+    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
+    const transactions = await this.prisma.paymentTransaction.findMany({
+      where: { orderId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true, amount: true, status: true, gateway: true,
+        collectionMode: true, failureReason: true, createdAt: true,
+      },
+    });
+    return transactions;
   }
 
   async cancel(userId: string, orderId: string, reason: string) {
@@ -1059,7 +1086,13 @@ export class OrdersController {
     return this.orders.collectCod(u.sub, u.role, id, b.mode, b.collectedLocation);
   }
 
-  @Get(':id/balance') balance(@Param('id') id: string) { return this.orders.getBalance(id); }
+  @Get(':id/balance') balance(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.orders.getBalance(id, u.sub, u.role);
+  }
+
+  @Get(':id/payment-history') paymentHistory(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.orders.getPaymentHistory(u.sub, id);
+  }
 
   @Post(':id/collect-balance')
   collectBalance(
