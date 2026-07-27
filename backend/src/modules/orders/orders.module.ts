@@ -3,7 +3,7 @@ import {
   NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { OrderStatus, OrderType, BookingChannel, UserRole } from '@prisma/client';
+import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode } from '@prisma/client';
 import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
@@ -54,6 +54,9 @@ class GuestBookingDto {
   @IsString() slotTime: string; // e.g. "10:00", "14:00", "18:00"
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsEnum(BookingChannel) channel?: BookingChannel;
+  // Defaults to COD for older/other clients that don't send it yet — matches the
+  // pre-existing behavior this field's absence used to (silently) produce.
+  @IsOptional() @IsIn(['ONLINE', 'COD']) paymentMethod?: 'ONLINE' | 'COD';
 }
 
 // ─── DTOs ───
@@ -203,6 +206,7 @@ export class OrdersService {
     private memberships: MembershipsService,
     private dispatch: DispatchService,
     private cities: CitiesService,
+    private payments: PaymentsService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -352,19 +356,139 @@ export class OrdersService {
     const existing = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!existing) throw new NotFoundException('Order not found');
     if (existing.paymentStatus === 'PAID') return existing; // Idempotent
-    if (existing.status !== OrderStatus.PENDING_PAYMENT) {
+
+    // Allowed up to VENDOR_EN_ROUTE (not just the initial PENDING_PAYMENT confirmation) so
+    // a COD order can convert to Online any time before work actually starts, per the
+    // "convert COD to Online anytime before work starts" requirement — without this, calling
+    // confirm-payment on an already-CONFIRMED/assigned COD order would be rejected outright.
+    const confirmableStatuses: OrderStatus[] = [
+      OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED, OrderStatus.VENDOR_ASSIGNED, OrderStatus.VENDOR_EN_ROUTE,
+    ];
+    if (!confirmableStatuses.includes(existing.status)) {
       throw new BadRequestException('Order cannot be confirmed in its current state');
     }
 
+    const wasPendingPayment = existing.status === OrderStatus.PENDING_PAYMENT;
     const order = await this.prisma.order.update({
       where: { id: orderId },
-      data: { paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED },
+      data: {
+        paymentId, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
+        status: wasPendingPayment ? OrderStatus.CONFIRMED : existing.status,
+      },
     });
-    await writeOrderTimeline(this.prisma, { orderId: order.id, status: OrderStatus.CONFIRMED });
-    if (order.serviceId) {
+    await writeOrderTimeline(this.prisma, { orderId: order.id, status: wasPendingPayment ? OrderStatus.CONFIRMED : existing.status, note: wasPendingPayment ? undefined : 'Converted from COD to Online payment' });
+    // Only dispatch on the order's first confirmation — a mid-flow COD->Online conversion
+    // must not re-trigger vendor matching for an order that may already have a vendor.
+    if (order.serviceId && wasPendingPayment) {
       this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
     }
     return order;
+  }
+
+  /**
+   * Re-initiates a gateway payment for an existing order without creating a new booking —
+   * covers both a plain retry after a failed/abandoned payment, and converting a COD order
+   * to Online before work starts. Guest-safe: verified by phone instead of a JWT.
+   */
+  async retryPayment(orderId: string, phone: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const ownerPhone = order.guestPhone;
+    const owner = ownerPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
+    if (owner && owner !== phone) throw new ForbiddenException('Phone number does not match this order');
+    if (order.paymentStatus === 'PAID') throw new BadRequestException('Order is already paid');
+    const lockedStatuses: OrderStatus[] = [
+      OrderStatus.STARTED, OrderStatus.IN_PROGRESS, OrderStatus.EXTRA_WORK_ADDED,
+      OrderStatus.COMPLETED, OrderStatus.INVOICED, OrderStatus.CLOSED,
+      OrderStatus.CANCELLED, OrderStatus.REFUNDED,
+    ];
+    if (lockedStatuses.includes(order.status)) {
+      throw new BadRequestException('Payment can no longer be changed for this order');
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder: any = await this.payments.initiatePayment(order.customerId, Number(order.totalAmount), order.id, frontendUrl);
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      totalAmount: order.totalAmount,
+      gateway: payOrder.gateway,
+      gatewayOrderId: payOrder.gatewayOrderId,
+      razorpayKeyId: payOrder.keyId,
+      redirectUrl: payOrder.redirectUrl,
+      txId: payOrder.txId,
+    };
+  }
+
+  /**
+   * The other half of "Change Payment Method": an order booked ONLINE that never got paid
+   * (customer's payment failed/was abandoned) can switch to COD instead of being stuck
+   * retrying the same gateway. Only valid before the order has ever been confirmed —
+   * once paid, or once it's moved past PENDING_PAYMENT another way, this no longer applies.
+   */
+  async switchToCod(orderId: string, phone: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const ownerPhone = order.guestPhone;
+    const owner = ownerPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
+    if (owner && owner !== phone) throw new ForbiddenException('Phone number does not match this order');
+    if (order.paymentStatus === 'PAID') throw new BadRequestException('Order is already paid online');
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException('Order has already moved past payment — cannot switch to Cash on Delivery now');
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.CONFIRMED, paymentMethod: 'COD' },
+    });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CONFIRMED, note: 'Switched from Online to Cash on Delivery' });
+    if (updated.serviceId) {
+      this.dispatch.dispatch(updated.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
+    }
+    return updated;
+  }
+
+  /**
+   * Records that a COD order's payment was actually collected in person (cash/UPI/card) —
+   * previously COD orders had no way to ever leave paymentStatus PENDING; it just stayed
+   * PENDING forever with no reconciliation step. Callable by the assigned vendor or an admin.
+   */
+  async collectCod(
+    actorUserId: string, actorRole: UserRole, orderId: string,
+    mode: PaymentCollectionMode, collectedLocation?: string,
+  ) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.paymentMethod === 'ONLINE') throw new BadRequestException('This order was paid online, not COD');
+    if (order.paymentStatus === 'PAID') return order; // idempotent
+    if (['CANCELLED', 'REFUNDED'].includes(order.status)) {
+      throw new BadRequestException('Cannot collect payment for a cancelled/refunded order');
+    }
+
+    const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+    if (actorRole === UserRole.SERVICE_VENDOR) {
+      const v = await this.prisma.serviceVendor.findUnique({ where: { userId: actorUserId } });
+      if (!v || order.vendorId !== v.id) throw new ForbiddenException();
+    } else if (!adminRoles.includes(actorRole)) {
+      throw new ForbiddenException();
+    }
+
+    await this.prisma.paymentTransaction.create({
+      data: {
+        orderId, userId: order.customerId, amount: order.totalAmount, status: 'PAID',
+        gateway: 'CASH_COLLECTION', collectionMode: mode,
+        collectedBy: actorUserId, collectedLocation,
+      },
+    });
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { paymentStatus: 'PAID', paymentMethod: 'COD' },
+    });
+    await writeOrderTimeline(this.prisma, {
+      orderId, status: 'COD_PAYMENT_COLLECTED', actorId: actorUserId, actorRole,
+      note: `Collected via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
+    });
+    return updated;
   }
 
   async markEnRoute(vendorUserId: string, orderId: string) {
@@ -562,6 +686,13 @@ export class GuestBookingService {
       },
     });
 
+    // COD confirms immediately (paymentStatus stays PENDING until an actual cash/UPI/card
+    // collection is recorded — see collect-cod). ONLINE must NOT confirm here: the order
+    // stays PENDING_PAYMENT and dispatch only fires once confirm-payment verifies the
+    // gateway signature, below. Previously this method ignored paymentMethod entirely and
+    // always auto-confirmed, so a customer choosing "Pay Online" in the booking modal was
+    // silently booked without ever being charged.
+    const isCOD = dto.paymentMethod !== 'ONLINE';
     const order = await this.prisma.order.create({
       data: {
         orderNumber,
@@ -570,8 +701,9 @@ export class GuestBookingService {
         addressId: address.id,
         type: OrderType.SERVICE,
         channel: dto.channel || BookingChannel.WEBSITE,
-        status: OrderStatus.CONFIRMED,
+        status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
         paymentStatus: 'PENDING',
+        paymentMethod: isCOD ? 'COD' : 'ONLINE',
         guestName: dto.name,
         guestPhone: dto.phone,
         guestEmail: dto.email || null,
@@ -598,17 +730,41 @@ export class GuestBookingService {
       },
     });
 
-    this.logger.log(`📋 Guest booking: ${orderNumber} for ${dto.name} (${dto.phone})`);
-    this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Guest dispatch failed: ${e.message}`));
+    if (isCOD) {
+      this.logger.log(`📋 Guest booking (COD): ${orderNumber} for ${dto.name} (${dto.phone})`);
+      this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Guest dispatch failed: ${e.message}`));
+      return {
+        orderNumber: order.orderNumber,
+        orderId: order.id,
+        status: order.status,
+        paymentMethod: 'COD',
+        service: order.service?.name,
+        slot: slotStart.toISOString(),
+        city: city.name,
+        totalAmount: order.totalAmount,
+        message: 'Booking confirmed! Our team will contact you within 30 minutes.',
+      };
+    }
+
+    this.logger.log(`📋 Guest booking (ONLINE, pending payment): ${orderNumber} for ${dto.name} (${dto.phone})`);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder: any = await this.payments.initiatePayment(user.id, totalAmount, order.id, frontendUrl);
+
     return {
       orderNumber: order.orderNumber,
       orderId: order.id,
       status: order.status,
+      paymentMethod: 'ONLINE',
+      requiresPayment: true,
       service: order.service?.name,
       slot: slotStart.toISOString(),
       city: city.name,
       totalAmount: order.totalAmount,
-      message: 'Booking confirmed! Our team will contact you within 30 minutes.',
+      gateway: payOrder.gateway,
+      gatewayOrderId: payOrder.gatewayOrderId,
+      razorpayKeyId: payOrder.keyId,
+      redirectUrl: payOrder.redirectUrl,
+      txId: payOrder.txId,
     };
   }
 
@@ -787,6 +943,13 @@ export class OrdersController {
   @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string }) {
     return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl);
   }
+  @Post(':id/collect-cod')
+  collectCod(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { mode: PaymentCollectionMode; collectedLocation?: string },
+  ) {
+    return this.orders.collectCod(u.sub, u.role, id, b.mode, b.collectedLocation);
+  }
 }
 
 // ─── Public (no-auth) booking controller ───
@@ -802,6 +965,20 @@ export class PublicBookingController {
   @Post('confirm-payment')
   confirmPayment(@Body() b: { dbOrderId: string; gatewayOrderId: string; paymentId: string; signature: string }) {
     return this.orders.confirmPayment(b.dbOrderId, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  // Retry a failed/abandoned payment, or convert an existing COD order to Online —
+  // never creates a new order. Phone-verified since guests have no JWT.
+  @Post(':id/retry-payment')
+  retryPayment(@Param('id') id: string, @Body() b: { phone: string }) {
+    return this.orders.retryPayment(id, b.phone);
+  }
+
+  // The reverse of retry-payment: an order booked Online that never got paid can
+  // switch to Cash on Delivery instead of endlessly retrying the same gateway.
+  @Post(':id/switch-to-cod')
+  switchToCod(@Param('id') id: string, @Body() b: { phone: string }) {
+    return this.orders.switchToCod(id, b.phone);
   }
 
   // PhonePe return callback — called by payment-return.html after redirect back from PhonePe

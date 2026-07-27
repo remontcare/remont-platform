@@ -270,19 +270,31 @@ export class PaymentsService implements OnModuleInit {
         // client-driven confirm-payment HMAC re-verify path, not this webhook.
         if (tx.orderId) {
           try {
-            await this.prisma.order.update({
-              where: { id: tx.orderId },
-              data: { paymentId: payment.id, paymentStatus: 'PAID', status: 'CONFIRMED' },
-            });
+            // Never downgrade an order that has already progressed past PENDING_PAYMENT
+            // (e.g. a COD order converting to Online after a vendor is already assigned) —
+            // only flip status to CONFIRMED when it's still awaiting its first confirmation.
+            const existing = await this.prisma.order.findUnique({ where: { id: tx.orderId } });
+            if (existing && existing.paymentStatus !== 'PAID') {
+              await this.prisma.order.update({
+                where: { id: tx.orderId },
+                data: {
+                  paymentId: payment.id, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
+                  status: existing.status === 'PENDING_PAYMENT' ? 'CONFIRMED' : existing.status,
+                },
+              });
+            }
           } catch (e) {
             this.logger.warn(`Webhook: no single Order row for orderId=${tx.orderId} (${e.message})`);
           }
         }
         if (tx.amcSubscriptionId) {
-          await this.prisma.amcSubscription.update({
-            where: { id: tx.amcSubscriptionId },
-            data: { paymentId: payment.id, status: 'ACTIVE' },
-          });
+          const sub = await this.prisma.amcSubscription.findUnique({ where: { id: tx.amcSubscriptionId }, include: { plan: true } });
+          if (sub && sub.status !== 'ACTIVE') {
+            await this.prisma.amcSubscription.update({
+              where: { id: tx.amcSubscriptionId },
+              data: { paymentId: payment.id, status: 'ACTIVE', servicesRemaining: sub.plan.freeServicesCount },
+            });
+          }
         }
       }
     }

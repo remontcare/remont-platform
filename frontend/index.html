@@ -6974,8 +6974,17 @@
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
 
     apiPost('/api/v1/orders/public/book', payload).then(function(res) {
-      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       var r = res && res.data ? res.data : res;
+      if (r.requiresPayment) {
+        window._bmPendingPayment = {
+          orderId: r.orderId, orderNumber: r.orderNumber, totalAmount: r.totalAmount,
+          razorpayKeyId: r.razorpayKeyId, gatewayOrderId: r.gatewayOrderId, phone: phone,
+        };
+        bmLaunchRazorpay();
+        return;
+      }
+      // COD — confirmed immediately
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       var orderNum = r.orderNumber || '—';
       _lastBookedOrderNum = orderNum;
       closeBookingModal();
@@ -6984,6 +6993,101 @@
     }).catch(function(err) {
       btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       showToast((err && err.message) || 'Booking failed. Please call us to book.', 'error');
+    });
+  }
+
+  function bmLaunchRazorpay() {
+    var p = window._bmPendingPayment;
+    var btn = document.getElementById('bm-next-btn');
+    document.getElementById('bm-payment-failed').style.display = 'none';
+
+    function fail(reason) {
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
+      document.getElementById('bm-payment-failed-reason').textContent = reason;
+      document.getElementById('bm-payment-failed').style.display = 'block';
+    }
+
+    if (!p || !p.razorpayKeyId) { fail('Payment gateway not configured. Please contact support or pay via cash instead.'); return; }
+    if (!window.Razorpay) { fail('Payment gateway failed to load. Check your internet and try again.'); return; }
+
+    btn.textContent = 'Opening payment…'; btn.disabled = true;
+    var nameEl = document.getElementById('bm-name');
+
+    var rzp = new window.Razorpay({
+      key: p.razorpayKeyId,
+      amount: Math.round(p.totalAmount * 100),
+      currency: 'INR',
+      name: 'Remont India',
+      description: 'Home Services Booking',
+      order_id: p.gatewayOrderId,
+      prefill: { name: nameEl ? nameEl.value.trim() : '', contact: '+91' + p.phone.replace(/\D/g, '') },
+      notes: { orderId: p.orderId },
+      theme: { color: '#c4601a' },
+      handler: function(response) {
+        btn.textContent = 'Confirming payment…'; btn.disabled = true;
+        fetch((API_BASE || '') + '/api/v1/orders/public/confirm-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dbOrderId: p.orderId,
+            gatewayOrderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+          }),
+        }).then(function(r) {
+          return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || 'Payment confirmation failed'); return d; });
+        }).then(function() {
+          btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
+          _lastBookedOrderNum = p.orderNumber;
+          closeBookingModal();
+          document.getElementById('success-order-num').textContent = p.orderNumber;
+          document.getElementById('booking-success').style.display = 'flex';
+        }).catch(function() {
+          fail('Payment received but confirmation failed. Please contact support with payment ID: ' + response.razorpay_payment_id);
+        });
+      },
+      modal: { ondismiss: function() { fail('Payment was not completed.'); } },
+    });
+    rzp.on('payment.failed', function(resp) {
+      fail('Payment failed: ' + ((resp.error && resp.error.description) || 'Unknown error'));
+    });
+    rzp.open();
+  }
+
+  function bmRetryPayment() {
+    var p = window._bmPendingPayment;
+    if (!p) return;
+    var btn = document.getElementById('bm-next-btn');
+    btn.textContent = 'Retrying…'; btn.disabled = true;
+    apiPost('/api/v1/orders/public/' + p.orderId + '/retry-payment', { phone: p.phone }).then(function(res) {
+      var r = res && res.data ? res.data : res;
+      window._bmPendingPayment = {
+        orderId: r.orderId, orderNumber: r.orderNumber, totalAmount: r.totalAmount,
+        razorpayKeyId: r.razorpayKeyId, gatewayOrderId: r.gatewayOrderId, phone: p.phone,
+      };
+      bmLaunchRazorpay();
+    }).catch(function(err) {
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
+      showToast((err && err.message) || 'Could not retry payment. Please try again.', 'error');
+    });
+  }
+
+  function bmSwitchToCOD() {
+    var p = window._bmPendingPayment;
+    if (!p) return;
+    var btn = document.getElementById('bm-next-btn');
+    btn.textContent = 'Switching…'; btn.disabled = true;
+    apiPost('/api/v1/orders/public/' + p.orderId + '/switch-to-cod', { phone: p.phone }).then(function(res) {
+      var r = res && res.data ? res.data : res;
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
+      document.getElementById('bm-payment-failed').style.display = 'none';
+      _lastBookedOrderNum = p.orderNumber;
+      closeBookingModal();
+      document.getElementById('success-order-num').textContent = p.orderNumber;
+      document.getElementById('booking-success').style.display = 'flex';
+    }).catch(function(err) {
+      btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
+      showToast((err && err.message) || 'Could not switch to Cash on Delivery. Please try again.', 'error');
     });
   }
 
@@ -7215,6 +7319,16 @@
     <span class="po-icon">📱</span>
     <div><div class="po-title">Online Payment (UPI / Card)</div><div class="po-sub">Secure payment via Razorpay · Instant confirmation</div></div>
    </label>
+
+   <!-- Shown only if an online payment attempt fails/is dismissed -->
+   <div id="bm-payment-failed" style="display:none;background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:14px 16px;margin-top:14px">
+    <div style="font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:4px">⚠️ Payment Failed</div>
+    <div id="bm-payment-failed-reason" style="font-size:13px;color:#7f1d1d;margin-bottom:12px"></div>
+    <div style="display:flex;gap:10px">
+     <button onclick="bmRetryPayment()" style="flex:1;padding:10px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Retry Payment</button>
+     <button onclick="bmSwitchToCOD()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">Pay via Cash Instead</button>
+    </div>
+   </div>
 
    <!-- Final bill recap -->
    <div style="background:#fef9f6;border:1.5px solid #fed7aa;border-radius:12px;padding:14px 16px;margin-top:14px">

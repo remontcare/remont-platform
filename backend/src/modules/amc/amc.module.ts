@@ -65,13 +65,18 @@ export class AmcService {
     const count = await this.prisma.amcSubscription.count();
     const subscriptionNumber = `AMC-${(count + 1).toString().padStart(6, '0')}`;
 
+    // Created PENDING_PAYMENT with zero service credits — activation (status -> ACTIVE,
+    // servicesRemaining granted) only happens in confirmPayment() once the gateway
+    // signature is actually verified. Previously this created an ACTIVE subscription
+    // with usable credits before any payment existed, refundable only by an optional
+    // admin-configured webhook.
     const subscription = await this.prisma.amcSubscription.create({
       data: {
         subscriptionNumber, userId, planId,
         startDate, endDate,
         amountPaid: plan.priceYearly,
-        status: AmcStatus.ACTIVE,
-        servicesRemaining: plan.freeServicesCount,
+        status: AmcStatus.PENDING_PAYMENT,
+        servicesRemaining: 0,
         autoRenew,
       },
       include: { plan: true, user: { select: { name: true, phone: true } } },
@@ -86,6 +91,25 @@ export class AmcService {
     );
 
     return { subscription, payment: rzpOrder };
+  }
+
+  // Re-verifies the gateway signature itself (same pattern as OrdersService.confirmPayment /
+  // WalletService.confirmTopup) rather than relying solely on the optional, admin-configured
+  // webhook — activation must not depend on a webhook that may never arrive.
+  async confirmPayment(userId: string, subscriptionId: string, paymentId: string, gatewayOrderId: string, signature: string) {
+    const sub = await this.prisma.amcSubscription.findUnique({ where: { id: subscriptionId }, include: { plan: true } });
+    if (!sub || sub.userId !== userId) throw new NotFoundException();
+    if (sub.status === AmcStatus.ACTIVE) return sub; // idempotent
+    if (sub.status !== AmcStatus.PENDING_PAYMENT) throw new BadRequestException('Subscription cannot be confirmed in its current state');
+
+    const ok = await this.payments.verifyAndMarkPaid(gatewayOrderId, paymentId, signature);
+    if (!ok) throw new BadRequestException('Invalid payment signature');
+
+    return this.prisma.amcSubscription.update({
+      where: { id: subscriptionId },
+      data: { status: AmcStatus.ACTIVE, paymentId, servicesRemaining: sub.plan.freeServicesCount },
+      include: { plan: true },
+    });
   }
 
   async myActiveSubscriptions(userId: string) {
@@ -134,8 +158,8 @@ export class AmcService {
         userId, planId: existing.planId,
         startDate, endDate,
         amountPaid: existing.plan.priceYearly,
-        status: AmcStatus.ACTIVE,
-        servicesRemaining: existing.plan.freeServicesCount,
+        status: AmcStatus.PENDING_PAYMENT,
+        servicesRemaining: 0,
         renewedFromId: existing.id,
         autoRenew: existing.autoRenew,
       },
@@ -218,6 +242,14 @@ export class AmcController {
   @UseGuards(JwtAuthGuard) @ApiBearerAuth() @Post('subscribe')
   subscribe(@CurrentUser() u: JwtPayload, @Body() b: { planId: string; autoRenew?: boolean }) {
     return this.amc.subscribe(u.sub, b.planId, b.autoRenew);
+  }
+
+  @UseGuards(JwtAuthGuard) @ApiBearerAuth() @Post(':id/confirm-payment')
+  confirmPayment(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { paymentId: string; gatewayOrderId: string; signature: string },
+  ) {
+    return this.amc.confirmPayment(u.sub, id, b.paymentId, b.gatewayOrderId, b.signature);
   }
 
   @UseGuards(JwtAuthGuard) @ApiBearerAuth() @Get('mine')
