@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, validateAddressInput } from '../../common';
 
 // ─── USERS ─────────────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ export class UsersService {
   }
 
   async addAddress(userId: string, data: any) {
+    validateAddressInput(data);
     if (data.isDefault) {
       await this.prisma.address.updateMany({ where: { userId }, data: { isDefault: false } });
     }
@@ -76,6 +77,7 @@ export class UsersService {
   async updateAddress(userId: string, addressId: string, data: any) {
     const existing = await this.prisma.address.findFirst({ where: { id: addressId, userId } });
     if (!existing) throw new NotFoundException('Address not found');
+    validateAddressInput(data, { partial: true });
     if (data.isDefault) {
       await this.prisma.address.updateMany({ where: { userId }, data: { isDefault: false } });
     }

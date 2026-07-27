@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blog | Remont India</title>
+<meta name="description" content="Guides, tips, and updates from Remont India on home services, maintenance, and getting the most out of your AMC plan." />
+<link rel="canonical" href="https://www.remontindia.com/blog" />
+<meta name="robots" content="index, follow" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Remont India" />
+<meta property="og:title" content="Blog | Remont India" />
+<meta property="og:description" content="Guides, tips, and updates from Remont India on home services and maintenance." />
+<meta property="og:url" content="https://www.remontindia.com/blog" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Blog","@id":"https://www.remontindia.com/blog#page","name":"Remont India Blog","url":"https://www.remontindia.com/blog","isPartOf":{"@id":"https://www.remontindia.com/#organization"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.remontindia.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://www.remontindia.com/blog"}]}]}</script>
+<style>
+:root{--cream:#F5F0E8;--ivory:#FDFAF5;--charcoal:#1A1A1A;--graphite:#2D2D2D;--sienna:#C4601A;--amber:#E8A650;--mist:#E8E3DA;--txt-muted:#6E6860;--radius:12px;--ff-display:"Cormorant Garamond",Georgia,serif;--ff-body:"DM Sans",sans-serif;--ff-accent:"Bebas Neue",sans-serif;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--ff-body);background:var(--ivory);color:var(--charcoal);line-height:1.65;-webkit-font-smoothing:antialiased}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+header.site{background:var(--charcoal);color:#fff;padding:16px 0}
+header.site .wrap{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.brand{font-family:var(--ff-accent);font-size:22px;letter-spacing:.5px;color:#fff}
+.brand span{color:var(--amber)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:100px;font-weight:600;font-size:13px}
+.btn-outline{border:1.5px solid rgba(255,255,255,.4);color:#fff}
+nav.crumbs{font-size:12.5px;color:var(--txt-muted);padding:14px 0}
+.hero{padding:40px 0 28px;border-bottom:1px solid var(--mist)}
+.hero h1{font-family:var(--ff-display);font-size:clamp(28px,4vw,42px);font-weight:600;margin-bottom:8px}
+.hero p{color:var(--txt-muted);font-size:15px}
+.blog-section{padding:32px 0 48px}
+.blog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}
+.blog-card{background:#fff;border:1px solid var(--mist);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column}
+.blog-card img{width:100%;height:150px;object-fit:cover;background:var(--cream)}
+.blog-card .body{padding:16px}
+.blog-card h2{font-size:16px;font-weight:700;margin-bottom:6px;line-height:1.35}
+.blog-card p{font-size:13px;color:var(--txt-muted);margin-bottom:10px}
+.blog-card .meta{font-size:11.5px;color:var(--sienna);font-weight:600}
+.empty-state{text-align:center;padding:48px 0;color:var(--txt-muted)}
+.empty-state .ic{font-size:36px;margin-bottom:10px}
+footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 0;font-size:13px;text-align:center}
+footer.site a{color:var(--amber)}
+</style>
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a href="/" class="brand">Remont <span>India</span></a>
+    <a href="tel:+919876543210" class="btn btn-outline">📞 Call</a>
+  </div>
+</header>
+<nav class="crumbs"><div class="wrap"><a href="/">Home</a> / Blog</div></nav>
+<section class="hero"><div class="wrap">
+  <h1>Remont India Blog</h1>
+  <p>Guides and updates on home maintenance, service tips, and getting the most from your AMC plan.</p>
+</div></section>
+
+<section class="blog-section"><div class="wrap">
+  <div id="blog-list" class="blog-grid">
+    <div class="empty-state" style="grid-column:1/-1"><div class="ic">⏳</div>Loading articles…</div>
+  </div>
+</div></section>
+
+<footer class="site">
+  <div class="wrap">
+    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/contact">Contact</a></p>
+  </div>
+</footer>
+
+<script>
+  var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+  function escHtml(s) {
+    return (s == null ? '' : String(s)).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  fetch(API_BASE + '/api/v1/cms/blogs?limit=24')
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var posts = Array.isArray(res) ? res : (res.data || []);
+      var list = document.getElementById('blog-list');
+      if (!posts.length) {
+        list.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="ic">📝</div>No articles published yet — check back soon.</div>';
+        return;
+      }
+      list.innerHTML = posts.map(function(p) {
+        var date = p.publishedAt ? new Date(p.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        var img = p.imageUrl ? '<img src="' + escHtml(p.imageUrl) + '" alt="' + escHtml(p.title) + '">' : '';
+        return '<a class="blog-card" href="/blog-post.html?slug=' + encodeURIComponent(p.slug) + '">' + img +
+          '<div class="body"><h2>' + escHtml(p.title) + '</h2>' +
+          (p.summary ? '<p>' + escHtml(p.summary) + '</p>' : '') +
+          '<div class="meta">' + escHtml(p.author || 'Remont Team') + (date ? ' · ' + date : '') + '</div></div></a>';
+      }).join('');
+    })
+    .catch(function() {
+      document.getElementById('blog-list').innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="ic">⚠️</div>Couldn\'t load articles right now — please try again shortly.</div>';
+    });
+</script>
+</body>
+</html>

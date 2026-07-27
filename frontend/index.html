@@ -363,6 +363,21 @@
   .sd-price { font-size: 13px; font-weight: 700; color: #C4601A; flex-shrink: 0; }
   .sd-empty { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
   .sd-loading { padding: 16px; text-align: center; color: #9ca3af; font-size: 13px; }
+  .sd-scopes { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #f3f0eb; }
+  .sd-scope-tab { padding: 5px 13px; border-radius: 100px; font-size: 12px; font-weight: 600; color: #6b7280; background: #f3f0eb; cursor: pointer; user-select: none; }
+  .sd-scope-tab.active { background: var(--sienna); color: #fff; }
+  .sd-group-hdr { padding: 10px 18px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: #b0a99e; }
+  .sd-badge { font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 100px; margin-left: 8px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+  .sd-badge.service { background: #e0e7ff; color: #3730a3; }
+  .sd-badge.product { background: #dcfce7; color: #166534; }
+  .sd-badge.plan { background: #fef3c7; color: #92400e; }
+  .sd-badge.page { background: #f3f4f6; color: #374151; }
+  .sd-badge.city { background: #fce7f3; color: #9d174d; }
+  .sd-item.kb-active { background: #fff7f3; }
+  .sd-suggest-lbl { padding: 14px 18px 4px; font-size: 12px; color: #6b7280; }
+  .sd-suggest-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 14px; }
+  .sd-suggest-chip { background: #f3f0eb; border-radius: 100px; padding: 5px 12px; font-size: 12px; color: var(--sienna); cursor: pointer; font-weight: 600; }
+  .sd-name-row { display: flex; align-items: center; flex-wrap: wrap; }
 
   .header-right { display: flex; align-items: center; gap: 14px; }
   .icon-btn {
@@ -3291,6 +3306,9 @@
   }
   .loc-field input:focus, .loc-field textarea:focus { border-color: #c4601a; }
   .loc-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .loc-field.invalid input, .loc-field.invalid textarea { border-color: #ef4444; background: #fef2f2; }
+  .loc-field-err { font-size: 11px; color: #ef4444; margin-top: 3px; display: none; }
+  .loc-field.invalid .loc-field-err { display: block; }
   .loc-gps-strip {
     background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 10px;
     padding: 12px 14px; margin-bottom: 16px;
@@ -4698,11 +4716,11 @@
     <div class="footer-col">
       <h4 data-en="Company" data-hi="कंपनी">Company</h4>
       <div class="footer-links">
-        <a href="#" data-en="About Us" data-hi="हमारे बारे में">About Us</a>
-        <a href="#" data-en="Contact" data-hi="संपर्क करें">Contact</a>
-        <a href="#" data-en="Careers" data-hi="करियर">Careers</a>
-        <a href="#" data-en="Blog" data-hi="ब्लॉग">Blog</a>
-        <a href="#" data-en="Press" data-hi="प्रेस">Press</a>
+        <a href="/about" data-en="About Us" data-hi="हमारे बारे में">About Us</a>
+        <a href="/contact" data-en="Contact" data-hi="संपर्क करें">Contact</a>
+        <a href="/careers" data-en="Careers" data-hi="करियर">Careers</a>
+        <a href="/blog" data-en="Blog" data-hi="ब्लॉग">Blog</a>
+        <a href="/contact" data-en="Press" data-hi="प्रेस">Press</a>
       </div>
     </div>
   </div>
@@ -4723,10 +4741,11 @@
   <div class="footer-bottom">
     <span>© 2026 Remont India Technologies Pvt. Ltd. · GSTIN: 27AABCT1234L1Z5</span>
     <div>
-      <a href="#" data-en="Privacy" data-hi="प्राइवेसी">Privacy</a>
-      <a href="#" data-en="Terms" data-hi="नियम व शर्तें">Terms</a>
+      <a href="/privacy" data-en="Privacy" data-hi="प्राइवेसी">Privacy</a>
+      <a href="/terms" data-en="Terms" data-hi="नियम व शर्तें">Terms</a>
       <a href="#" data-en="Sitemap" data-hi="साइटमैप">Sitemap</a>
-      <a href="#" data-en="Refund Policy" data-hi="रिफंड नीति">Refund Policy</a>
+      <a href="/refund-policy" data-en="Refund Policy" data-hi="रिफंड नीति">Refund Policy</a>
+      <a href="/shipping-policy" data-en="Shipping Policy" data-hi="शिपिंग नीति">Shipping Policy</a>
     </div>
   </div>
 </footer>
@@ -4866,20 +4885,23 @@
 
       <div style="text-align:center;color:#9ca3af;font-size:12px;margin-bottom:14px">— or enter manually —</div>
 
-      <div class="loc-field">
+      <div class="loc-field" id="loc-field-pincode">
         <label>PIN Code *</label>
-        <input id="loc-pincode" type="tel" maxlength="6" placeholder="e.g. 462023" oninput="locPincodeInput(this.value)">
+        <input id="loc-pincode" type="tel" maxlength="6" placeholder="e.g. 462023" oninput="locPincodeInput(this.value)" onblur="_locValidateAll()">
         <div id="loc-pincode-msg" style="font-size:11px;color:#22c55e;margin-top:3px;display:none"></div>
+        <div class="loc-field-err" id="loc-pincode-err"></div>
       </div>
 
       <div class="loc-field-row">
-        <div class="loc-field">
+        <div class="loc-field" id="loc-field-city">
           <label>City *</label>
-          <input id="loc-city" type="text" placeholder="Bhopal">
+          <input id="loc-city" type="text" placeholder="Bhopal" oninput="_locValidateAll()" onblur="_locValidateAll()">
+          <div class="loc-field-err" id="loc-city-err"></div>
         </div>
-        <div class="loc-field">
+        <div class="loc-field" id="loc-field-state">
           <label>State</label>
-          <input id="loc-state" type="text" placeholder="Madhya Pradesh">
+          <input id="loc-state" type="text" placeholder="Madhya Pradesh" oninput="_locValidateAll()" onblur="_locValidateAll()">
+          <div class="loc-field-err" id="loc-state-err"></div>
         </div>
       </div>
 
@@ -4888,9 +4910,10 @@
         <input id="loc-area" type="text" placeholder="e.g. Arera Colony, Kolar Road">
       </div>
 
-      <div class="loc-field">
-        <label>Full Address</label>
-        <textarea id="loc-address" rows="2" placeholder="House No, Street, Building name…"></textarea>
+      <div class="loc-field" id="loc-field-address">
+        <label>Full Address *</label>
+        <textarea id="loc-address" rows="2" placeholder="House No, Street, Building name…" oninput="_locValidateAll()" onblur="_locValidateAll()"></textarea>
+        <div class="loc-field-err" id="loc-address-err"></div>
       </div>
 
       <div class="loc-field">
@@ -4906,8 +4929,17 @@
         <iframe id="loc-map-iframe" src="" width="100%" height="200" frameborder="0" loading="lazy" style="display:block"></iframe>
       </div>
 
+      <!-- GPS-vs-typed-address mismatch warning (populated inside locRequestGPS) -->
+      <div id="loc-gps-mismatch" style="display:none;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#9a3412">
+        <div id="loc-gps-mismatch-msg" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px">
+          <button type="button" onclick="_locKeepTypedAddress()" style="flex:1;padding:8px;border:1.5px solid #c4601a;border-radius:8px;background:#fff;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer">Keep this address</button>
+          <button type="button" onclick="_locUseGpsAddress()" style="flex:1;padding:8px;border:none;border-radius:8px;background:#c4601a;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Use current location</button>
+        </div>
+      </div>
+
       <p id="loc-modal-msg" style="color:#ef4444;font-size:13px;margin-bottom:8px;display:none"></p>
-      <button class="loc-save-btn" onclick="locSaveManual()">Save Location</button>
+      <button class="loc-save-btn" id="loc-save-btn-el" onclick="locSaveManual()" disabled>Save Location</button>
     </div>
   </div>
 </div>
@@ -5633,6 +5665,59 @@
              BANNER_KEY: BANNER_KEY };
   })();
 
+  // ── Address validation — shared by the Address form (loc-modal) and the
+  // booking modal's "+ Add New Address" free-text entry. Mirrors the same
+  // rules enforced server-side in backend/src/common/index.ts
+  // (validateAddressInput) so a rejected address never even reaches the API.
+  var AddressValidation = (function() {
+    var PINCODE_BLACKLIST = { '000000':1,'111111':1,'222222':1,'333333':1,'444444':1,'555555':1,
+      '666666':1,'777777':1,'888888':1,'999999':1,'123456':1,'121212':1,'101010':1,'100000':1,'010101':1 };
+
+    function validatePincodeFormat(pin) {
+      pin = (pin || '').trim();
+      if (!pin) return 'PIN code is required';
+      if (!/^\d{6}$/.test(pin)) return 'PIN code must be exactly 6 digits';
+      if (PINCODE_BLACKLIST[pin]) return 'Enter a valid PIN code';
+      return null;
+    }
+
+    // A run of 5+ consonants inside one alphabetic word almost never occurs in a
+    // real place name/address ("hshsvx", "lxskjius") — catches keyboard-mash
+    // gibberish without flagging real (if unusual) addresses.
+    function hasLongConsonantRun(word, minRun) {
+      minRun = minRun || 5;
+      var run = 0;
+      for (var i = 0; i < word.length; i++) {
+        var ch = word[i].toLowerCase();
+        if ('aeiou'.indexOf(ch) !== -1) { run = 0; }
+        else { run++; if (run >= minRun) return true; }
+      }
+      return false;
+    }
+
+    function validateAddressLine(text) {
+      var trimmed = (text || '').trim();
+      if (!trimmed) return 'Address is required';
+      if (trimmed.length < 10) return 'Address must be at least 10 characters';
+      if (/^(.)\1+$/.test(trimmed.replace(/\s+/g, ''))) return 'Enter a valid address';
+      var words = trimmed.match(/[a-zA-Z]+/g) || [];
+      for (var i = 0; i < words.length; i++) {
+        if (words[i].length >= 6 && hasLongConsonantRun(words[i])) return 'This doesn\'t look like a valid address';
+      }
+      return null;
+    }
+
+    function validateCity(city)  { return (city  || '').trim() ? null : 'City is required'; }
+    function validateState(state){ return (state || '').trim() ? null : 'State is required'; }
+
+    return {
+      validatePincodeFormat: validatePincodeFormat,
+      validateAddressLine: validateAddressLine,
+      validateCity: validateCity,
+      validateState: validateState,
+    };
+  })();
+
   // ── Location indicator in header ──────────────────────────────────────────
   function _updateLocationIndicator(data) {
     var el   = document.getElementById('loc-indicator');
@@ -5766,6 +5851,25 @@
         // Got coords — reverse geocode
         if (strip) { strip.className = 'loc-gps-strip loading'; msg.textContent = 'Getting address…'; }
         LocationService.reverseGeocode(loc.latitude, loc.longitude, function(err, geo) {
+          // Don't silently overwrite an existing, meaningfully-different address —
+          // ask first (never force GPS; the customer can always keep what they typed).
+          var existing = LocationService.get();
+          var hasExistingCoords = existing && LocationService.isValidCoords(existing.latitude, existing.longitude);
+          var distKm = hasExistingCoords ? _haversineKm(loc.latitude, loc.longitude, existing.latitude, existing.longitude) : 0;
+
+          if (hasExistingCoords && distKm > LOC_GPS_MISMATCH_THRESHOLD_KM) {
+            _locPendingGps = { loc: loc, geo: geo };
+            if (strip) { strip.className = 'loc-gps-strip'; icon.textContent = '📍'; msg.textContent = 'GPS captured — review below'; }
+            var banner = document.getElementById('loc-gps-mismatch');
+            var bannerMsg = document.getElementById('loc-gps-mismatch-msg');
+            if (banner && bannerMsg) {
+              bannerMsg.textContent = 'Your current location appears to be different from the selected address. Would you like to use your current location instead?';
+              banner.style.display = '';
+            }
+            _locShowMapPreview(loc.latitude, loc.longitude); // map stays visible either way
+            return;
+          }
+
           if (geo) {
             var saved = Object.assign({}, loc, geo);
             LocationService.save(saved);
@@ -5779,9 +5883,12 @@
           _autoSelectCityFromGPS(loc.latitude, loc.longitude, geo ? geo.city : null);
           // Show OSM map preview in modal
           _locShowMapPreview(loc.latitude, loc.longitude);
+          _locValidateAll();
         });
       },
       function(errMsg) {
+        // GPS denied/unavailable — never force it; manual entry keeps working exactly
+        // as before.
         if (fromModal && strip) {
           strip.className = 'loc-gps-strip error'; icon.textContent = '❌'; msg.textContent = errMsg;
           strip.style.display = 'flex';
@@ -5792,9 +5899,35 @@
     );
   }
 
+  // "Significantly different" for the address-form GPS check (site-wide location
+  // picker) — deliberately looser than the booking-time proximity threshold below,
+  // since this is comparing against a whole saved address, not a single doorstep.
+  var LOC_GPS_MISMATCH_THRESHOLD_KM = 2;
+  var _locPendingGps = null; // { loc, geo } awaiting a Keep/Use decision from the banner
+
+  function _locUseGpsAddress() {
+    if (!_locPendingGps) return;
+    var loc = _locPendingGps.loc, geo = _locPendingGps.geo;
+    var saved = geo ? Object.assign({}, loc, geo) : loc;
+    LocationService.save(saved);
+    _fillLocModal(saved); // fields are still fully editable after this — nothing is locked
+    _autoSelectCityFromGPS(loc.latitude, loc.longitude, geo ? geo.city : null);
+    _locShowMapPreview(loc.latitude, loc.longitude);
+    document.getElementById('loc-gps-mismatch').style.display = 'none';
+    _locPendingGps = null;
+    _locValidateAll();
+  }
+
+  function _locKeepTypedAddress() {
+    document.getElementById('loc-gps-mismatch').style.display = 'none';
+    _locPendingGps = null;
+  }
+
   // ── Manual location modal ──────────────────────────────────────────────────
   function openLocModal() {
     locDismissBanner();
+    document.getElementById('loc-gps-mismatch').style.display = 'none';
+    _locPendingGps = null;
     var existing = LocationService.get();
     if (existing) {
       _fillLocModal(existing);
@@ -5806,6 +5939,12 @@
         var mp = document.getElementById('loc-map-preview');
         if (mp) mp.style.display = 'none';
       }
+      // Re-run the real pincode-existence check for the prefilled value — a saved
+      // pincode was verified when it was first entered, but _locPincodeExists starts
+      // out unknown on every fresh modal open, and Save must not stay disabled forever.
+      locPincodeInput(existing.pincode || '');
+    } else {
+      _locValidateAll();
     }
     document.getElementById('loc-modal-overlay').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -5841,23 +5980,75 @@
     preview.style.display = '';
   }
 
+  // null = not checked yet against the real pincode-existence API, true = verified
+  // real, false = lookup came back empty (non-existent pincode). Gates Save in
+  // _locValidateAll() alongside the plain format/blacklist check.
+  var _locPincodeExists = null;
+
   function locPincodeInput(val) {
+    _locPincodeExists = null; // any edit invalidates the previous lookup result
     if (val.length === 6) {
       var msg = document.getElementById('loc-pincode-msg');
       if (msg) { msg.style.display = ''; msg.textContent = 'Looking up…'; msg.style.color = '#6b7280'; }
+      // Reuses the existing pincode-lookup utility (LocationService.lookupPincode,
+      // which itself hits the real India-Post pincode API) as the "does this pincode
+      // actually exist" check — not just a format regex.
       LocationService.lookupPincode(val, function(err, data) {
         if (data) {
-          var setVal = function(id, v) { var el = document.getElementById(id); if (el && !el.value) el.value = v || ''; };
-          // Only auto-fill if field is empty
+          _locPincodeExists = true;
           document.getElementById('loc-city').value  = data.city  || '';
           document.getElementById('loc-state').value = data.state || '';
           if (!document.getElementById('loc-area').value) document.getElementById('loc-area').value = data.area || '';
           if (msg) { msg.style.display = ''; msg.style.color = '#22c55e'; msg.textContent = '✓ ' + (data.city || '') + ', ' + (data.state || ''); }
         } else {
+          _locPincodeExists = false;
           if (msg) { msg.style.display = ''; msg.style.color = '#ef4444'; msg.textContent = 'Pincode not found'; }
         }
+        _locValidateAll();
       });
     }
+    _locValidateAll();
+  }
+
+  function _locValidateAll() {
+    var fields = [
+      { id: 'loc-pincode', wrap: 'loc-field-pincode', err: 'loc-pincode-err', validate: AddressValidation.validatePincodeFormat },
+      { id: 'loc-city',    wrap: 'loc-field-city',    err: 'loc-city-err',    validate: AddressValidation.validateCity },
+      { id: 'loc-state',   wrap: 'loc-field-state',   err: 'loc-state-err',   validate: AddressValidation.validateState },
+      { id: 'loc-address', wrap: 'loc-field-address', err: 'loc-address-err',validate: AddressValidation.validateAddressLine },
+    ];
+    var allValid = true;
+    fields.forEach(function(f) {
+      var el = document.getElementById(f.id);
+      var wrap = document.getElementById(f.wrap);
+      var errEl = document.getElementById(f.err);
+      var msg = el ? f.validate(el.value) : null;
+      if (msg) {
+        allValid = false;
+        if (wrap) wrap.classList.add('invalid');
+        if (errEl) errEl.textContent = msg;
+      } else if (wrap) {
+        wrap.classList.remove('invalid');
+        if (errEl) errEl.textContent = '';
+      }
+    });
+
+    // Format can be fine while existence is still unknown/unverified — both gate Save.
+    var pincodeEl = document.getElementById('loc-pincode');
+    var pincodeFormatOk = pincodeEl && !AddressValidation.validatePincodeFormat(pincodeEl.value);
+    if (pincodeFormatOk && _locPincodeExists !== true) {
+      allValid = false;
+      if (_locPincodeExists === false) {
+        var pWrap = document.getElementById('loc-field-pincode');
+        var pErr  = document.getElementById('loc-pincode-err');
+        if (pWrap) pWrap.classList.add('invalid');
+        if (pErr) pErr.textContent = 'This PIN code could not be verified';
+      }
+    }
+
+    var btn = document.getElementById('loc-save-btn-el');
+    if (btn) btn.disabled = !allValid;
+    return allValid;
   }
 
   function locSaveManual() {
@@ -5867,7 +6058,13 @@
     var area    = (document.getElementById('loc-area').value    || '').trim();
     var msg     = document.getElementById('loc-modal-msg');
 
-    if (!city) { msg.style.display = ''; msg.textContent = 'Please enter your city'; return; }
+    // Defense in depth — the Save button is already disabled while any of this
+    // fails, but never trust client-side disabled state alone as the only gate.
+    if (!_locValidateAll()) {
+      msg.style.display = '';
+      msg.textContent = 'Please fix the highlighted fields before saving.';
+      return;
+    }
     if (msg) msg.style.display = 'none';
 
     var existing = LocationService.get() || {};
@@ -6106,136 +6303,472 @@
     CLEANING:'🧹', INTERIOR:'🏠', RENOVATION:'🏗️', CONSTRUCTION:'🏗️',
     PEST:'🐛', PAINTING:'🎨', CARPENTRY:'🪚', DEFAULT:'🔨'
   };
+  var TYPE_ICONS = { service: '🔨', product: '🛍️', plan: '🛡️', page: '📄', city: '📍' };
+  var TYPE_LABELS = { service: 'Service', product: 'Product', plan: 'Plan', page: 'Page', city: 'City' };
+  var TYPE_GROUP_ORDER = ['service', 'product', 'plan', 'page', 'city'];
+  var TYPE_GROUP_LABELS = { service: 'Services', product: 'Products', plan: 'AMC Plans', page: 'Pages', city: 'Cities' };
 
-  // Smart keyword map — handles typos, Hindi, intent matching
-  var SMART_KEYWORDS = [
-    { w:['ac','air condition','airconditioner','cooling','split ac','inverter ac','ac gas','ac filter','cool','ठंडक','एसी','ac repair','ac service','ac not cooling','ac not working'], svc:'AC Service & Repair', cat:'AC_SERVICE', icon:'❄️' },
-    { w:['plumb','pipe','leak','tap','drain','bathroom','toilet','geyser','shower','water','tank','nal','pani','paani','नल','पाइप','nali','blockage','clog'], svc:'Plumbing', cat:'PLUMBING', icon:'🔧' },
-    { w:['electric','wiring','switch','fan','mcb','short circuit','light','socket','power','earthing','bijli','बिजली','current','tripping','fitting','wiring','wirring'], svc:'Electrical Work', cat:'ELECTRICAL', icon:'⚡' },
-    { w:['washing machine','fridge','refrigerator','tv','television','microwave','oven','dishwasher','appliance','repair','machine','गीज़र','geysir','geyzer','उपकरण','washer','dryer'], svc:'Appliance Repair', cat:'APPLIANCE', icon:'🔌' },
-    { w:['clean','cleaning','deep clean','sofa','carpet','sanitize','disinfect','sweep','mop','सफाई','साफ','home clean','house clean','office clean'], svc:'Deep Cleaning', cat:'CLEANING', icon:'🧹' },
-    { w:['pest','cockroach','cockroch','cockorach','roach','termite','bedbug','bed bug','mosquito','rat','mouse','mice','ant','fly','insect','fumigat','spray','treatment','tila','kida','कीट','कॉकरोच','कॉकरोच','dengue','dengue spray','mosquito spray'], svc:'Pest Control', cat:'PEST', icon:'🐛' },
-    { w:['paint','painting','wall paint','colour','color','whitewash','polish','rang','रंग','पेंट','paint peel','exterior paint','interior paint'], svc:'Painting', cat:'PAINTING', icon:'🎨' },
-    { w:['carpenter','carpentary','furniture','sofa repair','door','window','almira','cupboard','wood','laminate','woodwork','बढ़ई','wardrobe','cabinet'], svc:'Carpentry & Furniture', cat:'CARPENTRY', icon:'🪚' },
-    { w:['interior','design','decor','false ceiling','modular kitchen','renovation','makeover','home design','room design'], svc:'Interior Design', cat:'INTERIOR', icon:'🏠' },
-    { w:['cctv','camera','security','surveillance','security camera','install camera','dvr','nvr'], svc:'CCTV Installation', cat:'ELECTRICAL', icon:'📷' },
-    { w:['ro','water purifier','purifier','water filter','ro service','ro repair','kent','aquaguard'], svc:'RO / Water Purifier', cat:'APPLIANCE', icon:'🫧' },
-    { w:['solar','solar panel','solar install','solar repair','inverter','battery'], svc:'Solar & Inverter', cat:'ELECTRICAL', icon:'☀️' },
-    { w:['waterproof','waterproofing','seepage','leakage roof','terrace leak','wall damp','damp','seepage'], svc:'Waterproofing', cat:'CONSTRUCTION', icon:'💧' },
-    { w:['tile','tiles','flooring','marble','granite','mosaic','floor repair','floor polish'], svc:'Tile & Flooring', cat:'CONSTRUCTION', icon:'🪟' },
+  // ═══════════════════════════════════════════════════════════════════
+  // UNIFIED SEARCH INDEX — services, products, AMC plans, static pages,
+  // cities. Each entry: { type, id, name, category, description,
+  // keywords[], url, _popularity }. Rebuilt incrementally as each data
+  // source loads (see _indexServicesFromData/_indexCitiesFromData/
+  // _indexPlansFromData below and their call sites), so search works
+  // progressively rather than waiting on every API call to land.
+  // ═══════════════════════════════════════════════════════════════════
+  var SEARCH_SERVICES = [];
+  var SEARCH_PRODUCTS = [];
+  var SEARCH_PLANS = [];
+  var SEARCH_PAGES = [];
+  var SEARCH_CITIES = [];
+  var _searchScope = 'all'; // 'all' | 'service' | 'product'
+  var _searchActiveIdx = -1;
+  var _searchLastResults = [];
+
+  // Synonym & intent map — natural-language / Hindi / Hinglish queries that
+  // should resolve to a service category even when they share no words with
+  // its name. Editable: add more terms/categories as the catalog grows.
+  var SYNONYM_MAP = [
+    { key:'ac', name:'AC Service & Repair', icon:'❄️', terms:['ac','air condition','airconditioner','aircon','cooling','split ac','inverter ac','ac gas','ac filter','ac not cooling','ac not working','thandi hawa nahi','thanda nahi','gas leak','gas leakage','ठंडक','एसी'] },
+    { key:'plumbing', name:'Plumbing', icon:'🔧', terms:['plumb','plumber','pipe','leak','leaking','tap','tap leaking','nal tapak raha','low water pressure','drain','bathroom fitting','toilet','geyser','shower','water tank','nal','pani','paani','नल','पाइप','nali','blockage','clog'] },
+    { key:'electrical', name:'Electrical Work', icon:'⚡', terms:['electric','electrician','wiring','switch','fan','mcb','mcb trip','short circuit','no power','power cut','light','socket','power','earthing','bijli','बिजली','current','tripping','fitting'] },
+    { key:'appliance', name:'Appliance Repair', icon:'🔌', terms:['washing machine','fridge','refrigerator','tv','television','microwave','oven','dishwasher','appliance','repair','machine','geysir','geyzer','उपकरण','washer','dryer'] },
+    { key:'cleaning', name:'Deep Cleaning', icon:'🧹', terms:['clean','cleaning','deep clean','sofa clean','carpet clean','sanitize','disinfect','sweep','mop','सफाई','साफ','home clean','house clean','office clean'] },
+    { key:'pest-control', name:'Pest Control', icon:'🐛', terms:['pest','cockroach','roach','termite','bedbug','bed bug','mosquito','rat','mouse','mice','fumigation','fumigate','pest spray','pest treatment','कीट','dengue spray','mosquito spray'] },
+    { key:'painting', name:'Painting', icon:'🎨', terms:['paint','painting','wall paint','whitewash','polish','rang','रंग','पेंट','paint peeling','exterior paint','interior paint'] },
+    { key:'carpentry', name:'Carpentry & Furniture', icon:'🪚', terms:['carpenter','carpentry','furniture','sofa repair','door repair','window repair','almira','cupboard','wood work','laminate','बढ़ई','wardrobe','cabinet'] },
+    { key:'interior', name:'Interior Design', icon:'🏠', terms:['interior','interior design','decor','false ceiling','modular kitchen','home design','room design'] },
+    { key:'renovation', name:'Renovation', icon:'🏗️', terms:['renovation','renovate','makeover','remodel','revamp'] },
+    { key:'construction', name:'Construction', icon:'🏗️', terms:['construction','contractor','civil work','building work'] },
+    { key:'cctv', name:'CCTV Installation', icon:'📷', terms:['cctv','camera','security camera','surveillance','install camera','dvr','nvr'] },
+    { key:'ro-purifier', name:'RO / Water Purifier', icon:'🫧', terms:['ro','water purifier','purifier','water filter','ro service','ro repair','kent','aquaguard'] },
+    { key:'solar', name:'Solar & Inverter', icon:'☀️', terms:['solar','solar panel','solar install','inverter','battery backup'] },
+    { key:'waterproofing', name:'Waterproofing', icon:'💧', terms:['waterproof','waterproofing','seepage','leakage roof','terrace leak','wall damp','damp'] },
+    { key:'tiles', name:'Tile & Flooring', icon:'🪟', terms:['tile','tiles','flooring','marble','granite','mosaic','floor repair','floor polish'] },
   ];
 
-  // Fuzzy match — query word matches keyword if first 5 chars overlap OR substring match
-  function fuzzyMatch(word, keyword) {
-    if (keyword.length < 3) return word === keyword;
-    var minLen = Math.min(word.length, keyword.length, 5);
-    return word.indexOf(keyword) !== -1 || keyword.indexOf(word) !== -1 ||
-      (minLen >= 4 && word.slice(0, minLen) === keyword.slice(0, minLen));
+  // Common short words that should never drive a fuzzy/substring match on
+  // their own (only an exact keyword match) — otherwise a token like "not"
+  // can fuzzy-match an unrelated 3-letter keyword like "ant" and drag in
+  // irrelevant categories (this was the literal cause of Pest Control
+  // showing up for "AC not cooling").
+  var SEARCH_STOPWORDS = { 'not':1,'and':1,'the':1,'is':1,'for':1,'with':1,'a':1,'an':1,'to':1,'in':1,'of':1,'on':1,'my':1,'i':1,'am':1,'are':1,'it':1,'do':1,'does':1,'has':1,'have':1 };
+
+  function _buildPagesIndex() {
+    SEARCH_PAGES = [
+      { type:'page', id:'about', name:'About Us', category:'Company', description:"Learn about Remont India's marketplace of verified service professionals.", keywords:['about','about us','company','who we are'], url:'/about' },
+      { type:'page', id:'contact', name:'Contact Us', category:'Company', description:'Phone, WhatsApp, and email support for bookings and order queries.', keywords:['contact','support','help','phone','call','whatsapp','email'], url:'/contact' },
+      { type:'page', id:'careers', name:'Careers', category:'Company', description:'Join as a verified service professional, product seller, or on our core team.', keywords:['careers','jobs','job','work with us','partner','join','vacancy'], url:'/careers' },
+      { type:'page', id:'blog', name:'Blog', category:'Company', description:'Guides and updates on home maintenance and service tips.', keywords:['blog','articles','news'], url:'/blog' },
+      { type:'page', id:'faq', name:'FAQ', category:'Support', description:'Frequently asked questions about booking, pricing, and payments.', keywords:['faq','frequently asked questions','questions'], url:'/#faq' },
+      { type:'page', id:'terms', name:'Terms & Conditions', category:'Legal', description:'Terms and conditions for using Remont India.', keywords:['terms','terms and conditions','tos','terms of service'], url:'/terms' },
+      { type:'page', id:'privacy', name:'Privacy Policy', category:'Legal', description:'How Remont India collects and uses your information.', keywords:['privacy','privacy policy','data policy'], url:'/privacy' },
+      { type:'page', id:'refund-policy', name:'Refund & Cancellation Policy', category:'Legal', description:'How cancellations and refund requests are reviewed and resolved.', keywords:['refund','refund policy','cancellation','cancel order'], url:'/refund-policy' },
+      { type:'page', id:'shipping-policy', name:'Shipping & Service Policy', category:'Legal', description:'How service dispatch and product delivery work.', keywords:['shipping','shipping policy','delivery','service policy'], url:'/shipping-policy' },
+      { type:'page', id:'corporate', name:'Corporate Portal', category:'Business', description:'Multi-location business accounts with centralized GST billing.', keywords:['corporate','business','b2b','corporate portal'], url:'/#corporate' },
+    ];
   }
 
-  // Returns matching service entries from SMART_KEYWORDS
-  function smartKeywordSearch(query) {
-    var qWords = query.toLowerCase().replace(/[^a-z0-9ऀ-ॿ ]/g,'').split(/\s+/).filter(Boolean);
-    var hits = [], seen = {};
-    SMART_KEYWORDS.forEach(function(entry) {
-      if (seen[entry.svc]) return;
-      var matched = entry.w.some(function(kw) {
-        return qWords.some(function(qw) { return fuzzyMatch(qw, kw) || fuzzyMatch(kw, qw); });
-      });
-      if (matched) {
-        seen[entry.svc] = true;
-        hits.push({ id:'', name: entry.svc, category:{ name: entry.svc, key: entry.cat }, basePrice: null, _icon: entry.icon });
-      }
+  function _indexCitiesFromData() {
+    SEARCH_CITIES = (bookingCities || []).map(function(c) {
+      var slug = (c.name || '').toLowerCase().trim().replace(/\s+/g, '-');
+      return {
+        type: 'city', id: c.id, name: c.name, category: c.state || 'City',
+        description: 'Remont India services in ' + c.name + (c.state ? ', ' + c.state : ''),
+        keywords: [(c.name || '').toLowerCase()], url: '/cities/' + slug,
+        _popularity: Math.min(20, (c.activeVendors || 0)),
+      };
     });
-    return hits;
   }
 
-  // Exact/substring search in loaded serviceData
-  function localSearch(query) {
-    var q = query.toLowerCase();
-    var hits = [], seen = {};
+  function _indexPlansFromData(plans) {
+    SEARCH_PLANS = (plans || []).map(function(p, i) {
+      return {
+        type: 'plan', id: p.id || ('plan-' + i), name: p.name || 'AMC Plan', category: 'AMC Plan',
+        description: p.description || 'Annual Maintenance Contract bundling recurring service visits.',
+        keywords: ['amc', 'annual maintenance', 'amc plan', 'maintenance contract', (p.name || '').toLowerCase()],
+        url: '/#amc', _popularity: 10,
+      };
+    });
+  }
+
+  // Snapshot the ORIGINAL hardcoded serviceData products right now, synchronously,
+  // before buildServicePanel()'s async API response later replaces serviceData[key]
+  // with { products: [] } (category products aren't re-fetched into that shape).
+  // A broader live catalog is merged in separately via _fetchProductsForSearch().
+  function _indexProductsFromServiceData() {
+    var out = [];
+    Object.keys(serviceData).forEach(function(key) {
+      var d = serviceData[key];
+      if (!d || !d.products) return;
+      d.products.forEach(function(p) {
+        out.push({
+          type: 'product', id: p.id, name: p.name, category: p.brand || d.title,
+          description: (p.brand ? p.brand + ' — ' : '') + p.name,
+          keywords: [(p.brand || '').toLowerCase()],
+          url: null, _productMeta: p,
+          _popularity: (p.badge === 'Bestseller' ? 15 : 0) + Math.round((parseFloat(p.rating) || 0) * 2),
+        });
+      });
+    });
+    SEARCH_PRODUCTS = out;
+  }
+
+  function _mergeApiProducts(list) {
+    var existingIds = {};
+    SEARCH_PRODUCTS.forEach(function(e) { existingIds[e.id] = true; });
+    (list || []).forEach(function(p) {
+      if (existingIds[p.id]) return;
+      SEARCH_PRODUCTS.push({
+        type: 'product', id: p.id, name: p.name,
+        category: p.brand || (p.category && p.category.name) || 'Product',
+        description: p.description || (p.brand ? p.brand + ' ' + p.name : p.name),
+        keywords: [].concat(p.brand ? [p.brand.toLowerCase()] : [], p.seoKeywords || []),
+        url: null, _productMeta: p,
+        _popularity: Math.round((p.rating || 0) * 2) + Math.round(Math.log10(1 + (p.reviewCount || 0)) * 4),
+      });
+    });
+  }
+
+  function _fetchProductsForSearch() {
+    apiGet('/api/v1/products?limit=300').then(function(res) {
+      var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+      _mergeApiProducts(list);
+    }).catch(function() {}); // seed products from serviceData already cover search either way
+  }
+
+  function _indexServicesFromData() {
+    var out = [];
     Object.keys(serviceData).forEach(function(key) {
       var d = serviceData[key];
       if (!d) return;
-      if ((d.title||'').toLowerCase().indexOf(q) !== -1 && !seen[d.title]) {
-        seen[d.title] = true;
-        hits.push({ id: d.id||'', name: d.title, category:{ name: d.title, key: key.toUpperCase() }, basePrice: null });
-      }
-      (d.services||[]).forEach(function(s) {
-        if ((s.name||'').toLowerCase().indexOf(q) !== -1 && !seen[s.name]) {
-          seen[s.name] = true;
-          hits.push({ id: s.id||'', name: s.name, category:{ name: d.title, key: key.toUpperCase() }, basePrice: s.price||null });
-        }
+      var syn = SYNONYM_MAP.filter(function(s) { return s.key === key || d.title === s.name; });
+      var kw = [];
+      syn.forEach(function(s) { kw = kw.concat(s.terms); });
+      var isPopular = ['ac', 'plumbing', 'electrical'].indexOf(key) !== -1;
+      // Category-level entry — clicking opens the category's SEO landing page when one
+      // exists; falls back to the booking flow's category key when it doesn't.
+      out.push({
+        type: 'service', id: null, categoryKey: key, name: d.title, category: 'Service Category',
+        description: d.subtitle || ('Professional ' + d.title + ' services'),
+        keywords: kw.length ? kw : [d.title.toLowerCase()],
+        url: null, _popularity: isPopular ? 15 : 5,
+      });
+      (d.subServices || []).forEach(function(s) {
+        out.push({
+          type: 'service', id: s.id, categoryKey: key, name: s.n, category: d.title,
+          description: s.desc || (d.title + ' — ' + s.n),
+          keywords: kw, price: s.pNum, priceLabel: s.p,
+          url: null, _popularity: isPopular ? 10 : 3,
+        });
       });
     });
-    return hits;
+    SEARCH_SERVICES = out;
   }
 
-  function openSearchDrop(html) { searchDropEl.innerHTML = html; searchDropEl.classList.add('open'); }
-  function closeSearchDrop() { searchDropEl.classList.remove('open'); searchDropEl.innerHTML = ''; }
+  // ── Fuzzy matching (Levenshtein distance, no external library) ─────
+  function _levenshtein(a, b) {
+    if (a === b) return 0;
+    var al = a.length, bl = b.length;
+    if (!al) return bl;
+    if (!bl) return al;
+    if (Math.abs(al - bl) > 3) return 99; // cheap short-circuit for obviously-different lengths
+    var prev = [];
+    for (var j = 0; j <= bl; j++) prev[j] = j;
+    for (var i = 1; i <= al; i++) {
+      var cur = [i];
+      for (var j2 = 1; j2 <= bl; j2++) {
+        cur[j2] = a[i - 1] === b[j2 - 1] ? prev[j2 - 1] : 1 + Math.min(prev[j2 - 1], prev[j2], cur[j2 - 1]);
+      }
+      prev = cur;
+    }
+    return prev[bl];
+  }
 
-  function renderSearchResults(results, query) {
-    if (!results || !results.length) {
-      openSearchDrop(
-        '<div class="sd-empty">' +
-          '🔍 No exact match for "<strong>' + query + '</strong>"<br>' +
-          '<span style="font-size:11px;color:#9ca3af">Let our AI assistant help you</span>' +
-          '<br><button onclick="closeSearchDrop();document.querySelector(\'.ai-fab\')&&document.querySelector(\'.ai-fab\').click()" ' +
-          'style="margin-top:10px;padding:8px 18px;background:var(--sienna);color:#fff;border:none;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer">🤖 Ask Remi AI</button>' +
-        '</div>'
-      );
+  // A flat "distance <= 2" tolerance is too loose for short words — 3-letter
+  // keywords like "mcb"/"fan"/"damp" sit within distance 2 of totally unrelated
+  // tokens like "amc"/"tap" (this was found and confirmed while testing the
+  // "AC not cooling" / "amc" cases: "amc" is genuinely only 2 edits from both
+  // "mcb" and "damp"). Scale the allowed distance down for shorter words so a
+  // typo has to be proportionally small relative to the word's own length.
+  function _fuzzyOk(a, b) {
+    var maxLen = Math.max(a.length, b.length);
+    var maxDist = Math.min(2, Math.floor(maxLen / 3));
+    if (maxDist < 1) return false;
+    return _levenshtein(a, b) <= maxDist;
+  }
+
+  // ── Relevance scoring ────────────────────────────────────────────────
+  // Tiers are spaced far enough apart (≥100) that the small popularity boost
+  // (capped below) can never let a lower tier cross into a higher one —
+  // "never let a weak description-only match outrank a strong name match."
+  var TIER_EXACT = 1000, TIER_WORD_EXACT = 900, TIER_PREFIX = 800, TIER_SYNONYM = 600,
+      TIER_SYNONYM_PARTIAL = 550, TIER_FUZZY = 500, TIER_FUZZY_KW = 450, TIER_CONTAINS = 400, TIER_DESC = 120;
+  var POPULARITY_CAP = 30;
+
+  function _norm(s) { return (s == null ? '' : String(s)).toLowerCase().trim(); }
+
+  function _scoreEntry(entry, qLower, qTokens) {
+    var name = _norm(entry.name);
+    if (!name) return 0;
+    var best = 0;
+
+    if (name === qLower) best = TIER_EXACT;
+    else if (name.indexOf(qLower) === 0) best = Math.max(best, TIER_PREFIX);
+    else if (qLower.length >= 3 && name.indexOf(qLower) !== -1) best = Math.max(best, TIER_CONTAINS);
+
+    var nameWords = name.split(/\s+/);
+    qTokens.forEach(function(tok) {
+      if (tok.length < 2) return;
+      var isStop = !!SEARCH_STOPWORDS[tok];
+
+      (entry.keywords || []).forEach(function(kw) {
+        var kwN = _norm(kw);
+        if (!kwN) return;
+        if (kwN === tok) { best = Math.max(best, TIER_SYNONYM); return; }
+        if (isStop || tok.length < 3) return;
+        if (kwN.indexOf(tok) !== -1 || tok.indexOf(kwN) !== -1) { best = Math.max(best, TIER_SYNONYM_PARTIAL); return; }
+        if (kwN.length >= 3 && _fuzzyOk(tok, kwN)) best = Math.max(best, TIER_FUZZY_KW);
+      });
+
+      if (isStop || tok.length < 3) return;
+      nameWords.forEach(function(nw) {
+        if (nw === tok) { best = Math.max(best, TIER_WORD_EXACT); return; }
+        if (nw.indexOf(tok) !== -1) { best = Math.max(best, TIER_CONTAINS); return; }
+        if (nw.length >= 3 && _fuzzyOk(tok, nw)) best = Math.max(best, TIER_FUZZY);
+      });
+    });
+
+    if (best === 0) {
+      var desc = _norm(entry.description);
+      if (desc) {
+        var descHit = desc.indexOf(qLower) !== -1 || qTokens.some(function(t) { return t.length >= 4 && desc.indexOf(t) !== -1; });
+        if (descHit) best = TIER_DESC;
+      }
+    }
+
+    if (best === 0) return 0;
+    return best + Math.min(POPULARITY_CAP, entry._popularity || 0);
+  }
+
+  function _tokenize(query) {
+    return _norm(query).replace(/[^a-z0-9ऀ-ॿ ]/g, '').split(/\s+/).filter(Boolean);
+  }
+
+  // Returns { grouped: [{type,label,items}], flat: [...] } — flat is what
+  // keyboard nav walks; grouped is what render uses when scope === 'all'.
+  function _runUnifiedSearch(query) {
+    var qLower = _norm(query);
+    var qTokens = _tokenize(query);
+    var pools;
+    if (_searchScope === 'service') pools = { service: SEARCH_SERVICES };
+    else if (_searchScope === 'product') pools = { product: SEARCH_PRODUCTS };
+    else pools = { service: SEARCH_SERVICES, product: SEARCH_PRODUCTS, plan: SEARCH_PLANS, page: SEARCH_PAGES, city: SEARCH_CITIES };
+
+    var perTypeCap = _searchScope === 'all' ? 3 : 8;
+    var grouped = [];
+    var flat = [];
+    TYPE_GROUP_ORDER.forEach(function(type) {
+      var pool = pools[type];
+      if (!pool) return;
+      var scored = pool.map(function(e) { return { entry: e, score: _scoreEntry(e, qLower, qTokens) }; })
+        .filter(function(x) { return x.score > 0; })
+        .sort(function(a, b) { return b.score - a.score; })
+        .slice(0, perTypeCap);
+      if (!scored.length) return;
+      var items = scored.map(function(x) { return x.entry; });
+      grouped.push({ type: type, label: TYPE_GROUP_LABELS[type], items: items });
+      flat = flat.concat(items);
+    });
+    // Overall dropdown cap (~6-8 results) — trim lowest-priority groups first
+    // (services/products already sort first via TYPE_GROUP_ORDER).
+    if (flat.length > 8) {
+      var kept = 0;
+      grouped = grouped.map(function(g) {
+        var room = Math.max(0, 8 - kept);
+        var items = g.items.slice(0, room);
+        kept += items.length;
+        return { type: g.type, label: g.label, items: items };
+      }).filter(function(g) { return g.items.length; });
+      flat = [];
+      grouped.forEach(function(g) { flat = flat.concat(g.items); });
+    }
+    return { grouped: grouped, flat: flat };
+  }
+
+  // ── Empty-state helpers: fuzzy "did you mean" + popular fallback ────
+  function _closestSuggestions(qLower, limit) {
+    var all = SEARCH_SERVICES.concat(SEARCH_PRODUCTS);
+    var scored = all.map(function(e) {
+      var name = _norm(e.name);
+      return { entry: e, dist: _levenshtein(qLower.slice(0, name.length + 3), name) };
+    }).filter(function(x) { return x.entry.name && x.dist <= Math.max(3, Math.floor(qLower.length / 2)); })
+      .sort(function(a, b) { return a.dist - b.dist; });
+    var seen = {}, out = [];
+    scored.forEach(function(x) {
+      if (out.length >= limit || seen[x.entry.name]) return;
+      seen[x.entry.name] = true;
+      out.push(x.entry);
+    });
+    return out;
+  }
+
+  function _popularFallback(limit) {
+    var pool = _searchScope === 'product' ? SEARCH_PRODUCTS : (_searchScope === 'service' ? SEARCH_SERVICES : SEARCH_SERVICES.concat(SEARCH_PRODUCTS));
+    return pool.slice().sort(function(a, b) { return (b._popularity || 0) - (a._popularity || 0); }).slice(0, limit);
+  }
+
+  function openSearchDrop(html) { searchDropEl.innerHTML = html; searchDropEl.classList.add('open'); searchDropEl.setAttribute('aria-hidden', 'false'); }
+  function closeSearchDrop() {
+    searchDropEl.classList.remove('open'); searchDropEl.innerHTML = ''; searchDropEl.setAttribute('aria-hidden', 'true');
+    _searchActiveIdx = -1; _searchLastResults = [];
+    if (headerInput) { headerInput.setAttribute('aria-expanded', 'false'); headerInput.removeAttribute('aria-activedescendant'); }
+  }
+
+  function _scopeTabsHtml() {
+    var tabs = [['all', 'All'], ['service', 'Services'], ['product', 'Products']];
+    return '<div class="sd-scopes" role="tablist" aria-label="Search scope">' +
+      tabs.map(function(t) {
+        return '<div class="sd-scope-tab' + (_searchScope === t[0] ? ' active' : '') + '" role="tab" aria-selected="' + (_searchScope === t[0]) + '" onclick="setSearchScope(\'' + t[0] + '\')">' + t[1] + '</div>';
+      }).join('') + '</div>';
+  }
+
+  function setSearchScope(scope) {
+    _searchScope = scope;
+    var pill = document.getElementById('searchScope');
+    if (pill) pill.textContent = scope === 'service' ? 'All Services' : (scope === 'product' ? 'All Products' : 'All');
+    runSearch(headerInput.value);
+  }
+
+  function _resultItemHtml(entry, idx) {
+    var badge = '<span class="sd-badge ' + entry.type + '">' + TYPE_LABELS[entry.type] + '</span>';
+    var icon = TYPE_ICONS[entry.type];
+    if (entry.type === 'service') icon = (SYNONYM_MAP.filter(function(s){ return s.key === entry.categoryKey; })[0] || {}).icon || CAT_ICONS.DEFAULT;
+    var meta = entry.category || '';
+    var priceHtml = '';
+    if (entry.type === 'service' && entry.priceLabel) priceHtml = '<div class="sd-price">' + entry.priceLabel + '</div>';
+    else if (entry.type === 'product' && entry._productMeta && entry._productMeta.price) priceHtml = '<div class="sd-price">₹' + entry._productMeta.price + '</div>';
+    else priceHtml = '<div class="sd-price" style="font-size:11px;color:#9ca3af">' + (entry.type === 'service' ? 'Book Now' : (entry.type === 'product' ? 'View' : 'Open')) + '</div>';
+    return '<div class="sd-item" id="sd-opt-' + idx + '" role="option" aria-selected="false" onclick="_activateSearchResult(' + idx + ')">' +
+      '<div class="sd-icon">' + icon + '</div>' +
+      '<div class="sd-info"><div class="sd-name-row"><span class="sd-name">' + escHtml(entry.name || '') + '</span>' + badge + '</div>' +
+      '<div class="sd-meta">' + escHtml(meta) + '</div></div>' + priceHtml +
+      '</div>';
+  }
+
+  function _emptyStateHtml(query) {
+    var qLower = _norm(query);
+    var suggestions = _closestSuggestions(qLower, 4);
+    var popular = _popularFallback(4);
+    var html = '<div class="sd-empty" style="padding-bottom:4px">🔍 No results for "<strong>' + escHtml(query) + '</strong>"</div>';
+    if (suggestions.length) {
+      html += '<div class="sd-suggest-lbl">Did you mean…?</div>' +
+        '<div class="sd-suggest-row">' + suggestions.map(function(e) {
+          return '<div class="sd-suggest-chip" onclick="headerSearchInput.value=\'' + e.name.replace(/'/g, "\\'") + '\';runSearch(headerSearchInput.value)">' + escHtml(e.name) + '</div>';
+        }).join('') + '</div>';
+    }
+    if (popular.length) {
+      html += '<div class="sd-group-hdr">Popular</div>' +
+        popular.map(function(e, i) { return _resultItemHtml(e, 'pop' + i); }).join('');
+    }
+    html += '<div style="padding:12px 18px;text-align:center;border-top:1px solid #f3f0eb">' +
+      '<button onclick="closeSearchDrop();openRemiChat()" style="padding:8px 18px;background:var(--sienna);color:#fff;border:none;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer">🤖 Ask Remi AI</button>' +
+      '</div>';
+    return html;
+  }
+
+  window._activateSearchResult = function(idx) {
+    var entry = _searchLastResults[idx];
+    if (!entry) return;
+    closeSearchDrop();
+    if (entry.type === 'service') {
+      if (entry.id) { openBookingModal(entry.id, entry.name, entry.priceLabel || ''); }
+      else {
+        var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/services/interior-design', renovation:'/services/renovation', construction:'/services/construction' };
+        if (svcSubpages[entry.categoryKey]) window.location.href = svcSubpages[entry.categoryKey];
+        else openBookingModal('', entry.name, '');
+      }
+    } else if (entry.type === 'product') {
+      var p = entry._productMeta || {};
+      addToCart({ id: p.id || entry.id, name: entry.name, price: parseFloat((p.price || '0').toString().replace(/,/g, '')) || 0, type: 'product' });
+      openCart();
+    } else if (entry.type === 'plan' || entry.type === 'page' || entry.type === 'city') {
+      if (entry.url) window.location.href = entry.url;
+    }
+  };
+
+  function renderSearchResults(result, query) {
+    _searchLastResults = result.flat;
+    if (!result.flat.length) {
+      openSearchDrop(_scopeTabsHtml() + _emptyStateHtml(query));
       return;
     }
-    var html = results.slice(0, 8).map(function(s) {
-      var catKey = (s.category && s.category.key) ? s.category.key : 'DEFAULT';
-      var icon = s._icon || CAT_ICONS[catKey] || CAT_ICONS.DEFAULT;
-      var cat  = (s.category && s.category.name) ? s.category.name : '';
-      var price = s.basePrice ? '₹' + Number(s.basePrice).toLocaleString('en-IN') : '';
-      var svcId = (s.id || '').replace(/'/g,"\\'");
-      var svcName = (s.name || '').replace(/'/g,"\\'");
-      return '<div class="sd-item" onclick="closeSearchDrop();openBookingModal(\'' + svcId + '\',\'' + svcName + '\',\'' + price + '\')">' +
-        '<div class="sd-icon">' + icon + '</div>' +
-        '<div class="sd-info"><div class="sd-name">' + (s.name||'') + '</div><div class="sd-meta">' + cat + '</div></div>' +
-        (price ? '<div class="sd-price">' + price + '</div>' : '<div class="sd-price" style="font-size:11px;color:#9ca3af">Book Now</div>') +
-        '</div>';
-    }).join('');
+    var idx = 0;
+    var html = _scopeTabsHtml();
+    if (_searchScope === 'all' && result.grouped.length > 1) {
+      result.grouped.forEach(function(g) {
+        html += '<div class="sd-group-hdr">' + g.label + '</div>';
+        g.items.forEach(function(entry) { html += _resultItemHtml(entry, idx); idx++; });
+      });
+    } else {
+      result.flat.forEach(function(entry) { html += _resultItemHtml(entry, idx); idx++; });
+    }
     openSearchDrop(html);
+    if (headerInput) headerInput.setAttribute('aria-expanded', 'true');
   }
 
   function runSearch(query) {
     query = (query || '').trim();
     if (!query) { closeSearchDrop(); return; }
-    openSearchDrop('<div class="sd-loading">🔍 Searching…</div>');
-
-    apiGet('/api/v1/services/search?q=' + encodeURIComponent(query))
-      .then(function(res) {
-        var data = res && res.data ? res.data : (Array.isArray(res) ? res : []);
-        // If API returns nothing, use smart keyword + local fallback
-        if (!data.length) data = smartKeywordSearch(query);
-        if (!data.length) data = localSearch(query);
-        renderSearchResults(data, query);
-      })
-      .catch(function() {
-        // API unreachable — use smart keyword map first, then local
-        var data = smartKeywordSearch(query);
-        if (!data.length) data = localSearch(query);
-        renderSearchResults(data, query);
-      });
+    var result = _runUnifiedSearch(query);
+    renderSearchResults(result, query);
+    _searchActiveIdx = -1;
   }
 
-  // Live search — 350ms debounce
+  function _moveSearchActive(delta) {
+    if (!_searchLastResults.length) return;
+    var prevIdx = _searchActiveIdx;
+    _searchActiveIdx = Math.max(0, Math.min(_searchLastResults.length - 1, _searchActiveIdx + delta));
+    var prevEl = document.getElementById('sd-opt-' + prevIdx);
+    if (prevEl) { prevEl.classList.remove('kb-active'); prevEl.setAttribute('aria-selected', 'false'); }
+    var el = document.getElementById('sd-opt-' + _searchActiveIdx);
+    if (el) {
+      el.classList.add('kb-active'); el.setAttribute('aria-selected', 'true');
+      el.scrollIntoView({ block: 'nearest' });
+      if (headerInput) headerInput.setAttribute('aria-activedescendant', 'sd-opt-' + _searchActiveIdx);
+    }
+  }
+
+  // Live search — ~250ms debounce
   if (headerInput) {
+    headerInput.setAttribute('role', 'combobox');
+    headerInput.setAttribute('aria-autocomplete', 'list');
+    headerInput.setAttribute('aria-controls', 'searchDropdown');
+    headerInput.setAttribute('aria-expanded', 'false');
+    searchDropEl.setAttribute('role', 'listbox');
+    searchDropEl.setAttribute('aria-label', 'Search results');
+
     headerInput.addEventListener('input', function() {
       clearTimeout(searchTimer);
       var q = headerInput.value.trim();
       if (!q) { closeSearchDrop(); return; }
-      searchTimer = setTimeout(function() { runSearch(q); }, 350);
+      searchTimer = setTimeout(function() { runSearch(q); }, 250);
     });
     headerInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(headerInput.value); }
-      if (e.key === 'Escape') closeSearchDrop();
+      if (e.key === 'ArrowDown') { e.preventDefault(); _moveSearchActive(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); _moveSearchActive(-1); }
+      else if (e.key === 'Enter') {
+        clearTimeout(searchTimer);
+        if (_searchActiveIdx >= 0 && _searchLastResults[_searchActiveIdx]) window._activateSearchResult(_searchActiveIdx);
+        else runSearch(headerInput.value);
+      } else if (e.key === 'Escape') closeSearchDrop();
     });
   }
+
+  _buildPagesIndex();
+  _indexProductsFromServiceData();
+  _indexServicesFromData();
+  _fetchProductsForSearch();
 
   // ── Voice search (Web Speech API) ──────────────────────────────────
   (function() {
@@ -6293,6 +6826,7 @@
     var icons = ['🏙️','🌆','🏞️','🏛️','🌅','🏰','🌉','🌃','🏟️','🌄','🌇','🏯','🌃','🏙️','🌆'];
     var activeCities = cities.filter(function(c){ return c.isActive; });
     bookingCities = activeCities;
+    _indexCitiesFromData();
 
     var html = '<div class="cm-section-label">Available Cities</div><div class="cm-city-grid">';
     activeCities.forEach(function(c, i) {
@@ -6380,6 +6914,7 @@
         _fromApi: true,
       };
     });
+    _indexServicesFromData();
 
     // Update the static svc-panel HTML items to match API categories
     var panel = document.querySelector('.svc-panel');
@@ -6664,6 +7199,7 @@
     apiGet('/api/v1/amc/plans').then(function(data) {
       var plans = Array.isArray(data) ? data : (data && data.data ? data.data : []);
       if (plans && plans.length) renderAmcPlans(plans);
+      _indexPlansFromData(plans);
     }).catch(function(){});
   }
 
@@ -6703,6 +7239,7 @@
     window._bmPriceNum = pNum;
     window._bmCoupon = null;
     window._bmPayMethod = 'COD';
+    _bmGpsChecked = false; // re-check GPS proximity fresh for every new booking session
 
     var today = new Date().toISOString().slice(0, 10);
     document.getElementById('bm-date').value = today;
@@ -6935,7 +7472,55 @@
     document.body.style.overflow = '';
   }
 
-  function submitBooking() {
+  // ── Booking validation: city/address match + GPS-vs-address proximity ──────
+  // Booking City vs the selected saved address's City — a freshly-typed "+ Add New
+  // Address" entry has no separate city field of its own (see bm-address textarea),
+  // so it implicitly takes the booking city and can never mismatch; this only
+  // applies when an existing saved address (with its own stored city) is selected.
+  function _bmCheckCityMatch(addrId, savedAddr) {
+    if (!addrId || !savedAddr || !savedAddr.city) return null;
+    var citySel = document.getElementById('bm-city');
+    if (!citySel || citySel.selectedIndex < 0 || !citySel.value) return null; // no city picked yet — unrelated required-field check handles this
+    var cityName = citySel.options[citySel.selectedIndex].textContent;
+    if (savedAddr.city.trim().toLowerCase() !== cityName.trim().toLowerCase()) {
+      return 'The selected address belongs to ' + savedAddr.city + ' while your booking city is ' + cityName + '. Please select the correct address or change the booking city.';
+    }
+    return null;
+  }
+
+  // "for example 300–500 meters" per the spec — one named constant, easy to retune.
+  var BOOKING_GPS_MISMATCH_METERS = 400;
+  var _bmGpsChecked = false; // reset per booking session in openBookingModal (above)
+
+  // Resolves true when it's OK to proceed with the booking API call, false when the
+  // customer chose to switch to their current GPS location instead (address fields
+  // were just refreshed — they must review and tap Confirm & Book again). Never
+  // blocks on missing/denied GPS, and never forces a switch the customer didn't ask for.
+  function _bmCheckGpsProximity(addrId, savedAddr) {
+    return new Promise(function(resolve) {
+      var hasCoords = savedAddr && LocationService.isValidCoords(savedAddr.latitude, savedAddr.longitude);
+      if (_bmGpsChecked || !addrId || !hasCoords) { resolve(true); return; }
+      LocationService.requestGPS(function(loc) {
+        _bmGpsChecked = true;
+        var distKm = _haversineKm(loc.latitude, loc.longitude, savedAddr.latitude, savedAddr.longitude);
+        if (distKm * 1000 <= BOOKING_GPS_MISMATCH_METERS) { resolve(true); return; }
+        var useGps = confirm('You appear to be at a different location. Do you want to update your booking address to your current location?');
+        if (!useGps) { resolve(true); return; } // e.g. booking for home while currently at the office — respected, not overridden
+        bmUseNewAddr();
+        LocationService.reverseGeocode(loc.latitude, loc.longitude, function(err, geo) {
+          var text = (geo && geo.fullAddress) ? geo.fullAddress : (loc.latitude.toFixed(5) + ', ' + loc.longitude.toFixed(5));
+          document.getElementById('bm-address').value = text;
+          showToast('Address updated to your current location — review and tap Confirm & Book again.', 'success');
+        });
+        resolve(false);
+      }, function(/* denied or unavailable */) {
+        _bmGpsChecked = true; // don't re-prompt for permission on every tap
+        resolve(true);
+      });
+    });
+  }
+
+  async function submitBooking() {
     var svcId   = document.getElementById('bm-svc-id').value;
     var name    = document.getElementById('bm-name').value.trim();
     var phone   = document.getElementById('bm-phone').value.trim();
@@ -6959,6 +7544,12 @@
     }
     if (!fullAddress) { showToast('Please enter a service address', 'error'); return; }
 
+    var cityMismatchMsg = _bmCheckCityMatch(addrId, savedAddr);
+    if (cityMismatchMsg) { showToast(cityMismatchMsg, 'error'); return; }
+
+    var okToProceed = await _bmCheckGpsProximity(addrId, savedAddr);
+    if (!okToProceed) return;
+
     var btn = document.getElementById('bm-next-btn');
     btn.textContent = 'Booking…'; btn.disabled = true;
 
@@ -6973,8 +7564,10 @@
     if (notes) payload.notes = notes;
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
 
-    apiPost('/api/v1/orders/public/book', payload).then(function(res) {
+    try {
+      var res = await bmBookingRequest(payload);
       var r = res && res.data ? res.data : res;
+
       if (r.requiresPayment) {
         window._bmPendingPayment = {
           orderId: r.orderId, orderNumber: r.orderNumber, totalAmount: r.totalAmount,
@@ -6983,16 +7576,45 @@
         bmLaunchRazorpay();
         return;
       }
+
       // COD — confirmed immediately
       btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
       var orderNum = r.orderNumber || '—';
       _lastBookedOrderNum = orderNum;
+      showToast('Booking confirmed! Order #' + orderNum, 'success');
       closeBookingModal();
-      document.getElementById('success-order-num').textContent = orderNum;
-      document.getElementById('booking-success').style.display = 'flex';
-    }).catch(function(err) {
+      openTrackingModalWithOrder();
+      trackOrderSubmit();
+    } catch (err) {
+      // Full detail for debugging; the toast below stays user-friendly.
+      console.error('[submitBooking] Booking request failed:', err, err && err.status, err && err.body);
       btn.textContent = '✔ Confirm & Book'; btn.disabled = false;
-      showToast((err && err.message) || 'Booking failed. Please call us to book.', 'error');
+      showToast('We could not complete your booking. Please try again.', 'error');
+      // Modal is intentionally left open (not closed) so the user can retry.
+    }
+  }
+
+  // Dedicated fetch for the booking call (rather than the shared apiPost helper)
+  // so a non-2xx response's parsed body is available for console logging —
+  // apiPost() only ever surfaces the bare HTTP status code.
+  function bmBookingRequest(payload) {
+    var token = localStorage.getItem('remont_token');
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch((API_BASE || '') + '/api/v1/orders/public/book', {
+      method: 'POST', headers: headers, body: JSON.stringify(payload)
+    }).then(function(res) {
+      return res.text().then(function(text) {
+        var body = null;
+        try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+        if (!res.ok) {
+          var err = new Error((body && body.message) || ('Booking request failed with HTTP ' + res.status));
+          err.status = res.status;
+          err.body = body;
+          throw err;
+        }
+        return body;
+      });
     });
   }
 
@@ -7939,6 +8561,19 @@ function cartCheckout() {
       <button class="tap-target-fix" onclick="closePaymentDetailModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
     </div>
     <div id="pd-body" style="padding:20px 24px;min-height:150px">
+      <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ORDER DETAILS MODAL (info, vendor, address, timeline, live tracking map) ═══ -->
+<div id="order-details-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10250;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:0;width:560px;max-width:96vw;max-height:90vh;overflow:auto;position:relative">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="font-size:18px;font-weight:700;color:#111">Order Details</h3>
+      <button class="tap-target-fix" onclick="closeOrderDetailsModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <div id="od-body" style="padding:20px 24px;min-height:200px">
       <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
     </div>
   </div>
@@ -9061,7 +9696,7 @@ function _renderOrderCard(o) {
   var payRetryAmount = o.masterOrderId && o.masterOrder ? Number(o.masterOrder.totalAmount || 0) : Number(o.totalAmount || 0);
   var payRetryNumber = (o.masterOrderId && o.masterOrder && o.masterOrder.masterOrderNumber) || o.orderNumber || '';
   var payRetryIsMaster = !!o.masterOrderId;
-  return '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px;background:#fff">' +
+  return '<div onclick="if(event.target.closest(\'button,a\'))return;openOrderDetailsModal(\'' + o.id + '\')" style="border:1.5px solid #f3f4f6;border-radius:12px;padding:16px;margin-bottom:12px;background:#fff;cursor:pointer">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
       '<div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(serviceName) + '</div>' +
         '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + ' · ' + date + '</div></div>' +
@@ -9443,6 +10078,176 @@ function cancelOrderFromList(orderId) {
     showToast('Could not cancel order', 'error');
   });
 }
+
+// ── Order Details Modal — full order info + live tracking map ──────────────
+// Opened by tapping an order card in My Orders. Reuses the existing Assigned
+// Partner overlay (showAssignedPartner) and Payment Detail modal
+// (openPaymentDetailModal) rather than duplicating that UI here.
+var _odOrderId = null;
+var _odPollTimer = null;
+// "Vendor Assigned" / "Partner En Route" / "On The Way" / "Service Started" from
+// the spec map onto these OrderStatus values — tracking is hidden for every
+// other status, including Completed/Cancelled/Refunded.
+var ORDER_TRACKING_ACTIVE_STATUSES = ['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS'];
+
+function openOrderDetailsModal(orderId) {
+  _odOrderId = orderId;
+  document.getElementById('order-details-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('od-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>';
+  loadOrderDetails();
+  clearInterval(_odPollTimer);
+  // Same 20s-ish poll pattern as My Orders/Tracking — an active order's status,
+  // vendor, and timeline can change while this modal is open.
+  _odPollTimer = setInterval(loadOrderDetails, 20000);
+}
+
+function closeOrderDetailsModal() {
+  document.getElementById('order-details-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  clearInterval(_odPollTimer);
+  _odOrderId = null;
+}
+
+function loadOrderDetails() {
+  var orderId = _odOrderId;
+  if (!orderId) return;
+  apiGet('/api/v1/orders/' + orderId).then(function(res) {
+    var o = res && res.data ? res.data : res;
+    _renderOrderDetails(o);
+  }).catch(function(e) {
+    console.error('[loadOrderDetails] Failed to load order', orderId, e);
+    document.getElementById('od-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:40px 0">Could not load order details. <button onclick="loadOrderDetails()" style="background:none;border:none;color:#c4601a;font-weight:600;cursor:pointer;text-decoration:underline">Retry</button></p>';
+  });
+}
+
+function _odSection(title, bodyHtml) {
+  return '<div style="margin-bottom:18px">' +
+    '<div style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">' + title + '</div>' +
+    bodyHtml +
+  '</div>';
+}
+
+function _renderOrderDetails(o) {
+  var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
+  var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
+  var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? (o.items[0].product && o.items[0].product.name) : null) || o.type || 'Service';
+
+  var itemsHtml = (o.items && o.items.length)
+    ? o.items.map(function(it) {
+        return '<div style="display:flex;justify-content:space-between;font-size:13px;color:#374151;padding:4px 0">' +
+          '<span>' + escHtml((it.product && it.product.name) || 'Item') + ' × ' + (it.quantity || 1) + '</span>' +
+          '<span>₹' + Number(it.price || 0).toLocaleString('en-IN') + '</span></div>';
+      }).join('')
+    : '';
+
+  var slot = o.slotStart
+    ? new Date(o.slotStart).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) +
+      (o.slotEnd ? ' – ' + new Date(o.slotEnd).toLocaleString('en-IN', { timeStyle: 'short' }) : '')
+    : 'Not scheduled yet';
+
+  var addr = o.address
+    ? [o.address.fullAddress, o.address.area, o.address.landmark, o.address.city, o.address.pincode].filter(Boolean).join(', ')
+    : '—';
+
+  var vendorBlock;
+  if (o.vendor) {
+    var vName = o.vendor.fullName || (o.vendor.user && o.vendor.user.name) || 'Partner';
+    vendorBlock =
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
+        '<div><div style="font-size:14px;font-weight:600;color:#111">' + escHtml(vName) + '</div>' +
+        '<div style="font-size:12px;color:#9ca3af">⭐ ' + Number(o.vendor.rating || 0).toFixed(1) + '</div></div>' +
+        '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">🪪 View Partner</button>' +
+      '</div>';
+  } else {
+    vendorBlock = '<div style="color:#9ca3af;font-size:13px">Not yet assigned</div>';
+  }
+
+  var paymentColor = o.paymentStatus === 'PAID' ? '#16a34a' : (o.paymentStatus === 'FAILED' ? '#ef4444' : '#f59e0b');
+
+  var timelineHtml = (o.timeline && o.timeline.length)
+    ? o.timeline.map(function(t) {
+        var d = new Date(t.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+        return '<div style="display:flex;gap:10px;padding:6px 0">' +
+          '<div style="width:8px;height:8px;border-radius:50%;background:#c4601a;margin-top:6px;flex-shrink:0"></div>' +
+          '<div><div style="font-size:13px;font-weight:600;color:#111">' + escHtml(STATUS_LABELS_MO[t.status] || t.status) + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af">' + d + (t.note ? ' · ' + escHtml(t.note) : '') + '</div></div>' +
+        '</div>';
+      }).join('')
+    : '<div style="color:#9ca3af;font-size:13px">No timeline history recorded yet.</div>';
+
+  var html =
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">' +
+      '<div><div style="font-size:16px;font-weight:700;color:#111">' + escHtml(o.orderNumber || '') + '</div>' +
+      '<div style="font-size:13px;color:#6b7280;margin-top:2px">' + escHtml(serviceName) + '</div></div>' +
+      '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px;white-space:nowrap">' + statusLabel + '</span>' +
+    '</div>' +
+    (itemsHtml ? _odSection('Items', itemsHtml) : '') +
+    _odSection('Partner', vendorBlock) +
+    _odSection('Service Address', '<div style="font-size:13px;color:#374151">' + escHtml(addr) + '</div>') +
+    _odSection('Booking Date &amp; Time / ETA', '<div style="font-size:13px;color:#374151">' + slot + '</div>') +
+    _odSection('Payment', '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<span style="font-size:13px;font-weight:600;color:' + paymentColor + '">' + escHtml(o.paymentStatus || '—') + '</span>' +
+      '<button onclick="openPaymentDetailModal(\'' + o.id + '\')" style="background:none;border:none;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline">View Payment Details →</button>' +
+    '</div>') +
+    _odTrackingSection(o) +
+    _odSection('Order Timeline', timelineHtml);
+
+  document.getElementById('od-body').innerHTML = html;
+}
+
+// Live tracking section — only rendered for the active statuses in
+// ORDER_TRACKING_ACTIVE_STATUSES. Reads o.vendor.currentLatitude/currentLongitude/
+// lastLocationUpdate: these already exist end-to-end on the backend today
+// (PATCH /vendors/me/location writes them; GET /orders/:id already returns them
+// via the vendor relation) — no new API was added for this feature. Nothing in
+// the vendor-facing UI currently calls navigator.geolocation to populate them
+// though, so in practice they're usually still null; when that's the case this
+// falls back to the order's saved service-address coordinates just to keep a
+// real map on screen, alongside the required "not connected yet" notice. When a
+// real live-location read endpoint/websocket exists, only the coordinate lookup
+// here needs to change — the map, section layout, and notice do not.
+function _odTrackingSection(o) {
+  if (ORDER_TRACKING_ACTIVE_STATUSES.indexOf(o.status) === -1) return '';
+
+  var vLat = o.vendor && typeof o.vendor.currentLatitude === 'number' ? o.vendor.currentLatitude : null;
+  var vLng = o.vendor && typeof o.vendor.currentLongitude === 'number' ? o.vendor.currentLongitude : null;
+  var hasLive = vLat !== null && vLng !== null && (vLat !== 0 || vLng !== 0);
+
+  var aLat = o.address && o.address.latitude;
+  var aLng = o.address && o.address.longitude;
+  var hasAddressCoords = !!aLat && !!aLng && (aLat !== 0 || aLng !== 0);
+
+  var lat = hasLive ? vLat : (hasAddressCoords ? aLat : null);
+  var lng = hasLive ? vLng : (hasAddressCoords ? aLng : null);
+
+  var mapHtml;
+  if (lat !== null && lng !== null) {
+    // Same OpenStreetMap iframe-embed technique as the location picker's map
+    // preview (_locShowMapPreview) — no API key, no paid provider, no new map dependency.
+    var delta = 0.004;
+    var osmSrc = 'https://www.openstreetmap.org/export/embed.html?bbox=' +
+      (lng - delta) + ',' + (lat - delta) + ',' + (lng + delta) + ',' + (lat + delta) +
+      '&layer=mapnik&marker=' + lat + ',' + lng;
+    mapHtml = '<div style="border-radius:10px;overflow:hidden;border:1.5px solid #e5e7eb;margin-bottom:8px">' +
+      '<iframe src="' + osmSrc + '" width="100%" height="220" frameborder="0" loading="lazy" style="display:block"></iframe>' +
+    '</div>';
+  } else {
+    mapHtml = '<div style="background:#f9fafb;border:1.5px dashed #e5e7eb;border-radius:10px;padding:24px;text-align:center;color:#9ca3af;font-size:13px;margin-bottom:8px">🗺 Map unavailable — no location data on this order yet.</div>';
+  }
+
+  var notice = hasLive
+    ? '<div style="font-size:11px;color:#9ca3af">Partner\'s last known location · updated ' +
+        new Date(o.vendor.lastLocationUpdate).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) + '</div>'
+    : '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;font-size:12px;color:#1e40af">Live tracking will be available once the vendor location service is connected.</div>';
+
+  return _odSection('Live Tracking', mapHtml + notice);
+}
+
+// Close on backdrop click + stop polling on Escape-equivalent (matches the other modals' pattern).
+document.getElementById('order-details-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeOrderDetailsModal();
+});
 
 // ══════════════════════════════════════════════════════════════════
 // MOBILE APP JS — only active on mobile, no effect on desktop

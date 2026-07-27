@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -288,8 +288,9 @@ export class MasterOrdersService {
 
     // Resolve address — same addressId / inline-address pattern as CreateOrderDto
     let resolvedAddressId = dto.addressId;
+    let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
     if (!resolvedAddressId && dto.inlineAddress) {
-      const addr = await this.prisma.address.create({
+      resolvedAddress = await this.prisma.address.create({
         data: {
           userId: customerId,
           label: dto.inlineAddress.label || 'Delivery Address',
@@ -301,7 +302,11 @@ export class MasterOrdersService {
           longitude: dto.inlineAddress.longitude || 0,
         },
       });
-      resolvedAddressId = addr.id;
+      resolvedAddressId = resolvedAddress.id;
+    } else if (resolvedAddressId) {
+      // An existing saved address was selected — snapshot it as it is *right now*.
+      // Later edits to this Address row must not retroactively change this order.
+      resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
     }
 
     // Master-level totals — computed once against the combined subtotal, exactly like
@@ -361,6 +366,7 @@ export class MasterOrdersService {
       const masterOrder = await tx.masterOrder.create({
         data: {
           masterOrderNumber, customerId, addressId: resolvedAddressId,
+          ...addressSnapshotFields(resolvedAddress),
           channel: dto.channel || BookingChannel.WEBSITE,
           status: confirmUpfront ? MasterOrderStatus.CONFIRMED : MasterOrderStatus.PENDING_PAYMENT,
           paymentStatus: PaymentStatus.PENDING,
@@ -397,6 +403,7 @@ export class MasterOrdersService {
             channel: dto.channel || BookingChannel.WEBSITE,
             serviceId: g.type === 'SERVICE' ? g.serviceId : undefined,
             addressId: resolvedAddressId,
+            ...addressSnapshotFields(resolvedAddress),
             slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
             slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
             startOtp, endOtp,

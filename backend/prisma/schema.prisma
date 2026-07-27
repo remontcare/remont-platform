@@ -979,6 +979,20 @@ model MasterOrder {
   masterOrderNumber String              @unique // customer-facing, e.g. RM250724001
   customerId        String
   addressId         String?
+
+  // Address snapshot at the moment of booking — addressId above is a live FK that
+  // follows whatever the customer's saved Address row says *today*; these columns
+  // are copied once at checkout and never touched again, so editing a saved address
+  // later can't rewrite where a past order says it was delivered/serviced.
+  snapshotAddressLine String?
+  snapshotLandmark    String?
+  snapshotCity        String?
+  snapshotState       String?
+  snapshotPincode     String?
+  snapshotLatitude    Float?
+  snapshotLongitude   Float?
+  snapshotGpsAt       DateTime?
+
   channel           BookingChannel      @default(WEBSITE)
   status            MasterOrderStatus   @default(PENDING_PAYMENT)
   paymentStatus     PaymentStatus       @default(PENDING)
@@ -1037,6 +1051,18 @@ model Order {
   addressId         String?
   deliveryId        String?
   amcSubscriptionId String?
+
+  // Address snapshot at the moment of booking — see the matching fields on
+  // MasterOrder for why: addressId is a live FK, these are copied once and frozen.
+  snapshotAddressLine String?
+  snapshotLandmark    String?
+  snapshotCity        String?
+  snapshotState       String?
+  snapshotPincode     String?
+  snapshotLatitude    Float?
+  snapshotLongitude   Float?
+  snapshotGpsAt       DateTime?
+
   type              OrderType
   channel           BookingChannel      @default(WEBSITE)
   status            OrderStatus         @default(PENDING_PAYMENT)

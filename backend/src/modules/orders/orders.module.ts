@@ -9,7 +9,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -256,8 +256,9 @@ export class OrdersService {
 
     // Resolve addressId: if an inline address is provided and no addressId, create one
     let resolvedAddressId = dto.addressId;
+    let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
     if (!resolvedAddressId && dto.inlineAddress) {
-      const addr = await this.prisma.address.create({
+      resolvedAddress = await this.prisma.address.create({
         data: {
           userId: customerId,
           label: dto.inlineAddress.label || 'Delivery Address',
@@ -269,7 +270,11 @@ export class OrdersService {
           longitude: 0,
         },
       });
-      resolvedAddressId = addr.id;
+      resolvedAddressId = resolvedAddress.id;
+    } else if (resolvedAddressId) {
+      // An existing saved address was selected — snapshot it as it is *right now*.
+      // Later edits to this Address row must not retroactively change this order.
+      resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
     }
 
     let subtotal = serviceAmount + productsAmount;
@@ -301,6 +306,7 @@ export class OrdersService {
         orderNumber, customerId,
         type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
         serviceId: dto.serviceId, addressId: resolvedAddressId,
+        ...addressSnapshotFields(resolvedAddress),
         slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
         slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
         startOtp, endOtp, status: OrderStatus.PENDING_PAYMENT,
@@ -734,6 +740,7 @@ export class OrdersService {
         service: true, items: { include: { product: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, invoice: true, delivery: true,
+        timeline: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!order) throw new NotFoundException();
@@ -862,6 +869,7 @@ export class GuestBookingService {
         customerId: user.id,
         serviceId: dto.serviceId,
         addressId: address.id,
+        ...addressSnapshotFields(address),
         type: OrderType.SERVICE,
         channel: dto.channel || BookingChannel.WEBSITE,
         status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
@@ -992,6 +1000,7 @@ export class GuestBookingService {
       data: {
         orderNumber, customerId: user.id, type: OrderType.PRODUCT,
         channel: BookingChannel.WEBSITE, addressId: address.id,
+        ...addressSnapshotFields(address),
         guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,
         productsAmount, subtotal: productsAmount, gstAmount, totalAmount,
         startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
