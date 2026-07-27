@@ -16,9 +16,8 @@
 .filter-row select,.filter-row input{border:1px solid #e5e7eb;border-radius:6px;padding:7px 12px;font-size:13px;font-family:inherit;background:#fff}
 .gateway-pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase}
 .gw-razorpay{background:#3b82f622;color:#2563eb}
-.gw-razorpay_dev{background:#f59e0b22;color:#92400e}
-.gw-cashfree{background:#10b98122;color:#065f46}
 .gw-phonepe{background:#7c3aed22;color:#5b21b6}
+.gw-cash_collection{background:#10b98122;color:#065f46}
 </style>
 </head>
 <body>
@@ -62,10 +61,9 @@
       </select>
       <select id="f-gateway" onchange="loadPayments()">
         <option value="">All Gateways</option>
-        <option value="RAZORPAY">Razorpay (Live)</option>
-        <option value="RAZORPAY_DEV">Razorpay (Dev Mock)</option>
-        <option value="CASHFREE">Cashfree</option>
+        <option value="RAZORPAY">Razorpay</option>
         <option value="PHONEPE">PhonePe</option>
+        <option value="CASH_COLLECTION">Cash / UPI / Card Collection</option>
       </select>
       <input type="text" id="f-search" placeholder="Search reference…" oninput="filterLocal()">
       <button class="btn btn-outline btn-sm" onclick="loadPayments()">Refresh</button>
@@ -144,7 +142,7 @@ function renderPayments(list) {
   tbody.innerHTML = list.map(function(p) {
     var gw = (p.gateway || 'UNKNOWN').toLowerCase();
     var gwClass = 'gw-' + gw;
-    var ordNum = (p.order && p.order.orderNumber) ? p.order.orderNumber : '—';
+    var ordNum = p.orderNumber || '—';
     return '<tr>' +
       '<td><span class="gateway-pill ' + gwClass + '">' + escape(p.gateway || 'UNKNOWN') + '</span></td>' +
       '<td><a href="orders.html" style="color:#c4601a;font-weight:500">' + escape(ordNum) + '</a></td>' +
@@ -154,8 +152,8 @@ function renderPayments(list) {
       '<td style="font-family:monospace;font-size:11px;color:#6b7280">' + escape(p.gatewayPaymentId || '—') + '</td>' +
       '<td style="color:#9ca3af;font-size:12px">' + fmtDate(p.createdAt) + '</td>' +
       '<td>' +
-        (p.status === 'PAID' ? '<button class="btn btn-outline btn-sm" onclick="viewReceipt(\'' + p.id + '\')">View</button>' : '') +
-        (p.status === 'PENDING' ? '<button class="btn btn-outline btn-sm" style="color:#f59e0b;border-color:#f59e0b" onclick="markFailed(\'' + p.id + '\')">Mark Failed</button>' : '') +
+        (p.status === 'PAID' ? '<button class="btn btn-outline btn-sm" onclick=\'viewReceipt(' + JSON.stringify(p) + ')\'>View</button>' : '') +
+        ((p.status === 'PENDING' || p.status === 'INITIATED') ? '<button class="btn btn-outline btn-sm" style="color:#f59e0b;border-color:#f59e0b" onclick="markFailed(\'' + p.id + '\')">Mark Failed</button>' : '') +
       '</td>' +
       '</tr>';
   }).join('');
@@ -184,8 +182,26 @@ function renderPagination() {
 function prevPage() { currentOffset = Math.max(0, currentOffset - PAGE_SIZE); fetchPayments(); }
 function nextPage() { currentOffset += PAGE_SIZE; fetchPayments(); }
 
-function viewReceipt(id) { toast('Receipt view coming soon. Use Invoices page.', 'warning'); }
-function markFailed(id) { toast('Manual status override coming soon. Contact tech team.', 'warning'); }
+function viewReceipt(p) {
+  alert(
+    'Payment Transaction\n\n' +
+    'Order: ' + (p.orderNumber || '—') + '\n' +
+    'Amount: ' + fmtCur(p.amount) + '\n' +
+    'Gateway: ' + p.gateway + (p.collectionMode ? ' (' + p.collectionMode + ')' : '') + '\n' +
+    'Gateway Payment ID: ' + (p.gatewayPaymentId || '—') + '\n' +
+    'Gateway Order ID: ' + (p.gatewayOrderId || '—') + '\n' +
+    'Collected By: ' + (p.collectedBy || '—') + '\n' +
+    'Date: ' + fmtDate(p.createdAt)
+  );
+}
+function markFailed(id) {
+  var reason = prompt('Reason for marking this payment as failed (visible in admin records only):');
+  if (reason === null) return;
+  api('PATCH', '/admin/payments/' + id + '/mark-failed', { reason: reason || undefined }).then(function() {
+    toast('Payment marked as failed', 'success');
+    fetchPayments();
+  }).catch(function(e) { toast('Could not update payment: ' + e.message, 'error'); });
+}
 
 function exportPayments() {
   downloadCsv(allPayments, [
@@ -202,11 +218,16 @@ function exportPayments() {
 function loadGatewayStatus() {
   api('GET', '/payments/config').then(function(d) {
     var el = document.getElementById('gw-status-badge');
-    if (d && d.isLive) {
-      el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Razorpay <strong>LIVE</strong> · Key: ' + d.keyId;
-    } else {
-      el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px"></span>Razorpay <strong>DEV MOCK</strong> · No real payments accepted';
+    if (!d || !d.activeGateway) {
+      el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:6px"></span>No payment gateway configured';
+      return;
     }
+    var active = d.activeGateway === 'PHONEPE' ? d.phonepe : d.razorpay;
+    var dotColor = active.isLive ? '#22c55e' : '#f59e0b';
+    var modeLabel = active.isLive ? 'LIVE' : 'TEST';
+    el.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + dotColor + ';margin-right:6px"></span>' +
+      d.activeGateway + ' <strong>' + modeLabel + '</strong>' + (active.keyId ? ' · Key: ' + active.keyId : '') +
+      (d.phonepe && d.phonepe.configured && d.activeGateway !== 'PHONEPE' ? ' · PhonePe also configured (inactive)' : '');
   }).catch(function(){});
 }
 

@@ -5,12 +5,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
-import { UserRole, VendorStatus, OrderStatus, DeleteTargetType } from '@prisma/client';
+import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
+import { SettlementsService, SettlementsModule } from '../settlements/settlements.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -39,7 +40,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -1507,16 +1508,62 @@ Return JSON with:
 
   // ─── Wallet Transactions ──────────────────────────────────────────────
 
-  async listWalletTransactions(opts: { userId?: string; type?: string; limit?: number }) {
+  async listWalletTransactions(opts: { userId?: string; type?: string; reason?: string; limit?: number }) {
     return this.prisma.walletTransaction.findMany({
       where: {
         ...(opts.userId ? { userId: opts.userId } : {}),
         ...(opts.type ? { type: opts.type as any } : {}),
+        ...(opts.reason ? { reason: opts.reason as any } : {}),
       },
       include: { user: { select: { name: true, phone: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
     });
+  }
+
+  // ─── Vendor Earnings & Payouts (frontend/admin/partner-earnings.html) ─
+  // Previously called /admin/vendor-earnings and /admin/vendor-payouts, neither of which
+  // existed anywhere in the backend — every action on that admin screen 404'd. Payout
+  // recording itself is delegated to SettlementsService (Phase 1), the single source of
+  // truth for manual partner settlement record-keeping.
+  async vendorEarningsSummary(q?: string, payoutStatus?: string) {
+    const vendors = await this.prisma.serviceVendor.findMany({
+      where: {
+        ...(q ? { fullName: { contains: q, mode: 'insensitive' as const } } : {}),
+        ...(payoutStatus === 'PENDING' ? { pendingPayout: { gt: 0 } } : {}),
+        ...(payoutStatus === 'PAID' ? { pendingPayout: 0 } : {}),
+      },
+      select: {
+        id: true, fullName: true, baseCity: true, totalEarnings: true,
+        pendingPayout: true, completedJobs: true, rating: true,
+      },
+      orderBy: { pendingPayout: 'desc' },
+    });
+    const vendorIds = vendors.map((v) => v.id);
+    const commissionAgg = vendorIds.length
+      ? await this.prisma.order.groupBy({
+          by: ['vendorId'],
+          where: { vendorId: { in: vendorIds }, status: { in: ['COMPLETED', 'INVOICED', 'CLOSED'] as any[] } },
+          _sum: { remontCommission: true },
+        })
+      : [];
+    const commissionByVendor = new Map(commissionAgg.map((c) => [c.vendorId, Number(c._sum.remontCommission || 0)]));
+
+    return vendors.map((v) => ({
+      vendorId: v.id,
+      vendorName: v.fullName,
+      city: v.baseCity,
+      totalEarnings: v.totalEarnings,
+      pendingPayout: v.pendingPayout,
+      totalPaid: Number(v.totalEarnings) - Number(v.pendingPayout),
+      commission: commissionByVendor.get(v.id) || 0,
+      jobsCompleted: v.completedJobs,
+      rating: v.rating,
+    }));
+  }
+
+  async vendorPayout(adminId: string, vendorId: string, amount: number, mode: SettlementMode, referenceNumber?: string, notes?: string) {
+    return this.settlements.record(vendorId, amount, mode, adminId, referenceNumber, notes);
   }
 
   async exportWalletTransactions() {
@@ -1759,7 +1806,29 @@ Return JSON with:
       }),
       this.prisma.paymentTransaction.count({ where }),
     ]);
-    return { transactions, total };
+    // PaymentTransaction.orderId is a loose, non-FK string (see schema comment) — no Prisma
+    // relation to join through, so resolve orderNumber with one extra batched lookup instead
+    // of leaving the frontend to guess at a `.order` relation that never existed.
+    const orderIds = [...new Set(transactions.map((t) => t.orderId).filter(Boolean))] as string[];
+    const orders = orderIds.length
+      ? await this.prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNumber: true } })
+      : [];
+    const orderNumberById = new Map(orders.map((o) => [o.id, o.orderNumber]));
+    const enriched = transactions.map((t) => ({
+      ...t,
+      orderNumber: t.isWalletTopup ? 'Wallet Top-up' : (t.orderId ? orderNumberById.get(t.orderId) || null : null),
+    }));
+    return { transactions: enriched, total };
+  }
+
+  async markPaymentFailed(id: string, reason?: string) {
+    const tx = await this.prisma.paymentTransaction.findUnique({ where: { id } });
+    if (!tx) throw new NotFoundException('Payment transaction not found');
+    if (tx.status === 'PAID') throw new BadRequestException('Cannot mark a completed payment as failed');
+    return this.prisma.paymentTransaction.update({
+      where: { id },
+      data: { status: 'FAILED', failureReason: reason || 'Manually marked failed by admin' },
+    });
   }
 
   // ─── Integrations Config ──────────────────────────────────────────────
@@ -2070,8 +2139,21 @@ export class AdminController {
   @Patch('corporate/:id') updateCorporate(@Param('id') id: string, @Body() b: any) { return this.admin.updateCorporate(id, b); }
 
   // Wallet Transactions
-  @Get('wallet-transactions') walletTx(@Query('userId') userId?: string, @Query('type') type?: string, @Query('limit') limit?: number) {
-    return this.admin.listWalletTransactions({ userId, type, limit: limit ? +limit : 100 });
+  @Get('vendor-earnings') vendorEarnings(@Query('q') q?: string, @Query('payoutStatus') payoutStatus?: string) {
+    return this.admin.vendorEarningsSummary(q, payoutStatus);
+  }
+  @Post('vendor-payouts') vendorPayout(
+    @CurrentUser() u: JwtPayload,
+    @Body() b: { vendorId: string; amount: number; method: SettlementMode; transactionRef?: string; notes?: string },
+  ) {
+    return this.admin.vendorPayout(u.sub, b.vendorId, b.amount, b.method, b.transactionRef, b.notes);
+  }
+
+  @Get('wallet-transactions') walletTx(
+    @Query('userId') userId?: string, @Query('type') type?: string,
+    @Query('reason') reason?: string, @Query('limit') limit?: number,
+  ) {
+    return this.admin.listWalletTransactions({ userId, type, reason, limit: limit ? +limit : 100 });
   }
   @Get('wallet-transactions/export') walletExport() { return this.admin.exportWalletTransactions(); }
 
@@ -2106,6 +2188,9 @@ export class AdminController {
     @Query('status') status?: string, @Query('gateway') gateway?: string,
     @Query('limit') limit?: number, @Query('offset') offset?: number,
   ) { return this.admin.listPaymentTransactions({ status, gateway, limit: limit ? +limit : 100, offset: offset ? +offset : 0 }); }
+  @Patch('payments/:id/mark-failed') markPaymentFailed(@Param('id') id: string, @Body() b: { reason?: string }) {
+    return this.admin.markPaymentFailed(id, b?.reason);
+  }
 
   // Integrations
   @Get('integrations') getIntegrations() { return this.admin.getIntegrations(); }
@@ -2118,7 +2203,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

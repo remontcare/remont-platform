@@ -9231,7 +9231,37 @@ function renderPaymentDetail(bal, txns) {
     '<button onclick="pdDownloadReceipt()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">🧾 Receipt</button>' +
   '</div>';
 
+  if (paid > 0) {
+    html += '<div style="margin-top:16px;border-top:1px solid #f3f4f6;padding-top:16px">' +
+      '<button id="pd-raise-refund-btn" onclick="pdShowRefundForm()" style="background:none;border:none;color:#ef4444;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;padding:0">↩️ Raise a Refund Request</button>' +
+      '<div id="pd-refund-form" style="display:none;margin-top:12px">' +
+        '<textarea id="pd-refund-reason" rows="3" placeholder="What went wrong? (required)" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px;box-sizing:border-box"></textarea>' +
+        '<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">Your request goes to our support team for review — refunds are never automatic and typically go to your Remont Wallet once approved.</div>' +
+        '<div id="pd-refund-err" style="color:#ef4444;font-size:12px;margin-bottom:8px"></div>' +
+        '<button onclick="pdSubmitRefund()" style="width:100%;padding:10px;background:#ef4444;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Submit Refund Request</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   document.getElementById('pd-body').innerHTML = html;
+}
+
+function pdShowRefundForm() {
+  document.getElementById('pd-raise-refund-btn').style.display = 'none';
+  document.getElementById('pd-refund-form').style.display = 'block';
+}
+
+function pdSubmitRefund() {
+  var reason = document.getElementById('pd-refund-reason').value.trim();
+  var errEl = document.getElementById('pd-refund-err');
+  errEl.textContent = '';
+  if (!reason) { errEl.textContent = 'Please describe the issue.'; return; }
+  apiPost('/api/v1/refunds', { orderId: _pdOrderId, reason: reason }).then(function() {
+    showToast('Refund request submitted — our team will review it.', 'success');
+    document.getElementById('pd-refund-form').innerHTML = '<div style="color:#16a34a;font-size:13px;padding:8px 0">✅ Request submitted. We\'ll notify you once it\'s reviewed.</div>';
+  }).catch(function(e) {
+    errEl.textContent = (e && e.message) || 'Could not submit request. Please try again.';
+  });
 }
 
 function pdPayRemaining() {

@@ -398,6 +398,9 @@ a{color:inherit;text-decoration:none}
         <div id="earn-txn-list">
           <div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No transactions yet</div></div>
         </div>
+
+        <div class="section-title" style="margin-top:20px">Refund Requests Needing Your Response</div>
+        <div id="refund-requests-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
       </div>
 
       <!-- SUPPORT VIEW -->
@@ -682,6 +685,32 @@ function loadEarnings(){
     document.getElementById('earn-wallet-val').textContent = fmtMoney(e.lifetime.pending);
     earnTabRender('today');
   }).catch(function(e){ console.warn('earnings load failed', e.message); });
+  loadRefundRequests();
+}
+
+function loadRefundRequests(){
+  apiFetch('/refunds/partner/mine').then(function(list){
+    var el = document.getElementById('refund-requests-list');
+    var pending = (list || []).filter(function(r){ return r.status === 'REQUESTED'; });
+    if (!pending.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Nothing needs your response right now</div></div>'; return; }
+    el.innerHTML = pending.map(function(r){
+      return '<div class="customer-card" style="margin-bottom:10px">' +
+        '<div style="font-size:12px;color:#6b7280;margin-bottom:4px">' + new Date(r.createdAt).toLocaleDateString('en-IN') + '</div>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + escapeHtmlRR(r.reason) + '</div>' +
+        '<textarea id="rr-resp-' + r.id + '" rows="2" placeholder="Your response to this refund request…" style="width:100%;border:1px solid var(--mist);border-radius:8px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box;margin-bottom:8px"></textarea>' +
+        '<button class="btn-outline" style="width:100%" onclick="respondToRefund(\'' + r.id + '\')">Submit Response</button>' +
+        '</div>';
+    }).join('');
+  }).catch(function(e){ console.warn('refund requests load failed', e.message); });
+}
+function escapeHtmlRR(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function respondToRefund(id){
+  var textEl = document.getElementById('rr-resp-' + id);
+  var response = textEl.value.trim();
+  if (!response) { alert('Please enter your response'); return; }
+  apiFetch('/refunds/' + id + '/partner-respond', { method:'POST', body: JSON.stringify({ response: response }) })
+    .then(function(){ loadRefundRequests(); })
+    .catch(function(e){ alert('Could not submit response: ' + e.message); });
 }
 var _payoutHistoryLoaded = false;
 function togglePayoutHistory(){

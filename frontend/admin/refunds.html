@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Refund Requests</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.rr-evidence-thumb{display:inline-block;font-size:11px;color:#2563eb;text-decoration:underline;margin-right:8px}
+.rr-log-row{padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
+.rr-log-action{font-weight:700;color:#374151}
+.rr-log-notes{color:#6b7280;margin-top:2px}
+.rr-decision-fields{display:none}
+.rr-decision-fields.active{display:block}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Refund Requests</h1><p>Customer refund requests — admin has final approval authority on every decision</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">NEEDS ATTENTION</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="s-active">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">ESCALATED</div><div style="font-size:22px;font-weight:800;color:#ef4444" id="s-escalated">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PROCESSED</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="s-processed">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">REJECTED</div><div style="font-size:22px;font-weight:800;color:#6b7280" id="s-rejected">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Refund Requests</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-status" class="form-control" style="width:190px" onchange="load()">
+            <option value="">All Statuses</option>
+            <option value="REQUESTED">Requested</option>
+            <option value="PARTNER_RESPONDED">Partner Responded</option>
+            <option value="UNDER_REVIEW">Under Review</option>
+            <option value="ESCALATED">Escalated</option>
+            <option value="APPROVED">Approved</option>
+            <option value="PARTIALLY_APPROVED">Partially Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="PROCESSED">Processed</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail / Decision Modal -->
+<div id="rr-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">Refund Request</span>
+      <button class="modal-close" onclick="closeModal('rr-overlay')">×</button>
+    </div>
+    <div id="rr-detail-body"></div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('refunds');
+requireAuth();
+var allRequests = [];
+var currentRR = null;
+
+function load() {
+  var status = document.getElementById('filter-status').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/refunds' + (status ? '?status=' + status : '')).then(function(list) {
+    allRequests = list || [];
+    renderStats();
+    renderTable();
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderStats() {
+  var active = allRequests.filter(function(r) { return ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW'].indexOf(r.status) !== -1; }).length;
+  var escalated = allRequests.filter(function(r) { return r.status === 'ESCALATED'; }).length;
+  var processed = allRequests.filter(function(r) { return r.status === 'PROCESSED' || r.status === 'APPROVED' || r.status === 'PARTIALLY_APPROVED'; }).length;
+  var rejected = allRequests.filter(function(r) { return r.status === 'REJECTED'; }).length;
+  document.getElementById('s-active').textContent = active;
+  document.getElementById('s-escalated').textContent = escalated;
+  document.getElementById('s-processed').textContent = processed;
+  document.getElementById('s-rejected').textContent = rejected;
+}
+
+var STATUS_COLOR = {
+  REQUESTED: 'yellow', PARTNER_RESPONDED: 'blue', UNDER_REVIEW: 'blue', ESCALATED: 'red',
+  APPROVED: 'green', PARTIALLY_APPROVED: 'green', PROCESSED: 'green', REJECTED: 'gray',
+};
+
+function renderTable() {
+  if (!allRequests.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No refund requests found.</div>'; return; }
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Customer</th><th>Order</th><th>Reason</th><th>Partner Response</th><th>Status</th><th>Requested</th><th>Action</th></tr></thead><tbody>' +
+    allRequests.map(function(r) {
+      return '<tr>' +
+        '<td><strong>' + escape(r.customerName || r.customerId) + '</strong><br><small style="color:#6b7280">' + escape(r.customerPhone || '') + '</small></td>' +
+        '<td>' + escape(r.orderNumber || '—') + (r.orderTotalAmount ? '<br><small style="color:#6b7280">' + fmtCur(r.orderTotalAmount) + '</small>' : '') + '</td>' +
+        '<td style="max-width:200px">' + escape(r.reason) + '</td>' +
+        '<td style="max-width:180px">' + (r.partnerResponse ? escape(r.partnerResponse) : '<span style="color:#9ca3af">—</span>') + '</td>' +
+        '<td>' + badge(r.status.replace(/_/g, ' '), STATUS_COLOR[r.status] || 'gray') + '</td>' +
+        '<td style="color:#9ca3af;font-size:12px">' + fmtDateShort(r.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs btn-primary" onclick="openDetail(\'' + r.id + '\')">Review</button></td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function openDetail(id) {
+  api('GET', '/refunds/' + id).then(function(rr) {
+    currentRR = rr;
+    renderDetail(rr);
+    document.getElementById('rr-overlay').style.display = 'flex';
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function renderDetail(rr) {
+  var isActive = ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED'].indexOf(rr.status) !== -1;
+  var evidenceHtml = (rr.evidenceUrls || []).length
+    ? rr.evidenceUrls.map(function(u, i) { return '<a class="rr-evidence-thumb" href="' + escape(u) + '" target="_blank">Evidence ' + (i + 1) + ' ↗</a>'; }).join('')
+    : '<span style="color:#9ca3af;font-size:12px">No evidence attached</span>';
+  var logsHtml = (rr.logs || []).map(function(l) {
+    return '<div class="rr-log-row"><span class="rr-log-action">' + escape(l.action) + '</span> · ' + escape(l.actorRole || '') + ' · ' + fmtDate(l.createdAt) +
+      (l.notes ? '<div class="rr-log-notes">' + escape(l.notes) + '</div>' : '') + '</div>';
+  }).join('') || '<div style="color:#9ca3af;font-size:12px">No activity yet</div>';
+
+  var html =
+    '<div style="padding:16px 20px">' +
+    '<div style="margin-bottom:12px">' + badge(rr.status.replace(/_/g, ' '), STATUS_COLOR[rr.status] || 'gray') + '</div>' +
+    '<div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">' +
+      '<div><strong>Order:</strong> ' + escape(rr.orderNumber || '—') + (rr.orderTotalAmount ? ' (' + fmtCur(rr.orderTotalAmount) + ')' : '') + '</div>' +
+      '<div><strong>Customer:</strong> ' + escape(rr.customerName || rr.customerId) + (rr.customerPhone ? ' · ' + escape(rr.customerPhone) : '') + '</div>' +
+      (rr.partnerName ? '<div><strong>Partner:</strong> ' + escape(rr.partnerName) + '</div>' : '') +
+      '<div style="margin-top:8px"><strong>Reason:</strong> ' + escape(rr.reason) + '</div>' +
+      '<div style="margin-top:6px">' + evidenceHtml + '</div>' +
+      (rr.partnerResponse ? '<div style="margin-top:8px"><strong>Partner Response:</strong> ' + escape(rr.partnerResponse) + '</div>' : '') +
+    '</div>' +
+    '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase">Activity Log</div>' +
+    '<div style="max-height:140px;overflow:auto;margin-bottom:16px">' + logsHtml + '</div>';
+
+  if (isActive) {
+    html +=
+      '<div style="display:flex;gap:8px;margin-bottom:14px">' +
+        '<button class="btn btn-outline btn-sm" onclick="rrUnderReview()">Mark Under Review</button>' +
+        '<button class="btn btn-outline btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="rrEscalate()">Escalate</button>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">Decision (only Admin/Super Admin can decide)</label>' +
+        '<select id="rr-decision-mode" class="form-control" onchange="rrDecisionModeChanged()">' +
+          '<option value="WALLET_CREDIT">Full Wallet Credit (Default)</option>' +
+          '<option value="PARTIAL_WALLET_PARTIAL_GATEWAY">Partial Wallet + Partial Gateway Refund</option>' +
+          '<option value="GATEWAY_REFUND">Full Gateway Refund (Exceptional)</option>' +
+          '<option value="NO_REFUND">No Refund</option>' +
+          '<option value="FREE_REWORK">Free Rework</option>' +
+          '<option value="DISCOUNT_COUPON">Discount Coupon / Promotional Credit</option>' +
+        '</select>' +
+      '</div>' +
+      '<div id="rr-field-approved" class="form-group rr-decision-fields active">' +
+        '<label class="form-label">Amount (₹)</label>' +
+        '<input id="rr-approved-amount" type="number" class="form-control" placeholder="Full order amount if left blank">' +
+      '</div>' +
+      '<div id="rr-field-split" class="rr-decision-fields">' +
+        '<div class="form-group"><label class="form-label">Wallet Credit Amount (₹)</label><input id="rr-wallet-amount" type="number" class="form-control"></div>' +
+        '<div class="form-group"><label class="form-label">Gateway Refund Amount (₹)</label><input id="rr-gateway-amount" type="number" class="form-control"></div>' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">Admin Notes</label><input id="rr-admin-notes" class="form-control" placeholder="Reason for this decision…"></div>' +
+      '<div class="modal-footer">' +
+        '<button class="btn btn-outline" onclick="closeModal(\'rr-overlay\')">Cancel</button>' +
+        '<button class="btn btn-primary" onclick="rrDecide()">Submit Decision</button>' +
+      '</div>';
+  } else {
+    html += '<div style="background:#f0fdf4;border-radius:8px;padding:12px;font-size:13px">' +
+      '<strong>Decision:</strong> ' + escape((rr.decisionMode || '—').replace(/_/g, ' ')) +
+      (rr.approvedAmount ? ' · ' + fmtCur(rr.approvedAmount) : '') +
+      (rr.gatewayRefundId ? '<br><strong>Gateway Refund ID:</strong> ' + escape(rr.gatewayRefundId) : '') +
+      (rr.adminNotes ? '<br><strong>Notes:</strong> ' + escape(rr.adminNotes) : '') +
+      '</div>';
+  }
+  html += '</div>';
+  document.getElementById('rr-detail-body').innerHTML = html;
+}
+
+function rrDecisionModeChanged() {
+  var mode = document.getElementById('rr-decision-mode').value;
+  document.getElementById('rr-field-approved').classList.toggle('active', mode === 'WALLET_CREDIT' || mode === 'GATEWAY_REFUND');
+  document.getElementById('rr-field-split').classList.toggle('active', mode === 'PARTIAL_WALLET_PARTIAL_GATEWAY');
+}
+
+function rrUnderReview() {
+  api('POST', '/refunds/' + currentRR.id + '/under-review', {}).then(function() {
+    toast('Marked under review', 'success');
+    closeModal('rr-overlay'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function rrEscalate() {
+  var notes = prompt('Reason for escalation:');
+  if (notes === null) return;
+  api('POST', '/refunds/' + currentRR.id + '/escalate', { notes: notes }).then(function() {
+    toast('Escalated', 'success');
+    closeModal('rr-overlay'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function rrDecide() {
+  var mode = document.getElementById('rr-decision-mode').value;
+  var body = { decisionMode: mode, adminNotes: document.getElementById('rr-admin-notes').value.trim() || undefined };
+  if (mode === 'WALLET_CREDIT' || mode === 'GATEWAY_REFUND') {
+    var amt = document.getElementById('rr-approved-amount').value;
+    if (amt) body.approvedAmount = Number(amt);
+  } else if (mode === 'PARTIAL_WALLET_PARTIAL_GATEWAY') {
+    body.walletCreditAmount = Number(document.getElementById('rr-wallet-amount').value) || 0;
+    body.gatewayRefundAmount = Number(document.getElementById('rr-gateway-amount').value) || 0;
+  }
+  if (!confirm('Confirm this refund decision? This cannot be undone.')) return;
+  api('POST', '/refunds/' + currentRR.id + '/decide', body).then(function() {
+    toast('Decision recorded', 'success');
+    closeModal('rr-overlay'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -156,6 +156,55 @@ export class PaymentsService implements OnModuleInit {
     return true;
   }
 
+  /**
+   * Real gateway money movement — previously refunds only ever flipped a status flag
+   * (AdminService.refundOrder()) with nothing actually sent back to the customer's original
+   * payment method. Called only from the admin-approved refund-decision pipeline
+   * (RefundsService) — gateway refund is the exception path, wallet credit is the default,
+   * per the business's refund policy. Test-mode Razorpay keys only move test money.
+   */
+  async refundPayment(paymentTransactionId: string, amount: number): Promise<{ refundId: string; gateway: string }> {
+    const tx = await this.prisma.paymentTransaction.findUnique({ where: { id: paymentTransactionId } });
+    if (!tx || tx.status !== 'PAID') throw new BadRequestException('Payment transaction not found or not marked PAID');
+    if (amount <= 0 || amount > Number(tx.amount)) throw new BadRequestException('Invalid refund amount');
+
+    if (tx.gateway === 'RAZORPAY') {
+      if (!this.razorpay || !tx.gatewayPaymentId) throw new BadRequestException('Razorpay not configured or payment has no gateway reference');
+      const refund = await this.razorpay.payments.refund(tx.gatewayPaymentId, { amount: Math.round(amount * 100) });
+      return { refundId: refund.id, gateway: 'RAZORPAY' };
+    }
+    if (tx.gateway === 'PHONEPE') {
+      return this.refundPhonePe(tx.gatewayOrderId!, amount);
+    }
+    throw new BadRequestException(`Cannot issue a gateway refund for a ${tx.gateway} payment — use Wallet Credit instead`);
+  }
+
+  private async refundPhonePe(merchantTransactionId: string, amount: number): Promise<{ refundId: string; gateway: string }> {
+    const cfg = this.phonePe;
+    if (!cfg.merchantId || !cfg.saltKey) throw new BadRequestException('PhonePe is not configured');
+    const merchantRefundId = `REFUND_${merchantTransactionId.slice(-8)}_${Date.now()}`;
+    const payload = {
+      merchantId: cfg.merchantId,
+      merchantTransactionId: merchantRefundId,
+      originalTransactionId: merchantTransactionId,
+      amount: Math.round(amount * 100),
+      callbackUrl: '',
+    };
+    const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
+    const endpoint = '/pg/v1/refund';
+    const signature = crypto.createHash('sha256')
+      .update(base64Payload + endpoint + cfg.saltKey)
+      .digest('hex') + '###' + cfg.saltIndex;
+    const resp = await fetch(`${cfg.baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-VERIFY': signature, 'X-MERCHANT-ID': cfg.merchantId },
+      body: JSON.stringify({ request: base64Payload }),
+    });
+    const data: any = await resp.json();
+    if (!data.success) throw new BadRequestException(data.message || 'PhonePe refund failed');
+    return { refundId: merchantRefundId, gateway: 'PHONEPE' };
+  }
+
   // ─── PhonePe ───────────────────────────────────────────────────────────────
 
   async createPhonePeOrder(userId: string, amount: number, orderId: string, frontendUrl: string) {
