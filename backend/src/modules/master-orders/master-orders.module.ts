@@ -16,6 +16,7 @@ import { MembershipsService, MembershipsModule } from '../memberships/membership
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { DispatchService, OrdersModule } from '../orders/orders.module';
+import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -179,6 +180,7 @@ export class MasterOrdersService {
     private cities: CitiesService,
     private payments: PaymentsService,
     private dispatch: DispatchService,
+    private paymentNotify: PaymentNotificationsService,
   ) {}
 
   private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
@@ -492,7 +494,14 @@ export class MasterOrdersService {
       if (child.serviceId) this.dispatch.dispatch(child.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
     }
 
+    this.notifyPaymentSuccess(existing).catch(() => {});
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
+  }
+
+  private async notifyPaymentSuccess(mo: { id: string; customerId: string; guestPhone: string | null; masterOrderNumber: string; totalAmount: any }) {
+    const phone = mo.guestPhone || (await this.prisma.user.findUnique({ where: { id: mo.customerId }, select: { phone: true } }))?.phone;
+    if (!phone) return;
+    await this.paymentNotify.paymentSuccess(mo.customerId, phone, mo.masterOrderNumber, Number(mo.totalAmount), mo.id);
   }
 
   async findMine(customerId: string) {
@@ -643,7 +652,7 @@ export class PublicMasterOrderController {
 
 // ─── Module ───
 @Module({
-  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule],
+  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule],
   // PublicMasterOrderController MUST be registered before MasterOrdersController —
   // Express/Nest matches routes in registration order, and MasterOrdersController's
   // POST /master-orders/:id/confirm-payment (a wildcard :id) would otherwise swallow

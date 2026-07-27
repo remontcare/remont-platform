@@ -15,6 +15,7 @@ import { MembershipsService, MembershipsModule } from '../memberships/membership
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
+import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -143,7 +144,7 @@ export class DispatchService {
 // ─── Extra work service ───
 @Injectable()
 class ExtraWorkService {
-  constructor(private prisma: PrismaService, private wa: WhatsappService) {}
+  constructor(private prisma: PrismaService, private wa: WhatsappService, private paymentNotify: PaymentNotificationsService) {}
 
   async addExtraWork(vendorUserId: string, orderId: string, description: string, amount: number) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
@@ -165,7 +166,7 @@ class ExtraWorkService {
   }
 
   async approve(customerId: string, extraId: string) {
-    const extra = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, include: { order: true } });
+    const extra = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, include: { order: { include: { customer: true } } } });
     if (!extra) throw new NotFoundException();
     if (extra.order.customerId !== customerId) throw new ForbiddenException();
     const updated = await this.prisma.extraWorkItem.update({
@@ -173,6 +174,12 @@ class ExtraWorkService {
       data: { customerApproved: true, approvedAt: new Date() },
     });
     await this.recalc(extra.orderId);
+    // Additional-work approval increases the order's outstanding balance — let the
+    // customer know right away rather than surprising them at completion time.
+    this.paymentNotify.balanceDue(
+      extra.order.customerId, extra.order.customer.phone, extra.order.orderNumber,
+      Number(extra.amount), 'additional work approved', extra.orderId,
+    ).catch(() => {});
     return updated;
   }
 
@@ -207,6 +214,7 @@ export class OrdersService {
     private dispatch: DispatchService,
     private cities: CitiesService,
     private payments: PaymentsService,
+    private paymentNotify: PaymentNotificationsService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -382,7 +390,15 @@ export class OrdersService {
     if (order.serviceId && wasPendingPayment) {
       this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
     }
+    this.notifyPaymentSuccess(order).catch(() => {});
     return order;
+  }
+
+  /** Resolves the right phone (guest or registered) and fires the payment-success notification. */
+  private async notifyPaymentSuccess(order: { id: string; customerId: string; guestPhone: string | null; orderNumber: string; totalAmount: any }) {
+    const phone = order.guestPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
+    if (!phone) return;
+    await this.paymentNotify.paymentSuccess(order.customerId, phone, order.orderNumber, Number(order.totalAmount), order.id);
   }
 
   /**
@@ -488,6 +504,7 @@ export class OrdersService {
       orderId, status: 'COD_PAYMENT_COLLECTED', actorId: actorUserId, actorRole,
       note: `Collected via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
     });
+    this.notifyPaymentSuccess(updated).catch(() => {});
     return updated;
   }
 
@@ -575,6 +592,7 @@ export class OrdersService {
       orderId, status: 'BALANCE_COLLECTED', actorId: actorUserId, actorRole,
       note: `Collected ₹${balance.balanceDue} via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
     });
+    this.notifyPaymentSuccess(updated).catch(() => {});
     return updated;
   }
 
@@ -603,7 +621,9 @@ export class OrdersService {
 
     const balance = await this.getBalance(orderId);
     const newPaymentStatus = balance.balanceDue <= 0 ? 'PAID' : 'PARTIAL';
-    return this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: newPaymentStatus } });
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: newPaymentStatus } });
+    if (newPaymentStatus === 'PAID') this.notifyPaymentSuccess(updated).catch(() => {});
+    return updated;
   }
 
   async markEnRoute(vendorUserId: string, orderId: string) {
@@ -661,7 +681,14 @@ export class OrdersService {
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     this.autoGenerateInvoice(orderId).catch((e) => this.logger.warn(`Auto-invoice failed: ${e.message}`));
+    this.notifyWorkCompleted(completed).catch(() => {});
     return completed;
+  }
+
+  private async notifyWorkCompleted(order: { id: string; customerId: string; guestPhone: string | null; orderNumber: string }) {
+    const phone = order.guestPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
+    if (!phone) return;
+    await this.paymentNotify.workCompleted(order.customerId, phone, order.orderNumber, order.id);
   }
 
   private async autoGenerateInvoice(orderId: string) {
@@ -758,6 +785,7 @@ export class GuestBookingService {
     private dispatch: DispatchService,
     private payments: PaymentsService,
     private cities: CitiesService,
+    private paymentNotify: PaymentNotificationsService,
   ) {}
 
   async book(dto: GuestBookingDto) {
@@ -868,6 +896,9 @@ export class GuestBookingService {
     if (isCOD) {
       this.logger.log(`📋 Guest booking (COD): ${orderNumber} for ${dto.name} (${dto.phone})`);
       this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Guest dispatch failed: ${e.message}`));
+      // One-time nudge encouraging online payment — "throughout the application encourage
+      // online payment" per the COD workflow requirement.
+      this.paymentNotify.payOnlineNudge(user.id, dto.phone, order.orderNumber, order.id).catch(() => {});
       return {
         orderNumber: order.orderNumber,
         orderId: order.id,
@@ -1152,7 +1183,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, ExtraWorkService, GuestBookingService],
   exports: [OrdersService, DispatchService],

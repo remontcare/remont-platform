@@ -9006,6 +9006,47 @@ function _otpBanner(o) {
   return '';
 }
 
+var COD_CONVERTIBLE_STATUSES = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE'];
+function _codBanner(o) {
+  if (o.paymentMethod !== 'COD' || o.paymentStatus === 'PAID' || COD_CONVERTIBLE_STATUSES.indexOf(o.status) === -1) return '';
+  return '<div style="background:#fef9f6;border:1.5px solid #fed7aa;border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+    '<span style="font-size:12px;color:#9a3412;font-weight:600">📱 Pay online now — faster, secure, cashless</span>' +
+    '<button onclick="payOnlineForCOD(\'' + o.id + '\',\'' + escHtml(o.orderNumber || '') + '\',' + Number(o.totalAmount || 0) + ',this)" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Online →</button>' +
+  '</div>';
+}
+function payOnlineForCOD(orderId, orderNumber, totalAmount, btn) {
+  var phone = localStorage.getItem('remont_phone') || '';
+  if (!phone) { showToast('Please update your phone number in Account settings first.', 'error'); return; }
+  btn.disabled = true; btn.textContent = 'Opening…';
+  apiPost('/api/v1/orders/public/' + orderId + '/retry-payment', { phone: phone }).then(function(res) {
+    var r = res && res.data ? res.data : res;
+    window._pdCodPending = { orderId: r.orderId, orderNumber: r.orderNumber, totalAmount: r.totalAmount, razorpayKeyId: r.razorpayKeyId, gatewayOrderId: r.gatewayOrderId, phone: phone };
+    if (!window.Razorpay || !r.razorpayKeyId) { showToast('Payment gateway not available right now.', 'error'); btn.disabled = false; btn.textContent = 'Pay Online →'; return; }
+    var rzp = new window.Razorpay({
+      key: r.razorpayKeyId, amount: Math.round(r.totalAmount * 100), currency: 'INR',
+      name: 'Remont India', description: 'Order ' + orderNumber, order_id: r.gatewayOrderId,
+      theme: { color: '#c4601a' },
+      handler: function(response) {
+        fetch((API_BASE || '') + '/api/v1/orders/public/confirm-payment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dbOrderId: r.orderId, gatewayOrderId: response.razorpay_order_id, paymentId: response.razorpay_payment_id, signature: response.razorpay_signature }),
+        }).then(function(res2) { return res2.json().then(function(d) { if (!res2.ok) throw new Error(d.message || 'Confirmation failed'); return d; }); })
+          .then(function() { showToast('Payment successful!', 'success'); loadMyOrders(); })
+          .catch(function(e) { showToast(e.message || 'Payment received but confirmation failed. Contact support.', 'error'); });
+      },
+      modal: { ondismiss: function() { btn.disabled = false; btn.textContent = 'Pay Online →'; } },
+    });
+    rzp.on('payment.failed', function(resp) {
+      showToast('Payment failed: ' + ((resp.error && resp.error.description) || 'Unknown error'), 'error');
+      btn.disabled = false; btn.textContent = 'Pay Online →';
+    });
+    rzp.open();
+  }).catch(function(e) {
+    showToast((e && e.message) || 'Could not start payment.', 'error');
+    btn.disabled = false; btn.textContent = 'Pay Online →';
+  });
+}
+
 function _renderOrderCard(o) {
   var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
   var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
@@ -9027,6 +9068,7 @@ function _renderOrderCard(o) {
       '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
     '</div>' +
     _otpBanner(o) +
+    _codBanner(o) +
     '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
       (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + payRetryId + '\',' + payRetryAmount + ',\'' + payRetryNumber + '\',this,' + payRetryIsMaster + ')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :

@@ -23,8 +23,15 @@ function makeService() {
     initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
   };
   const dispatch: any = { dispatch: jest.fn(async () => {}) };
-  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, {} as any, payments);
-  return { svc, prisma, payments, dispatch };
+  const paymentNotify: any = {
+    paymentSuccess: jest.fn(async () => {}),
+    paymentFailed: jest.fn(async () => {}),
+    balanceDue: jest.fn(async () => {}),
+    workCompleted: jest.fn(async () => {}),
+    payOnlineNudge: jest.fn(async () => {}),
+  };
+  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, {} as any, payments, paymentNotify);
+  return { svc, prisma, payments, dispatch, paymentNotify };
 }
 
 describe('OrdersService.retryPayment — retry/COD-to-Online conversion without duplicate bookings', () => {

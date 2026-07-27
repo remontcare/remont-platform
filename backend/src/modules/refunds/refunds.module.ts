@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { WalletService, WalletModule } from '../wallet/wallet.module';
+import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 // Business rule (highest priority, per product): a refund is NEVER automatic, even for an
 // online payment. Full pipeline: customer raises a request -> evidence -> partner response
@@ -24,7 +25,10 @@ interface DecideOptions {
 
 @Injectable()
 export class RefundsService {
-  constructor(private prisma: PrismaService, private payments: PaymentsService, private wallet: WalletService) {}
+  constructor(
+    private prisma: PrismaService, private payments: PaymentsService, private wallet: WalletService,
+    private paymentNotify: PaymentNotificationsService,
+  ) {}
 
   private log(refundRequestId: string, actorId: string | undefined, actorRole: UserRole | undefined, action: string, notes?: string) {
     return this.prisma.refundRequestLog.create({ data: { refundRequestId, actorId, actorRole, action, notes } });
@@ -252,6 +256,17 @@ export class RefundsService {
       if (order) await this.prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'REFUNDED' } });
       if (masterOrder) await this.prisma.masterOrder.update({ where: { id: masterOrder.id }, data: { paymentStatus: 'REFUNDED' } });
     }
+
+    const orderNumber = order?.orderNumber ?? masterOrder?.masterOrderNumber;
+    if (orderNumber) {
+      const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { phone: true } });
+      if (user?.phone) {
+        const decisionLabel = newStatus === 'REJECTED' ? 'rejected' : 'approved';
+        this.paymentNotify.refundProcessed(
+          customerId, user.phone, orderNumber, approvedAmount, decisionLabel, decisionMode, rr.orderId ?? undefined,
+        ).catch(() => {});
+      }
+    }
     return updated;
   }
 }
@@ -306,7 +321,7 @@ export class RefundsController {
 }
 
 @Module({
-  imports: [PaymentsModule, WalletModule],
+  imports: [PaymentsModule, WalletModule, PaymentNotificationsModule],
   controllers: [RefundsController],
   providers: [RefundsService],
   exports: [RefundsService],

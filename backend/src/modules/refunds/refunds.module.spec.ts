@@ -14,11 +14,13 @@ function makeService() {
       findMany: jest.fn(async () => []),
     },
     refundRequestLog: { create: jest.fn(async () => ({})) },
+    user: { findUnique: jest.fn(async () => ({ phone: '9999999999' })) },
   };
   const payments: any = { refundPayment: jest.fn(async () => ({ refundId: 'rfnd_1', gateway: 'RAZORPAY' })) };
   const wallet: any = { credit: jest.fn(async () => ({})) };
-  const svc = new RefundsService(prisma, payments, wallet);
-  return { svc, prisma, payments, wallet };
+  const paymentNotify: any = { refundProcessed: jest.fn(async () => {}) };
+  const svc = new RefundsService(prisma, payments, wallet, paymentNotify);
+  return { svc, prisma, payments, wallet, paymentNotify };
 }
 
 describe('RefundsService.raise', () => {

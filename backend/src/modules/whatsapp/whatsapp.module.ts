@@ -18,6 +18,30 @@ const TEMPLATES: Record<string, Record<string, (v: any) => string>> = {
     EN: (v) => `✅ ₹${v.amount} received for order #${v.orderNumber}. ₹${v.payout} added to wallet.`,
     HI: (v) => `✅ Order #${v.orderNumber} ka ₹${v.amount} mil gaya. ₹${v.payout} wallet mein add.`,
   },
+  PAYMENT_SUCCESS_CUSTOMER: {
+    EN: (v) => `✅ Payment of ₹${v.amount} received for order #${v.orderNumber}. Your booking is confirmed!`,
+    HI: (v) => `✅ Order #${v.orderNumber} ke liye ₹${v.amount} ka payment mil gaya. Aapki booking confirm ho gayi hai!`,
+  },
+  PAYMENT_FAILED: {
+    EN: (v) => `❌ Payment failed for order #${v.orderNumber}${v.reason ? `: ${v.reason}` : ''}. Tap to retry or pay via Cash on Delivery.`,
+    HI: (v) => `❌ Order #${v.orderNumber} ka payment fail ho gaya${v.reason ? `: ${v.reason}` : ''}. Retry karein ya Cash on Delivery chunein.`,
+  },
+  REFUND_PROCESSED: {
+    EN: (v) => `↩️ Your refund of ₹${v.amount} for order #${v.orderNumber} has been ${v.decision}${v.mode ? ` (${v.mode})` : ''}.`,
+    HI: (v) => `↩️ Order #${v.orderNumber} ka ₹${v.amount} refund ${v.decision} ho gaya hai${v.mode ? ` (${v.mode})` : ''}.`,
+  },
+  BALANCE_DUE_REMINDER: {
+    EN: (v) => `💳 ₹${v.amount} is due on order #${v.orderNumber}${v.reason ? ` (${v.reason})` : ''}. Pay online anytime from your account.`,
+    HI: (v) => `💳 Order #${v.orderNumber} par ₹${v.amount} baaki hai${v.reason ? ` (${v.reason})` : ''}. Apne account se kabhi bhi online pay karein.`,
+  },
+  WORK_COMPLETED: {
+    EN: (v) => `🎉 Your service for order #${v.orderNumber} is complete. Please rate your experience!`,
+    HI: (v) => `🎉 Order #${v.orderNumber} ka kaam complete ho gaya. Apna anubhav rate karein!`,
+  },
+  PAY_ONLINE_NUDGE: {
+    EN: (v) => `📱 Pay online for order #${v.orderNumber} — faster, secure, and cashless. Switch from Cash on Delivery anytime before work starts.`,
+    HI: (v) => `📱 Order #${v.orderNumber} ke liye online pay karein — tez, surakshit, cashless. Kaam shuru hone se pehle COD se online badal sakte hain.`,
+  },
   EXTRA_WORK: {
     EN: (v) => `📝 Extra work for #${v.orderNumber}:\n${v.description}\nAmount: ₹${v.amount}\nApprove? YES/NO`,
     HI: (v) => `📝 Order #${v.orderNumber} extra:\n${v.description}\nAmount: ₹${v.amount}\nYES/NO?`,
@@ -72,6 +96,42 @@ export class WhatsappService {
     const lang = await this.getLang(phone);
     const body = this.render('PAYMENT_RECEIVED', lang, { orderNumber, amount, payout });
     return this.send(phone, body, WhatsappMessageType.PAYMENT_RECEIVED);
+  }
+
+  async sendPaymentSuccessCustomer(phone: string, orderNumber: string, amount: number) {
+    const lang = await this.getLang(phone);
+    const body = this.render('PAYMENT_SUCCESS_CUSTOMER', lang, { orderNumber, amount });
+    return this.send(phone, body, WhatsappMessageType.PAYMENT_RECEIVED);
+  }
+
+  async sendPaymentFailed(phone: string, orderNumber: string, reason?: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('PAYMENT_FAILED', lang, { orderNumber, reason });
+    return this.send(phone, body, WhatsappMessageType.PAYMENT_FAILED);
+  }
+
+  async sendRefundProcessed(phone: string, orderNumber: string, amount: number, decision: string, mode?: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('REFUND_PROCESSED', lang, { orderNumber, amount, decision, mode });
+    return this.send(phone, body, WhatsappMessageType.REFUND_PROCESSED);
+  }
+
+  async sendBalanceDueReminder(phone: string, orderNumber: string, amount: number, reason?: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('BALANCE_DUE_REMINDER', lang, { orderNumber, amount, reason });
+    return this.send(phone, body, WhatsappMessageType.BALANCE_DUE_REMINDER);
+  }
+
+  async sendWorkCompleted(phone: string, orderNumber: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('WORK_COMPLETED', lang, { orderNumber });
+    return this.send(phone, body, WhatsappMessageType.WORK_COMPLETED);
+  }
+
+  async sendPayOnlineNudge(phone: string, orderNumber: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('PAY_ONLINE_NUDGE', lang, { orderNumber });
+    return this.send(phone, body, WhatsappMessageType.PAY_ONLINE_NUDGE);
   }
 
   /** Plain-text message with no template — used by flows (like seller-registration review

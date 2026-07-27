@@ -7,6 +7,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, Public, CurrentUser, JwtPayload } from '../../common';
+import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 interface PhonePeConfig {
   merchantId: string;
@@ -32,7 +33,7 @@ export class PaymentsService implements OnModuleInit {
   // Which gateway is the active one
   private activeGateway: 'RAZORPAY' | 'PHONEPE' | '' = '';
 
-  constructor(private prisma: PrismaService) {
+  constructor(private prisma: PrismaService, private paymentNotify: PaymentNotificationsService) {
     // Bootstrap from env vars — will be overridden by DB in onModuleInit
     this.razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
     this.razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
@@ -350,15 +351,29 @@ export class PaymentsService implements OnModuleInit {
 
     if (event.event === 'payment.failed') {
       const payment = event.payload.payment.entity;
+      const failureReason = payment.error_description || payment.error_reason || undefined;
       const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId: payment.order_id } });
       if (tx) {
         await this.prisma.paymentTransaction.update({
           where: { id: tx.id },
-          data: { status: 'FAILED', gatewayPaymentId: payment.id },
+          data: { status: 'FAILED', gatewayPaymentId: payment.id, failureReason },
         });
+        if (tx.orderId && !tx.isWalletTopup) {
+          this.notifyPaymentFailed(tx.userId, tx.orderId, failureReason).catch(() => {});
+        }
       }
     }
     return { received: true };
+  }
+
+  private async notifyPaymentFailed(userId: string, orderId: string, reason?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { phone: true } });
+    if (!user?.phone) return;
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { orderNumber: true } });
+    const orderNumber = order?.orderNumber
+      ?? (await this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { masterOrderNumber: true } }))?.masterOrderNumber;
+    if (!orderNumber) return;
+    await this.paymentNotify.paymentFailed(userId, user.phone, orderNumber, reason, orderId);
   }
 
   getConfig() {
@@ -413,5 +428,10 @@ export class PaymentsController {
   }
 }
 
-@Module({ controllers: [PaymentsController], providers: [PaymentsService], exports: [PaymentsService] })
+@Module({
+  imports: [PaymentNotificationsModule],
+  controllers: [PaymentsController],
+  providers: [PaymentsService],
+  exports: [PaymentsService],
+})
 export class PaymentsModule {}
