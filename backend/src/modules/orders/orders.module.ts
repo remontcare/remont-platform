@@ -491,6 +491,114 @@ export class OrdersService {
     return updated;
   }
 
+  /**
+   * The single source of truth for "how much is still owed" — Order.totalAmount already
+   * absorbs extra-work amounts automatically (ExtraWorkService.recalc()), so balanceDue
+   * recalculates correctly the moment extra work is approved, with no separate tracking
+   * needed. Sums every successful PaymentTransaction for this order (original payment,
+   * COD/balance collections, prior partial payments) plus any wallet amount applied at
+   * booking time.
+   */
+  async getBalance(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const paidAgg = await this.prisma.paymentTransaction.aggregate({
+      where: { orderId, status: 'PAID' },
+      _sum: { amount: true },
+    });
+    const paidAmount = Number(paidAgg._sum.amount || 0);
+    const walletUsed = Number(order.walletUsed || 0);
+    const balanceDue = Math.max(0, Number(order.totalAmount) - paidAmount - walletUsed);
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      totalAmount: order.totalAmount,
+      walletUsed: order.walletUsed,
+      paidAmount,
+      balanceDue,
+      paymentStatus: order.paymentStatus,
+    };
+  }
+
+  /**
+   * Collect any outstanding balance — the original amount for a still-unpaid order, or
+   * whatever extra work added on top of an already-paid one. CASH/UPI/CARD is an in-person
+   * collection (vendor or admin only); ONLINE generates a fresh gateway order that the
+   * customer themselves, the vendor (handing over their device), or admin can trigger —
+   * confirmBalancePayment() below finalizes it once the gateway signature verifies.
+   */
+  async collectBalance(actorUserId: string, actorRole: UserRole, orderId: string, mode: PaymentCollectionMode, collectedLocation?: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (['CANCELLED', 'REFUNDED'].includes(order.status)) {
+      throw new BadRequestException('Cannot collect payment for a cancelled/refunded order');
+    }
+
+    const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+    const isAdmin = adminRoles.includes(actorRole);
+    const isOwner = order.customerId === actorUserId;
+    const isAssignedVendor = order.vendor?.userId === actorUserId;
+    if (mode === 'ONLINE') {
+      if (!isAdmin && !isAssignedVendor && !isOwner) throw new ForbiddenException();
+    } else if (!isAdmin && !isAssignedVendor) {
+      throw new ForbiddenException();
+    }
+
+    const balance = await this.getBalance(orderId);
+    if (balance.balanceDue <= 0) return { ...balance, message: 'Nothing due — already fully paid' };
+
+    if (mode === 'ONLINE') {
+      const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+      const payOrder: any = await this.payments.initiatePayment(order.customerId, balance.balanceDue, order.id, frontendUrl);
+      return {
+        orderId: order.id, orderNumber: order.orderNumber, balanceDue: balance.balanceDue,
+        requiresPayment: true, gateway: payOrder.gateway, gatewayOrderId: payOrder.gatewayOrderId,
+        razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
+      };
+    }
+
+    await this.prisma.paymentTransaction.create({
+      data: {
+        orderId, userId: order.customerId, amount: balance.balanceDue, status: 'PAID',
+        gateway: 'CASH_COLLECTION', collectionMode: mode, collectedBy: actorUserId, collectedLocation,
+      },
+    });
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: 'PAID' } });
+    await writeOrderTimeline(this.prisma, {
+      orderId, status: 'BALANCE_COLLECTED', actorId: actorUserId, actorRole,
+      note: `Collected ₹${balance.balanceDue} via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
+    });
+    return updated;
+  }
+
+  /**
+   * Confirms an ONLINE balance/extra-work payment. Deliberately separate from
+   * confirmPayment(): that method also drives the order's lifecycle status (PENDING_PAYMENT
+   * -> CONFIRMED) which does not apply here — a balance payment can happen at ANY point after
+   * the job is already COMPLETED/INVOICED, and must never move status backwards or sideways.
+   */
+  async confirmBalancePayment(orderId: string, paymentId: string, gatewayOrderId: string, signature: string) {
+    if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
+    const expected = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${gatewayOrderId}|${paymentId}`)
+      .digest('hex');
+    if (expected !== signature) throw new BadRequestException('Invalid payment signature');
+
+    const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId } });
+    if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
+    if (linkedTx.status !== 'PAID') {
+      await this.prisma.paymentTransaction.update({
+        where: { id: linkedTx.id },
+        data: { status: 'PAID', gatewayPaymentId: paymentId, gatewaySignature: signature },
+      });
+    }
+
+    const balance = await this.getBalance(orderId);
+    const newPaymentStatus = balance.balanceDue <= 0 ? 'PAID' : 'PARTIAL';
+    return this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: newPaymentStatus } });
+  }
+
   async markEnRoute(vendorUserId: string, orderId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
@@ -949,6 +1057,24 @@ export class OrdersController {
     @Body() b: { mode: PaymentCollectionMode; collectedLocation?: string },
   ) {
     return this.orders.collectCod(u.sub, u.role, id, b.mode, b.collectedLocation);
+  }
+
+  @Get(':id/balance') balance(@Param('id') id: string) { return this.orders.getBalance(id); }
+
+  @Post(':id/collect-balance')
+  collectBalance(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { mode: PaymentCollectionMode; collectedLocation?: string },
+  ) {
+    return this.orders.collectBalance(u.sub, u.role, id, b.mode, b.collectedLocation);
+  }
+
+  @Post(':id/confirm-balance-payment')
+  confirmBalancePayment(
+    @Param('id') id: string,
+    @Body() b: { paymentId: string; gatewayOrderId: string; signature: string },
+  ) {
+    return this.orders.confirmBalancePayment(id, b.paymentId, b.gatewayOrderId, b.signature);
   }
 }
 

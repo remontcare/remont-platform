@@ -379,7 +379,11 @@ a{color:inherit;text-decoration:none}
         <div class="wallet-banner">
           <div class="wb-label" data-en="Total Wallet Balance" data-hi="कुल वॉलेट बैलेंस">Total Wallet Balance</div>
           <div class="wb-val" id="earn-wallet-val">₹0</div>
-          <div class="wb-row"><div style="font-size:11px;opacity:.85" id="earn-pending-label" data-en="Pending payout" data-hi="लंबित भुगतान">Pending payout</div><button class="wb-btn" data-en="Withdraw" data-hi="निकासी">Withdraw</button></div>
+          <div class="wb-row"><div style="font-size:11px;opacity:.85" id="earn-pending-label" data-en="Pending payout" data-hi="लंबित भुगतान">Pending payout</div><button class="wb-btn" onclick="togglePayoutHistory()" data-en="Payout History" data-hi="भुगतान इतिहास">Payout History</button></div>
+        </div>
+        <div id="payout-history-panel" style="display:none;background:#fff;border:1px solid var(--mist);border-radius:12px;padding:12px 14px;margin-bottom:14px">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:8px">Remont settles partner payouts periodically via bank transfer/UPI/cash. This shows what's already been paid out to you.</div>
+          <div id="payout-history-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
         </div>
         <div class="tab-row">
           <button class="tab-btn active" onclick="earnTab(this,'today')" data-en="Today" data-hi="आज">Today</button>
@@ -494,6 +498,7 @@ a{color:inherit;text-decoration:none}
 </div>
 
 <script src="/shared/remont-auth.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 var LANG='EN';
@@ -505,7 +510,7 @@ var vendorProfile = null, earningsData = null, jobsAll = [];
 var pendingPhone = '';
 var onlineState = false;
 window.vendorType = 'individual';
-var jfState = {step:1, orderId:null, mock:true, order:null, photosBefore:[], photosAfter:[], extras:[], payMethod:null};
+var jfState = {step:1, orderId:null, mock:true, order:null, photosBefore:[], photosAfter:[], extras:[], payMethod:null, balance:null};
 var JF_STEPS=['Accepted','En Route','Verify','Before','Working','Extra','After','Payment','Done'];
 
 /* ── API HELPER ── */
@@ -678,6 +683,27 @@ function loadEarnings(){
     earnTabRender('today');
   }).catch(function(e){ console.warn('earnings load failed', e.message); });
 }
+var _payoutHistoryLoaded = false;
+function togglePayoutHistory(){
+  var panel = document.getElementById('payout-history-panel');
+  var showing = panel.style.display !== 'none';
+  panel.style.display = showing ? 'none' : 'block';
+  if (!showing && !_payoutHistoryLoaded) {
+    _payoutHistoryLoaded = true;
+    apiFetch('/settlements/me').then(function(list){
+      var el = document.getElementById('payout-history-list');
+      if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No payouts recorded yet</div></div>'; return; }
+      el.innerHTML = list.map(function(s){
+        var date = new Date(s.paidAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+        var modeLabel = {BANK_TRANSFER:'Bank Transfer', UPI:'UPI', CASH:'Cash', CHEQUE:'Cheque'}[s.mode] || s.mode;
+        return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+modeLabel+(s.referenceNumber?' · '+s.referenceNumber:'')+'</div><div class="tr-date">'+date+'</div></div><div class="txn-amt pos">'+fmtMoney(s.amount)+'</div></div>';
+      }).join('');
+    }).catch(function(e){
+      document.getElementById('payout-history-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load payout history</div></div>';
+      _payoutHistoryLoaded = false;
+    });
+  }
+}
 function earnTab(el,t){
   document.querySelectorAll('#view-earnings .tab-btn').forEach(function(b){b.classList.remove('active')});
   el.classList.add('active');
@@ -787,7 +813,7 @@ function acceptJob(){
 
 /* ── JOB FLOW ── */
 function startJobFlow(order, isMock){
-  jfState={step:1, orderId: order?order.id:null, mock:isMock, order:order, photosBefore:[], photosAfter:[], extras:(order&&order.extraWorkItems)||[], payMethod:null};
+  jfState={step:1, orderId: order?order.id:null, mock:isMock, order:order, photosBefore:[], photosAfter:[], extras:(order&&order.extraWorkItems)||[], payMethod:null, balance:null};
   if(order){
     var stepMap={VENDOR_ASSIGNED:1, VENDOR_EN_ROUTE:3, STARTED:5, IN_PROGRESS:5, EXTRA_WORK_ADDED:5};
     jfState.step = stepMap[order.status] || 1;
@@ -896,19 +922,31 @@ function renderJfStep(){
   }
   else if(s===8){
     var extraTotal=jfState.extras.reduce(function(a,e){return a+Number(e.amount||e.amt||0);},0);
-    var total = d.amount + (jfState.mock ? extraTotal : 0);
+    var bal = jfState.balance;
+    var alreadyPaid = bal ? Number(bal.paidAmount) + Number(bal.walletUsed) : 0;
+    var balanceDue = bal ? Number(bal.balanceDue) : (d.amount + (jfState.mock ? extraTotal : 0));
+    var total = bal ? Number(bal.totalAmount) : (d.amount + (jfState.mock ? extraTotal : 0));
     html = `<div class="jf-step-tag">Step 8 of 9 — Payment</div><div class="jf-title">Collect Payment</div>
       <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Base Amount</span><span class="cdr">${fmtMoney(d.amount)}</span></div>
       ${extraTotal ? `<div class="cc-detail-row"><span class="cdl">Extra Work (pending approval)</span><span class="cdr">${fmtMoney(extraTotal)}</span></div>` : ''}
-      <div class="cc-detail-row" style="font-size:15px"><span class="cdl">Total</span><span class="cdr" style="color:var(--sienna)">${fmtMoney(total)}</span></div></div>
-      ${jfState.mock ? '' : '<div class="demo-note">Payment collection (COD confirm / Razorpay link) is not wired to a backend endpoint yet — the button below only marks the job complete.</div>'}
-      <div class="pay-option" id="pay-cod" onclick="selectPay('cod')"><div class="po-icon">💵</div><div><div class="po-name">Cash on Delivery</div><div class="po-sub">Confirm cash received</div></div></div>
-      <div class="pay-option" id="pay-online" onclick="selectPay('online')"><div class="po-icon">🔗</div><div><div class="po-name">Send Payment Link</div><div class="po-sub">Razorpay link via SMS/WhatsApp</div></div></div>
+      <div class="cc-detail-row"><span class="cdl">Order Total</span><span class="cdr">${fmtMoney(total)}</span></div>
+      ${alreadyPaid ? `<div class="cc-detail-row" style="color:#16a34a"><span class="cdl">Already Paid</span><span class="cdr">-${fmtMoney(alreadyPaid)}</span></div>` : ''}
+      <div class="cc-detail-row" style="font-size:15px"><span class="cdl">Balance Due</span><span class="cdr" style="color:var(--sienna)">${fmtMoney(balanceDue)}</span></div></div>
+      ${balanceDue<=0 ? '<div class="demo-note">Already fully paid — nothing to collect. Just verify the completion OTP below.</div>' : `
+      <div class="pay-option" id="pay-cod" onclick="selectPay('cod')"><div class="po-icon">💵</div><div><div class="po-name">Cash / UPI / Card in person</div><div class="po-sub">Confirm payment received on-site</div></div></div>
+      <div class="pay-option" id="pay-online" onclick="selectPay('online')"><div class="po-icon">📱</div><div><div class="po-name">Online (UPI / Card)</div><div class="po-sub">Customer pays on this device now</div></div></div>`}
       <div class="jf-title" style="font-size:15px;margin-top:18px">Verify Completion OTP</div>
       <div class="jf-sub">${jfState.mock ? 'Ask the customer for their 4-digit completion OTP.' : 'Ask the customer to read out the completion OTP shown on their order screen — this confirms the job before it closes out.'}</div>
       <div class="otp-row"><input class="otp-digit" maxlength="1" id="cotp-0" oninput="jfCompletionOtpJump(0)"><input class="otp-digit" maxlength="1" id="cotp-1" oninput="jfCompletionOtpJump(1)"><input class="otp-digit" maxlength="1" id="cotp-2" oninput="jfCompletionOtpJump(2)"><input class="otp-digit" maxlength="1" id="cotp-3" oninput="jfCompletionOtpJump(3)"></div>
-      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}`;
+      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}
+      <div class="auth-error" id="jf-pay-err"></div>`;
     foot = `<button class="btn-primary" id="pay-confirm-btn" onclick="confirmPayment()" disabled>Confirm & Complete Job →</button>`;
+    if (!jfState.mock && jfState.orderId && !bal) {
+      apiFetch('/orders/'+jfState.orderId+'/balance').then(function(b){
+        jfState.balance = b;
+        if (jfState.step === 8) renderJfStep();
+      }).catch(function(){ /* fall back to client-estimated total already rendered above */ });
+    }
   }
   else if(s===9){
     var extraTotal2=jfState.extras.reduce(function(a,e){return a+Number(e.amount||e.amt||0);},0);
@@ -952,7 +990,8 @@ function _jfCompletionOtp(){
 }
 function _jfUpdatePayConfirmBtn(){
   var btn=document.getElementById('pay-confirm-btn'); if(!btn) return;
-  btn.disabled = !(jfState.payMethod && _jfCompletionOtp().length===4);
+  var noBalanceDue = jfState.balance && Number(jfState.balance.balanceDue) <= 0;
+  btn.disabled = !((jfState.payMethod || noBalanceDue) && _jfCompletionOtp().length===4);
 }
 function verifyJfOtp(){
   var code=['0','1','2','3'].map(function(i){return document.getElementById('jotp-'+i).value}).join('');
@@ -1033,13 +1072,55 @@ function confirmPayment(){
   var code=_jfCompletionOtp();
   if(code.length!==4){ alert('Enter the 4-digit completion OTP from the customer'); return; }
   var btn=document.getElementById('pay-confirm-btn'); btn.disabled=true; btn.textContent='Completing…';
+  var errEl=document.getElementById('jf-pay-err'); if(errEl) errEl.textContent='';
   if(jfState.mock){
     if(code!=='1234'){ alert('Incorrect OTP. Try 1234 for this demo.'); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; return; }
     jfGoto(9); return;
   }
   apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify({otp:code, photosAfter: jfState.photosAfter})})
-    .then(function(order){ jfState.completedOrder=order; jfGoto(9); })
-    .catch(function(e){ alert('Could not complete job: '+e.message); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; });
+    .then(function(order){
+      jfState.completedOrder=order;
+      var balanceDue = jfState.balance ? Number(jfState.balance.balanceDue) : 0;
+      if (balanceDue <= 0) { jfGoto(9); return; }
+      return jfCollectBalancePayment(btn);
+    })
+    .catch(function(e){
+      if(errEl) errEl.textContent=e.message; else alert('Could not complete job: '+e.message);
+      btn.disabled=false; btn.textContent='Confirm & Complete Job →';
+    });
+}
+
+function jfCollectBalancePayment(btn){
+  var mode = jfState.payMethod === 'online' ? 'ONLINE' : 'CASH';
+  btn.textContent='Collecting payment…';
+  return apiFetch('/orders/'+jfState.orderId+'/collect-balance', {method:'POST', body: JSON.stringify({mode:mode})})
+    .then(function(res){
+      if (mode === 'CASH' || !res.requiresPayment) { jfGoto(9); return; }
+      // ONLINE — open Razorpay right here so the customer can pay on this device.
+      return new Promise(function(resolve, reject){
+        if (!window.Razorpay || !res.razorpayKeyId) { reject(new Error('Payment gateway not available on this device — collect cash instead.')); return; }
+        var rzp = new window.Razorpay({
+          key: res.razorpayKeyId,
+          amount: Math.round(res.balanceDue * 100),
+          currency: 'INR',
+          name: 'Remont India',
+          description: 'Balance payment for order ' + jfState.orderId,
+          order_id: res.gatewayOrderId,
+          handler: function(response){
+            btn.textContent='Confirming payment…';
+            apiFetch('/orders/'+jfState.orderId+'/confirm-balance-payment', {method:'POST', body: JSON.stringify({
+              paymentId: response.razorpay_payment_id,
+              gatewayOrderId: response.razorpay_order_id,
+              signature: response.razorpay_signature,
+            })}).then(function(){ jfGoto(9); resolve(); }).catch(reject);
+          },
+          theme: { color: '#c4601a' },
+          modal: { ondismiss: function(){ reject(new Error('Payment was not completed. Try again or collect cash instead.')); } },
+        });
+        rzp.on('payment.failed', function(resp){ reject(new Error('Payment failed: ' + ((resp.error && resp.error.description) || 'Unknown error'))); });
+        rzp.open();
+      });
+    });
 }
 
 /* ── AGENCY TEAM (demo only — no backend yet) ── */

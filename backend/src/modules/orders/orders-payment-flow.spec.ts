@@ -8,7 +8,12 @@ function makeService() {
       update: jest.fn(async (args: any) => ({ id: 'o1', ...args.data })),
     },
     serviceVendor: { findUnique: jest.fn() },
-    paymentTransaction: { create: jest.fn(async (args: any) => ({ id: 'tx-1', ...args.data })) },
+    paymentTransaction: {
+      create: jest.fn(async (args: any) => ({ id: 'tx-1', ...args.data })),
+      findFirst: jest.fn(),
+      update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })),
+      aggregate: jest.fn(async () => ({ _sum: { amount: 0 } })),
+    },
     user: { findUnique: jest.fn() },
   };
   // writeOrderTimeline (imported from ../../common) hits prisma.orderTimeline.create — stub it too.
@@ -135,6 +140,130 @@ describe('OrdersService.collectCod — closing the "COD paymentStatus stuck PEND
     expect(prisma.paymentTransaction.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ collectionMode: 'CASH', collectedBy: 'vendor-user-1', collectedLocation: 'Customer doorstep' }),
     }));
+    expect(result.paymentStatus).toBe('PAID');
+  });
+});
+
+describe('OrdersService.getBalance — recalculates automatically as extra work / partial payments change the total', () => {
+  it('reports the full amount due when nothing has been paid yet', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0, paymentStatus: 'PENDING' });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    const b = await svc.getBalance('o1');
+    expect(b.balanceDue).toBe(1000);
+  });
+
+  it('subtracts wallet-covered amount and prior PAID transactions from the total', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 200, paymentStatus: 'PARTIAL' });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 300 } });
+    const b = await svc.getBalance('o1');
+    expect(b.balanceDue).toBe(500);
+  });
+
+  it('reflects extra work automatically — totalAmount already includes it, no separate tracking needed', async () => {
+    const { svc, prisma } = makeService();
+    // Order.totalAmount was 1000, then ExtraWorkService.recalc() bumped it to 1300 after
+    // ₹300 of approved extra work — getBalance needs no extra-work-specific logic at all.
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1300, walletUsed: 0, paymentStatus: 'PARTIAL' });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 1000 } });
+    const b = await svc.getBalance('o1');
+    expect(b.balanceDue).toBe(300);
+  });
+
+  it('never reports a negative balance', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0, paymentStatus: 'PAID' });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 1200 } });
+    const b = await svc.getBalance('o1');
+    expect(b.balanceDue).toBe(0);
+  });
+});
+
+describe('OrdersService.collectBalance — Section 6/7 "Collect Payment" at completion / additional work', () => {
+  it('rejects a vendor who is not assigned to the order', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 500, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+    });
+    await expect(svc.collectBalance('vendor-user-b', 'SERVICE_VENDOR' as any, 'o1', 'CASH' as any)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects a random customer trying to collect cash on someone else\'s order', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 500, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+    });
+    await expect(svc.collectBalance('cust-1', 'CUSTOMER' as any, 'o1', 'CASH' as any)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('allows the order\'s own customer to self-serve pay the remaining balance online', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 500, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+    });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    const result: any = await svc.collectBalance('cust-1', 'CUSTOMER' as any, 'o1', 'ONLINE' as any);
+    expect(payments.initiatePayment).toHaveBeenCalledWith('cust-1', 500, 'o1', expect.any(String));
+    expect(result.requiresPayment).toBe(true);
+  });
+
+  it('returns "nothing due" without creating a transaction when the balance is already zero', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 500, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+    });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 500 } });
+    const result: any = await svc.collectBalance('vendor-user-a', 'SERVICE_VENDOR' as any, 'o1', 'CASH' as any);
+    expect(result.message).toMatch(/already fully paid/);
+    expect(prisma.paymentTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('records a cash collection for exactly the outstanding balance and marks the order PAID', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 800, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+    });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 500 } });
+    const result: any = await svc.collectBalance('vendor-user-a', 'SERVICE_VENDOR' as any, 'o1', 'UPI' as any, 'Site visit');
+    expect(prisma.paymentTransaction.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 300, collectionMode: 'UPI', collectedLocation: 'Site visit' }),
+    }));
+    expect(result.paymentStatus).toBe('PAID');
+  });
+});
+
+describe('OrdersService.confirmBalancePayment — never moves order.status, only paymentStatus', () => {
+  it('rejects an invalid signature', async () => {
+    const { svc } = makeService();
+    process.env.RAZORPAY_KEY_SECRET = 'test-secret';
+    await expect(svc.confirmBalancePayment('o1', 'pay_1', 'order_1', 'bad-sig')).rejects.toThrow(BadRequestException);
+  });
+
+  it('sets paymentStatus PARTIAL when a balance remains after this payment', async () => {
+    const { svc, prisma } = makeService();
+    process.env.RAZORPAY_KEY_SECRET = 'test-secret';
+    const crypto = require('crypto');
+    const gatewayOrderId = 'order_1', paymentId = 'pay_1';
+    const sig = crypto.createHmac('sha256', 'test-secret').update(`${gatewayOrderId}|${paymentId}`).digest('hex');
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', status: 'PENDING' });
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0 });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 400 } }); // still short of 1000
+    const result = await svc.confirmBalancePayment('o1', paymentId, gatewayOrderId, sig);
+    expect(prisma.paymentTransaction.update).toHaveBeenCalled();
+    expect(result.paymentStatus).toBe('PARTIAL');
+  });
+
+  it('sets paymentStatus PAID once this payment fully covers the balance', async () => {
+    const { svc, prisma } = makeService();
+    process.env.RAZORPAY_KEY_SECRET = 'test-secret';
+    const crypto = require('crypto');
+    const gatewayOrderId = 'order_2', paymentId = 'pay_2';
+    const sig = crypto.createHmac('sha256', 'test-secret').update(`${gatewayOrderId}|${paymentId}`).digest('hex');
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-2', status: 'PENDING' });
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', orderNumber: 'REM-1', totalAmount: 1000, walletUsed: 0 });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 1000 } });
+    const result = await svc.confirmBalancePayment('o1', paymentId, gatewayOrderId, sig);
     expect(result.paymentStatus).toBe('PAID');
   });
 });
