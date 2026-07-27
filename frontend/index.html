@@ -6948,16 +6948,27 @@
     var notes   = document.getElementById('bm-notes').value.trim();
     if (!svcId) { showToast('Service not found — please try again', 'error'); return; }
 
+    var fullAddress = address;
+    var pincode;
+    if (addrId) {
+      var savedAddr = (window._bmSavedAddrs || []).find(function(a) { return a.id === addrId; });
+      if (savedAddr) {
+        fullAddress = savedAddr.fullAddress;
+        pincode = savedAddr.pincode;
+      }
+    }
+    if (!fullAddress) { showToast('Please enter a service address', 'error'); return; }
+
     var btn = document.getElementById('bm-next-btn');
     btn.textContent = 'Booking…'; btn.disabled = true;
 
     var payload = {
       name: name, phone: phone, serviceId: svcId, cityId: cityId,
-      fullAddress: addrId ? undefined : address,
+      fullAddress: fullAddress,
       slotDate: date, slotTime: time, channel: 'WEBSITE',
       paymentMethod: window._bmPayMethod || 'COD'
     };
-    if (!addrId) payload.fullAddress = address;
+    if (pincode) payload.pincode = pincode;
     if (email) payload.email = email;
     if (notes) payload.notes = notes;
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
