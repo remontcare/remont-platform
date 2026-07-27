@@ -139,6 +139,7 @@
     <!-- Financial Tab -->
     <div id="tab-financial" style="display:none">
       <div class="kpi-row" id="fin-kpis"></div>
+      <div class="kpi-row" id="fin-payment-kpis" style="margin-top:12px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
         <div class="chart-wrap">
           <div class="chart-title">Revenue by Gateway</div>
@@ -147,6 +148,16 @@
         <div class="chart-wrap">
           <div class="chart-title">Wallet Credits Issued</div>
           <div id="wallet-info" style="font-size:13px;color:#374151">—</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
+        <div class="chart-wrap">
+          <div class="chart-title">COD vs Online</div>
+          <div class="bar-chart" id="cod-online-bars">—</div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-title">Collection Trend</div>
+          <div class="bar-chart" id="collection-trend-bars">—</div>
         </div>
       </div>
       <div class="table-wrap">
@@ -331,6 +342,23 @@ function loadFinancial() {
         '<td style="font-size:11px;color:#9ca3af">' + escape(t.gatewayOrderId || '—') + '</td></tr>';
     }).join('');
   }).catch(function(e){ toast('Error loading financial: ' + e.message, 'error'); });
+
+  api('GET', '/admin/reports/payments-dashboard' + getDateParams()).then(function(d) {
+    currentData.paymentsDashboard = d;
+    var kpiEl = document.getElementById('fin-payment-kpis');
+    kpiEl.innerHTML =
+      '<div class="kpi"><div class="kpi-val">' + fmtCur(d.totalCollection.amount) + '</div><div class="kpi-label">Total Collection</div><div class="kpi-sub">' + d.totalCollection.count + ' payments</div></div>' +
+      '<div class="kpi"><div class="kpi-val" style="color:#f59e0b">' + fmtCur(d.outstandingAmount) + '</div><div class="kpi-label">Pending Collection</div><div class="kpi-sub">' + d.pendingCollection.count + ' orders</div></div>' +
+      '<div class="kpi"><div class="kpi-val" style="color:#ef4444">' + fmtCur(d.failedPayments.amount) + '</div><div class="kpi-label">Failed Payments</div><div class="kpi-sub">' + d.failedPayments.count + ' attempts</div></div>' +
+      '<div class="kpi"><div class="kpi-val" style="color:#ef4444">' + fmtCur(d.refunds.amount) + '</div><div class="kpi-label">Refunds Processed</div><div class="kpi-sub">' + d.refunds.count + ' requests</div></div>' +
+      '<div class="kpi"><div class="kpi-val">' + fmtCur(d.partnerSettlements.amount) + '</div><div class="kpi-label">Partner Settlements</div><div class="kpi-sub">' + d.partnerSettlements.count + ' payouts</div></div>';
+
+    var codItems = (d.codVsOnline || []).map(function(g){ return { label: g.paymentMethod || 'Unspecified', val: g.amount }; });
+    renderBars('cod-online-bars', codItems, 'label', 'val', fmtCur);
+
+    var trendItems = (d.trend || []).slice(-14).map(function(t){ return { label: t.period, val: t.amount }; });
+    renderBars('collection-trend-bars', trendItems, 'label', 'val', fmtCur);
+  }).catch(function(e){ console.warn('payments dashboard load failed', e.message); });
 }
 
 function exportCurrentTab() {

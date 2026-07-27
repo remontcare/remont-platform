@@ -122,11 +122,31 @@ function load() {
             '<td style="color:#f97316">' + fmtCur(e.commission||e.platformCommission||0) + '</td>' +
             '<td>' + (e.jobsCompleted||e.completedOrders||0) + '</td>' +
             '<td>' + (e.rating||e.avgRating ? '⭐ '+(e.rating||e.avgRating) : '—') + '</td>' +
-            '<td>' + (pending > 0 ? '<button class="btn btn-xs btn-primary" onclick="openPayout(\''+e.vendorId+'\',\''+escape(name)+'\','+pending+')">💳 Pay</button>' : '<span style="color:#22c55e;font-size:12px">✓ Settled</span>') + '</td>' +
+            '<td>' +
+              (pending > 0 ? '<button class="btn btn-xs btn-primary" onclick="openPayout(\''+e.vendorId+'\',\''+escape(name)+'\','+pending+')">💳 Pay</button>' : '<span style="color:#22c55e;font-size:12px">✓ Settled</span>') +
+              ' <button class="btn btn-xs btn-outline" onclick="viewLedger(\''+e.vendorId+'\')">📒 Ledger</button>' +
+            '</td>' +
             '</tr>';
         }).join('') + '</tbody></table>';
     })
     .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function viewLedger(vendorId) {
+  api('GET', '/admin/partners/' + vendorId + '/ledger').then(function(l) {
+    var settlementLines = (l.settlements || []).map(function(s) {
+      return '  · ' + fmtCur(s.amount) + ' via ' + s.mode + (s.referenceNumber ? ' (' + s.referenceNumber + ')' : '') + ' — ' + fmtDate(s.paidAt);
+    }).join('\n');
+    var orderLines = (l.completedOrders || []).slice(0, 15).map(function(o) {
+      return '  · ' + o.orderNumber + ' — earned ' + fmtCur(o.vendorPayout) + ' (commission ' + fmtCur(o.remontCommission) + ')';
+    }).join('\n');
+    alert(
+      'Partner Ledger — ' + l.vendor.fullName + '\n\n' +
+      'Total Earnings: ' + fmtCur(l.vendor.totalEarnings) + '  Pending Payout: ' + fmtCur(l.vendor.pendingPayout) + '\n\n' +
+      'Settlements Paid:\n' + (settlementLines || '  (none yet)') + '\n\n' +
+      'Recent Completed Jobs:\n' + (orderLines || '  (none)')
+    );
+  }).catch(function(e) { toast('Could not load ledger: ' + e.message, 'error'); });
 }
 
 function openPayout(vendorId, name, amount) {

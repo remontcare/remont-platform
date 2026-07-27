@@ -154,6 +154,7 @@ function renderPayments(list) {
       '<td>' +
         (p.status === 'PAID' ? '<button class="btn btn-outline btn-sm" onclick=\'viewReceipt(' + JSON.stringify(p) + ')\'>View</button>' : '') +
         ((p.status === 'PENDING' || p.status === 'INITIATED') ? '<button class="btn btn-outline btn-sm" style="color:#f59e0b;border-color:#f59e0b" onclick="markFailed(\'' + p.id + '\')">Mark Failed</button>' : '') +
+        (p.orderId ? '<button class="btn btn-outline btn-sm" onclick="viewLedger(\'' + p.orderId + '\')">Ledger</button>' : '') +
       '</td>' +
       '</tr>';
   }).join('');
@@ -194,6 +195,24 @@ function viewReceipt(p) {
     'Date: ' + fmtDate(p.createdAt)
   );
 }
+function viewLedger(orderId) {
+  api('GET', '/admin/orders/' + orderId + '/ledger').then(function(l) {
+    var txLines = (l.transactions || []).map(function(t) {
+      return '  · ' + fmtCur(t.amount) + ' — ' + t.status + ' (' + (t.collectionMode || t.gateway) + ') — ' + fmtDate(t.createdAt);
+    }).join('\n');
+    var refundLines = (l.refundRequests || []).map(function(r) {
+      return '  · ' + r.status + (r.approvedAmount ? ' — ' + fmtCur(r.approvedAmount) : '') + ' (' + escape(r.reason) + ')';
+    }).join('\n');
+    alert(
+      'Order Ledger — ' + l.order.orderNumber + '\n\n' +
+      'Total: ' + fmtCur(l.summary.totalAmount) + '  Wallet Used: ' + fmtCur(l.summary.walletUsed) + '\n' +
+      'Paid: ' + fmtCur(l.summary.paidAmount) + '  Balance Due: ' + fmtCur(l.summary.balanceDue) + '\n\n' +
+      'Transactions:\n' + (txLines || '  (none)') + '\n\n' +
+      'Refund Requests:\n' + (refundLines || '  (none)')
+    );
+  }).catch(function(e) { toast('Could not load ledger: ' + e.message, 'error'); });
+}
+
 function markFailed(id) {
   var reason = prompt('Reason for marking this payment as failed (visible in admin records only):');
   if (reason === null) return;

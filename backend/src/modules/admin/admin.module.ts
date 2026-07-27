@@ -1792,6 +1792,96 @@ Return JSON with:
     };
   }
 
+  // ─── Payment Dashboard (Section 9: complete payment management) ───────
+  // Everything here is computed live from PaymentTransaction/Order/RefundRequest/
+  // PartnerSettlement — no separately-maintained ledger table, so there's nothing to keep
+  // in sync and no manual calculation anywhere in the numbers below.
+  private bucketKey(date: Date, bucket: 'day' | 'week' | 'month'): string {
+    const d = new Date(date);
+    if (bucket === 'month') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (bucket === 'week') {
+      const oneJan = new Date(d.getFullYear(), 0, 1);
+      const week = Math.ceil(((d.getTime() - oneJan.getTime()) / 86400000 + oneJan.getDay() + 1) / 7);
+      return `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
+    }
+    return d.toISOString().slice(0, 10);
+  }
+
+  async paymentDashboard(opts: { from?: string; to?: string; bucket?: 'day' | 'week' | 'month' }) {
+    const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
+    const to = opts.to ? new Date(opts.to) : new Date();
+    const bucket = opts.bucket || 'day';
+
+    const [totalCollection, pendingCollection, failedPayments, refundsAgg, settlementsAgg, codVsOnline, ordersInRange] = await Promise.all([
+      this.prisma.paymentTransaction.aggregate({ where: { createdAt: { gte: from, lte: to }, status: 'PAID' }, _sum: { amount: true }, _count: true }),
+      this.prisma.order.aggregate({ where: { createdAt: { gte: from, lte: to }, paymentStatus: { in: ['PENDING', 'PARTIAL'] as any[] } }, _sum: { totalAmount: true, walletUsed: true }, _count: true }),
+      this.prisma.paymentTransaction.aggregate({ where: { createdAt: { gte: from, lte: to }, status: 'FAILED' }, _sum: { amount: true }, _count: true }),
+      this.prisma.refundRequest.aggregate({ where: { createdAt: { gte: from, lte: to }, status: { in: ['APPROVED', 'PARTIALLY_APPROVED', 'PROCESSED'] as any[] } }, _sum: { approvedAmount: true }, _count: true }),
+      this.prisma.partnerSettlement.aggregate({ where: { paidAt: { gte: from, lte: to } }, _sum: { amount: true }, _count: true }),
+      this.prisma.order.groupBy({ by: ['paymentMethod'], where: { createdAt: { gte: from, lte: to } }, _sum: { totalAmount: true }, _count: true }),
+      this.prisma.order.findMany({ where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' }, select: { totalAmount: true, createdAt: true } }),
+    ]);
+
+    const outstandingAmount = Math.max(0, Number(pendingCollection._sum.totalAmount || 0) - Number(pendingCollection._sum.walletUsed || 0));
+
+    const trendMap = new Map<string, number>();
+    for (const o of ordersInRange) {
+      const key = this.bucketKey(o.createdAt, bucket);
+      trendMap.set(key, (trendMap.get(key) || 0) + Number(o.totalAmount));
+    }
+    const trend = [...trendMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([period, amount]) => ({ period, amount }));
+
+    return {
+      period: { from, to, bucket },
+      totalCollection: { amount: Number(totalCollection._sum.amount || 0), count: totalCollection._count },
+      pendingCollection: { count: pendingCollection._count },
+      failedPayments: { amount: Number(failedPayments._sum.amount || 0), count: failedPayments._count },
+      refunds: { amount: Number(refundsAgg._sum.approvedAmount || 0), count: refundsAgg._count },
+      partnerSettlements: { amount: Number(settlementsAgg._sum.amount || 0), count: settlementsAgg._count },
+      codVsOnline: codVsOnline.map((g) => ({ paymentMethod: g.paymentMethod, amount: Number(g._sum.totalAmount || 0), count: g._count })),
+      outstandingAmount,
+      trend,
+    };
+  }
+
+  /** Full financial trail for one order/booking — every PaymentTransaction and RefundRequest against it. */
+  async getOrderLedger(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const [transactions, refundRequests] = await Promise.all([
+      this.prisma.paymentTransaction.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } }),
+      this.prisma.refundRequest.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } }),
+    ]);
+    const paidAmount = transactions.filter((t) => t.status === 'PAID').reduce((s, t) => s + Number(t.amount), 0);
+    const balanceDue = Math.max(0, Number(order.totalAmount) - paidAmount - Number(order.walletUsed));
+    return {
+      order,
+      transactions,
+      refundRequests,
+      summary: { totalAmount: order.totalAmount, walletUsed: order.walletUsed, paidAmount, balanceDue },
+    };
+  }
+
+  /** Full financial trail for one partner — settlements paid, and the completed jobs behind their earnings. */
+  async getPartnerLedger(vendorId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    const [settlements, completedOrders] = await Promise.all([
+      this.prisma.partnerSettlement.findMany({ where: { vendorId }, orderBy: { paidAt: 'desc' } }),
+      this.prisma.order.findMany({
+        where: { vendorId, status: { in: ['COMPLETED', 'INVOICED', 'CLOSED'] as any[] } },
+        select: { id: true, orderNumber: true, totalAmount: true, vendorPayout: true, remontCommission: true, completedAt: true },
+        orderBy: { completedAt: 'desc' },
+        take: 100,
+      }),
+    ]);
+    return {
+      vendor: { id: vendor.id, fullName: vendor.fullName, totalEarnings: vendor.totalEarnings, pendingPayout: vendor.pendingPayout },
+      settlements,
+      completedOrders,
+    };
+  }
+
   // ─── Payment Transactions ─────────────────────────────────────────────
   async listPaymentTransactions(opts: { status?: string; gateway?: string; limit?: number; offset?: number }) {
     const where: any = {};
@@ -2182,6 +2272,13 @@ export class AdminController {
   @Get('reports/financial') reportFinancial(@Query('from') from?: string, @Query('to') to?: string) {
     return this.admin.financialReport({ from, to });
   }
+  @Get('reports/payments-dashboard') paymentsDashboard(
+    @Query('from') from?: string, @Query('to') to?: string, @Query('bucket') bucket?: 'day' | 'week' | 'month',
+  ) {
+    return this.admin.paymentDashboard({ from, to, bucket });
+  }
+  @Get('orders/:id/ledger') orderLedger(@Param('id') id: string) { return this.admin.getOrderLedger(id); }
+  @Get('partners/:vendorId/ledger') partnerLedger(@Param('vendorId') vendorId: string) { return this.admin.getPartnerLedger(vendorId); }
 
   // Payment Transactions
   @Get('payments') adminPayments(
