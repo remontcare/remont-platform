@@ -33,6 +33,7 @@ import { HealthModule } from './modules/health/health.module';
 import { LocationModule } from './modules/location/location.module';
 import { PartnerRegistrationModule } from './modules/partner-registration/partner-registration.module';
 import { SellerRegistrationModule } from './modules/seller-registration/seller-registration.module';
+import { SettlementsModule } from './modules/settlements/settlements.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { SellerRegistrationModule } from './modules/seller-registration/seller-r
     WalletModule,
     CouponsModule,
     MembershipsModule,
+    SettlementsModule,
 
     // B2B
     CorporateModule,

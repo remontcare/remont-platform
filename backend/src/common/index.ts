@@ -185,6 +185,49 @@ export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+// Shared GST invoice math — previously copy-pasted verbatim in three places
+// (InvoicesService.generate(), OrdersService.autoGenerateInvoice(), AdminService.autoGenerateInvoice()).
+// Pure function: callers fetch the Order + approved ExtraWorkItems and the current
+// Invoice count (for numbering), everything else is deterministic arithmetic.
+export interface InvoiceBreakdownInput {
+  orderNumber: string;
+  subtotal: number;
+  totalAmount: number;
+  gstAmount: number;
+  serviceAmount: number;
+  remontCommission: number;
+  approvedExtraWorkAmount: number;
+}
+
+export function computeInvoiceBreakdown(input: InvoiceBreakdownInput, invoiceSeq: number, bookingFee = 49) {
+  const customerSubtotal = input.subtotal;
+  const customerTotal = input.totalAmount;
+  const customerCgst = Math.round((input.gstAmount / 2) * 100) / 100;
+  const customerSgst = customerCgst;
+
+  const vendorLabor = input.serviceAmount + input.approvedExtraWorkAmount;
+  const vendorMaterial = 0;
+  const vendorPretax = vendorLabor + vendorMaterial;
+  const vendorCgst = Math.round(vendorPretax * 0.09 * 100) / 100;
+  const vendorSgst = vendorCgst;
+  const vendorTotal = vendorPretax + vendorCgst + vendorSgst;
+
+  const platformCommission = input.remontCommission;
+  const remontPretax = platformCommission + bookingFee;
+  const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
+  const remontSgst = remontCgst;
+  const remontTotal = remontPretax + remontCgst + remontSgst;
+
+  const invoiceNumber = `INV-${input.orderNumber}-${(invoiceSeq + 1).toString().padStart(4, '0')}`;
+
+  return {
+    invoiceNumber,
+    customerSubtotal, customerCgst, customerSgst, customerTotal,
+    vendorLabor, vendorMaterial, vendorCgst, vendorSgst, vendorTotal,
+    platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
+  };
+}
+
 // Vendor "skills" have been entered through at least two different UIs with different
 // vocabularies (a legacy category picker using names like ELECTRICIAN/PLUMBER/CIVIL, and
 // free-text/seed data using lowercase-hyphenated slugs like "plumbing"/"pest-control")

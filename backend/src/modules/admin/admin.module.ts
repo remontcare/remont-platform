@@ -7,7 +7,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -476,30 +476,17 @@ export class AdminService {
       include: { extraWorkItems: { where: { customerApproved: true } } },
     });
     if (!order) return;
-    const customerSubtotal = Number(order.subtotal);
-    const customerTotal = Number(order.totalAmount);
-    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
-    const customerSgst = customerCgst;
-    const vendorLabor = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
-    const vendorCgst = Math.round(vendorLabor * 0.09 * 100) / 100;
-    const vendorSgst = vendorCgst;
-    const vendorTotal = vendorLabor + vendorCgst + vendorSgst;
-    const platformCommission = Number(order.remontCommission);
-    const bookingFee = 49;
-    const remontPretax = platformCommission + bookingFee;
-    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
-    const remontSgst = remontCgst;
-    const remontTotal = remontPretax + remontCgst + remontSgst;
     const count = await this.prisma.invoice.count();
-    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
-    await this.prisma.invoice.create({
-      data: {
-        invoiceNumber, orderId,
-        customerSubtotal, customerCgst, customerSgst, customerTotal,
-        vendorLabor, vendorMaterial: 0, vendorCgst, vendorSgst, vendorTotal,
-        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
-      },
-    });
+    const b = computeInvoiceBreakdown({
+      orderNumber: order.orderNumber,
+      subtotal: Number(order.subtotal),
+      totalAmount: Number(order.totalAmount),
+      gstAmount: Number(order.gstAmount),
+      serviceAmount: Number(order.serviceAmount),
+      remontCommission: Number(order.remontCommission),
+      approvedExtraWorkAmount: order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0),
+    }, count);
+    await this.prisma.invoice.create({ data: { orderId, ...b } });
     await this.prisma.order.update({ where: { id: orderId }, data: { status: 'INVOICED' as any } });
   }
 

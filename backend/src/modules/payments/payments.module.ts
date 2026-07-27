@@ -43,8 +43,16 @@ export class PaymentsService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // DB keys override env vars — lets admin change keys without redeploying
-    await this.reinitialize();
+    // DB keys override env vars — lets admin change keys without redeploying. Swallow
+    // failures here (e.g. DB unreachable at boot): PrismaService already degrades
+    // gracefully in that case, but this query is NOT wrapped by that guard, and an
+    // unhandled rejection here previously crashed the entire Nest bootstrap — env-var
+    // based init from the constructor is a perfectly good fallback until the DB is up.
+    try {
+      await this.reinitialize();
+    } catch (e) {
+      this.logger.warn(`Gateway config reinitialize failed (DB unreachable?): ${e.message}`);
+    }
   }
 
   private _initRazorpay(keyId: string, keySecret: string) {

@@ -1,7 +1,7 @@
 import { Module, Injectable, Controller, Get, Post, Param, UseGuards, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, computeInvoiceBreakdown } from '../../common';
 
 @Injectable()
 export class InvoicesService {
@@ -20,36 +20,19 @@ export class InvoicesService {
     if (!order) throw new NotFoundException();
     if (order.invoice) return order.invoice;
 
-    const customerSubtotal = Number(order.subtotal);
-    const customerTotal = Number(order.totalAmount);
-    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
-    const customerSgst = customerCgst;
-
-    const vendorLabor = Number(order.serviceAmount) +
-      order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
-    const vendorMaterial = 0;
-    const vendorPretax = vendorLabor + vendorMaterial;
-    const vendorCgst = Math.round(vendorPretax * 0.09 * 100) / 100;
-    const vendorSgst = vendorCgst;
-    const vendorTotal = vendorPretax + vendorCgst + vendorSgst;
-
-    const platformCommission = Number(order.remontCommission);
-    const bookingFee = 49;
-    const remontPretax = platformCommission + bookingFee;
-    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
-    const remontSgst = remontCgst;
-    const remontTotal = remontPretax + remontCgst + remontSgst;
-
     const count = await this.prisma.invoice.count();
-    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
+    const b = computeInvoiceBreakdown({
+      orderNumber: order.orderNumber,
+      subtotal: Number(order.subtotal),
+      totalAmount: Number(order.totalAmount),
+      gstAmount: Number(order.gstAmount),
+      serviceAmount: Number(order.serviceAmount),
+      remontCommission: Number(order.remontCommission),
+      approvedExtraWorkAmount: order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0),
+    }, count);
 
     return this.prisma.invoice.create({
-      data: {
-        invoiceNumber, orderId: order.id,
-        customerSubtotal, customerCgst, customerSgst, customerTotal,
-        vendorLabor, vendorMaterial, vendorCgst, vendorSgst, vendorTotal,
-        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
-      },
+      data: { orderId: order.id, ...b },
     });
   }
 
