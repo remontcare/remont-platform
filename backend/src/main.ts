@@ -29,6 +29,11 @@ async function bootstrap() {
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
+  // Serve Task 3's WebP-processed uploads (backend/src/modules/uploads) — mounted under
+  // /api/uploads specifically so it rides the existing Vercel /api/:path* proxy rewrite
+  // with zero new frontend routing config.
+  app.use('/api/uploads', express.static(require('path').join(process.cwd(), 'uploads')));
+
   const allowedOrigins = [
     'https://remontindia.com',
     'https://www.remontindia.com',

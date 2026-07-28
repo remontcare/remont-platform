@@ -35,6 +35,7 @@ import { PartnerRegistrationModule } from './modules/partner-registration/partne
 import { SellerRegistrationModule } from './modules/seller-registration/seller-registration.module';
 import { SettlementsModule } from './modules/settlements/settlements.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { RefundsModule } from './modules/refunds/refunds.module';
     MembershipsModule,
     SettlementsModule,
     RefundsModule,
+    UploadsModule,
 
     // B2B
     CorporateModule,

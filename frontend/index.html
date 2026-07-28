@@ -1112,6 +1112,13 @@
   #svc-detail-modal .sdm-cart { flex: 1; padding: 13px; border: 2px solid var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--sienna); background: #fff; }
   #svc-detail-modal .sdm-book { flex: 1.5; padding: 13px; background: var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; }
   #svc-detail-modal .sdm-close { position: absolute; top: 16px; right: 18px; font-size: 22px; color: #9ca3af; background: none; border: none; cursor: pointer; }
+  #svc-detail-modal .sdm-cover { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 12px; background: #f3f4f6; }
+  #svc-detail-modal .sdm-gallery { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; }
+  #svc-detail-modal .sdm-gallery img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: #f3f4f6; }
+  #svc-detail-modal .sdm-meta-row { display: flex; gap: 14px; font-size: 12px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
+  #svc-detail-modal .sdm-faq-item { border-bottom: 1px solid #f3f4f6; padding: 10px 0; }
+  #svc-detail-modal .sdm-faq-q { font-size: 13px; font-weight: 600; color: #111; margin-bottom: 3px; }
+  #svc-detail-modal .sdm-faq-a { font-size: 12.5px; color: #6b7280; line-height: 1.5; }
   /* Cart order group indicator */
   .cart-group-badge {
     font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px;
@@ -5123,7 +5130,7 @@
       <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''}>
         <span class="icn">${s.ic}</span>
         <div class="nm">${s.n}</div>
-        <div class="pr">${s.o !== '—' ? `<small>${s.o}</small>` : ''}${s.p}<span class="svc-unit">${s.unit || 'per visit'}</span></div>
+        <div class="pr">${s.o !== '—' ? `<small>${s.o}</small> ` : ''}${s.p} <span class="svc-unit">${s.unit || 'per visit'}</span></div>
         ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).join(' · ')}</div>` : ''}
         <div class="svc-card-btns">
           <button class="svc-cart-btn" onclick="addSvcToCart(event,'${s.id}','${escJs(s.n)}',${s.pNum||0},'${escJs(s.unit||'per visit')}','${escJs(s.categoryKey||'')}',${JSON.stringify(s.inclusions||[])})">+ Cart</button>
@@ -5275,10 +5282,56 @@
     document.body.style.overflow = '';
   }
 
+  // Category key not in the city's active list, or the city currently has no vendors —
+  // consulted client-side from data already loaded via buildCityModal(); no extra API call.
+  function _isCategoryAvailableInCity(fkey) {
+    if (_cityHasNoVendors(currentCity)) return false;
+    var available = CITY_SERVICES[currentCity];
+    if (!available) return true; // no data yet for this city — don't block
+    return available.indexOf(fkey) !== -1;
+  }
+
+  function _showCityUnavailablePopup(serviceName) {
+    var msg = document.getElementById('city-unavail-msg');
+    if (msg) msg.textContent = 'Yeh service abhi ' + currentCity + ' me available nahi hai — jaldi launch ho rahi hai';
+    var emailEl = document.getElementById('city-unavail-email');
+    if (emailEl) emailEl.value = '';
+    var form = document.getElementById('city-unavail-notify-form');
+    var success = document.getElementById('city-unavail-notify-success');
+    if (form) form.style.display = '';
+    if (success) success.style.display = 'none';
+    var modal = document.getElementById('city-unavail-modal');
+    if (modal) modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+  function closeCityUnavailModal() {
+    var modal = document.getElementById('city-unavail-modal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+  function _cityUnavailNotify() {
+    var email = (document.getElementById('city-unavail-email').value || '').trim();
+    if (!email || email.indexOf('@') === -1) { showToast('Enter a valid email address', 'error'); return; }
+    apiPost('/api/v1/cms/newsletter', { email: email, source: 'CITY_NOTIFY', name: 'City: ' + currentCity })
+      .then(function() {
+        document.getElementById('city-unavail-notify-form').style.display = 'none';
+        document.getElementById('city-unavail-notify-success').style.display = '';
+      })
+      .catch(function(e) {
+        showToast((e && e.message) || 'Could not save — please try again.', 'error');
+      });
+  }
+
   function switchService(el) {
+    var fkey = el.dataset.svc;
+    if (!_isCategoryAvailableInCity(fkey)) {
+      var title = (serviceData[fkey] && serviceData[fkey].title) || el.textContent.trim();
+      _showCityUnavailablePopup(title);
+      return;
+    }
     document.querySelectorAll('.svc-item').forEach(i => i.classList.remove('active'));
     el.classList.add('active');
-    renderService(el.dataset.svc);
+    renderService(fkey);
     if (window.innerWidth < 768) {
       el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
@@ -5489,8 +5542,15 @@
    *   - Update premium cards' availability badges
    *   - Update category nav (cosmetic only — services panel is the source of truth)
    */
+  // A city with activeVendors === 0 has nobody to fulfill anything yet, regardless of
+  // which categories are nominally marked active — treat it as fully unavailable.
+  function _cityHasNoVendors(cityName) {
+    var row = (typeof bookingCities !== 'undefined' ? bookingCities : []).find(function(c) { return c.name === cityName; });
+    return !!row && Number(row.activeVendors || 0) <= 0;
+  }
+
   function applyCityFilter() {
-    const available = CITY_SERVICES[currentCity] || null; // null = show all (unknown city)
+    const available = _cityHasNoVendors(currentCity) ? [] : (CITY_SERVICES[currentCity] || null); // null = show all (unknown city)
 
     // Update services panel
     document.querySelectorAll('.svc-item[data-svc]').forEach(item => {
@@ -6887,6 +6947,11 @@
         exclusions: s.exclusions || [],
         desc: s.description || '',
         categoryKey: cat.key,
+        imageUrl: s.imageUrl || '',
+        images: s.images || [],
+        durationMinutes: s.durationMinutes || 0,
+        rating: s.rating || 0,
+        faqJson: s.faqJson || null,
       };
     }
     categories.forEach(function(cat) {
@@ -7111,11 +7176,32 @@
     var exclusions = (data && data.exclusions && data.exclusions.length) ? data.exclusions : [];
     var pNum = (data && data.pNum) ? data.pNum : 0;
     var categoryKey = (data && data.categoryKey) ? data.categoryKey : '';
+    var imageUrl = (data && data.imageUrl) ? data.imageUrl : '';
+    var images = (data && data.images && data.images.length) ? data.images : [];
+    var durationMinutes = (data && data.durationMinutes) ? data.durationMinutes : 0;
+    var rating = (data && data.rating) ? data.rating : 0;
+    var faqs = (data && data.faqJson && Array.isArray(data.faqJson)) ? data.faqJson : [];
 
-    var html = '<div class="sdm-icon">' + icon + '</div>' +
-      '<div class="sdm-name">' + escHtml(name) + '</div>' +
-      '<div class="sdm-price">' + (orig ? '<span class="sdm-orig">' + escHtml(orig) + '</span>' : '') + escHtml(price) + '</div>' +
+    var html = '';
+    if (imageUrl) html += '<img class="sdm-cover" src="' + escHtml(imageUrl) + '" alt="' + escHtml(name) + '" loading="lazy">';
+    else html += '<div class="sdm-icon">' + icon + '</div>';
+
+    html += '<div class="sdm-name">' + escHtml(name) + '</div>' +
+      '<div class="sdm-price">' + (orig ? '<span class="sdm-orig">' + escHtml(orig) + '</span> ' : '') + escHtml(price) + '</div>' +
       '<div class="sdm-unit">Per: ' + escHtml(unit) + '</div>';
+
+    if (durationMinutes || rating) {
+      html += '<div class="sdm-meta-row">' +
+        (durationMinutes ? '<span>⏱ ~' + Math.round(durationMinutes) + ' min</span>' : '') +
+        (rating ? '<span>⭐ ' + Number(rating).toFixed(1) + '</span>' : '') +
+        '</div>';
+    }
+
+    if (images.length) {
+      html += '<div class="sdm-gallery">' + images.map(function(src) {
+        return '<img src="' + escHtml(src) + '" alt="' + escHtml(name) + '" loading="lazy">';
+      }).join('') + '</div>';
+    }
 
     if (desc) html += '<div class="sdm-desc">' + escHtml(desc) + '</div>';
 
@@ -7130,6 +7216,16 @@
       html += '</ul>';
     }
 
+    if (faqs.length) {
+      html += '<div class="sdm-section">❓ FAQs</div>';
+      faqs.forEach(function(f) {
+        var q = f.question || f.q || '';
+        var a = f.answer || f.a || '';
+        if (!q || !a) return;
+        html += '<div class="sdm-faq-item"><div class="sdm-faq-q">' + escHtml(q) + '</div><div class="sdm-faq-a">' + escHtml(a) + '</div></div>';
+      });
+    }
+
     html += '<div class="sdm-btns">' +
       '<button class="sdm-cart" onclick="addToCart({id:\'' + escJs(id) + '\',name:\'' + escJs(name) + '\',price:' + pNum + ',type:\'service\',unit:\'' + escJs(unit) + '\',categoryKey:\'' + escJs(categoryKey) + '\'});closeSvcDetail();showToast(\'Added to cart\',\'success\')">+ Add to Cart</button>' +
       '<button class="sdm-book" onclick="closeSvcDetail();openBookingModal(\'' + escJs(id) + '\',\'' + escJs(name) + '\',\'' + escJs(price) + '\')">⚡ Book Now</button>' +
@@ -7138,11 +7234,27 @@
     document.getElementById('svc-detail-content').innerHTML = html;
     document.getElementById('svc-detail-overlay').classList.add('open');
     document.body.style.overflow = 'hidden';
+    _applyServiceCitySeo(data);
+  }
+
+  var _svcDetailOrigTitle = null;
+  // Admin-authored seoTitle/seoDesc can carry a literal "{city}" template token (see
+  // generateAiContent() in admin.module.ts) so the same content works for every city we
+  // serve. Substituting it into document.title only while this popup is open is a safe,
+  // template-driven way to surface city-specific SEO context without touching the
+  // homepage's own city-agnostic (all-cities) <title>/meta/JSON-LD, which must stay as-is
+  // since Googlebot's canonical crawl of "/" serves every city, not just whichever one a
+  // given visitor's browser has selected.
+  function _applyServiceCitySeo(data) {
+    if (!data || !data.seoTitle || data.seoTitle.indexOf('{city}') === -1) return;
+    if (_svcDetailOrigTitle === null) _svcDetailOrigTitle = document.title;
+    document.title = data.seoTitle.replace(/\{city\}/g, currentCity || 'India');
   }
 
   function closeSvcDetail() {
     document.getElementById('svc-detail-overlay').classList.remove('open');
     document.body.style.overflow = '';
+    if (_svcDetailOrigTitle !== null) { document.title = _svcDetailOrigTitle; _svcDetailOrigTitle = null; }
   }
 
   updateCartBadge();
@@ -7228,7 +7340,24 @@
   window._bmPayMethod = 'COD';
   window._bmSavedAddrs = [];
 
+  // Finds which category owns a given sub-service id — lets openBookingModal gate on
+  // city availability regardless of entry point (search results, deal cards, premium
+  // cards all funnel through here, not just the category tabs switchService() covers).
+  function _categoryKeyForService(svcId) {
+    if (!svcId) return null;
+    for (var key in serviceData) {
+      var d = serviceData[key];
+      if (d && d.subServices && d.subServices.some(function(s) { return s.id === svcId; })) return key;
+    }
+    return null;
+  }
+
   function openBookingModal(svcId, svcName, svcPrice) {
+    var _catKey = _categoryKeyForService(svcId);
+    if (_catKey && !_isCategoryAvailableInCity(_catKey)) {
+      _showCityUnavailablePopup(svcName || 'This service');
+      return;
+    }
     document.getElementById('bm-svc-id').value = svcId || '';
     document.getElementById('bm-service').textContent = svcName
       ? svcName + (svcPrice ? ' — ' + svcPrice : '')
@@ -8576,6 +8705,20 @@ function cartCheckout() {
     <div id="od-body" style="padding:20px 24px;min-height:200px">
       <p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>
     </div>
+  </div>
+</div>
+
+<!-- ═══ CITY-UNAVAILABLE POPUP (Task 1) ═══ -->
+<div id="city-unavail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10260;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:28px 24px;width:400px;max-width:96vw;text-align:center">
+    <div style="font-size:40px;margin-bottom:10px">🚧</div>
+    <p id="city-unavail-msg" style="font-size:15px;color:#111;font-weight:600;margin-bottom:16px;line-height:1.5"></p>
+    <div id="city-unavail-notify-form">
+      <input id="city-unavail-email" type="email" placeholder="Email — notify me when live" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:10px;box-sizing:border-box">
+      <button onclick="_cityUnavailNotify()" style="width:100%;padding:11px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:8px">🔔 Notify Me</button>
+    </div>
+    <div id="city-unavail-notify-success" style="display:none;color:#16a34a;font-size:13px;font-weight:600;margin-bottom:8px">✅ We'll email you when this launches!</div>
+    <button onclick="closeCityUnavailModal()" style="width:100%;padding:10px;background:none;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;cursor:pointer">Browse Other Services</button>
   </div>
 </div>
 

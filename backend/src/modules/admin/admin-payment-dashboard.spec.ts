@@ -20,7 +20,8 @@ function makeService() {
   const config: any = { get: jest.fn((_k: string, def: any) => def) };
   const payments: any = {};
   const settlements: any = {};
-  return { svc: new AdminService(prisma, config, payments, settlements), prisma };
+  const cities: any = {};
+  return { svc: new AdminService(prisma, config, payments, settlements, cities), prisma };
 }
 
 describe('AdminService.paymentDashboard — Section 9 complete payment management', () => {

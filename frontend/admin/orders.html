@@ -90,6 +90,20 @@
             <option value="CRM_AGENT">CRM Agent</option>
             <option value="MOBILE_APP">Mobile App</option>
           </select>
+          <select id="filter-city" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Cities</option>
+          </select>
+          <select id="filter-fulfillment" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All Routing Types</option>
+            <option value="DIRECT_PARTNER">Direct Partner</option>
+            <option value="ADMIN_TEAM">Admin Team</option>
+            <option value="PROJECT">Project Work</option>
+          </select>
+          <select id="filter-staff-type" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All Staff Types</option>
+            <option value="IN_HOUSE">In-House</option>
+            <option value="PARTNER">Partner</option>
+          </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
@@ -123,6 +137,8 @@
       <div class="detail-box"><label>Address</label><div class="val" id="detail-address">—</div></div>
       <div class="detail-box"><label>Amount</label><div class="val" id="detail-amount">—</div></div>
       <div class="detail-box"><label>Payment</label><div class="val" id="detail-payment">—</div></div>
+      <div class="detail-box"><label>Routing</label><div class="val" id="detail-routing">—</div></div>
+      <div class="detail-box"><label>Commission</label><div class="val" id="detail-commission">—</div></div>
     </div>
 
     <!-- Vendor Assignment -->
@@ -271,13 +287,23 @@ function setStatusFilter(status) {
 function load() {
   var q = document.getElementById('filter-q').value;
   var ch = document.getElementById('filter-channel').value;
+  var cityName = document.getElementById('filter-city').value;
+  var fulfillmentFilter = document.getElementById('filter-fulfillment').value;
+  var staffTypeFilter = document.getElementById('filter-staff-type').value;
   var params = 'limit=100';
   if (currentStatus) params += '&status='+currentStatus;
   if (q) params += '&q='+encodeURIComponent(q);
   if (ch) params += '&channel='+ch;
   document.getElementById('tbl').innerHTML='<div class="loading">Loading…</div>';
   api('GET','/admin/orders?'+params).then(function(orders) {
-    _ordersCache = orders || [];
+    orders = orders || [];
+    // City/routing filters are client-side (Order.address.city is a free-text snapshot,
+    // and fulfillmentType/staffType live on the related Service/Vendor, not Order itself)
+    // — filtering here avoids any schema/API change, per Task 7/8 scope.
+    if (cityName) orders = orders.filter(function(o){ return o.address && o.address.city === cityName; });
+    if (fulfillmentFilter) orders = orders.filter(function(o){ return o.service && (o.service.fulfillmentType||'DIRECT_PARTNER') === fulfillmentFilter; });
+    if (staffTypeFilter) orders = orders.filter(function(o){ return o.vendor && (o.vendor.staffType||'PARTNER') === staffTypeFilter; });
+    _ordersCache = orders;
     if (!orders||!orders.length) {
       document.getElementById('tbl').innerHTML='<div class="empty-state"><div class="empty-icon">📦</div><h3>No orders found</h3><p>Create a new order or adjust filters.</p></div>';
       return;
@@ -341,6 +367,20 @@ function openDetail(orderId) {
 
     // Slot
     document.getElementById('detail-slot').textContent = o.slotStart ? fmtDate(o.slotStart) + (o.slotEnd?' → '+fmtDate(o.slotEnd):'') : 'Not scheduled';
+
+    // Routing decision (Task 8) — "Routed to: Admin Team / In-house: {name} / Partner: {name}"
+    var routingLabels = { ADMIN_TEAM: 'Admin Team', PROJECT: 'Project Work (Admin)', IN_HOUSE: 'In-House', PARTNER: 'Partner', MANUAL_FALLBACK: 'Manual (no match found)' };
+    var routingText = o.routingDecision
+      ? 'Routed to: ' + (routingLabels[o.routingDecision] || o.routingDecision) + ((o.routingDecision === 'IN_HOUSE' || o.routingDecision === 'PARTNER') && o.vendor ? ' — ' + escape((o.vendor.user && o.vendor.user.name) || o.vendor.fullName || '') : '')
+      : (o.needsAdminReview ? 'Awaiting admin review' : 'Not yet routed');
+    document.getElementById('detail-routing').innerHTML = routingText + (o.needsAdminReview ? ' ' + badge('Needs Admin Review', 'yellow') : '');
+
+    // Commission (Task 9) — snapshotted at confirmation time, so this always reflects
+    // what the order was ACTUALLY charged against, even if the rule has since changed.
+    var payout = Number(o.serviceAmount||0) - Number(o.remontCommission||0);
+    document.getElementById('detail-commission').innerHTML = o.remontCommission != null
+      ? fmtCur(o.remontCommission) + ' <span style="color:#9ca3af;font-size:11px">(' + escape(o.commissionRuleLabel || 'legacy flat rate') + ') · Payout: ' + fmtCur(payout) + '</span>'
+      : '—';
 
     // Address + Navigate button
     var a = o.address || {};
@@ -587,6 +627,14 @@ function exportOrders() {
     { label: 'Created', key: 'createdAt' },
   ], 'orders-' + new Date().toISOString().slice(0,10) + '.csv');
 }
+
+function loadCitiesForOrderFilter() {
+  api('GET', '/admin/cities').then(function(cities) {
+    var opts = (cities || []).map(function(c) { return '<option value="' + c.name + '">' + escape(c.name) + '</option>'; }).join('');
+    document.getElementById('filter-city').innerHTML = '<option value="">All Cities</option>' + opts;
+  }).catch(function(){});
+}
+loadCitiesForOrderFilter();
 
 loadStats();
 // Apply ?status= URL param filter on load

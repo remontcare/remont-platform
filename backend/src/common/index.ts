@@ -146,6 +146,126 @@ export async function writeOrderTimeline(prisma: any, entry: {
   });
 }
 
+// Append-only audit trail for job start/completion OTPs — same direct-insert pattern
+// as writeOrderTimeline above, no event bus. Called at initial generation (booking
+// time), on regeneration ("Request OTP Again"), and on successful verification.
+export async function writeOtpLog(prisma: any, entry: {
+  orderId: string;
+  otpType: 'START' | 'END';
+  otp: string;
+  action: 'GENERATED' | 'REGENERATED' | 'VERIFIED';
+  requestedByRole?: 'VENDOR' | 'SYSTEM' | 'ADMIN';
+  requestedById?: string;
+}): Promise<void> {
+  await prisma.orderOtpLog.create({
+    data: {
+      orderId: entry.orderId,
+      otpType: entry.otpType,
+      otp: entry.otp,
+      action: entry.action,
+      requestedByRole: entry.requestedByRole,
+      requestedById: entry.requestedById,
+    },
+  });
+}
+
+// 30-60s cooldown window the requirement asks for, between "Request OTP Again" taps
+// for the same (order, otpType) — picked the middle of that range.
+export const OTP_REGEN_COOLDOWN_SECONDS = 45;
+
+// ─── Commission resolution (Task 9) ──────────────────────────────────────────
+// Category-level, service-level, and city-wise platform commission, with an
+// explicit priority + fallback order:
+//   (a) a CATEGORY-level rule (matching this city, or "all cities") applies to
+//       every service in that category by default;
+//   (b) a SERVICE-level rule OVERRIDES the category rule for that one service
+//       when both exist;
+//   (c) if no category rule exists at all, a SERVICE-level rule still applies
+//       directly;
+//   (d) if nothing matches, commission is a SiteSetting default (or 0).
+// A rule marked `stackable` adds its own amount on top of whichever single rule
+// won above — opt-in per rule, so two rules never silently combine by accident.
+type CommissionRuleRow = {
+  id: string;
+  scope: 'CATEGORY' | 'SERVICE';
+  categoryId: string | null;
+  serviceId: string | null;
+  cityId: string | null;
+  commissionType: 'PERCENTAGE' | 'FLAT' | 'SLAB';
+  value: unknown; // Prisma Decimal
+  slabJson: unknown;
+  priority: number;
+  stackable: boolean;
+};
+
+function computeRuleAmount(rule: CommissionRuleRow, amount: number): number {
+  if (rule.commissionType === 'FLAT') return Number(rule.value);
+  if (rule.commissionType === 'PERCENTAGE') return (amount * Number(rule.value)) / 100;
+  if (rule.commissionType === 'SLAB') {
+    const slabs = Array.isArray(rule.slabJson) ? (rule.slabJson as any[]) : [];
+    const match = slabs.find((s) => amount >= (s.min ?? 0) && (s.max == null || amount <= s.max));
+    if (!match) return 0;
+    return match.type === 'FLAT' ? Number(match.value) : (amount * Number(match.value)) / 100;
+  }
+  return 0;
+}
+
+function describeRule(rule: CommissionRuleRow): string {
+  const kind = rule.scope === 'SERVICE' ? 'Service' : 'Category';
+  const scopeLabel = rule.cityId ? '' : ' (all cities)';
+  if (rule.commissionType === 'PERCENTAGE') return `${kind} rule: ${rule.value}%${scopeLabel}`;
+  if (rule.commissionType === 'FLAT') return `${kind} rule: ₹${rule.value} flat${scopeLabel}`;
+  return `${kind} rule: slab-based${scopeLabel}`;
+}
+
+export async function resolveCommission(
+  prisma: any,
+  params: { serviceId: string; categoryId: string; cityId?: string | null; amount: number },
+): Promise<{ commissionAmount: number; ruleId: string | null; ruleLabel: string }> {
+  const { serviceId, categoryId, cityId, amount } = params;
+  const now = new Date();
+
+  const rules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
+    where: {
+      isActive: true,
+      OR: [{ serviceId }, { categoryId, serviceId: null }],
+      AND: [
+        { OR: [{ cityId: null }, { cityId: cityId || undefined }] },
+        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+        { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+      ],
+    },
+    orderBy: { priority: 'desc' },
+  });
+
+  // City-specific beats "all cities" at the same scope level.
+  const bySpecificity = (a: CommissionRuleRow, b: CommissionRuleRow) => {
+    const score = (r: CommissionRuleRow) => (r.cityId ? 1 : 0) * 10 + r.priority;
+    return score(b) - score(a);
+  };
+
+  const serviceRules = rules.filter((r) => r.serviceId === serviceId).sort(bySpecificity);
+  const categoryRules = rules.filter((r) => r.categoryId === categoryId && !r.serviceId).sort(bySpecificity);
+
+  // (b) service-level overrides category-level when both exist; (c) service-level
+  // alone still applies when no category rule exists.
+  const primary = serviceRules[0] || categoryRules[0] || null;
+
+  if (!primary) {
+    const setting = await prisma.siteSetting.findUnique({ where: { key: 'default_commission_pct' } });
+    const pct = setting ? parseFloat(setting.value) || 0 : 0;
+    const commissionAmount = Math.round(((amount * pct) / 100) * 100) / 100;
+    return { commissionAmount, ruleId: null, ruleLabel: pct > 0 ? `Default (${pct}%)` : 'No rule — ₹0' };
+  }
+
+  let commissionAmount = computeRuleAmount(primary, amount);
+  const stacked = rules.filter((r) => r.id !== primary.id && r.stackable);
+  for (const r of stacked) commissionAmount += computeRuleAmount(r, amount);
+
+  const label = describeRule(primary) + (stacked.length ? ` + ${stacked.length} stacked rule(s)` : '');
+  return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
+}
+
 export async function logAudit(prisma: any, entry: {
   actorId: string;
   actorRole: UserRole;

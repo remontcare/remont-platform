@@ -108,6 +108,21 @@ enum VendorStatus {
   REJECTED
 }
 
+// Which pipeline a service's orders route through when confirmed — see
+// resolveServiceRouting() in common/index.ts.
+enum FulfillmentType {
+  DIRECT_PARTNER // auto-match a vendor (in-house first, then partner) — current default behaviour
+  ADMIN_TEAM     // smaller admin-handled services — no auto vendor match, goes to the admin queue
+  PROJECT        // project-scale work — never auto-assigned, always goes to the admin queue
+}
+
+// In-house Remont staff vs an external partner vendor — used to prioritize in-house
+// staff first when auto-routing a DIRECT_PARTNER service.
+enum StaffType {
+  IN_HOUSE
+  PARTNER
+}
+
 enum DeleteTargetType {
   SERVICE_VENDOR
   PRODUCT_VENDOR
@@ -195,6 +210,7 @@ enum WhatsappMessageType {
   EXTRA_WORK_APPROVAL
   EARNINGS_NUDGE
   REVIEW_REQUEST
+  SERVICE_OTP_RESENT
   CUSTOM
 }
 
@@ -459,9 +475,62 @@ model City {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users    User[]
-  services CityService[]
-  products CityProduct[]
+  users           User[]
+  services        CityService[]
+  products        CityProduct[]
+  commissionRules CommissionRule[]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMISSION RULES (Task 9) — category-level, service-level, and city-wise
+// platform commission. See resolveCommission() in common/index.ts for the
+// priority + fallback resolution logic (service overrides category; category
+// applies to every service in it by default; nothing matched = 0 or a
+// SiteSetting default).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum CommissionScope {
+  CATEGORY
+  SERVICE
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FLAT
+  SLAB
+}
+
+model CommissionRule {
+  id         String          @id @default(cuid())
+  scope      CommissionScope
+  categoryId String? // required when scope=CATEGORY
+  serviceId  String? // required when scope=SERVICE
+  cityId     String? // null = applies to all cities
+
+  commissionType CommissionType
+  // Percentage (0-100) or flat ₹ amount — ignored when commissionType=SLAB, where
+  // slabJson is the source of truth instead.
+  value    Decimal @default(0) @db.Decimal(10, 2)
+  slabJson Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
+
+  // Higher priority wins when more than one rule matches at the same specificity level.
+  // A `stackable` rule ADDS its own amount on top of whichever single rule already won —
+  // opt-in per rule so stacking never happens by surprise.
+  priority   Int     @default(0)
+  stackable  Boolean @default(false)
+  isActive   Boolean @default(true)
+  validFrom  DateTime?
+  validTo    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  service  Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  city     City?            @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId, cityId])
+  @@index([serviceId, cityId])
 }
 
 // City-wise service pricing & availability override
@@ -514,8 +583,9 @@ model ServiceCategory {
   seoDesc     String?
   seoKeywords String[]
 
-  services      Service[]
-  subCategories SubCategory[]
+  services        Service[]
+  subCategories   SubCategory[]
+  commissionRules CommissionRule[]
 }
 
 model SubCategory {
@@ -550,6 +620,9 @@ model Service {
   originalPrice   Decimal? @db.Decimal(10, 2)
   durationMinutes Int      @default(60)
   requiredSkills  String[]
+  // Which pipeline this service's orders route through when confirmed — see
+  // resolveServiceRouting() in common/index.ts (Task 8).
+  fulfillmentType FulfillmentType @default(DIRECT_PARTNER)
   imageUrl        String?
   images          String[]
   faqJson         Json?
@@ -562,11 +635,12 @@ model Service {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  category     ServiceCategory @relation(fields: [categoryId], references: [id])
-  subCategory  SubCategory?    @relation(fields: [subCategoryId], references: [id])
-  orders       Order[]
-  cityServices CityService[]
-  reviews      Review[]
+  category        ServiceCategory  @relation(fields: [categoryId], references: [id])
+  subCategory     SubCategory?     @relation(fields: [subCategoryId], references: [id])
+  orders          Order[]
+  cityServices    CityService[]
+  reviews         Review[]
+  commissionRules CommissionRule[]
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -659,6 +733,10 @@ model ServiceVendor {
   skills             String[]
   serviceRadius      Int          @default(10)
   baseCity           String
+  // In-house Remont staff vs an external partner — routing prioritizes IN_HOUSE first
+  // for DIRECT_PARTNER services (Task 8). Defaults to PARTNER so every existing vendor
+  // keeps today's behaviour with zero migration needed.
+  staffType          StaffType    @default(PARTNER)
   status             VendorStatus @default(PENDING_VERIFICATION)
   isOnline           Boolean      @default(false)
   isVipPro           Boolean      @default(false)
@@ -1084,6 +1162,21 @@ model Order {
   totalAmount        Decimal @default(0) @db.Decimal(10, 2)
   remontCommission   Decimal @default(0) @db.Decimal(10, 2)
   vendorPayout       Decimal @default(0) @db.Decimal(10, 2)
+  // Which CommissionRule (if any) produced remontCommission above, snapshotted once at
+  // confirmation time (Task 9) — never re-derived later, so editing/deleting the rule
+  // afterward can't silently change what a past invoice/earnings statement shows.
+  // commissionRuleId is deliberately NOT a foreign key (the rule may be deleted later;
+  // the label alone must remain readable regardless).
+  commissionRuleId    String?
+  commissionRuleLabel String?
+
+  // Service assignment routing (Task 8) — set once by resolveServiceRouting() when the
+  // order is confirmed. A flag + free-text outcome rather than a new OrderStatus value,
+  // so the existing OrderStatus-based logic elsewhere (dispatch, admin filters, payment
+  // flow) needs no changes at all. needsAdminReview drives the admin queue filter;
+  // routingDecision is just the human-readable "Routed to: ..." display value.
+  needsAdminReview Boolean @default(false)
+  routingDecision  String? // ADMIN_TEAM | PROJECT | IN_HOUSE | PARTNER | MANUAL_FALLBACK
 
   // Job lifecycle
   slotStart        DateTime?
@@ -1092,6 +1185,10 @@ model Order {
   startOtpVerified Boolean   @default(false)
   endOtp           String?
   endOtpVerified   Boolean   @default(false)
+  // Last time each OTP was (re)sent — drives the 30-60s resend cooldown, same
+  // pattern as the existing login-OTP User.otpLastSentAt below.
+  startOtpLastSentAt DateTime?
+  endOtpLastSentAt   DateTime?
   startedAt        DateTime?
   completedAt      DateTime?
   cancelledAt      DateTime?
@@ -1131,6 +1228,7 @@ model Order {
   reviews         Review[]
   lead            Lead?            @relation(fields: [leadId], references: [id])
   timeline        OrderTimeline[]
+  otpLogs         OrderOtpLog[]
 
   @@index([customerId])
   @@index([masterOrderId])
@@ -1183,6 +1281,27 @@ model OrderTimeline {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+}
+
+// Append-only audit trail for job start/completion OTPs — one row per generation
+// (initial, at booking) or regeneration ("Request OTP Again"), plus one row when an
+// OTP is actually verified/used. Mirrors OrderTimeline's append-only pattern; written
+// via the writeOtpLog() helper in common/index.ts. The row for the currently-valid
+// OTP is simply the most recent GENERATED/REGENERATED row for that (orderId, otpType) —
+// nothing here is ever mutated, so history stays exact even across regenerations.
+model OrderOtpLog {
+  id              String   @id @default(cuid())
+  orderId         String
+  otpType         String // START | END
+  otp             String
+  action          String // GENERATED | REGENERATED | VERIFIED
+  requestedByRole String? // VENDOR | SYSTEM | ADMIN — who caused this row
+  requestedById   String? // vendorId (or userId) of the requester; null for the initial auto-generation
+  createdAt       DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, otpType])
 }
 
 model ExtraWorkItem {

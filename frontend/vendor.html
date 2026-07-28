@@ -912,7 +912,9 @@ function renderJfStep(){
     html = `<div class="jf-step-tag">Step 3 of 9 — Verify</div><div class="jf-title">Verify Customer OTP</div>
       <div class="jf-sub">${jfState.mock ? 'Ask the customer for their 4-digit start OTP.' : 'The customer received a start OTP via WhatsApp when the job was assigned. Ask them for it.'}</div>
       <div class="otp-row"><input class="otp-digit" maxlength="1" id="jotp-0" oninput="jfOtpJump(0)"><input class="otp-digit" maxlength="1" id="jotp-1" oninput="jfOtpJump(1)"><input class="otp-digit" maxlength="1" id="jotp-2" oninput="jfOtpJump(2)"><input class="otp-digit" maxlength="1" id="jotp-3" oninput="jfOtpJump(3)"></div>
-      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}
+      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : `
+      <div style="margin-top:10px"><button class="btn-outline" style="width:100%;font-size:13px;padding:8px" id="jf-resend-start-btn" onclick="jfRequestOtpAgain('START')">🔄 Request OTP Again</button>
+      <div id="jf-resend-start-msg" style="font-size:12px;margin-top:6px;text-align:center"></div></div>`}
       <div class="auth-error" id="jf-otp-err"></div>`;
     foot = `<button class="btn-primary" id="jf-verify-btn" onclick="verifyJfOtp()">Verify & Start Job →</button>`;
   }
@@ -967,7 +969,9 @@ function renderJfStep(){
       <div class="jf-title" style="font-size:15px;margin-top:18px">Verify Completion OTP</div>
       <div class="jf-sub">${jfState.mock ? 'Ask the customer for their 4-digit completion OTP.' : 'Ask the customer to read out the completion OTP shown on their order screen — this confirms the job before it closes out.'}</div>
       <div class="otp-row"><input class="otp-digit" maxlength="1" id="cotp-0" oninput="jfCompletionOtpJump(0)"><input class="otp-digit" maxlength="1" id="cotp-1" oninput="jfCompletionOtpJump(1)"><input class="otp-digit" maxlength="1" id="cotp-2" oninput="jfCompletionOtpJump(2)"><input class="otp-digit" maxlength="1" id="cotp-3" oninput="jfCompletionOtpJump(3)"></div>
-      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : ''}
+      ${jfState.mock ? '<div class="otp-hint">Dev OTP: 1234</div>' : `
+      <div style="margin-top:10px"><button class="btn-outline" style="width:100%;font-size:13px;padding:8px" id="jf-resend-end-btn" onclick="jfRequestOtpAgain('END')">🔄 Request OTP Again</button>
+      <div id="jf-resend-end-msg" style="font-size:12px;margin-top:6px;text-align:center"></div></div>`}
       <div class="auth-error" id="jf-pay-err"></div>`;
     foot = `<button class="btn-primary" id="pay-confirm-btn" onclick="confirmPayment()" disabled>Confirm & Complete Job →</button>`;
     if (!jfState.mock && jfState.orderId && !bal) {
@@ -1036,6 +1040,40 @@ function verifyJfOtp(){
     .then(function(){ jfGoto(4); })
     .catch(function(e){ errEl.textContent=e.message; })
     .then(function(){ btn.disabled=false; btn.textContent='Verify & Start Job →'; });
+}
+// "Request OTP Again" — this order's OTP only (regenerating never touches any other
+// service under the same booking). Server enforces the real cooldown/limit; the
+// countdown here is just UX — a fresh page load or retry still hits the server check.
+var _jfOtpCooldownTimers = {};
+function jfRequestOtpAgain(type){
+  if (jfState.mock || !jfState.orderId) return;
+  var btnId = type==='START' ? 'jf-resend-start-btn' : 'jf-resend-end-btn';
+  var msgId = type==='START' ? 'jf-resend-start-msg' : 'jf-resend-end-msg';
+  var btn = document.getElementById(btnId);
+  var msg = document.getElementById(msgId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  if (msg) msg.textContent = '';
+  apiFetch('/orders/'+jfState.orderId+'/regenerate-otp', {method:'POST', body: JSON.stringify({type:type})})
+    .then(function(){
+      if (msg) { msg.style.color = '#16a34a'; msg.textContent = '✅ New OTP sent to customer — the old one no longer works.'; }
+      jfStartOtpCooldown(type, btn, 45);
+    })
+    .catch(function(e){
+      if (msg) { msg.style.color = '#dc2626'; msg.textContent = e.message || 'Could not resend OTP.'; }
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Request OTP Again'; }
+    });
+}
+function jfStartOtpCooldown(type, btn, seconds){
+  if (!btn) return;
+  clearInterval(_jfOtpCooldownTimers[type]);
+  var remaining = seconds;
+  btn.disabled = true;
+  btn.textContent = 'Resend in ' + remaining + 's';
+  _jfOtpCooldownTimers[type] = setInterval(function(){
+    remaining--;
+    if (remaining <= 0) { clearInterval(_jfOtpCooldownTimers[type]); btn.disabled = false; btn.textContent = '🔄 Request OTP Again'; }
+    else btn.textContent = 'Resend in ' + remaining + 's';
+  }, 1000);
 }
 function addPhoto(input,arrName,gridId){
   if(!input.files||!input.files[0])return;

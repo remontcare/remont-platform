@@ -10,12 +10,12 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, resolveCommission } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
-import { DispatchService, OrdersModule } from '../orders/orders.module';
+import { DispatchService, RoutingService, OrdersModule } from '../orders/orders.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
@@ -180,6 +180,7 @@ export class MasterOrdersService {
     private cities: CitiesService,
     private payments: PaymentsService,
     private dispatch: DispatchService,
+    private routing: RoutingService,
     private paymentNotify: PaymentNotificationsService,
   ) {}
 
@@ -226,9 +227,11 @@ export class MasterOrdersService {
       customerId = user.id;
     }
 
+    let orderCityId: string | null = null;
     if (dto.city) {
       const cityRow = await this.cities.getByName(dto.city);
       if (cityRow && !cityRow.isActive) throw new BadRequestException(`${cityRow.name} is not currently accepting orders`);
+      orderCityId = cityRow?.id || null;
     }
 
     // Fetch + validate every referenced service/product once
@@ -261,6 +264,7 @@ export class MasterOrdersService {
     // (city price override for services, Product.price * qty for products), applied once
     // per group instead of once for the whole cart.
     const cityPriceCache = new Map<string, number | null>();
+    const commissionByService = new Map<string, { commissionAmount: number; ruleId: string | null; ruleLabel: string }>();
     const pricedGroups: PricedGroup[] = [];
     for (const g of groups) {
       if (g.type === 'SERVICE') {
@@ -273,7 +277,11 @@ export class MasterOrdersService {
           const override = cityPriceCache.get(g.serviceId);
           if (override !== null && override !== undefined) unitPrice = override;
         }
-        pricedGroups.push({ type: 'SERVICE', amount: unitPrice * g.quantity, serviceId: g.serviceId, quantity: g.quantity });
+        const groupAmount = unitPrice * g.quantity;
+        commissionByService.set(g.serviceId, await resolveCommission(this.prisma, {
+          serviceId: svc.id, categoryId: svc.categoryId, cityId: orderCityId, amount: groupAmount,
+        }));
+        pricedGroups.push({ type: 'SERVICE', amount: groupAmount, serviceId: g.serviceId, quantity: g.quantity });
       } else {
         let amount = 0;
         const items = g.items.map((it) => {
@@ -390,7 +398,10 @@ export class MasterOrdersService {
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
         const childTotal = Math.max(0, g.amount - childDiscount + childGst - childWallet);
-        const remontCommission = Math.round(serviceAmount * 0.15 * 100) / 100;
+        const childCommission = (g.type === 'SERVICE' && g.serviceId)
+          ? commissionByService.get(g.serviceId) || { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' }
+          : { commissionAmount: 0, ruleId: null, ruleLabel: 'Product line — no commission' };
+        const remontCommission = childCommission.commissionAmount;
         const vendorPayout = serviceAmount - remontCommission;
         const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         const startOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
@@ -412,6 +423,7 @@ export class MasterOrdersService {
             serviceAmount, productsAmount, subtotal: g.amount,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
             totalAmount: childTotal, remontCommission, vendorPayout,
+            commissionRuleId: childCommission.ruleId, commissionRuleLabel: childCommission.ruleLabel,
             guestName: isGuest ? opts.guestName : undefined,
             guestPhone: isGuest ? opts.guestPhone : undefined,
             items: g.type === 'PRODUCT'
@@ -420,6 +432,13 @@ export class MasterOrdersService {
           },
         });
         await tx.orderTimeline.create({ data: { orderId: childOrder.id, status: childOrder.status } });
+        if (g.type === 'SERVICE') {
+          // Each service child gets its own independent OTP pair (see startOtp/endOtp
+          // above, generated fresh per loop iteration) — logged individually here so a
+          // master order with N different service partners has N separate audit trails.
+          await writeOtpLog(tx, { orderId: childOrder.id, otpType: 'START', otp: startOtp!, action: 'GENERATED', requestedByRole: 'SYSTEM' });
+          await writeOtpLog(tx, { orderId: childOrder.id, otpType: 'END', otp: endOtp!, action: 'GENERATED', requestedByRole: 'SYSTEM' });
+        }
         childOrders.push(childOrder);
       }
 
@@ -437,7 +456,7 @@ export class MasterOrdersService {
 
     if (confirmUpfront) {
       for (const child of childOrders) {
-        if (child.serviceId) this.dispatch.dispatch(child.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
+        if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
       }
       return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
@@ -498,7 +517,7 @@ export class MasterOrdersService {
     }
 
     for (const child of existing.childOrders) {
-      if (child.serviceId) this.dispatch.dispatch(child.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
+      if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
     }
 
     this.notifyPaymentSuccess(existing).catch(() => {});

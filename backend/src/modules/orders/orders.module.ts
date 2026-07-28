@@ -9,7 +9,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -141,6 +141,69 @@ export class DispatchService {
   }
 }
 
+// ─── Service assignment routing (Task 8) ───
+// Runs once when an order/child-part is confirmed, based on Service.fulfillmentType:
+//   PROJECT / ADMIN_TEAM  -> never auto-assigned, flagged for the admin queue instead.
+//   DIRECT_PARTNER        -> auto-match a vendor (in-house staff first, then partner)
+//                            by requiredSkills + order city; on no match, falls back to
+//                            today's unchanged notify-candidates DispatchService flow.
+// This never replaces the existing manual "Assign Vendor" admin action — it only
+// pre-selects to save time; admins can always reassign afterward the same way they do today.
+@Injectable()
+export class RoutingService {
+  private readonly logger = new Logger(RoutingService.name);
+  constructor(private prisma: PrismaService, private wa: WhatsappService, private dispatch: DispatchService) {}
+
+  async route(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { service: true, address: true, customer: { select: { name: true, phone: true } } },
+    });
+    if (!order || !order.service) return; // product-only child orders have nothing to route
+
+    const fulfillmentType = order.service.fulfillmentType || 'DIRECT_PARTNER';
+    if (fulfillmentType === 'PROJECT' || fulfillmentType === 'ADMIN_TEAM') {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { needsAdminReview: true, routingDecision: fulfillmentType },
+      });
+      this.logger.log(`📋 ${order.orderNumber} routed to admin queue (${fulfillmentType})`);
+      return;
+    }
+
+    const cityName = order.address?.city || (order as any).snapshotCity || null;
+    const requiredSkills: string[] = order.service.requiredSkills || [];
+    const candidates = cityName ? await this.prisma.serviceVendor.findMany({
+      where: {
+        isOnline: true, status: 'ACTIVE', baseCity: cityName,
+        ...(requiredSkills.length ? { skills: { hasSome: requiredSkills } } : {}),
+      },
+      include: { user: true },
+      orderBy: { rating: 'desc' },
+    }) : [];
+
+    const chosen = candidates.find((v) => v.staffType === 'IN_HOUSE') || candidates[0];
+
+    if (chosen) {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { vendorId: chosen.id, status: OrderStatus.VENDOR_ASSIGNED, routingDecision: chosen.staffType === 'IN_HOUSE' ? 'IN_HOUSE' : 'PARTNER' },
+      });
+      await writeOrderTimeline(this.prisma, {
+        orderId, status: OrderStatus.VENDOR_ASSIGNED,
+        note: `Auto-routed to ${chosen.staffType === 'IN_HOUSE' ? 'in-house staff' : 'partner'}: ${chosen.fullName}`,
+      });
+      try { await this.wa.sendJobAssigned(chosen.userId, order); } catch (e) { this.logger.warn(`Auto-assign notify failed: ${e.message}`); }
+      return;
+    }
+
+    // No in-house or partner match found — flag it and fall back to the existing
+    // multi-candidate notify flow (unchanged), same as before this feature existed.
+    await this.prisma.order.update({ where: { id: orderId }, data: { routingDecision: 'MANUAL_FALLBACK' } });
+    await this.dispatch.dispatch(orderId);
+  }
+}
+
 // ─── Extra work service ───
 @Injectable()
 class ExtraWorkService {
@@ -194,7 +257,11 @@ class ExtraWorkService {
     const gst = Math.round(subtotal * 0.18 * 100) / 100;
     const discount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.walletUsed);
     const total = Math.max(0, subtotal + gst - discount);
-    const commission = Math.round(Number(order.serviceAmount) * 0.15 * 100) / 100;
+    // Commission was already resolved once and snapshotted at confirmation time (Task 9) —
+    // extra work changes the payout (more serviceAmount-equivalent to pay the vendor for)
+    // but must NOT re-resolve commission rules again here, or a rule edited/removed after
+    // booking could silently change what an already-placed order's invoice shows.
+    const commission = Number(order.remontCommission);
     const payout = Number(order.serviceAmount) + extraTotal - commission;
     await this.prisma.order.update({
       where: { id: orderId },
@@ -212,6 +279,7 @@ export class OrdersService {
     private coupons: CouponsService,
     private memberships: MembershipsService,
     private dispatch: DispatchService,
+    private routing: RoutingService,
     private cities: CitiesService,
     private payments: PaymentsService,
     private paymentNotify: PaymentNotificationsService,
@@ -230,18 +298,25 @@ export class OrdersService {
 
     let serviceAmount = 0;
     let productsAmount = 0;
+    let commissionResult = { commissionAmount: 0, ruleId: null as string | null, ruleLabel: 'No service on this order' };
     const itemInputs: any[] = [];
 
     if (dto.serviceId) {
       const svc = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
       if (!svc) throw new NotFoundException('Service not found');
+      let cityRowId: string | null = null;
       // City-wise price override
       if (dto.city) {
         const cityPrice = await this.cities.getServicePrice(dto.city, svc.id);
         serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
+        const cityRow = await this.cities.getByName(dto.city);
+        cityRowId = cityRow?.id || null;
       } else {
         serviceAmount = Number(svc.basePrice);
       }
+      commissionResult = await resolveCommission(this.prisma, {
+        serviceId: svc.id, categoryId: svc.categoryId, cityId: cityRowId, amount: serviceAmount,
+      });
     }
 
     if (dto.items?.length) {
@@ -294,7 +369,7 @@ export class OrdersService {
     const gstAmount = Math.round(discountedSubtotal * 0.18 * 100) / 100;
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
     const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
-    const remontCommission = Math.round(serviceAmount * 0.15 * 100) / 100;
+    const remontCommission = commissionResult.commissionAmount;
     const vendorPayout = serviceAmount - remontCommission;
 
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -313,6 +388,7 @@ export class OrdersService {
         serviceAmount, productsAmount, subtotal,
         couponCode: dto.couponCode, couponDiscount, membershipDiscount,
         walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
+        commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
         aiSessionId: dto.aiSessionId, leadId: dto.leadId,
         guestName: dto.guestName,
         guestPhone: dto.guestPhone,
@@ -320,6 +396,9 @@ export class OrdersService {
       },
       include: { items: true, service: true, address: true },
     });
+
+    await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'START', otp: startOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
+    await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'END', otp: endOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, order.id, couponDiscount);
 
@@ -394,7 +473,7 @@ export class OrdersService {
     // Only dispatch on the order's first confirmation — a mid-flow COD->Online conversion
     // must not re-trigger vendor matching for an order that may already have a vendor.
     if (order.serviceId && wasPendingPayment) {
-      this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
+      this.routing.route(order.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
     }
     this.notifyPaymentSuccess(order).catch(() => {});
     return order;
@@ -465,7 +544,7 @@ export class OrdersService {
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CONFIRMED, note: 'Switched from Online to Cash on Delivery' });
     if (updated.serviceId) {
-      this.dispatch.dispatch(updated.id).catch((e) => this.logger.error(`Dispatch failed: ${e.message}`));
+      this.routing.route(updated.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
     }
     return updated;
   }
@@ -657,6 +736,7 @@ export class OrdersService {
       data: { startOtpVerified: true, startedAt: new Date(), status: OrderStatus.STARTED },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.STARTED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
+    await writeOtpLog(this.prisma, { orderId, otpType: 'START', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
     return updated;
   }
 
@@ -686,6 +766,9 @@ export class OrdersService {
       },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
+    if (order.endOtp) {
+      await writeOtpLog(this.prisma, { orderId, otpType: 'END', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
+    }
     this.autoGenerateInvoice(orderId).catch((e) => this.logger.warn(`Auto-invoice failed: ${e.message}`));
     this.notifyWorkCompleted(completed).catch(() => {});
     return completed;
@@ -695,6 +778,65 @@ export class OrdersService {
     const phone = order.guestPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
     if (!phone) return;
     await this.paymentNotify.workCompleted(order.customerId, phone, order.orderNumber, order.id);
+  }
+
+  /**
+   * "Request OTP Again" — the assigned vendor regenerates the start or completion OTP
+   * for THIS order only (never touches any other child order under the same master
+   * order, so a multi-service booking's other partners are unaffected). Overwriting
+   * order.startOtp/endOtp makes the previous code invalid immediately, since every OTP
+   * check reads that same live field. A full history survives regardless, in
+   * OrderOtpLog (never mutated, append-only).
+   */
+  async regenerateOtp(vendorUserId: string, orderId: string, type: 'START' | 'END') {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!v) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+
+    const isStart = type === 'START';
+    if (isStart) {
+      if (order.startOtpVerified) throw new BadRequestException('Start OTP already verified for this service');
+    } else {
+      // Mirrors the existing lifecycle gate in complete(): a completion OTP only makes
+      // sense once this specific partner has actually started the job.
+      if (!order.startOtpVerified) throw new BadRequestException('Job has not started yet — completion OTP is not active');
+      if (order.endOtpVerified) throw new BadRequestException('Completion OTP already verified for this service');
+    }
+
+    const lastSentAt = isStart ? order.startOtpLastSentAt : order.endOtpLastSentAt;
+    if (lastSentAt) {
+      const secsSince = (Date.now() - lastSentAt.getTime()) / 1000;
+      if (secsSince < OTP_REGEN_COOLDOWN_SECONDS) {
+        throw new BadRequestException(`Please wait ${Math.ceil(OTP_REGEN_COOLDOWN_SECONDS - secsSince)}s before requesting another OTP`);
+      }
+    }
+
+    // 0/unset = unlimited, matching the requirement's "unlimited (or configurable limit
+    // from Admin Panel)" — admins set this via the existing generic Site Settings screen.
+    const limitSetting = await this.prisma.siteSetting.findUnique({ where: { key: 'otp_regen_max_attempts' } });
+    const maxAttempts = limitSetting ? parseInt(limitSetting.value, 10) || 0 : 0;
+    if (maxAttempts > 0) {
+      const usedCount = await this.prisma.orderOtpLog.count({ where: { orderId, otpType: type, action: 'REGENERATED' } });
+      if (usedCount >= maxAttempts) {
+        throw new BadRequestException(`Maximum OTP resend limit (${maxAttempts}) reached for this service`);
+      }
+    }
+
+    const newOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    const now = new Date();
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: isStart ? { startOtp: newOtp, startOtpLastSentAt: now } : { endOtp: newOtp, endOtpLastSentAt: now },
+    });
+    await writeOtpLog(this.prisma, { orderId, otpType: type, otp: newOtp, action: 'REGENERATED', requestedByRole: 'VENDOR', requestedById: v.id });
+
+    const phone = order.guestPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
+    if (phone) {
+      this.paymentNotify.otpResent(order.customerId, phone, order.orderNumber, type, newOtp, order.id).catch(() => {});
+    }
+
+    return { orderId, otpType: type, sentAt: now };
   }
 
   private async autoGenerateInvoice(orderId: string) {
@@ -790,6 +932,7 @@ export class GuestBookingService {
   constructor(
     private prisma: PrismaService,
     private dispatch: DispatchService,
+    private routing: RoutingService,
     private payments: PaymentsService,
     private cities: CitiesService,
     private paymentNotify: PaymentNotificationsService,
@@ -821,13 +964,14 @@ export class GuestBookingService {
     const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });
     if (!city || !city.isActive) throw new NotFoundException('City not available');
 
-    // Determine price (city override or base price)
-    const cityService = await this.prisma.cityService.findUnique({
-      where: { cityId_serviceId: { cityId: dto.cityId, serviceId: dto.serviceId } },
+    // Determine price: per-service city override → else city priceMultiplier on
+    // basePrice → else basePrice as-is (CitiesService.getServicePrice — shared with
+    // the authenticated create() and Master Order checkout price resolution).
+    const cityPrice = await this.cities.getServicePrice(city.name, dto.serviceId);
+    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
+    const commissionResult = await resolveCommission(this.prisma, {
+      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
     });
-    const serviceAmount = (cityService?.isActive && cityService.customPrice)
-      ? Number(cityService.customPrice)
-      : Number(svc.basePrice);
 
     const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
     const totalAmount = serviceAmount + gstAmount;
@@ -891,8 +1035,10 @@ export class GuestBookingService {
         walletUsed: 0,
         gstAmount,
         totalAmount,
-        remontCommission: Math.round(serviceAmount * 0.15 * 100) / 100,
-        vendorPayout: serviceAmount - Math.round(serviceAmount * 0.15 * 100) / 100,
+        remontCommission: commissionResult.commissionAmount,
+        vendorPayout: serviceAmount - commissionResult.commissionAmount,
+        commissionRuleId: commissionResult.ruleId,
+        commissionRuleLabel: commissionResult.ruleLabel,
       },
       include: {
         service: { select: { name: true, durationMinutes: true } },
@@ -901,9 +1047,12 @@ export class GuestBookingService {
       },
     });
 
+    await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'START', otp: startOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
+    await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'END', otp: endOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
+
     if (isCOD) {
       this.logger.log(`📋 Guest booking (COD): ${orderNumber} for ${dto.name} (${dto.phone})`);
-      this.dispatch.dispatch(order.id).catch((e) => this.logger.error(`Guest dispatch failed: ${e.message}`));
+      this.routing.route(order.id).catch((e) => this.logger.error(`Guest routing failed: ${e.message}`));
       // One-time nudge encouraging online payment — "throughout the application encourage
       // online payment" per the COD workflow requirement.
       this.paymentNotify.payOnlineNudge(user.id, dto.phone, order.orderNumber, order.id).catch(() => {});
@@ -1106,6 +1255,9 @@ export class OrdersController {
     return this.orders.cancel(u.sub, id, b.reason);
   }
   @Patch(':id/en-route') enRoute(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.markEnRoute(u.sub, id); }
+  @Post(':id/regenerate-otp') regenerateOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { type: 'START' | 'END' }) {
+    return this.orders.regenerateOtp(u.sub, id, b.type);
+  }
   @Post(':id/verify-otp') verify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
     return this.orders.verifyStartOtp(u.sub, id, b.otp);
   }
@@ -1194,7 +1346,7 @@ export class PublicBookingController {
 @Module({
   imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule],
   controllers: [OrdersController, PublicBookingController],
-  providers: [OrdersService, DispatchService, ExtraWorkService, GuestBookingService],
-  exports: [OrdersService, DispatchService],
+  providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService],
+  exports: [OrdersService, DispatchService, RoutingService],
 })
 export class OrdersModule {}

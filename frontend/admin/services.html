@@ -39,6 +39,7 @@
       <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Categories</button>
       <button class="tab" id="tab-btn-subcat" onclick="showTab('subcat')">Sub-Categories</button>
       <button class="tab" id="tab-btn-svc" onclick="showTab('svc')">Services</button>
+      <button class="tab" id="tab-btn-commission" onclick="showTab('commission')">Commission</button>
     </div>
 
     <!-- ── CATEGORIES TAB ─────────────────────────────────────────────── -->
@@ -92,7 +93,17 @@
             <select id="svc-filter-status" class="form-control" style="width:120px" onchange="loadServices()">
               <option value="">All</option><option value="true">Active</option><option value="false">Inactive</option>
             </select>
+            <select id="svc-filter-city" class="form-control" style="width:150px" onchange="loadServices()" title="Only shows services whose category is active in this city">
+              <option value="">All Cities</option>
+            </select>
+            <select id="svc-filter-fulfillment" class="form-control" style="width:170px" onchange="loadServices()">
+              <option value="">All Routing Types</option>
+              <option value="DIRECT_PARTNER">Direct Partner</option>
+              <option value="ADMIN_TEAM">Admin Team</option>
+              <option value="PROJECT">Project Work</option>
+            </select>
             <button class="btn btn-primary btn-sm" onclick="openSvcModal()">+ Add Service</button>
+            <button class="btn btn-outline btn-sm" id="bulk-ai-btn" onclick="bulkGenerateAi()" title="Fills description/SEO/inclusions only where currently empty — never overwrites existing content">✨ Generate AI for Empty Services</button>
             <button class="btn btn-outline btn-sm" onclick="exportServices()">⬇ Export CSV</button>
             <button class="btn btn-outline btn-sm" onclick="document.getElementById('xl-overlay').style.display='flex'">⬆ Import Excel</button>
             <button class="btn btn-outline btn-sm" onclick="loadServices()">↺</button>
@@ -106,6 +117,99 @@
         </div>
         <div class="table-wrap"><div id="svc-tbl" class="loading">Loading…</div></div>
       </div>
+    </div>
+
+    <!-- ── COMMISSION TAB ────────────────────────────────────────────── -->
+    <div id="tab-commission" style="display:none">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title">Preview Commission</span></div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Service</label>
+              <select id="comm-preview-svc" class="form-control"><option value="">Select a service…</option></select>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label">City (optional)</label>
+              <select id="comm-preview-city" class="form-control"><option value="">Any / all cities</option></select>
+            </div>
+            <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
+              <button class="btn btn-primary" onclick="previewCommission()">Preview</button>
+            </div>
+          </div>
+          <div id="comm-preview-result" style="display:none;margin-top:8px;padding:12px;background:#f9fafb;border-radius:8px;font-size:14px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Commission Rules</span>
+          <button class="btn btn-primary btn-sm" onclick="openCommModal()">+ Add Rule</button>
+        </div>
+        <div class="table-wrap"><div id="comm-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── COMMISSION RULE MODAL ────────────────────────────────────────── -->
+<div id="comm-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="comm-modal-title">Add Commission Rule</span>
+      <button class="modal-close" onclick="closeModal('comm-overlay')">×</button>
+    </div>
+    <input type="hidden" id="comm-id">
+    <div class="form-group">
+      <label class="form-label">Scope <span style="color:red">*</span></label>
+      <select id="comm-scope" class="form-control" onchange="toggleCommScopeFields()">
+        <option value="CATEGORY">Category (applies to every service in it by default)</option>
+        <option value="SERVICE">Service (overrides the category rule for this one service)</option>
+      </select>
+    </div>
+    <div class="form-group" id="comm-category-field">
+      <label class="form-label">Category <span style="color:red">*</span></label>
+      <select id="comm-category" class="form-control"><option value="">Select category…</option></select>
+    </div>
+    <div class="form-group" id="comm-service-field" style="display:none">
+      <label class="form-label">Service <span style="color:red">*</span></label>
+      <select id="comm-service" class="form-control"><option value="">Select service…</option></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">City <small style="color:#9ca3af">(blank = all cities)</small></label>
+      <select id="comm-city" class="form-control"><option value="">All Cities</option></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Commission Type <span style="color:red">*</span></label>
+        <select id="comm-type" class="form-control" onchange="toggleCommTypeFields()">
+          <option value="PERCENTAGE">Percentage</option>
+          <option value="FLAT">Flat Amount (₹)</option>
+          <option value="SLAB">Slab / Tiered (by price range)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1" id="comm-value-field">
+        <label class="form-label">Value</label>
+        <input id="comm-value" class="form-control" type="number" placeholder="e.g. 15 for 15%, or a flat ₹ amount">
+      </div>
+    </div>
+    <div class="form-group" id="comm-slab-field" style="display:none">
+      <label class="form-label">Slabs <small style="color:#9ca3af">(JSON — one array of {min,max,type,value})</small></label>
+      <textarea id="comm-slab" class="form-control" rows="4" placeholder='[{"min":0,"max":500,"type":"PERCENTAGE","value":10},{"min":501,"max":null,"type":"PERCENTAGE","value":20}]'></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Priority <small style="color:#9ca3af">(higher wins a tie)</small></label>
+        <input id="comm-priority" class="form-control" type="number" value="0">
+      </div>
+      <div class="form-group" style="flex:1;display:flex;align-items:center;gap:16px;padding-top:22px">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="comm-stackable"> Stackable</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="comm-active" checked> Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('comm-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCommRule()">Save Rule</button>
     </div>
   </div>
 </div>
@@ -246,6 +350,14 @@
           <textarea id="svc-exclusions" class="form-control" rows="4" placeholder="Gas refill (charged extra)&#10;Spare parts&#10;Electrical wiring&#10;Wall mounting"></textarea>
         </div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Route this service to</label>
+        <select id="svc-fulfillment" class="form-control">
+          <option value="DIRECT_PARTNER">Direct Partner (auto-match a vendor)</option>
+          <option value="ADMIN_TEAM">Admin Team (manual, smaller jobs)</option>
+          <option value="PROJECT">Project Work (manual, project-scale)</option>
+        </select>
+      </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-active" checked> Active</label>
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-popular"> Popular</label>
@@ -330,6 +442,7 @@ var selectedCats = new Set();
 var selectedSvcs = new Set();
 var currentSvcId = null;
 var aiData = {};
+var svcAiFaq = null; // set by applyAi('svc') when generated content is applied; read by saveService()
 var galleryImages = [];
 var importRows = [];
 
@@ -339,10 +452,13 @@ function showTab(tab) {
   document.getElementById('tab-cat').style.display = tab==='cat' ? '' : 'none';
   document.getElementById('tab-subcat').style.display = tab==='subcat' ? '' : 'none';
   document.getElementById('tab-svc').style.display = tab==='svc' ? '' : 'none';
+  document.getElementById('tab-commission').style.display = tab==='commission' ? '' : 'none';
   document.getElementById('tab-btn-cat').className = 'tab' + (tab==='cat' ? ' active' : '');
   document.getElementById('tab-btn-subcat').className = 'tab' + (tab==='subcat' ? ' active' : '');
   document.getElementById('tab-btn-svc').className = 'tab' + (tab==='svc' ? ' active' : '');
+  document.getElementById('tab-btn-commission').className = 'tab' + (tab==='commission' ? ' active' : '');
   if (tab === 'subcat') loadSubCategories();
+  if (tab === 'commission') loadCommissionRules();
 }
 
 function switchModalTab(btn, pane) {
@@ -542,19 +658,48 @@ function populateSvcSubcatSelect(preselectId) {
 
 // ── SERVICES ──────────────────────────────────────────────────────────
 
+// City filter is client-side only (no schema/endpoint change) — reuses the same
+// activeServiceKeys already loaded for every other city-availability check in the app.
+var adminCitiesForFilter = [];
+function loadCitiesForFilter() {
+  api('GET', '/admin/cities').then(function(cities) {
+    adminCitiesForFilter = cities || [];
+    var opts = adminCitiesForFilter.map(function(c) { return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
+    document.getElementById('svc-filter-city').innerHTML = '<option value="">All Cities</option>' + opts;
+  }).catch(function(){});
+}
+
+var commRulesForColumnCache = null;
 function loadServices() {
   var q = document.getElementById('svc-search').value;
   var cat = document.getElementById('svc-filter-cat').value;
   var status = document.getElementById('svc-filter-status').value;
+  var cityId = document.getElementById('svc-filter-city').value;
+  var fulfillment = document.getElementById('svc-filter-fulfillment').value;
   var params = 'limit=200';
   if (q) params += '&q=' + encodeURIComponent(q);
   if (cat) params += '&categoryId=' + cat;
   if (status) params += '&isActive=' + status;
   document.getElementById('svc-tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET','/admin/services?'+params).then(function(svcs) {
+  Promise.all([
+    api('GET','/admin/services?'+params),
+    commRulesForColumnCache ? Promise.resolve(commRulesForColumnCache) : api('GET','/admin/commission-rules').then(function(r){ commRulesForColumnCache = r||[]; return commRulesForColumnCache; }),
+  ]).then(function(results) {
+    var svcs = results[0];
+    var commRules = results[1] || [];
+    var svcRuleIds = {}, catRuleIds = {};
+    commRules.forEach(function(r){ if (!r.isActive) return; if (r.scope==='SERVICE') svcRuleIds[r.serviceId]=true; else catRuleIds[r.categoryId]=true; });
+    if (cityId) {
+      var cityRow = adminCitiesForFilter.find(function(c){ return c.id === cityId; });
+      var activeKeys = cityRow ? (cityRow.activeServiceKeys || []) : [];
+      svcs = svcs.filter(function(s) { return s.category && activeKeys.indexOf(s.category.key) !== -1; });
+    }
+    if (fulfillment) svcs = svcs.filter(function(s) { return (s.fulfillmentType || 'DIRECT_PARTNER') === fulfillment; });
     if (!svcs||!svcs.length) { document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><h3>No services found</h3></div>'; return; }
     var rows = svcs.map(function(s) {
       var cityCount = (s.cityServices || []).length;
+      var commLabel = svcRuleIds[s.id] ? 'Service Rule' : (catRuleIds[s.categoryId] ? 'Category Rule' : 'Default');
+      var commColor = svcRuleIds[s.id] ? 'blue' : (catRuleIds[s.categoryId] ? 'purple' : 'gray');
       return '<tr>' +
         '<td style="width:32px"><input type="checkbox" ' + (selectedSvcs.has(s.id)?'checked':'') + ' onchange="toggleSvcSel(\'' + s.id + '\',this.checked)"></td>' +
         (s.imageUrl ? '<td><img src="' + escape(s.imageUrl) + '" style="width:48px;height:36px;object-fit:cover;border-radius:4px"></td>' : '<td style="text-align:center;color:#9ca3af;font-size:18px">' + (s.category && s.category.key ? '🔧' : '') + '</td>') +
@@ -564,6 +709,8 @@ function loadServices() {
         '<td>' + fmtCur(s.basePrice) + (s.originalPrice && s.originalPrice > 0 ? ' <span style="text-decoration:line-through;color:#9ca3af;font-size:11px">' + fmtCur(s.originalPrice) + '</span>' : '') + '</td>' +
         '<td>' + s.durationMinutes + ' min</td>' +
         '<td>' + badge(cityCount > 0 ? cityCount + ' cities' : 'All cities', cityCount > 0 ? 'blue' : 'gray') + '</td>' +
+        '<td>' + badge((s.fulfillmentType||'DIRECT_PARTNER').replace('_',' '), s.fulfillmentType==='PROJECT'?'purple':(s.fulfillmentType==='ADMIN_TEAM'?'yellow':'gray')) + '</td>' +
+        '<td>' + badge(commLabel, commColor) + '</td>' +
         '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick="editService(\'' + s.id + '\')">Edit</button>' +
@@ -574,7 +721,7 @@ function loadServices() {
         '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('svc-tbl').innerHTML = '<table style="min-width:1000px"><thead><tr><th></th><th>Img</th><th>Name</th><th>Category</th><th>Sub-Category</th><th>Price</th><th>Duration</th><th>Cities</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.getElementById('svc-tbl').innerHTML = '<table style="min-width:1220px"><thead><tr><th></th><th>Img</th><th>Name</th><th>Category</th><th>Sub-Category</th><th>Price</th><th>Duration</th><th>Cities</th><th>Route</th><th>Commission</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e){ document.getElementById('svc-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
@@ -596,6 +743,7 @@ function openSvcModal(svc) {
   document.getElementById('svc-active').checked = svc ? svc.isActive : true;
   document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
   document.getElementById('svc-premium').checked = svc ? svc.isPremium : false;
+  document.getElementById('svc-fulfillment').value = svc ? (svc.fulfillmentType || 'DIRECT_PARTNER') : 'DIRECT_PARTNER';
   document.getElementById('svc-seo-title').value = svc ? (svc.seoTitle||'') : '';
   document.getElementById('svc-seo-desc').value = svc ? (svc.seoDesc||'') : '';
   document.getElementById('svc-seo-kw').value = svc ? (svc.seoKeywords||[]).join(', ') : '';
@@ -603,6 +751,7 @@ function openSvcModal(svc) {
   renderGallery();
   previewImg();
   document.getElementById('svc-ai-preview').style.display = 'none';
+  svcAiFaq = svc && svc.faqJson ? svc.faqJson : null;
   // Load city assignments if editing
   if (svc) loadSvcCities(svc.id);
   else document.getElementById('svc-cities-list').innerHTML = '<div style="color:#9ca3af;font-size:13px">Save service first to manage city availability.</div>';
@@ -650,9 +799,11 @@ function saveService() {
     isActive: document.getElementById('svc-active').checked,
     isPopular: document.getElementById('svc-popular').checked,
     isPremium: document.getElementById('svc-premium').checked,
+    fulfillmentType: document.getElementById('svc-fulfillment').value,
     seoTitle: document.getElementById('svc-seo-title').value.trim()||undefined,
     seoDesc: document.getElementById('svc-seo-desc').value.trim()||undefined,
     seoKeywords: document.getElementById('svc-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
+    faqJson: svcAiFaq || undefined,
   };
   var p = id ? api('PATCH','/admin/services/'+id,data) : api('POST','/admin/services',data);
   p.then(function(saved){
@@ -766,6 +917,132 @@ document.getElementById && (function(){
   counter('svc-seo-desc','svc-seo-desc-cnt',160);
 })();
 
+// ── COMMISSION RULES (Task 9) ──────────────────────────────────────────
+var commServicesCache = [];
+
+function toggleCommScopeFields() {
+  var isCat = document.getElementById('comm-scope').value === 'CATEGORY';
+  document.getElementById('comm-category-field').style.display = isCat ? '' : 'none';
+  document.getElementById('comm-service-field').style.display = isCat ? 'none' : '';
+}
+function toggleCommTypeFields() {
+  var isSlab = document.getElementById('comm-type').value === 'SLAB';
+  document.getElementById('comm-value-field').style.display = isSlab ? 'none' : '';
+  document.getElementById('comm-slab-field').style.display = isSlab ? '' : 'none';
+}
+
+function _populateCommDropdowns() {
+  var catOpts = categories.map(function(c){ return '<option value="'+c.id+'">'+escape(c.name)+'</option>'; }).join('');
+  document.getElementById('comm-category').innerHTML = '<option value="">Select category…</option>' + catOpts;
+  var cityOpts = adminCitiesForFilter.map(function(c){ return '<option value="'+c.id+'">'+escape(c.name)+'</option>'; }).join('');
+  document.getElementById('comm-city').innerHTML = '<option value="">All Cities</option>' + cityOpts;
+  document.getElementById('comm-preview-city').innerHTML = '<option value="">Any / all cities</option>' + cityOpts;
+  return (commServicesCache.length ? Promise.resolve(commServicesCache) : api('GET','/admin/services?limit=500')).then(function(svcs) {
+    commServicesCache = svcs || [];
+    var svcOpts = commServicesCache.map(function(s){ return '<option value="'+s.id+'">'+escape(s.name)+'</option>'; }).join('');
+    document.getElementById('comm-service').innerHTML = '<option value="">Select service…</option>' + svcOpts;
+    document.getElementById('comm-preview-svc').innerHTML = '<option value="">Select a service…</option>' + svcOpts;
+  });
+}
+
+function loadCommissionRules() {
+  document.getElementById('comm-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  Promise.all([_populateCommDropdowns(), api('GET','/admin/commission-rules')]).then(function(results) {
+    var rules = results[1] || [];
+    if (!rules.length) { document.getElementById('comm-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><h3>No commission rules yet</h3><p>Falls back to the SiteSetting default (or ₹0) until you add one.</p></div>'; return; }
+    var rows = rules.map(function(r) {
+      var target = r.scope === 'CATEGORY' ? (r.category ? r.category.name : '—') : (r.service ? r.service.name : '—');
+      var valueLabel = r.commissionType === 'SLAB' ? 'Slab' : (r.commissionType === 'FLAT' ? '₹' + r.value : r.value + '%');
+      return '<tr>' +
+        '<td>' + badge(r.scope, r.scope==='SERVICE'?'blue':'purple') + '</td>' +
+        '<td>' + escape(target) + '</td>' +
+        '<td>' + escape(r.city ? r.city.name : 'All Cities') + '</td>' +
+        '<td>' + escape(valueLabel) + (r.stackable ? ' ' + badge('Stacks','teal') : '') + '</td>' +
+        '<td>' + r.priority + '</td>' +
+        '<td>' + badge(r.isActive?'Active':'Inactive', r.isActive?'green':'gray') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openCommModal(' + JSON.stringify(r) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteCommRule(\'' + r.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('comm-tbl').innerHTML = '<table><thead><tr><th>Scope</th><th>Applies To</th><th>City</th><th>Value</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){ document.getElementById('comm-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openCommModal(rule) {
+  document.getElementById('comm-modal-title').textContent = rule ? 'Edit Commission Rule' : 'Add Commission Rule';
+  document.getElementById('comm-id').value = rule ? rule.id : '';
+  document.getElementById('comm-scope').value = rule ? rule.scope : 'CATEGORY';
+  document.getElementById('comm-category').value = rule ? (rule.categoryId||'') : '';
+  document.getElementById('comm-service').value = rule ? (rule.serviceId||'') : '';
+  document.getElementById('comm-city').value = rule ? (rule.cityId||'') : '';
+  document.getElementById('comm-type').value = rule ? rule.commissionType : 'PERCENTAGE';
+  document.getElementById('comm-value').value = rule ? rule.value : '';
+  document.getElementById('comm-slab').value = rule && rule.slabJson ? JSON.stringify(rule.slabJson) : '';
+  document.getElementById('comm-priority').value = rule ? rule.priority : 0;
+  document.getElementById('comm-stackable').checked = rule ? !!rule.stackable : false;
+  document.getElementById('comm-active').checked = rule ? rule.isActive : true;
+  toggleCommScopeFields();
+  toggleCommTypeFields();
+  document.getElementById('comm-overlay').style.display = 'flex';
+}
+
+function saveCommRule() {
+  var id = document.getElementById('comm-id').value;
+  var scope = document.getElementById('comm-scope').value;
+  var type = document.getElementById('comm-type').value;
+  if (scope === 'CATEGORY' && !document.getElementById('comm-category').value) { toast('Select a category','error'); return; }
+  if (scope === 'SERVICE' && !document.getElementById('comm-service').value) { toast('Select a service','error'); return; }
+  var slabJson = null;
+  if (type === 'SLAB') {
+    try { slabJson = JSON.parse(document.getElementById('comm-slab').value || '[]'); }
+    catch (e) { toast('Slab JSON is invalid: ' + e.message, 'error'); return; }
+  }
+  var data = {
+    scope: scope,
+    categoryId: scope === 'CATEGORY' ? document.getElementById('comm-category').value : null,
+    serviceId: scope === 'SERVICE' ? document.getElementById('comm-service').value : null,
+    cityId: document.getElementById('comm-city').value || null,
+    commissionType: type,
+    value: parseFloat(document.getElementById('comm-value').value) || 0,
+    slabJson: slabJson,
+    priority: parseInt(document.getElementById('comm-priority').value) || 0,
+    stackable: document.getElementById('comm-stackable').checked,
+    isActive: document.getElementById('comm-active').checked,
+  };
+  var p = id ? api('PATCH','/admin/commission-rules/'+id, data) : api('POST','/admin/commission-rules', data);
+  p.then(function(){
+    toast(id?'Rule updated':'Rule created','success');
+    closeModal('comm-overlay');
+    loadCommissionRules();
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function deleteCommRule(id) {
+  if (!confirm('Delete this commission rule?')) return;
+  api('DELETE','/admin/commission-rules/'+id).then(function(){ toast('Rule deleted','success'); loadCommissionRules(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function previewCommission() {
+  var serviceId = document.getElementById('comm-preview-svc').value;
+  if (!serviceId) { toast('Select a service to preview','error'); return; }
+  var cityId = document.getElementById('comm-preview-city').value;
+  var cityName = '';
+  if (cityId) {
+    var cityRow = adminCitiesForFilter.find(function(c){ return c.id === cityId; });
+    cityName = cityRow ? cityRow.name : '';
+  }
+  var params = 'serviceId=' + encodeURIComponent(serviceId) + (cityName ? '&city=' + encodeURIComponent(cityName) : '');
+  api('GET','/admin/commission-rules/preview?'+params).then(function(r) {
+    var box = document.getElementById('comm-preview-result');
+    box.style.display = '';
+    box.innerHTML = '<strong>' + escape(r.serviceName) + '</strong>' + (cityName ? ' in ' + escape(cityName) : ' (all cities)') +
+      ' → commission = <strong style="color:#c4601a">' + fmtCur(r.commissionAmount) + '</strong>' +
+      ' <span style="color:#6b7280;font-size:12px">(on ₹' + r.amount + ' base) — ' + escape(r.ruleLabel) + '</span>';
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
 // ── AI GENERATION ─────────────────────────────────────────────────────
 
 function generateAi(type, prefix) {
@@ -786,6 +1063,23 @@ function generateAi(type, prefix) {
   }).catch(function(e){ toast(e.message,'error'); });
 }
 
+// Bulk-fills description/SEO/inclusions/exclusions/FAQ for services still missing
+// them, in batches (server processes up to 20 per call so one request can't run long
+// enough to time out) — click again to continue until "remaining" reaches 0. Never
+// overwrites a field an admin has already filled in (see bulkGenerateAiContent()).
+function bulkGenerateAi() {
+  var btn = document.getElementById('bulk-ai-btn');
+  btn.disabled = true; btn.textContent = 'Generating…';
+  api('POST', '/admin/ai/bulk-generate', { limit: 20 }).then(function(res) {
+    toast('Filled ' + res.processed + ' service(s). ' + (res.remaining > 0 ? res.remaining + ' still empty — click again to continue.' : 'All services now have SEO content!'), 'success');
+    loadServices();
+  }).catch(function(e) {
+    toast(e.message || 'Bulk generate failed', 'error');
+  }).then(function() {
+    btn.disabled = false; btn.textContent = '✨ Generate AI for Empty Services';
+  });
+}
+
 function applyAi(prefix) {
   var data = aiData[prefix];
   if (!data) return;
@@ -799,6 +1093,11 @@ function applyAi(prefix) {
     if (data.seoTitle) document.getElementById('svc-seo-title').value = data.seoTitle;
     if (data.seoDesc) document.getElementById('svc-seo-desc').value = data.seoDesc;
     if (data.seoKeywords) document.getElementById('svc-seo-kw').value = data.seoKeywords.join(', ');
+    if (data.inclusions && data.inclusions.length) document.getElementById('svc-inclusions').value = data.inclusions.join('\n');
+    if (data.exclusions && data.exclusions.length) document.getElementById('svc-exclusions').value = data.exclusions.join('\n');
+    // No dedicated FAQ editor exists yet — carry the generated Q&A through to save as-is
+    // (faqJson) so it isn't lost; svcAiFaq is read by saveService() below.
+    if (data.faq && data.faq.length) svcAiFaq = data.faq;
   }
   toast('AI content applied!','success');
 }
@@ -877,6 +1176,7 @@ attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
 attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200 });
 loadCategories();
 loadSubCategories();
+loadCitiesForFilter();
 loadServices();
 </script>
 </body>

@@ -43,6 +43,11 @@
               <option>SUSPENDED</option><option>REJECTED</option>
             </select>
             <input id="filter-q" class="form-control" style="width:160px" placeholder="Search name…" oninput="loadAll()">
+            <select id="filter-staff-type" class="form-control" style="width:150px" onchange="loadAll()">
+              <option value="">All Staff Types</option>
+              <option value="IN_HOUSE">In-House</option>
+              <option value="PARTNER">Partner</option>
+            </select>
             <button class="btn btn-outline btn-sm" onclick="loadAll()">↺ Refresh</button>
           </div>
         </div>
@@ -251,6 +256,8 @@ function loadAll() {
   p.push('limit=100');
   document.getElementById('all-tbl').innerHTML='<div class="loading">Loading…</div>';
   api('GET','/admin/vendors'+(p.length?'?'+p.join('&'):'')).then(function(vendors) {
+    var staffTypeFilter = document.getElementById('filter-staff-type').value;
+    if (staffTypeFilter) vendors = (vendors||[]).filter(function(v){ return (v.staffType||'PARTNER') === staffTypeFilter; });
     if (!vendors||!vendors.length) { document.getElementById('all-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">🏪</div><h3>No vendors found</h3></div>'; return; }
     var rows=vendors.map(function(v) {
       var u=v.user||{};
@@ -262,22 +269,30 @@ function loadAll() {
         '<td style="text-align:center">'+escape(String(v.rating||'—'))+' ★ ('+escape(String(v.totalJobs||0))+')</td>'+
         '<td>'+badge(v.isOnline?'Online':'Offline',v.isOnline?'green':'gray')+'</td>'+
         '<td>'+statusBadge(v.status)+'</td>'+
+        '<td>'+badge(v.staffType==='IN_HOUSE'?'In-House':'Partner',v.staffType==='IN_HOUSE'?'teal':'gray')+'</td>'+
         '<td><div style="display:flex;gap:4px">'+
           (v.status==='PENDING_VERIFICATION'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Approve</button>':'')+
           (v.status==='ACTIVE'?'<button class="btn btn-xs btn-warning" onclick="suspend(\''+v.id+'\')">Suspend</button>':'')+
           (v.status==='SUSPENDED'?'<button class="btn btn-xs btn-success" onclick="approve(\''+v.id+'\')">Reactivate</button>':'')+
+          '<button class="btn btn-xs btn-outline" onclick="toggleStaffType(\''+v.id+'\',\''+(v.staffType==='IN_HOUSE'?'PARTNER':'IN_HOUSE')+'\')">Mark '+(v.staffType==='IN_HOUSE'?'Partner':'In-House')+'</button>'+
           (isSuperAdmin()?
             '<button class="btn btn-xs btn-danger" onclick="deleteVendor(\''+v.id+'\')">🗑 Delete</button>':
             '<button class="btn btn-xs btn-outline" onclick="requestDeleteVendor(\''+v.id+'\')">Request Delete</button>')+
         '</div></td>'+
       '</tr>';
     }).join('');
-    document.getElementById('all-tbl').innerHTML='<table><thead><tr><th>Vendor</th><th>Business</th><th>Skills</th><th>City</th><th>Rating / Jobs</th><th>Online</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    document.getElementById('all-tbl').innerHTML='<table><thead><tr><th>Vendor</th><th>Business</th><th>Skills</th><th>City</th><th>Rating / Jobs</th><th>Online</th><th>Status</th><th>Staff Type</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }).catch(function(e){document.getElementById('all-tbl').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div><h3>'+escape(e.message)+'</h3></div>';});
 }
 
 function approve(id) {
   api('PATCH','/admin/vendors/'+id+'/approve').then(function(){ toast('Vendor approved','success'); loadPending(); loadAll(); }).catch(function(e){toast(e.message,'error');});
+}
+function toggleStaffType(id, staffType) {
+  api('PATCH','/admin/vendors/'+id+'/staff-type',{staffType:staffType}).then(function(){
+    toast(staffType==='IN_HOUSE'?'Marked as in-house staff':'Marked as partner','success');
+    loadAll();
+  }).catch(function(e){ toast(e.message,'error'); });
 }
 function suspend(id) {
   if (!confirm('Suspend this vendor?')) return;

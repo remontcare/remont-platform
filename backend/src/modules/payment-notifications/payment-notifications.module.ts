@@ -89,6 +89,21 @@ export class PaymentNotificationsService {
       }).catch(() => {}),
     ]);
   }
+
+  /** A partner tapped "Request OTP Again" — the previous code for this specific
+   * service order is now invalid; the customer needs the fresh one. */
+  async otpResent(userId: string, phone: string, orderNumber: string, otpType: 'START' | 'END', otp: string, orderId?: string) {
+    const label = otpType === 'START' ? 'arrival' : 'completion';
+    await Promise.all([
+      this.wa.sendServiceOtpResent(phone, orderNumber, otpType, otp).catch(() => {}),
+      this.notifications.create(userId, {
+        title: 'New OTP Sent',
+        body: `A new ${label} OTP was requested for order #${orderNumber}. Check your latest code in My Orders.`,
+        channels: [NotificationChannel.IN_APP, NotificationChannel.WHATSAPP],
+        orderId,
+      }).catch(() => {}),
+    ]);
+  }
 }
 
 @Module({

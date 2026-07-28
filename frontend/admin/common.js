@@ -250,6 +250,25 @@ function renderSidebar(page) {
 }
 
 // ── IMAGE COMPRESSION ─────────────────────────────────────────────
+// Task 3 — one click, real server-side WebP + responsive sizes (thumb/card/full), via
+// the new POST /api/v1/uploads/image endpoint (backend/src/modules/uploads). Falls back
+// to the original client-side compressImage() below if the request fails for any reason
+// (e.g. offline, endpoint down) so upload never just breaks.
+function uploadImageToServer(file, onDone, onError) {
+  var fd = new FormData();
+  fd.append('file', file);
+  fetch(API_BASE + '/api/v1/uploads/image', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getToken() },
+    body: fd,
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error((d && d.message) ? (Array.isArray(d.message) ? d.message.join(', ') : d.message) : ('HTTP ' + r.status));
+      return d.data !== undefined ? d.data : d;
+    });
+  }).then(onDone).catch(function(e) { if (onError) onError(e); });
+}
+
 function compressImage(file, cb, maxDim, quality) {
   maxDim = maxDim || 1600;
   quality = quality || 0.88;
@@ -295,22 +314,32 @@ function attachImageUpload(inputId, opts) {
   var thumb = document.createElement('img');
   thumb.style.cssText = 'display:none;width:' + previewW + 'px;height:' + previewH + 'px;object-fit:cover;border-radius:6px;border:1.5px solid #e5e7eb;margin-top:6px;';
 
+  function applyUploadedUrl(url, label) {
+    input.value = url;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    thumb.src = url; thumb.style.display = 'block';
+    info.textContent = label; info.style.display = 'inline';
+    btn.disabled = false; btn.innerHTML = '📷 Change Image';
+    fileInp.value = '';
+  }
+
   fileInp.onchange = function() {
     var file = fileInp.files[0]; if (!file) return;
-    btn.disabled = true; btn.innerHTML = '⏳ Compressing…';
-    compressImage(file, function(dataUrl, origKB, compKB) {
-      input.value = dataUrl;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      thumb.src = dataUrl; thumb.style.display = 'block';
-      info.textContent = '✓ ' + compKB + ' KB (was ' + origKB + ' KB)';
-      info.style.display = 'inline';
-      btn.disabled = false; btn.innerHTML = '📷 Change Image';
-      fileInp.value = '';
-    }, maxDim, quality);
+    btn.disabled = true; btn.innerHTML = '⏳ Uploading…';
+    uploadImageToServer(file, function(urls) {
+      applyUploadedUrl(urls.full, '✓ Optimized (WebP)');
+    }, function() {
+      // Upload endpoint unreachable — fall back to the original client-side path so
+      // this never just breaks; result is a data: URI, not a real hosted file.
+      btn.innerHTML = '⏳ Compressing…';
+      compressImage(file, function(dataUrl, origKB, compKB) {
+        applyUploadedUrl(dataUrl, '✓ ' + compKB + ' KB (was ' + origKB + ' KB)');
+      }, maxDim, quality);
+    });
   };
 
   input.addEventListener('input', function() {
-    if (input.value && !input.value.startsWith('data:')) {
+    if (input.value && input.value.indexOf('data:') !== 0 && input.value.indexOf('/api/uploads/') === -1) {
       thumb.style.display = 'none'; info.style.display = 'none';
       btn.innerHTML = '📷 Upload Image';
     }
@@ -345,13 +374,22 @@ function attachGalleryUpload(inputId, addFn, opts) {
   fileInp.onchange = function() {
     var file = fileInp.files[0]; if (!file) return;
     btn.disabled = true; btn.innerHTML = '⏳';
-    compressImage(file, function(dataUrl, origKB, compKB) {
-      input.value = dataUrl;
+    uploadImageToServer(file, function(urls) {
+      input.value = urls.card; // gallery thumbnails don't need full-size
       addFn();
       btn.disabled = false; btn.innerHTML = '📷 Upload';
       fileInp.value = '';
-      if (typeof toast === 'function') toast('Image compressed: ' + compKB + 'KB (was ' + origKB + 'KB)');
-    }, maxDim, quality);
+      if (typeof toast === 'function') toast('Image uploaded and optimized (WebP)');
+    }, function() {
+      // Fall back to client-side compression if the upload endpoint is unreachable.
+      compressImage(file, function(dataUrl, origKB, compKB) {
+        input.value = dataUrl;
+        addFn();
+        btn.disabled = false; btn.innerHTML = '📷 Upload';
+        fileInp.value = '';
+        if (typeof toast === 'function') toast('Image compressed: ' + compKB + 'KB (was ' + origKB + 'KB)');
+      }, maxDim, quality);
+    });
   };
 
   var addBtn = input.nextElementSibling;

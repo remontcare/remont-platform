@@ -35,18 +35,26 @@ export class CitiesService {
     return { serviceable: !!city, city };
   }
 
-  /** Get city-wise price for a service (with multiplier + override) */
+  /**
+   * Resolve a service's real price for one city: per-service CityService override
+   * (if any) → else the city's blanket priceMultiplier on basePrice → else basePrice
+   * as-is. Previously this returned null (leaving callers to fall back to the
+   * unmultiplied basePrice) whenever no CityService row existed at all — meaning the
+   * multiplier only ever applied to services an admin had explicitly configured for
+   * that city, when it's meant to be the city-wide default and CityService rows are
+   * only for the services that need a specific override.
+   */
   async getServicePrice(cityName: string, serviceId: string): Promise<number | null> {
     const city = await this.prisma.city.findUnique({ where: { name: cityName } });
     if (!city) return null;
+    const svc = await this.prisma.service.findUnique({ where: { id: serviceId } });
+    if (!svc) return null;
     const cs = await this.prisma.cityService.findUnique({
       where: { cityId_serviceId: { cityId: city.id, serviceId } },
-      include: { service: true },
     });
-    if (!cs) return null;
-    if (!cs.isActive) return null;
-    if (cs.customPrice) return Number(cs.customPrice);
-    return Number(cs.service.basePrice) * Number(city.priceMultiplier);
+    if (cs && !cs.isActive) return null; // explicitly disabled for this city
+    if (cs && cs.customPrice) return Number(cs.customPrice); // service-level override wins
+    return Number(svc.basePrice) * Number(city.priceMultiplier);
   }
 
   // Admin: configure city

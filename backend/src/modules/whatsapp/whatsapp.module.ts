@@ -42,6 +42,10 @@ const TEMPLATES: Record<string, Record<string, (v: any) => string>> = {
     EN: (v) => `📱 Pay online for order #${v.orderNumber} — faster, secure, and cashless. Switch from Cash on Delivery anytime before work starts.`,
     HI: (v) => `📱 Order #${v.orderNumber} ke liye online pay karein — tez, surakshit, cashless. Kaam shuru hone se pehle COD se online badal sakte hain.`,
   },
+  SERVICE_OTP_RESENT: {
+    EN: (v) => `🔐 New ${v.otpLabel} OTP for order #${v.orderNumber} is ${v.otp}. Share only with your assigned technician. The previous code no longer works.`,
+    HI: (v) => `🔐 Order #${v.orderNumber} ka naya ${v.otpLabel} OTP ${v.otp} hai. Sirf apne assigned technician ke saath share karein. Purana code ab kaam nahi karega.`,
+  },
   EXTRA_WORK: {
     EN: (v) => `📝 Extra work for #${v.orderNumber}:\n${v.description}\nAmount: ₹${v.amount}\nApprove? YES/NO`,
     HI: (v) => `📝 Order #${v.orderNumber} extra:\n${v.description}\nAmount: ₹${v.amount}\nYES/NO?`,
@@ -132,6 +136,13 @@ export class WhatsappService {
     const lang = await this.getLang(phone);
     const body = this.render('PAY_ONLINE_NUDGE', lang, { orderNumber });
     return this.send(phone, body, WhatsappMessageType.PAY_ONLINE_NUDGE);
+  }
+
+  async sendServiceOtpResent(phone: string, orderNumber: string, otpType: 'START' | 'END', otp: string) {
+    const lang = await this.getLang(phone);
+    const otpLabel = otpType === 'START' ? 'arrival' : 'completion';
+    const body = this.render('SERVICE_OTP_RESENT', lang, { orderNumber, otp, otpLabel });
+    return this.send(phone, body, WhatsappMessageType.SERVICE_OTP_RESENT);
   }
 
   /** Plain-text message with no template — used by flows (like seller-registration review

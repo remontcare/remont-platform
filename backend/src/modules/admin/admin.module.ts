@@ -7,11 +7,12 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown, resolveCommission } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
 import { SettlementsService, SettlementsModule } from '../settlements/settlements.module';
+import { CitiesService, CitiesModule } from '../cities/cities.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -40,7 +41,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -248,6 +249,12 @@ export class AdminService {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { status: VendorStatus.SUSPENDED, isOnline: false } });
   }
 
+  // Marks a vendor as in-house Remont staff vs an external partner — used by
+  // RoutingService to prioritize in-house staff first for DIRECT_PARTNER services (Task 8).
+  async setVendorStaffType(vendorId: string, staffType: 'IN_HOUSE' | 'PARTNER') {
+    return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { staffType } });
+  }
+
   // Permanent removal — SUPER_ADMIN only at the route level. Regular admins use
   // suspendVendor() + createDeleteRequest() instead; see the Delete Request workflow below.
   async deleteServiceVendorDirect(vendorId: string) {
@@ -365,8 +372,8 @@ export class AdminService {
       where,
       include: {
         customer: { select: { name: true, phone: true } },
-        vendor: { select: { id: true, fullName: true, user: { select: { name: true, phone: true } } } },
-        service: { select: { name: true, basePrice: true, durationMinutes: true } },
+        vendor: { select: { id: true, fullName: true, staffType: true, user: { select: { name: true, phone: true } } } },
+        service: { select: { name: true, basePrice: true, durationMinutes: true, fulfillmentType: true } },
         address: { select: { city: true, fullAddress: true } },
         invoice: { select: { id: true, invoiceNumber: true } },
       },
@@ -410,11 +417,11 @@ export class AdminService {
       });
     }
 
-    const cityService = await this.prisma.cityService.findUnique({
-      where: { cityId_serviceId: { cityId: data.cityId, serviceId: data.serviceId } },
+    const cityPrice = await this.cities.getServicePrice(city.name, data.serviceId);
+    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
+    const commissionResult = await resolveCommission(this.prisma, {
+      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
     });
-    const serviceAmount = (cityService?.isActive && cityService.customPrice)
-      ? Number(cityService.customPrice) : Number(svc.basePrice);
     const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
 
     const [h, m] = data.slotTime.split(':').map(Number);
@@ -438,8 +445,10 @@ export class AdminService {
         serviceAmount, productsAmount: 0, subtotal: serviceAmount,
         couponDiscount: 0, membershipDiscount: 0, walletUsed: 0,
         gstAmount, totalAmount: serviceAmount + gstAmount,
-        remontCommission: Math.round(serviceAmount * 0.15 * 100) / 100,
-        vendorPayout: serviceAmount - Math.round(serviceAmount * 0.15 * 100) / 100,
+        remontCommission: commissionResult.commissionAmount,
+        vendorPayout: serviceAmount - commissionResult.commissionAmount,
+        commissionRuleId: commissionResult.ruleId,
+        commissionRuleLabel: commissionResult.ruleLabel,
       },
       include: { service: true, address: true, customer: { select: { name: true, phone: true } } },
     });
@@ -954,7 +963,10 @@ export class AdminService {
 
   // ─── AI Content Generation ───────────────────────────────────────────
 
-  async generateAiContent(type: 'SERVICE' | 'PRODUCT' | 'CATEGORY', name: string, context?: string) {
+  async generateAiContent(type: 'SERVICE' | 'PRODUCT' | 'CATEGORY', name: string, context?: string): Promise<{
+    description: string; seoTitle: string; seoDesc: string; seoKeywords: string[];
+    inclusions?: string[]; exclusions?: string[]; faq: { q: string; a: string }[];
+  }> {
     if (this.openaiKey) {
       try {
         const prompt = `Generate content for a Remont India home services listing:
@@ -963,10 +975,15 @@ Name: ${name}
 ${context ? `Context: ${context}` : ''}
 
 Return JSON with:
-- description: 2-3 sentence professional description (60-80 words)
-- seoTitle: SEO title (50-60 chars)
-- seoDesc: meta description (140-155 chars)
-- seoKeywords: array of 5 relevant keywords
+- description: 2-3 sentence customer-friendly, conversion-focused professional description (60-80 words)
+- seoTitle: strong SEO title, 50-60 characters exactly. Include the literal token "{city}" where a
+  city name would naturally go (e.g. "${name} in {city} | Remont India") so the SAME title can be
+  reused for every city we serve just by substituting the token — never hardcode one specific city.
+- seoDesc: meta description, 150-160 characters exactly. Also include "{city}" if a city name
+  would naturally appear, for the same reason.
+- seoKeywords: array of 5-8 relevant, SEO-optimized keywords
+- inclusions: array of 4-6 short bullet points of what's included in this service/product
+- exclusions: array of 2-4 short bullet points of what's NOT included (e.g. spare parts, materials, exclusions)
 - faq: array of 4 objects with {q, a} — common customer questions and answers`;
 
         const raw = await openAiComplete(this.openaiKey, this.openaiModel, [
@@ -981,16 +998,74 @@ Return JSON with:
 
     // Fallback: template-based content
     const description = `Experience premium ${name} by Remont India's certified professionals. Our experts use industry-grade equipment and follow quality-checked processes to deliver exceptional results. Book in minutes, get service at your doorstep — 100% satisfaction guaranteed.`;
-    const seoTitle = `${name} | Best ${name} Service in India | Remont India`;
-    const seoDesc = `Book ${name} online at the best price. Certified professionals, doorstep service, 100% satisfaction guarantee. Available in 11+ cities across India.`;
-    const seoKeywords = [name.toLowerCase(), 'home service', 'doorstep service', 'remont india', 'book online'];
+    // {city} is a literal template token, substituted client-side per the customer's
+    // selected city (see _applyServiceCitySeo() in index.html) — never one hardcoded city.
+    const seoTitle = `${name} in {city} | Remont India`.slice(0, 60);
+    const seoDesc = `Book ${name} in {city} with Remont India. Certified professionals, doorstep service, 100% satisfaction guarantee, GST invoice.`.slice(0, 160);
+    const seoKeywords = [name.toLowerCase(), 'home service', 'doorstep service', 'remont india', 'book online', `${name.toLowerCase()} price`, `best ${name.toLowerCase()}`];
+    const inclusions = [
+      `Professional ${name} by a certified technician`,
+      'Pre-service inspection and diagnosis',
+      'Standard tools and equipment',
+      'Post-service quality check',
+      'Digital service report',
+    ];
+    const exclusions = [
+      'Spare parts and replacement materials (charged separately, on approval)',
+      'Structural or civil work beyond the scope of this service',
+    ];
     const faq = [
       { q: `How long does ${name} take?`, a: 'Our certified technicians typically complete the service in 60–90 minutes depending on the scope of work.' },
       { q: `Is ${name} available in my city?`, a: 'We are available in Mumbai, Delhi, Bangalore, Hyderabad, Pune, Chennai, Kolkata, Ahmedabad, Jaipur, Lucknow, and Indore.' },
       { q: `What is included in ${name}?`, a: `The ${name} package includes a thorough inspection, cleaning, repair if required, and a service report. All work is backed by a 30-day service guarantee.` },
       { q: `How do I book ${name}?`, a: 'Visit remontindia.com, select your city and service, choose a time slot, and pay online. Our professional will arrive at the scheduled time.' },
     ];
-    return { description, seoTitle, seoDesc, seoKeywords, faq };
+    return { description, seoTitle, seoDesc, seoKeywords, inclusions, exclusions, faq };
+  }
+
+  /**
+   * "Generate for all empty services" — one click fills the 196/222 services that
+   * already have a basic description but zero SEO/inclusions content (or any other
+   * still-missing field), without touching services an admin has already filled in
+   * manually. Bounded to `limit` per call (default 20) so one HTTP request can't run
+   * long enough to time out against 200+ services — the admin button just reports how
+   * many are left and can be clicked again.
+   */
+  async bulkGenerateAiContent(limit = 20) {
+    const services = await this.prisma.service.findMany({
+      where: {
+        OR: [
+          { seoTitle: null }, { seoTitle: '' },
+          { inclusions: { equals: [] } },
+        ],
+      },
+      take: limit,
+    });
+    let processed = 0;
+    for (const svc of services) {
+      try {
+        const ai = await this.generateAiContent('SERVICE', svc.name);
+        await this.prisma.service.update({
+          where: { id: svc.id },
+          data: {
+            description: svc.description || ai.description,
+            seoTitle: svc.seoTitle || ai.seoTitle,
+            seoDesc: svc.seoDesc || ai.seoDesc,
+            seoKeywords: svc.seoKeywords?.length ? svc.seoKeywords : ai.seoKeywords,
+            inclusions: svc.inclusions?.length ? svc.inclusions : (ai.inclusions || []),
+            exclusions: svc.exclusions?.length ? svc.exclusions : (ai.exclusions || []),
+            faqJson: (svc.faqJson as any) || ai.faq,
+          },
+        });
+        processed++;
+      } catch (e) {
+        this.logger.warn(`Bulk AI generate failed for service ${svc.id}: ${e.message}`);
+      }
+    }
+    const remaining = await this.prisma.service.count({
+      where: { OR: [{ seoTitle: null }, { seoTitle: '' }, { inclusions: { equals: [] } }] },
+    });
+    return { processed, remaining };
   }
 
   // ─── Banners (CMS) ──────────────────────────────────────────────────
@@ -1009,6 +1084,60 @@ Return JSON with:
 
   async deleteBanner(id: string) {
     return this.prisma.homeBanner.delete({ where: { id } });
+  }
+
+  // ─── Commission Rules (Task 9) ───────────────────────────────────────
+  // CRUD for CommissionRule; actual resolution logic lives in resolveCommission()
+  // (common/index.ts), shared with every order-creation path so admin edits here
+  // take effect on the NEXT booking without touching past orders (which keep their
+  // snapshotted commissionRuleId/commissionRuleLabel — see Order in schema.prisma).
+
+  async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string) {
+    return this.prisma.commissionRule.findMany({
+      where: {
+        ...(scope ? { scope: scope as any } : {}),
+        ...(categoryId ? { categoryId } : {}),
+        ...(serviceId ? { serviceId } : {}),
+        ...(cityId ? { cityId } : {}),
+      },
+      include: {
+        category: { select: { name: true } },
+        service: { select: { name: true } },
+        city: { select: { name: true } },
+      },
+      orderBy: [{ scope: 'asc' }, { priority: 'desc' }],
+    });
+  }
+
+  async createCommissionRule(data: any) {
+    if (data.scope === 'CATEGORY' && !data.categoryId) throw new BadRequestException('categoryId is required for a CATEGORY-scoped rule');
+    if (data.scope === 'SERVICE' && !data.serviceId) throw new BadRequestException('serviceId is required for a SERVICE-scoped rule');
+    return this.prisma.commissionRule.create({ data });
+  }
+
+  async updateCommissionRule(id: string, data: any) {
+    const existing = await this.prisma.commissionRule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Commission rule not found');
+    return this.prisma.commissionRule.update({ where: { id }, data });
+  }
+
+  async deleteCommissionRule(id: string) {
+    return this.prisma.commissionRule.delete({ where: { id } });
+  }
+
+  // Admin preview: "This service, this city -> commission = ₹X (rule: ...)" — reuses
+  // the exact same resolveCommission() every real order goes through.
+  async previewCommission(serviceId: string, cityName?: string, amount?: number) {
+    const svc = await this.prisma.service.findUnique({ where: { id: serviceId } });
+    if (!svc) throw new NotFoundException('Service not found');
+    let cityId: string | null = null;
+    if (cityName) {
+      const city = await this.cities.getByName(cityName);
+      cityId = city?.id || null;
+    }
+    const testAmount = amount ?? Number(svc.basePrice);
+    const result = await resolveCommission(this.prisma, { serviceId, categoryId: svc.categoryId, cityId, amount: testAmount });
+    return { serviceName: svc.name, amount: testAmount, ...result };
   }
 
   // ─── Site Settings ───────────────────────────────────────────────────
@@ -1155,6 +1284,7 @@ Return JSON with:
       { key: 'total_cities', value: '32', label: 'Total Cities (shown on homepage)', group: 'stats' },
       { key: 'total_reviews', value: '50000', label: 'Total Reviews (shown on homepage)', group: 'stats' },
       { key: 'total_vendors', value: '5000', label: 'Total Vendors (shown on homepage)', group: 'stats' },
+      { key: 'otp_regen_max_attempts', value: '0', label: 'Max "Request OTP Again" attempts per service (0 = unlimited)', group: 'operations' },
     ];
     for (const s of settings) {
       await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: {} });
@@ -2001,6 +2131,9 @@ export class AdminController {
   @Patch('vendors/:id/approve') approve(@Param('id') id: string) { return this.admin.approveVendor(id); }
   @Patch('vendors/:id/reject') reject(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.rejectVendor(id, b.reason); }
   @Patch('vendors/:id/suspend') suspend(@Param('id') id: string) { return this.admin.suspendVendor(id); }
+  @Patch('vendors/:id/staff-type') setStaffType(@Param('id') id: string, @Body() b: { staffType: 'IN_HOUSE' | 'PARTNER' }) {
+    return this.admin.setVendorStaffType(id, b.staffType);
+  }
   @Roles(UserRole.SUPER_ADMIN)
   @Delete('vendors/:id') deleteVendorDirect(@Param('id') id: string) { return this.admin.deleteServiceVendorDirect(id); }
 
@@ -2126,6 +2259,9 @@ export class AdminController {
   @Post('ai/generate') aiGenerate(@Body() b: { type: 'SERVICE' | 'PRODUCT' | 'CATEGORY'; name: string; context?: string }) {
     return this.admin.generateAiContent(b.type, b.name, b.context);
   }
+  @Post('ai/bulk-generate') aiBulkGenerate(@Body() b: { limit?: number }) {
+    return this.admin.bulkGenerateAiContent(b.limit);
+  }
 
   // Banners (CMS)
   @Get('banners') listBanners() { return this.admin.listBanners(); }
@@ -2134,6 +2270,17 @@ export class AdminController {
   @Delete('banners/:id') deleteBanner(@Param('id') id: string) { return this.admin.deleteBanner(id); }
 
   // Settings
+  @Get('commission-rules') listCommissionRules(
+    @Query('scope') scope?: string, @Query('categoryId') categoryId?: string,
+    @Query('serviceId') serviceId?: string, @Query('cityId') cityId?: string,
+  ) { return this.admin.listCommissionRules(scope, categoryId, serviceId, cityId); }
+  @Post('commission-rules') createCommissionRule(@Body() b: any) { return this.admin.createCommissionRule(b); }
+  @Patch('commission-rules/:id') updateCommissionRule(@Param('id') id: string, @Body() b: any) { return this.admin.updateCommissionRule(id, b); }
+  @Delete('commission-rules/:id') deleteCommissionRule(@Param('id') id: string) { return this.admin.deleteCommissionRule(id); }
+  @Get('commission-rules/preview') previewCommission(
+    @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string,
+  ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined); }
+
   @Get('settings') getSettings(@Query('group') group?: string) { return this.admin.getSettings(group); }
   @Patch('settings/:key') upsertSetting(@Param('key') key: string, @Body() b: { value: string; label?: string; group?: string }) {
     return this.admin.upsertSetting(key, b.value, b.label, b.group);
@@ -2300,7 +2447,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],
