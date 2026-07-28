@@ -1134,28 +1134,61 @@ function downloadTemplate() {
   var a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='service_import_template.csv'; a.click();
 }
 
+function normKey(s) { return String(s||'').trim().toLowerCase(); }
+
 function importServices() {
   if (!importRows.length) return;
-  var errors = [];
-  var promises = importRows.map(function(row, idx) {
-    var catMatch = categories.find(function(c){ return c.key === (row.categoryKey||'').toUpperCase(); });
-    if (!catMatch) { errors.push('Row '+(idx+2)+': Category "'+row.categoryKey+'" not found'); return Promise.resolve(); }
+  var skipped = [];
+
+  // Resolve each row's category (key OR name match, case-insensitive/trimmed) and
+  // dedupe rows sharing the same category+name within the file — last row wins.
+  var deduped = new Map(); // categoryId + '||' + normalized name -> { row, idx }
+  importRows.forEach(function(row, idx) {
+    var wanted = normKey(row.categoryKey);
+    var catMatch = categories.find(function(c) { return normKey(c.key) === wanted || normKey(c.name) === wanted; });
+    if (!catMatch) { skipped.push('Row '+(idx+2)+': category "'+row.categoryKey+'" not found'); return; }
     var price = parseFloat(row.basePrice);
-    if (isNaN(price)) { errors.push('Row '+(idx+2)+': Invalid price'); return Promise.resolve(); }
-    return api('POST','/admin/services',{
-      categoryId: catMatch.id, name: row.name, basePrice: price,
-      originalPrice: parseFloat(row.originalPrice)||undefined,
-      durationMinutes: parseInt(row.durationMinutes)||60,
-      description: row.description||undefined,
-      isPopular: row.isPopular==='true', isPremium: row.isPremium==='true',
+    if (isNaN(price)) { skipped.push('Row '+(idx+2)+': invalid price'); return; }
+    deduped.set(catMatch.id + '||' + normKey(row.name), { row: row, catMatch: catMatch, price: price, idx: idx });
+  });
+
+  api('GET', '/admin/services?limit=1000').then(function(existingSvcs) {
+    var existingMap = new Map(); // categoryId + '||' + normalized name -> serviceId
+    (existingSvcs || []).forEach(function(s) {
+      existingMap.set(s.categoryId + '||' + normKey(s.name), s.id);
     });
-  });
-  Promise.allSettled(promises).then(function(results){
-    var success = results.filter(function(r){ return r.status==='fulfilled' && r.value; }).length;
-    if (errors.length) document.getElementById('xl-errors').textContent = errors.join('\n');
-    toast('Imported ' + success + ' services' + (errors.length ? ', ' + errors.length + ' errors' : ''), errors.length ? 'warning' : 'success');
-    closeModal('xl-overlay'); loadServices();
-  });
+
+    var promises = [], kinds = [];
+    deduped.forEach(function(entry) {
+      var row = entry.row;
+      var payload = {
+        categoryId: entry.catMatch.id, name: row.name, basePrice: entry.price,
+        originalPrice: parseFloat(row.originalPrice)||undefined,
+        durationMinutes: parseInt(row.durationMinutes)||60,
+        description: row.description||undefined,
+        isPopular: row.isPopular==='true', isPremium: row.isPremium==='true',
+      };
+      var existingId = existingMap.get(entry.catMatch.id + '||' + normKey(row.name));
+      if (existingId) {
+        kinds.push({ type: 'updated', row: row });
+        promises.push(api('PATCH','/admin/services/'+existingId, payload));
+      } else {
+        kinds.push({ type: 'added', row: row });
+        promises.push(api('POST','/admin/services', payload));
+      }
+    });
+
+    return Promise.allSettled(promises).then(function(results) {
+      var added = 0, updated = 0;
+      results.forEach(function(r, i) {
+        if (r.status === 'fulfilled') { if (kinds[i].type === 'added') added++; else updated++; }
+        else skipped.push('"' + kinds[i].row.name + '": ' + (r.reason && r.reason.message || 'save failed'));
+      });
+      if (skipped.length) document.getElementById('xl-errors').textContent = skipped.join('\n');
+      toast('Added ' + added + ', updated ' + updated + (skipped.length ? ', skipped ' + skipped.length : ''), skipped.length ? 'warning' : 'success');
+      closeModal('xl-overlay'); loadServices();
+    });
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 function exportServices() {
