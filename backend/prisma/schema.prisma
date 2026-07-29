@@ -112,8 +112,8 @@ enum VendorStatus {
 // resolveServiceRouting() in common/index.ts.
 enum FulfillmentType {
   DIRECT_PARTNER // auto-match a vendor (in-house first, then partner) — current default behaviour
-  ADMIN_TEAM     // smaller admin-handled services — no auto vendor match, goes to the admin queue
-  PROJECT        // project-scale work — never auto-assigned, always goes to the admin queue
+  ADMIN_TEAM // smaller admin-handled services — no auto vendor match, goes to the admin queue
+  PROJECT // project-scale work — never auto-assigned, always goes to the admin queue
 }
 
 // In-house Remont staff vs an external partner vendor — used to prioritize in-house
@@ -220,6 +220,28 @@ enum NotificationChannel {
   SMS
   WHATSAPP
   EMAIL
+  VOICE
+}
+
+enum DevicePlatform {
+  WEB
+  ANDROID
+  IOS
+}
+
+enum NotificationDeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  EXPIRED
+}
+
+enum ScheduledStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
 }
 
 enum CorporateRole {
@@ -336,6 +358,7 @@ model User {
   walletTransactions     WalletTransaction[]
   reviews                Review[]
   notifications          Notification[]
+  deviceTokens           DeviceToken[]
   serviceVendor          ServiceVendor?
   productVendor          ProductVendor?
   deliveryPartner        DeliveryPartner?
@@ -510,17 +533,17 @@ model CommissionRule {
   commissionType CommissionType
   // Percentage (0-100) or flat ₹ amount — ignored when commissionType=SLAB, where
   // slabJson is the source of truth instead.
-  value    Decimal @default(0) @db.Decimal(10, 2)
-  slabJson Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
+  value          Decimal        @default(0) @db.Decimal(10, 2)
+  slabJson       Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
 
   // Higher priority wins when more than one rule matches at the same specificity level.
   // A `stackable` rule ADDS its own amount on top of whichever single rule already won —
   // opt-in per rule so stacking never happens by surprise.
-  priority   Int     @default(0)
-  stackable  Boolean @default(false)
-  isActive   Boolean @default(true)
-  validFrom  DateTime?
-  validTo    DateTime?
+  priority  Int       @default(0)
+  stackable Boolean   @default(false)
+  isActive  Boolean   @default(true)
+  validFrom DateTime?
+  validTo   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -607,18 +630,18 @@ model SubCategory {
 }
 
 model Service {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   categoryId      String
   subCategoryId   String?
   name            String
-  slug            String   @unique
+  slug            String          @unique
   description     String?
-  unit            String   @default("per visit")
+  unit            String          @default("per visit")
   inclusions      String[]
   exclusions      String[]
-  basePrice       Decimal  @db.Decimal(10, 2)
-  originalPrice   Decimal? @db.Decimal(10, 2)
-  durationMinutes Int      @default(60)
+  basePrice       Decimal         @db.Decimal(10, 2)
+  originalPrice   Decimal?        @db.Decimal(10, 2)
+  durationMinutes Int             @default(60)
   requiredSkills  String[]
   // Which pipeline this service's orders route through when confirmed — see
   // resolveServiceRouting() in common/index.ts (Task 8).
@@ -629,11 +652,11 @@ model Service {
   seoTitle        String?
   seoDesc         String?
   seoKeywords     String[]
-  isActive        Boolean  @default(true)
-  isPopular       Boolean  @default(false)
-  isPremium       Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  isActive        Boolean         @default(true)
+  isPopular       Boolean         @default(false)
+  isPremium       Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   category        ServiceCategory  @relation(fields: [categoryId], references: [id])
   subCategory     SubCategory?     @relation(fields: [subCategoryId], references: [id])
@@ -1053,8 +1076,8 @@ enum MasterOrderStatus {
 }
 
 model MasterOrder {
-  id                String              @id @default(cuid())
-  masterOrderNumber String              @unique // customer-facing, e.g. RM250724001
+  id                String  @id @default(cuid())
+  masterOrderNumber String  @unique // customer-facing, e.g. RM250724001
   customerId        String
   addressId         String?
 
@@ -1071,11 +1094,11 @@ model MasterOrder {
   snapshotLongitude   Float?
   snapshotGpsAt       DateTime?
 
-  channel           BookingChannel      @default(WEBSITE)
-  status            MasterOrderStatus   @default(PENDING_PAYMENT)
-  paymentStatus     PaymentStatus       @default(PENDING)
-  paymentMethod     OrderPaymentMethod?
-  paymentId         String?
+  channel       BookingChannel      @default(WEBSITE)
+  status        MasterOrderStatus   @default(PENDING_PAYMENT)
+  paymentStatus PaymentStatus       @default(PENDING)
+  paymentMethod OrderPaymentMethod?
+  paymentId     String?
 
   // Pricing — authoritative totals the customer actually pays once against.
   // Child Orders carry their own allocated share once the split engine exists.
@@ -1120,8 +1143,8 @@ model MasterOrder {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Order {
-  id                String              @id @default(cuid())
-  orderNumber       String              @unique
+  id                String  @id @default(cuid())
+  orderNumber       String  @unique
   masterOrderId     String?
   customerId        String
   vendorId          String?
@@ -1141,27 +1164,27 @@ model Order {
   snapshotLongitude   Float?
   snapshotGpsAt       DateTime?
 
-  type              OrderType
-  channel           BookingChannel      @default(WEBSITE)
-  status            OrderStatus         @default(PENDING_PAYMENT)
-  paymentStatus     PaymentStatus       @default(PENDING)
-  paymentMethod     OrderPaymentMethod?
-  paymentId         String?
+  type          OrderType
+  channel       BookingChannel      @default(WEBSITE)
+  status        OrderStatus         @default(PENDING_PAYMENT)
+  paymentStatus PaymentStatus       @default(PENDING)
+  paymentMethod OrderPaymentMethod?
+  paymentId     String?
 
   // Pricing breakdown
-  serviceAmount      Decimal @default(0) @db.Decimal(10, 2)
-  productsAmount     Decimal @default(0) @db.Decimal(10, 2)
-  extraWorkAmount    Decimal @default(0) @db.Decimal(10, 2)
-  subtotal           Decimal @default(0) @db.Decimal(10, 2)
-  couponCode         String?
-  couponDiscount     Decimal @default(0) @db.Decimal(10, 2)
-  membershipDiscount Decimal @default(0) @db.Decimal(10, 2)
-  walletUsed         Decimal @default(0) @db.Decimal(10, 2)
-  gstAmount          Decimal @default(0) @db.Decimal(10, 2)
-  platformCharges    Decimal @default(0) @db.Decimal(10, 2)
-  totalAmount        Decimal @default(0) @db.Decimal(10, 2)
-  remontCommission   Decimal @default(0) @db.Decimal(10, 2)
-  vendorPayout       Decimal @default(0) @db.Decimal(10, 2)
+  serviceAmount       Decimal @default(0) @db.Decimal(10, 2)
+  productsAmount      Decimal @default(0) @db.Decimal(10, 2)
+  extraWorkAmount     Decimal @default(0) @db.Decimal(10, 2)
+  subtotal            Decimal @default(0) @db.Decimal(10, 2)
+  couponCode          String?
+  couponDiscount      Decimal @default(0) @db.Decimal(10, 2)
+  membershipDiscount  Decimal @default(0) @db.Decimal(10, 2)
+  walletUsed          Decimal @default(0) @db.Decimal(10, 2)
+  gstAmount           Decimal @default(0) @db.Decimal(10, 2)
+  platformCharges     Decimal @default(0) @db.Decimal(10, 2)
+  totalAmount         Decimal @default(0) @db.Decimal(10, 2)
+  remontCommission    Decimal @default(0) @db.Decimal(10, 2)
+  vendorPayout        Decimal @default(0) @db.Decimal(10, 2)
   // Which CommissionRule (if any) produced remontCommission above, snapshotted once at
   // confirmation time (Task 9) — never re-derived later, so editing/deleting the rule
   // afterward can't silently change what a past invoice/earnings statement shows.
@@ -1179,20 +1202,20 @@ model Order {
   routingDecision  String? // ADMIN_TEAM | PROJECT | IN_HOUSE | PARTNER | MANUAL_FALLBACK
 
   // Job lifecycle
-  slotStart        DateTime?
-  slotEnd          DateTime?
-  startOtp         String?
-  startOtpVerified Boolean   @default(false)
-  endOtp           String?
-  endOtpVerified   Boolean   @default(false)
+  slotStart          DateTime?
+  slotEnd            DateTime?
+  startOtp           String?
+  startOtpVerified   Boolean   @default(false)
+  endOtp             String?
+  endOtpVerified     Boolean   @default(false)
   // Last time each OTP was (re)sent — drives the 30-60s resend cooldown, same
   // pattern as the existing login-OTP User.otpLastSentAt below.
   startOtpLastSentAt DateTime?
   endOtpLastSentAt   DateTime?
-  startedAt        DateTime?
-  completedAt      DateTime?
-  cancelledAt      DateTime?
-  cancelReason     String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelReason       String?
 
   // Proof artifacts
   photosBefore String[]
@@ -1802,9 +1825,81 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime              @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user       User                   @relation(fields: [userId], references: [id])
+  deliveries NotificationDelivery[]
 
   @@index([userId, isRead])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION ENGINE — shared across every portal (customer/partner/seller/
+// admin/CRM/AMC/...), independent of business modules. See notification-engine
+// module: business code emits domain events (EventEmitter2), never imports
+// this directly. `Notification` above stays the user-facing inbox row; these
+// models are the technical per-channel/per-device delivery plumbing behind it,
+// mirroring how WhatsappLog is already a separate technical log from the
+// user-facing row it supports.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model DeviceToken {
+  id               String         @id @default(cuid())
+  userId           String
+  token            String         @unique
+  platform         DevicePlatform
+  userAgent        String?
+  isActive         Boolean        @default(true)
+  subscribedTopics String[]       @default([])
+  lastSeenAt       DateTime       @default(now())
+  createdAt        DateTime       @default(now())
+
+  user       User                   @relation(fields: [userId], references: [id])
+  deliveries NotificationDelivery[]
+
+  @@index([userId, isActive])
+}
+
+model NotificationDelivery {
+  id             String                     @id @default(cuid())
+  notificationId String
+  channel        NotificationChannel
+  deviceTokenId  String?
+  status         NotificationDeliveryStatus @default(QUEUED)
+  attempts       Int                        @default(0)
+  maxAttempts    Int                        @default(3)
+  nextAttemptAt  DateTime?
+  lastError      String?
+  sentAt         DateTime?
+  ackedAt        DateTime? // client-reported delivered/opened/acted-on — stops ring retries
+  // Denormalized off the parent Notification purely so retry-sweep.service.ts's cron
+  // (which only loads NotificationDelivery rows) can emit a meaningful 'notification.exhausted'
+  // event without a second query per row — Notification itself stays the simple,
+  // stable user-facing inbox shape every portal's bell icon already reads.
+  type           String?
+  data           Json?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id])
+  deviceToken  DeviceToken? @relation(fields: [deviceTokenId], references: [id])
+
+  @@index([status, nextAttemptAt])
+  @@index([notificationId])
+}
+
+model ScheduledNotification {
+  id           String                @id @default(cuid())
+  userId       String? // null = broadcast/topic send
+  topic        String?
+  title        String
+  body         String
+  data         Json?
+  channels     NotificationChannel[]
+  scheduledFor DateTime
+  status       ScheduledStatus       @default(PENDING)
+  createdAt    DateTime              @default(now())
+  sentAt       DateTime?
+
+  @@index([status, scheduledFor])
 }
 
 // ─── CMS MODELS ────────────────────────────────────────────────────────────

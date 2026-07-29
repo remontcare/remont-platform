@@ -22,6 +22,7 @@ import { MembershipsModule } from './modules/memberships/memberships.module';
 import { CorporateModule } from './modules/corporate/corporate.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { NotificationEngineModule } from './modules/notification-engine/notification-engine.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { AmcModule } from './modules/amc/amc.module';
@@ -76,6 +77,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
     // Communication
     WhatsappModule,
     NotificationsModule,
+    NotificationEngineModule,
     PaymentsModule,
 
     // Strategic modules

@@ -32,6 +32,10 @@
     if (data.accessToken) localStorage.setItem(KEY_ACCESS, data.accessToken);
     if (data.refreshToken) localStorage.setItem(KEY_REFRESH, data.refreshToken);
     if (data.user) localStorage.setItem(KEY_USER, JSON.stringify(data.user));
+    // Optional — only present on portals that also load remont-notifications.js.
+    // Kept as a runtime existence check (not an import) so this file stays
+    // independent of the notification engine, same as every other module boundary.
+    if (data.accessToken && global.RemontNotifications) global.RemontNotifications.onLogin(data.accessToken);
   }
 
   function clearSession() {
@@ -87,6 +91,7 @@
 
   function logout() {
     var rt = getRefreshToken();
+    if (global.RemontNotifications) global.RemontNotifications.onLogout();
     clearSession();
     if (rt) {
       fetch(API_BASE + '/api/v1/auth/logout', {
@@ -107,6 +112,7 @@
       }).catch(function () {})
       : Promise.resolve();
     return req.then(function () {
+      if (global.RemontNotifications) global.RemontNotifications.onLogout();
       clearSession();
       window.location.replace('/');
     });

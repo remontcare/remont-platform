@@ -1,0 +1,13 @@
+{
+  "name": "Remont India — Home Services",
+  "short_name": "Remont",
+  "description": "AI-powered home services — book vetted technicians for AC, plumbing, electrical, and more.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#c4601a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

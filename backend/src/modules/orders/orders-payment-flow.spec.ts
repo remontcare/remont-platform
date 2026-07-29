@@ -457,10 +457,10 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
       serviceVendor: { findMany: jest.fn(async () => []) },
     };
     prisma.orderTimeline = { create: jest.fn() };
-    const wa: any = { sendJobAssigned: jest.fn(async () => {}) };
+    const events: any = { emit: jest.fn() };
     const dispatch: any = { dispatch: jest.fn(async () => {}) };
-    const svc = new RoutingService(prisma, wa, dispatch);
-    return { svc, prisma, wa, dispatch };
+    const svc = new RoutingService(prisma, events, dispatch);
+    return { svc, prisma, events, dispatch };
   }
 
   it('does nothing for a product-only order (no service attached)', async () => {
@@ -488,7 +488,7 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
   });
 
   it('DIRECT_PARTNER: prioritizes an IN_HOUSE match over a PARTNER match in the same city', async () => {
-    const { svc, prisma, wa, dispatch } = makeRouting();
+    const { svc, prisma, events, dispatch } = makeRouting();
     prisma.order.findUnique.mockResolvedValue({
       id: 'o1', orderNumber: 'REM-1', service: { fulfillmentType: 'DIRECT_PARTNER', requiredSkills: ['PLUMBING'] },
       address: { city: 'Bhopal' },
@@ -502,12 +502,12 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
       where: { id: 'o1' },
       data: { vendorId: 'vendor-inhouse', status: 'VENDOR_ASSIGNED', routingDecision: 'IN_HOUSE' },
     });
-    expect(wa.sendJobAssigned).toHaveBeenCalledWith('u-inhouse', expect.anything());
+    expect(events.emit).toHaveBeenCalledWith('job.offer.created', expect.objectContaining({ vendorUserId: 'u-inhouse', orderId: 'o1' }));
     expect(dispatch.dispatch).not.toHaveBeenCalled();
   });
 
   it('DIRECT_PARTNER: falls back to a PARTNER when no IN_HOUSE staff match', async () => {
-    const { svc, prisma, wa } = makeRouting();
+    const { svc, prisma, events } = makeRouting();
     prisma.order.findUnique.mockResolvedValue({
       id: 'o1', orderNumber: 'REM-1', service: { fulfillmentType: 'DIRECT_PARTNER', requiredSkills: ['PLUMBING'] },
       address: { city: 'Bhopal' },
@@ -520,7 +520,7 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
       where: { id: 'o1' },
       data: { vendorId: 'vendor-partner', status: 'VENDOR_ASSIGNED', routingDecision: 'PARTNER' },
     });
-    expect(wa.sendJobAssigned).toHaveBeenCalledWith('u-partner', expect.anything());
+    expect(events.emit).toHaveBeenCalledWith('job.offer.created', expect.objectContaining({ vendorUserId: 'u-partner', orderId: 'o1' }));
   });
 
   it('DIRECT_PARTNER: falls back to manual assignment (flagged) and the existing dispatch notify flow when nobody matches', async () => {

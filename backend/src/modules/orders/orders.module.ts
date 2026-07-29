@@ -3,6 +3,7 @@ import {
   NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode } from '@prisma/client';
 import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -98,7 +99,7 @@ class CreateOrderDto {
 @Injectable()
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
-  constructor(private prisma: PrismaService, private wa: WhatsappService) {}
+  constructor(private prisma: PrismaService, private events: EventEmitter2) {}
 
   async dispatch(orderId: string) {
     const order = await this.prisma.order.findUnique({
@@ -132,9 +133,10 @@ export class DispatchService {
     candidates.sort((a, b) => b.score - a.score);
     const top = candidates.slice(0, 5);
     for (const c of top) {
-      try { await this.wa.sendJobAssigned(c.userId, order); } catch (e) {
-        this.logger.warn(`Notify failed: ${e.message}`);
-      }
+      // NotificationEngineModule's job-ring-policy.service.ts listens for this — it
+      // handles the actual push/WhatsApp send (and the ring/retry policy), so this
+      // module never imports the engine or WhatsappService directly.
+      this.events.emit('job.offer.created', { vendorUserId: c.userId, orderId: order.id, order });
     }
     this.logger.log(`📡 Dispatched ${order.orderNumber} to ${top.length} vendors`);
     return top;
@@ -152,7 +154,7 @@ export class DispatchService {
 @Injectable()
 export class RoutingService {
   private readonly logger = new Logger(RoutingService.name);
-  constructor(private prisma: PrismaService, private wa: WhatsappService, private dispatch: DispatchService) {}
+  constructor(private prisma: PrismaService, private events: EventEmitter2, private dispatch: DispatchService) {}
 
   async route(orderId: string): Promise<void> {
     const order = await this.prisma.order.findUnique({
@@ -193,7 +195,7 @@ export class RoutingService {
         orderId, status: OrderStatus.VENDOR_ASSIGNED,
         note: `Auto-routed to ${chosen.staffType === 'IN_HOUSE' ? 'in-house staff' : 'partner'}: ${chosen.fullName}`,
       });
-      try { await this.wa.sendJobAssigned(chosen.userId, order); } catch (e) { this.logger.warn(`Auto-assign notify failed: ${e.message}`); }
+      this.events.emit('job.offer.created', { vendorUserId: chosen.userId, orderId: order.id, order });
       return;
     }
 

@@ -3,6 +3,7 @@ import {
   NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
@@ -11,7 +12,7 @@ import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 // ─── Service Vendor ───
 @Injectable()
 export class ServiceVendorsService {
-  constructor(private prisma: PrismaService, private wa: WhatsappService) {}
+  constructor(private prisma: PrismaService, private wa: WhatsappService, private events: EventEmitter2) {}
 
   async register(userId: string, data: any) {
     // Strip fields a vendor must not self-assign
@@ -132,6 +133,9 @@ export class ServiceVendorsService {
     });
     await writeOrderTimeline(this.prisma, { orderId, status: 'VENDOR_ASSIGNED', actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     await this.wa.sendJobAssigned(v.userId, updated);
+    // Stops the ring/retry/WhatsApp-fallback sweep for this order on every other
+    // candidate who was also offered it — see job-ring-policy.service.ts.
+    this.events.emit('job.offer.resolved', { orderId });
     return updated;
   }
 
