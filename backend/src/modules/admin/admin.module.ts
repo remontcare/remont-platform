@@ -3,6 +3,7 @@ import {
   NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
@@ -41,7 +42,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -458,9 +459,15 @@ export class AdminService {
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
-      include: { vendor: { include: { user: { select: { name: true, phone: true } } } } },
+      include: { vendor: { include: { user: { select: { name: true, phone: true } } } }, service: true, address: true },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: 'Force-assigned by admin' });
+    // Previously this silently set vendorId with no notification of any kind — the
+    // vendor only ever found out by happening to check their job list. Now goes
+    // through the same ring/push/WhatsApp-fallback path as auto-routed jobs.
+    if (updated.vendor) {
+      this.events.emit('job.offer.created', { vendorUserId: updated.vendor.userId, orderId: updated.id, order: updated });
+    }
     return updated;
   }
 

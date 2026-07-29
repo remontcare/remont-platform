@@ -21,7 +21,8 @@ function makeService() {
   const payments: any = {};
   const settlements: any = {};
   const cities: any = {};
-  return { svc: new AdminService(prisma, config, payments, settlements, cities), prisma };
+  const events: any = { emit: jest.fn() };
+  return { svc: new AdminService(prisma, config, payments, settlements, cities, events), prisma };
 }
 
 describe('AdminService.paymentDashboard — Section 9 complete payment management', () => {
