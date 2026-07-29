@@ -5284,22 +5284,44 @@
 
   // Category key not in the city's active list, or the city currently has no vendors —
   // consulted client-side from data already loaded via buildCityModal(); no extra API call.
-  function _isCategoryAvailableInCity(fkey) {
-    if (_cityHasNoVendors(currentCity)) return false;
+  // Returns true when available, or a reason code when not — the two cases need different
+  // copy: the category may just not be offered here yet, vs. it's offered but nobody has
+  // registered as a vendor in this city yet, which is a different message entirely.
+  function _cityAvailabilityReason(fkey) {
+    if (_cityHasNoVendors(currentCity)) return 'NO_VENDOR';
     var available = CITY_SERVICES[currentCity];
     if (!available) return true; // no data yet for this city — don't block
-    return available.indexOf(fkey) !== -1;
+    return available.indexOf(fkey) !== -1 ? true : 'CATEGORY_UNAVAILABLE';
   }
 
-  function _showCityUnavailablePopup(serviceName) {
+  function _showCityUnavailablePopup(serviceName, reason) {
+    var isHi = (typeof siteLang !== 'undefined' && siteLang === 'HI');
     var msg = document.getElementById('city-unavail-msg');
-    if (msg) msg.textContent = 'Yeh service abhi ' + currentCity + ' me available nahi hai — jaldi launch ho rahi hai';
+    var text;
+    if (reason === 'NO_VENDOR') {
+      text = isHi
+        ? currentCity + ' me is service ke liye abhi koi vendor register nahi hai — jaldi hi partners jud rahe hain'
+        : 'No vendor is registered for this service in ' + currentCity + ' yet — we\'re onboarding partners soon';
+    } else {
+      text = isHi
+        ? 'Yeh service abhi ' + currentCity + ' me available nahi hai — jaldi launch ho rahi hai'
+        : 'This service isn\'t available in ' + currentCity + ' yet — launching soon';
+    }
+    if (msg) msg.textContent = text;
     var emailEl = document.getElementById('city-unavail-email');
-    if (emailEl) emailEl.value = '';
+    if (emailEl) {
+      emailEl.value = '';
+      emailEl.placeholder = isHi ? 'Email — live hote hi bata denge' : 'Email — notify me when live';
+    }
+    var notifyBtn = document.getElementById('city-unavail-notify-btn');
+    if (notifyBtn) notifyBtn.textContent = isHi ? '🔔 Notify Karein' : '🔔 Notify Me';
+    var browseBtn = document.getElementById('city-unavail-browse-btn');
+    if (browseBtn) browseBtn.textContent = isHi ? 'Doosri Services Dekhein' : 'Browse Other Services';
+    var successEl = document.getElementById('city-unavail-notify-success');
+    if (successEl) successEl.textContent = isHi ? '✅ Live hote hi aapko email kar denge!' : '✅ We\'ll email you when this launches!';
     var form = document.getElementById('city-unavail-notify-form');
-    var success = document.getElementById('city-unavail-notify-success');
     if (form) form.style.display = '';
-    if (success) success.style.display = 'none';
+    if (successEl) successEl.style.display = 'none';
     var modal = document.getElementById('city-unavail-modal');
     if (modal) modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -5324,9 +5346,10 @@
 
   function switchService(el) {
     var fkey = el.dataset.svc;
-    if (!_isCategoryAvailableInCity(fkey)) {
+    var _avail = _cityAvailabilityReason(fkey);
+    if (_avail !== true) {
       var title = (serviceData[fkey] && serviceData[fkey].title) || el.textContent.trim();
-      _showCityUnavailablePopup(title);
+      _showCityUnavailablePopup(title, _avail);
       return;
     }
     document.querySelectorAll('.svc-item').forEach(i => i.classList.remove('active'));
@@ -7354,8 +7377,9 @@
 
   function openBookingModal(svcId, svcName, svcPrice) {
     var _catKey = _categoryKeyForService(svcId);
-    if (_catKey && !_isCategoryAvailableInCity(_catKey)) {
-      _showCityUnavailablePopup(svcName || 'This service');
+    var _avail = _catKey ? _cityAvailabilityReason(_catKey) : true;
+    if (_catKey && _avail !== true) {
+      _showCityUnavailablePopup(svcName || 'This service', _avail);
       return;
     }
     document.getElementById('bm-svc-id').value = svcId || '';
@@ -8715,10 +8739,10 @@ function cartCheckout() {
     <p id="city-unavail-msg" style="font-size:15px;color:#111;font-weight:600;margin-bottom:16px;line-height:1.5"></p>
     <div id="city-unavail-notify-form">
       <input id="city-unavail-email" type="email" placeholder="Email — notify me when live" style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:10px;box-sizing:border-box">
-      <button onclick="_cityUnavailNotify()" style="width:100%;padding:11px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:8px">🔔 Notify Me</button>
+      <button id="city-unavail-notify-btn" onclick="_cityUnavailNotify()" style="width:100%;padding:11px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:8px">🔔 Notify Me</button>
     </div>
     <div id="city-unavail-notify-success" style="display:none;color:#16a34a;font-size:13px;font-weight:600;margin-bottom:8px">✅ We'll email you when this launches!</div>
-    <button onclick="closeCityUnavailModal()" style="width:100%;padding:10px;background:none;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;cursor:pointer">Browse Other Services</button>
+    <button id="city-unavail-browse-btn" onclick="closeCityUnavailModal()" style="width:100%;padding:10px;background:none;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;cursor:pointer">Browse Other Services</button>
   </div>
 </div>
 

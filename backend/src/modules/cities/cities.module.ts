@@ -8,11 +8,23 @@ import { JwtAuthGuard, RolesGuard, Roles, Public } from '../../common';
 export class CitiesService {
   constructor(private prisma: PrismaService) {}
 
+  // City.activeVendors is a stored counter that nothing in the app ever writes to, so it
+  // sits at its default of 0 for every city regardless of how many vendors actually
+  // operate there — computing it from real ACTIVE ServiceVendor rows instead is what the
+  // frontend's "no vendor in this city" gate needs to be trustworthy.
   async list() {
-    return this.prisma.city.findMany({
-      where: { isActive: true },
-      orderBy: [{ activeVendors: 'desc' }, { name: 'asc' }],
-    });
+    const [cities, counts] = await Promise.all([
+      this.prisma.city.findMany({ where: { isActive: true } }),
+      this.prisma.serviceVendor.groupBy({
+        by: ['baseCity'],
+        where: { status: 'ACTIVE' },
+        _count: true,
+      }),
+    ]);
+    const countByCity = new Map(counts.map((c) => [c.baseCity, c._count]));
+    return cities
+      .map((city) => ({ ...city, activeVendors: countByCity.get(city.name) || 0 }))
+      .sort((a, b) => b.activeVendors - a.activeVendors || a.name.localeCompare(b.name));
   }
 
   async getByName(name: string) {
