@@ -66,6 +66,32 @@ export class PartnerRegistrationService {
     return { registrationId: draft.registrationId, isNew: true };
   }
 
+  // Phase 2 — an agency owner invites a team member by phone. Creates the same kind of
+  // draft initRegistration() does (so the member completes KYC through the existing
+  // partner-register.html flow and admin approves through the existing admin screen),
+  // just pre-filled and tagged with invitedByAgencyId so _activatePartner() links the
+  // resulting ServiceVendor to this agency once approved.
+  async inviteAgencyMember(agencyOwnerVendorId: string, phone: string, fullName?: string, skills?: string[]) {
+    const normalized = phone.startsWith('+91') ? phone : `+91${phone.replace(/\D/g, '')}`;
+    const existing = await this.prisma.partnerRegistration.findFirst({ where: { phone: normalized }, orderBy: { createdAt: 'desc' } });
+    if (existing && existing.status === 'APPROVED') throw new BadRequestException('This phone number is already an active partner');
+    if (existing && existing.agreedTerms && existing.status === 'PENDING') throw new BadRequestException('This phone number already has a pending application');
+    if (existing && !existing.agreedTerms) {
+      const updated = await this.prisma.partnerRegistration.update({
+        where: { id: existing.id },
+        data: { invitedByAgencyId: agencyOwnerVendorId, ...(fullName ? { fullName } : {}), ...(skills?.length ? { categories: skills } : {}) },
+      });
+      return { registrationId: updated.registrationId, isNew: false };
+    }
+    const draft = await this.prisma.partnerRegistration.create({
+      data: {
+        registrationId: generateRegistrationId(), phone: normalized, currentStep: 1,
+        invitedByAgencyId: agencyOwnerVendorId, fullName: fullName || undefined, categories: skills?.length ? skills : undefined,
+      },
+    });
+    return { registrationId: draft.registrationId, isNew: true };
+  }
+
   /** Save step data (autosave) — accepts any partial step payload */
   async saveStep(registrationId: string, step: number, data: Record<string, any>) {
     const rec = await this.prisma.partnerRegistration.findUnique({ where: { registrationId } });
@@ -245,6 +271,11 @@ export class PartnerRegistrationService {
       // 3. Create or update ServiceVendor record from registration data
       // Normalize onto real ServiceCategory.key values — see normalizeSkillKey() for why.
       const skills = (reg.categories || []).map(normalizeSkillKey);
+      // Phase 2 — set when an agency owner invited this person: activation links the new
+      // ServiceVendor to the agency instead of leaving it an unaffiliated individual.
+      const agencyFields = reg.invitedByAgencyId
+        ? { agencyOwnerId: reg.invitedByAgencyId, memberStatus: 'ACTIVE' as const }
+        : {};
       await this.prisma.serviceVendor.upsert({
         where: { userId: user.id },
         create: {
@@ -256,6 +287,7 @@ export class PartnerRegistrationService {
           currentLatitude:  reg.latitude  || null,
           currentLongitude: reg.longitude || null,
           status:           'ACTIVE',
+          ...agencyFields,
         },
         update: {
           fullName: reg.fullName || 'Partner',
@@ -264,6 +296,7 @@ export class PartnerRegistrationService {
           status:   'ACTIVE',
           ...(reg.latitude  ? { currentLatitude:  reg.latitude  } : {}),
           ...(reg.longitude ? { currentLongitude: reg.longitude } : {}),
+          ...agencyFields,
         },
       });
 

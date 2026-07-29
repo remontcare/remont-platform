@@ -17,6 +17,7 @@ import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
+import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -116,6 +117,7 @@ export class DispatchService {
         isOnline: true, status: 'ACTIVE',
         skills: { has: skill },
         currentLatitude: { not: null }, currentLongitude: { not: null },
+        memberStatus: { not: 'FROZEN' }, // Phase 2: a frozen agency team member is excluded from dispatch
       },
       include: { user: true },
       take: 50,
@@ -178,6 +180,7 @@ export class RoutingService {
     const candidates = cityName ? await this.prisma.serviceVendor.findMany({
       where: {
         isOnline: true, status: 'ACTIVE', baseCity: cityName,
+        memberStatus: { not: 'FROZEN' }, // Phase 2: a frozen agency team member is excluded from routing
         ...(requiredSkills.length ? { skills: { hasSome: requiredSkills } } : {}),
       },
       include: { user: true },
@@ -285,6 +288,7 @@ export class OrdersService {
     private cities: CitiesService,
     private payments: PaymentsService,
     private paymentNotify: PaymentNotificationsService,
+    private ledger: PartnerLedgerService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -755,17 +759,24 @@ export class OrdersService {
     // Orders created before this field existed have endOtp === null — skip the check for
     // those rather than permanently locking them out of completion.
     if (order.endOtp && order.endOtp !== otp) throw new BadRequestException('Invalid completion OTP');
-    const completed = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl, endOtpVerified: !!order.endOtp },
-    });
-    await this.prisma.serviceVendor.update({
-      where: { id: v.id },
-      data: {
-        completedJobs: { increment: 1 },
-        totalEarnings: { increment: Number(order.vendorPayout) },
-        pendingPayout: { increment: Number(order.vendorPayout) },
-      },
+    // Job-completion → ledger update is Phase 2's "Settlement Engine" backbone: previously
+    // the order update and the ServiceVendor earnings update were two separate, non-atomic
+    // writes — wrapping them (plus the new ledger entry) in one $transaction closes that gap.
+    const completed = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl, endOtpVerified: !!order.endOtp },
+      });
+      await tx.serviceVendor.update({
+        where: { id: v.id },
+        data: {
+          completedJobs: { increment: 1 },
+          totalEarnings: { increment: Number(order.vendorPayout) },
+          pendingPayout: { increment: Number(order.vendorPayout) },
+        },
+      });
+      await this.ledger.postEntry(tx, v.id, 'JOB_EARNING', Number(order.vendorPayout), { orderId });
+      return updated;
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     if (order.endOtp) {
@@ -1346,7 +1357,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService],
   exports: [OrdersService, DispatchService, RoutingService],

@@ -8,6 +8,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
+import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 
 // ─── Service Vendor ───
 @Injectable()
@@ -15,8 +16,13 @@ export class ServiceVendorsService {
   constructor(private prisma: PrismaService, private wa: WhatsappService, private events: EventEmitter2) {}
 
   async register(userId: string, data: any) {
-    // Strip fields a vendor must not self-assign
-    const { status, rating, completedJobs, totalEarnings, pendingPayout, isOnline, ...safeData } = data;
+    // Strip fields a vendor must not self-assign. isAgencyOwner is deliberately NOT
+    // stripped — it's the real "individual vs agency" declaration made at registration
+    // (vendor.html's type-individual/type-agency toggle), same trust level as businessName.
+    // Becoming an agency stays gated behind admin approval regardless: agencyStatus is
+    // never set here, so a self-declared agency starts with agencyStatus:null until
+    // AdminService.approveAgency() flips it to ACTIVE.
+    const { status, rating, completedJobs, totalEarnings, pendingPayout, isOnline, agencyOwnerId, agencyStatus, memberStatus, ...safeData } = data;
     // Normalize onto real ServiceCategory.key values — see normalizeSkillKey() for why
     // (this free-text field has never matched the DispatchService lookup otherwise).
     if (Array.isArray(safeData.skills)) safeData.skills = safeData.skills.map(normalizeSkillKey);
@@ -122,6 +128,7 @@ export class ServiceVendorsService {
   async acceptJob(userId: string, orderId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
+    if (v.memberStatus === 'FROZEN') throw new ForbiddenException('Your account is frozen — contact your agency or Remont support');
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException();
     if (order.vendorId && order.vendorId !== v.id) throw new BadRequestException('Already assigned');
@@ -304,10 +311,55 @@ export class ProductVendorsController {
   @Get('me/orders') orders(@CurrentUser() u: JwtPayload) { return this.pv.myOrders(u.sub); }
 }
 
+// ─── Phase 2: Agency Partner Management (owner-side self-service) ───
+// Admin-side agency/member controls (approve/suspend/freeze/transfer) live in
+// admin.module.ts next to the equivalent vendor-lifecycle methods; this is only
+// what an agency owner does for their own team.
+@Injectable()
+export class AgencyService {
+  constructor(private prisma: PrismaService, private registrations: PartnerRegistrationService) {}
+
+  private async resolveOwner(userId: string) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException('Partner profile not found');
+    if (!v.isAgencyOwner) throw new ForbiddenException('Only agency accounts can manage a team');
+    return v;
+  }
+
+  async inviteMember(userId: string, phone: string, fullName?: string, skills?: string[]) {
+    const owner = await this.resolveOwner(userId);
+    return this.registrations.inviteAgencyMember(owner.id, phone, fullName, skills);
+  }
+
+  async listMembers(userId: string) {
+    const owner = await this.resolveOwner(userId);
+    return this.prisma.serviceVendor.findMany({
+      where: { agencyOwnerId: owner.id },
+      select: {
+        id: true, fullName: true, skills: true, baseCity: true, rating: true,
+        completedJobs: true, memberStatus: true, isOnline: true, createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+}
+
+@ApiTags('Vendors')
+@ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.SERVICE_VENDOR)
+@Controller('vendors/agency')
+export class AgencyController {
+  constructor(private agency: AgencyService) {}
+  @Post('invite-member') invite(@CurrentUser() u: JwtPayload, @Body() b: { phone: string; fullName?: string; skills?: string[] }) {
+    return this.agency.inviteMember(u.sub, b.phone, b.fullName, b.skills);
+  }
+  @Get('members') members(@CurrentUser() u: JwtPayload) { return this.agency.listMembers(u.sub); }
+}
+
 @Module({
-  imports: [WhatsappModule],
-  controllers: [ServiceVendorsController, ProductVendorsController],
-  providers: [ServiceVendorsService, ProductVendorsService],
+  imports: [WhatsappModule, PartnerRegistrationModule],
+  controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
+  providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],
 })
 export class VendorsModule {}

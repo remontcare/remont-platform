@@ -12,7 +12,8 @@ function makeService() {
   const settlements: any = { record: jest.fn(async (vendorId: string, amount: number, mode: any, adminId: string, ref?: string, notes?: string) => ({ id: 'settlement-1', vendorId, amount, mode })) };
   const cities: any = {};
   const events: any = { emit: jest.fn() };
-  const svc = new AdminService(prisma, config, payments, settlements, cities, events);
+  const ledger: any = { postEntry: jest.fn(async () => {}), availableBalance: jest.fn(async () => 0) };
+  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger);
   return { svc, prisma, settlements };
 }
 

@@ -37,6 +37,7 @@ import { SellerRegistrationModule } from './modules/seller-registration/seller-r
 import { SettlementsModule } from './modules/settlements/settlements.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
     CouponsModule,
     MembershipsModule,
     SettlementsModule,
+    PartnerLedgerModule,
     RefundsModule,
     UploadsModule,
 

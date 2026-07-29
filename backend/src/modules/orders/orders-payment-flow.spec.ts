@@ -34,8 +34,9 @@ function makeService() {
     payOnlineNudge: jest.fn(async () => {}),
     otpResent: jest.fn(async () => {}),
   };
-  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, routing, {} as any, payments, paymentNotify);
-  return { svc, prisma, payments, dispatch, routing, paymentNotify };
+  const ledger: any = { postEntry: jest.fn(async () => {}) };
+  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, routing, {} as any, payments, paymentNotify, ledger);
+  return { svc, prisma, payments, dispatch, routing, paymentNotify, ledger };
 }
 
 describe('OrdersService.retryPayment — retry/COD-to-Online conversion without duplicate bookings', () => {

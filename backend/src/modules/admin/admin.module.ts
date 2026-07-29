@@ -14,6 +14,7 @@ import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
 import { SettlementsService, SettlementsModule } from '../settlements/settlements.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
+import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -42,7 +43,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -254,6 +255,87 @@ export class AdminService {
   // RoutingService to prioritize in-house staff first for DIRECT_PARTNER services (Task 8).
   async setVendorStaffType(vendorId: string, staffType: 'IN_HOUSE' | 'PARTNER') {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { staffType } });
+  }
+
+  // ─── Phase 2: Agency Partner Management ────────────────────────────
+  // Same shape as approveVendor/suspendVendor above — an agency owner is just a
+  // ServiceVendor with isAgencyOwner:true, so these are targeted additions next
+  // to the vendor-lifecycle methods that already do this exact kind of work.
+
+  async approveAgency(vendorId: string, adminId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    if (!vendor.isAgencyOwner) throw new BadRequestException('This partner is not registered as an agency');
+    const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyStatus: 'ACTIVE', status: VendorStatus.ACTIVE } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'AGENCY_APPROVED', targetType: 'ServiceVendor', targetId: vendorId });
+    return updated;
+  }
+
+  // Members keep working independently while their agency is suspended — the spec
+  // states members "work exactly like Individual Service Partners after approval,"
+  // so suspending the agency shouldn't silently pull already-approved workers offline.
+  async suspendAgency(vendorId: string, adminId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    if (!vendor.isAgencyOwner) throw new BadRequestException('This partner is not registered as an agency');
+    const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyStatus: 'SUSPENDED' } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'AGENCY_SUSPENDED', targetType: 'ServiceVendor', targetId: vendorId });
+    return updated;
+  }
+
+  async freezeMember(vendorId: string, adminId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    if (!vendor.agencyOwnerId) throw new BadRequestException('This partner is not an agency team member');
+    const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { memberStatus: 'FROZEN', isOnline: false } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_FROZEN', targetType: 'ServiceVendor', targetId: vendorId });
+    return updated;
+  }
+
+  async unfreezeMember(vendorId: string, adminId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    if (!vendor.agencyOwnerId) throw new BadRequestException('This partner is not an agency team member');
+    const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { memberStatus: 'ACTIVE' } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_UNFROZEN', targetType: 'ServiceVendor', targetId: vendorId });
+    return updated;
+  }
+
+  async transferMember(vendorId: string, newAgencyOwnerId: string, adminId: string) {
+    const [member, newOwner] = await Promise.all([
+      this.prisma.serviceVendor.findUnique({ where: { id: vendorId } }),
+      this.prisma.serviceVendor.findUnique({ where: { id: newAgencyOwnerId } }),
+    ]);
+    if (!member) throw new NotFoundException('Partner not found');
+    if (!member.agencyOwnerId) throw new BadRequestException('This partner is not an agency team member');
+    if (!newOwner || !newOwner.isAgencyOwner) throw new BadRequestException('Target is not an active agency owner');
+    const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyOwnerId: newAgencyOwnerId } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_TRANSFERRED', targetType: 'ServiceVendor', targetId: vendorId, metadata: { fromAgencyOwnerId: member.agencyOwnerId, toAgencyOwnerId: newAgencyOwnerId } });
+    return updated;
+  }
+
+  async approveWithdrawal(id: string, adminId: string, note?: string) {
+    const req = await this.prisma.withdrawalRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Withdrawal request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    // Hands off to the existing, unchanged settlement-recording flow instead of
+    // re-implementing "pay a vendor" — record() already decrements pendingPayout atomically.
+    const settlement = await this.settlements.record(req.vendorId, Number(req.amount), SettlementMode.BANK_TRANSFER, adminId, undefined, note);
+    await this.prisma.$transaction(async (tx) => {
+      await this.ledger.postEntry(tx, req.vendorId, 'WITHDRAWAL', -Number(req.amount), { withdrawalRequestId: id, createdBy: adminId });
+      await tx.withdrawalRequest.update({ where: { id }, data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date(), settlementId: settlement.id } });
+    });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_APPROVED', targetType: 'WithdrawalRequest', targetId: id, metadata: { amount: req.amount } });
+    return this.prisma.withdrawalRequest.findUnique({ where: { id } });
+  }
+
+  async rejectWithdrawal(id: string, adminId: string, note?: string) {
+    const req = await this.prisma.withdrawalRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Withdrawal request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    const updated = await this.prisma.withdrawalRequest.update({ where: { id }, data: { status: 'REJECTED', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date() } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_REJECTED', targetType: 'WithdrawalRequest', targetId: id });
+    return updated;
   }
 
   // Permanent removal — SUPER_ADMIN only at the route level. Regular admins use
@@ -2144,6 +2226,21 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   @Delete('vendors/:id') deleteVendorDirect(@Param('id') id: string) { return this.admin.deleteServiceVendorDirect(id); }
 
+  // ─── Phase 2: Agency Partner Management ────────────────────────────
+  @Patch('agencies/:id/approve') approveAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.approveAgency(id, u.sub); }
+  @Patch('agencies/:id/suspend') suspendAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.suspendAgency(id, u.sub); }
+  @Patch('agencies/members/:id/freeze') freezeMember(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.freezeMember(id, u.sub); }
+  @Patch('agencies/members/:id/unfreeze') unfreezeMember(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.unfreezeMember(id, u.sub); }
+  @Patch('agencies/members/:id/transfer') transferMember(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { newAgencyOwnerId: string }) {
+    return this.admin.transferMember(id, b.newAgencyOwnerId, u.sub);
+  }
+  @Patch('withdrawals/:id/approve') approveWithdrawal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note?: string }) {
+    return this.admin.approveWithdrawal(id, u.sub, b?.note);
+  }
+  @Patch('withdrawals/:id/reject') rejectWithdrawal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note?: string }) {
+    return this.admin.rejectWithdrawal(id, u.sub, b?.note);
+  }
+
   @Get('product-vendors') listProductVendors(@Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number) {
     return this.admin.listProductVendors({ status, q, limit });
   }
@@ -2454,7 +2551,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],
