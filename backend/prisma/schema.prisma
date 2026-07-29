@@ -123,6 +123,38 @@ enum StaffType {
   PARTNER
 }
 
+enum AgencyStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MemberStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  FROZEN
+  REJECTED
+}
+
+enum LedgerEntryType {
+  JOB_EARNING
+  INCENTIVE
+  BONUS
+  PENALTY
+  ADVANCE
+  ADJUSTMENT
+  COMMISSION
+  WITHDRAWAL
+  GST // reserved — no logic yet, per spec's "(Future)"
+  TDS // reserved — no logic yet, per spec's "(Future)"
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
 enum DeleteTargetType {
   SERVICE_VENDOR
   PRODUCT_VENDOR
@@ -774,16 +806,32 @@ model ServiceVendor {
   rejectionReason    String?
   createdAt          DateTime     @default(now())
 
-  user            User                @relation(fields: [userId], references: [id])
-  documents       VendorDocument[]
-  orders          Order[]
-  issuedInventory IssuedInventory[]
-  reviews         Review[]
-  extraWorks      ExtraWorkItem[]
-  settlements     PartnerSettlement[]
+  // ── Phase 2: Agency Partner Management ──────────────────────────────
+  // No separate Agency entity — an agency owner is just a ServiceVendor with
+  // isAgencyOwner:true; a team member is a ServiceVendor with agencyOwnerId
+  // pointing at the owner's own id. Individuals and agency owners both have
+  // agencyOwnerId:null (both may request withdrawals); members never can.
+  isAgencyOwner Boolean       @default(false)
+  agencyOwnerId String?
+  agencyStatus  AgencyStatus?
+  memberStatus  MemberStatus?
+
+  user               User                 @relation(fields: [userId], references: [id])
+  documents          VendorDocument[]
+  orders             Order[]
+  issuedInventory    IssuedInventory[]
+  reviews            Review[]
+  extraWorks         ExtraWorkItem[]
+  settlements        PartnerSettlement[]
+  agencyOwner        ServiceVendor?       @relation("AgencyMembers", fields: [agencyOwnerId], references: [id])
+  members            ServiceVendor[]      @relation("AgencyMembers")
+  ledgerEntries      PartnerLedgerEntry[]
+  withdrawalRequests WithdrawalRequest[]
+  attendance         VendorAttendance[]
 
   @@index([status, isOnline])
   @@index([baseCity])
+  @@index([agencyOwnerId])
 }
 
 model VendorDocument {
@@ -1496,6 +1544,62 @@ model PartnerSettlement {
   @@index([paidAt])
 }
 
+// ── Phase 2: per-partner ledger — same single-entry-with-running-balance idiom
+// as WalletTransaction below, just vendorId-keyed with a richer category enum.
+// ServiceVendor.totalEarnings/pendingPayout keep being maintained exactly as
+// before (existing admin screens depend on them); this is additive detail.
+model PartnerLedgerEntry {
+  id                  String          @id @default(cuid())
+  vendorId            String
+  type                LedgerEntryType
+  amount              Decimal         @db.Decimal(12, 2) // signed: + credits the partner, - debits
+  balanceAfter        Decimal         @db.Decimal(12, 2)
+  orderId             String?
+  withdrawalRequestId String?
+  notes               String?
+  createdBy           String? // admin/agency-owner userId, when manually posted
+  createdAt           DateTime        @default(now())
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId, createdAt])
+}
+
+// Same proven shape as DeleteRequest (typed status enum + reviewedBy FK + reviewNote)
+// rather than PartnerRegistration's looser free-text-status shape.
+model WithdrawalRequest {
+  id                        String           @id @default(cuid())
+  vendorId                  String // always an individual or agency owner — agencyOwnerId must be null, enforced in service layer
+  amount                    Decimal          @db.Decimal(12, 2)
+  availableBalanceAtRequest Decimal          @db.Decimal(12, 2) // snapshot for audit, same idiom as Order.commissionRuleLabel
+  status                    WithdrawalStatus @default(PENDING)
+  reviewedBy                String?
+  reviewNote                String?
+  settlementId              String? // set once PAID — the PartnerSettlement created via the existing SettlementsService.record()
+  createdAt                 DateTime         @default(now())
+  reviewedAt                DateTime?
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+// Minimal daily check-in/out — nothing to extend, no attendance concept existed before.
+model VendorAttendance {
+  id         String    @id @default(cuid())
+  vendorId   String
+  date       DateTime  @db.Date
+  checkInAt  DateTime?
+  checkOutAt DateTime?
+  checkInLat Float?
+  checkInLng Float?
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, date])
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // WALLET, COUPONS, MEMBERSHIPS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2079,6 +2183,10 @@ model PartnerRegistration {
   currentStep Int     @default(1)
   status      String  @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_DOCS
   adminNotes  String?
+
+  // Phase 2 — set when an agency owner invites this person as a team member;
+  // _activatePartner() reads this to set the new ServiceVendor's agencyOwnerId.
+  invitedByAgencyId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
