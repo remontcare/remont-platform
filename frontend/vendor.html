@@ -720,6 +720,7 @@ function loadEarnings(){
     document.getElementById('home-today-earn').textContent = fmtMoney(e.today.earnings);
     document.getElementById('earn-wallet-val').textContent = fmtMoney(e.lifetime.pending);
     earnTabRender('today');
+    updateAvailableBalanceDisplay();
   }).catch(function(e){ console.warn('earnings load failed', e.message); });
   loadRefundRequests();
 }
@@ -740,6 +741,22 @@ function loadRefundRequests(){
   }).catch(function(e){ console.warn('refund requests load failed', e.message); });
 }
 function escapeHtmlRR(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// For a value embedded as a single-quoted JS string argument inside an inline
+// onclick="...('...')" attribute (team roster "Request Freeze" button below) — NOT a
+// substitute for escapeHtmlRR() on plain text content. The browser HTML-decodes attribute
+// values before parsing them as JS, so HTML-entity-escaping a quote decodes right back to
+// ' before the JS parser sees it and does not prevent breaking out of the string literal
+// (e.g. via a partner's own self-set fullName containing one). This escapes the
+// backslash/quote for the JS layer first, then HTML-escapes the result for the attribute.
+function escapeJsAttr(s){
+  return String(s||'')
+    .replace(/\\/g,'\\\\')
+    .replace(/'/g,"\\'")
+    .replace(/&/g,'&amp;')
+    .replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
 function respondToRefund(id){
   var textEl = document.getElementById('rr-resp-' + id);
   var response = textEl.value.trim();
@@ -1264,7 +1281,7 @@ function loadTeamMembers(){
       var statusMap = {PENDING_APPROVAL:'Pending Approval', ACTIVE:'Active', FROZEN:'Frozen', REJECTED:'Rejected'};
       var sub = '⭐ '+Number(m.rating||0).toFixed(1)+' · '+((m.skills&&m.skills[0])||'Partner')+' · '+(statusMap[m.memberStatus]||m.memberStatus||'—');
       return '<div class="team-row"><div class="team-avatar">👨‍🔧</div><div class="team-info"><div class="team-name">'+escapeHtmlRR(m.fullName)+'</div><div class="team-sub">'+sub+'</div></div>'+
-        (m.memberStatus==='FROZEN' ? '' : '<button class="team-remove" onclick="requestFreezeMember(\''+m.id+'\',\''+escapeHtmlRR(m.fullName)+'\')">Request Freeze</button>') +
+        (m.memberStatus==='FROZEN' ? '' : '<button class="team-remove" onclick="requestFreezeMember(\''+m.id+'\',\''+escapeJsAttr(m.fullName)+'\')">Request Freeze</button>') +
         '</div>';
     }).join('');
   }).catch(function(e){ document.getElementById('team-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team: '+e.message+'</div></div>'; });
@@ -1300,10 +1317,8 @@ function loadTeamAttendance(){
 }
 
 /* ── PARTNER LEDGER & WITHDRAWALS ── */
-var _myLedgerLoaded = false, _teamLedgerLoaded = false;
 function loadMyLedger(){
   apiFetch('/vendors/ledger/me').then(function(list){
-    _myLedgerLoaded = true;
     var el = document.getElementById('my-ledger-list');
     if (!el) return;
     if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No ledger entries yet</div></div>'; return; }
@@ -1316,10 +1331,12 @@ function ledgerRowHtml(l){
   var date = new Date(l.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
   return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+typeLabel+'</div><div class="tr-date">'+date+' · Balance '+fmtMoney(l.balanceAfter)+'</div></div><div class="txn-amt '+(amt>=0?'pos':'neg')+'">'+(amt>=0?'+':'')+fmtMoney(amt)+'</div></div>';
 }
+var withdrawalsMine = [], teamLedgerTotal = 0;
 function loadTeamLedger(){
   if (!vendorProfile || !vendorProfile.isAgencyOwner) return;
   apiFetch('/vendors/agency/ledger').then(function(list){
-    _teamLedgerLoaded = true;
+    teamLedgerTotal = list.reduce(function(sum,m){ return sum + Number(m.balance||0); }, 0);
+    updateAvailableBalanceDisplay();
     var el = document.getElementById('team-ledger-list');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No team members yet</div></div>'; return; }
     el.innerHTML = list.map(function(m){
@@ -1327,19 +1344,12 @@ function loadTeamLedger(){
     }).join('');
   }).catch(function(e){ document.getElementById('team-ledger-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team ledger: '+e.message+'</div></div>'; });
 }
-var withdrawalsMine = [], teamLedgerTotal = 0;
 function loadWithdrawals(){
   apiFetch('/vendors/withdrawals/me').then(function(list){
     withdrawalsMine = list;
     renderWithdrawalHistory();
     updateAvailableBalanceDisplay();
   }).catch(function(e){ console.warn('withdrawals load failed', e.message); });
-  if (vendorProfile && vendorProfile.isAgencyOwner) {
-    apiFetch('/vendors/agency/ledger').then(function(list){
-      teamLedgerTotal = list.reduce(function(sum,m){ return sum + Number(m.balance||0); }, 0);
-      updateAvailableBalanceDisplay();
-    }).catch(function(){});
-  }
 }
 function renderWithdrawalHistory(){
   var el = document.getElementById('withdrawal-history-list');

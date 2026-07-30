@@ -118,8 +118,29 @@ function downloadCsv(rows, columns, filename) {
   toast('CSV downloaded (' + rows.length + ' rows)', 'success');
 }
 
+// Escapes ' as &#39; too, not just "  — most call sites interpolate this into
+// onclick="...('...')" (a single-quoted JS string inside a double-quoted HTML
+// attribute), where an unescaped apostrophe in user-controlled data (e.g. a
+// partner's business name) breaks out of the JS string and can execute arbitrary
+// script in the admin's browser. &#39; renders as a normal apostrophe everywhere.
 function escape(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// For a value embedded as a single-quoted JS string argument inside an inline
+// onclick="...('...')" attribute — NOT a substitute for escape() on plain text/attribute
+// content. The browser HTML-decodes attribute values before parsing them as JS, so
+// HTML-entity-escaping a quote (e.g. &#39;) decodes right back to ' before the JS parser
+// ever sees it and does not prevent breaking out of the string literal. This escapes the
+// backslash/quote for the JS layer first, then HTML-escapes the result for the attribute.
+function escapeJsAttr(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function badge(text, color) {

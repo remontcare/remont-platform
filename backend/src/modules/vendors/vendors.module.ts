@@ -419,6 +419,7 @@ export class AgencyService {
   async attendance(userId: string, dateStr?: string) {
     const owner = await this.resolveOwner(userId);
     const date = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(date.getTime())) throw new BadRequestException('Invalid date');
     date.setHours(0, 0, 0, 0);
     const members = await this.prisma.serviceVendor.findMany({ where: { agencyOwnerId: owner.id }, select: { id: true } });
     const vendorIds = [owner.id, ...members.map((m) => m.id)];

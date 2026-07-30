@@ -135,7 +135,7 @@ function loadAgencies() {
             '<td><strong>' + escape(a.businessName || a.fullName) + '</strong><br><small style="color:#6b7280">' + escape(a.fullName) + ' · ' + escape((a.user&&a.user.phone)||'') + '</small></td>' +
             '<td>' + escape(a.baseCity||'') + '</td>' +
             '<td>' + statusBadge + '</td>' +
-            '<td><a href="javascript:void(0)" onclick="viewMembers(\''+a.id+'\',\''+escape(a.businessName||a.fullName)+'\')">' + (a._count?a._count.members:0) + ' →</a></td>' +
+            '<td><a href="javascript:void(0)" onclick="viewMembers(\''+a.id+'\',\''+escapeJsAttr(a.businessName||a.fullName)+'\')">' + (a._count?a._count.members:0) + ' →</a></td>' +
             '<td style="color:#22c55e">' + fmtCur(a.totalEarnings||0) + '</td>' +
             '<td style="color:#f59e0b">' + fmtCur(a.pendingPayout||0) + '</td>' +
             '<td>' + (a.rating ? '⭐ '+Number(a.rating).toFixed(1) : '—') + '</td>' +
@@ -175,9 +175,9 @@ function viewMembers(ownerId, ownerName) {
           '<td>' + (m.completedJobs||0) + '</td>' +
           '<td>' +
             (m.memberStatus === 'FROZEN'
-              ? '<button class="btn btn-xs btn-primary" onclick="unfreezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escape(ownerName)+'\')">Unfreeze</button>'
-              : '<button class="btn btn-xs btn-outline" onclick="freezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escape(ownerName)+'\')">Freeze</button>') +
-            ' <button class="btn btn-xs btn-outline" onclick="openTransfer(\''+m.id+'\',\''+escape(m.fullName)+'\')">Transfer</button>' +
+              ? '<button class="btn btn-xs btn-primary" onclick="unfreezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escapeJsAttr(ownerName)+'\')">Unfreeze</button>'
+              : '<button class="btn btn-xs btn-outline" onclick="freezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escapeJsAttr(ownerName)+'\')">Freeze</button>') +
+            ' <button class="btn btn-xs btn-outline" onclick="openTransfer(\''+m.id+'\',\''+escapeJsAttr(m.fullName)+'\')">Transfer</button>' +
           '</td>' +
           '</tr>';
       }).join('') + '</tbody></table>';

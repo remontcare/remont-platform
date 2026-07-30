@@ -326,6 +326,7 @@ export class AdminService {
   // self-service; this is the "or all (for admin)" half of the same spec line.
   async vendorAttendance(dateStr?: string, agencyOwnerId?: string) {
     const date = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(date.getTime())) throw new BadRequestException('Invalid date');
     date.setHours(0, 0, 0, 0);
     const where: any = { date };
     if (agencyOwnerId) where.vendor = { OR: [{ id: agencyOwnerId }, { agencyOwnerId }] };
