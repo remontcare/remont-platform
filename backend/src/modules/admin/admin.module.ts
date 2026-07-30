@@ -270,6 +270,7 @@ export class AdminService {
     if (!vendor.isAgencyOwner) throw new BadRequestException('This partner is not registered as an agency');
     const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyStatus: 'ACTIVE', status: VendorStatus.ACTIVE } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'AGENCY_APPROVED', targetType: 'ServiceVendor', targetId: vendorId });
+    this.events.emit('agency.approved', { userId: vendor.userId, vendorId });
     return updated;
   }
 
@@ -282,6 +283,7 @@ export class AdminService {
     if (!vendor.isAgencyOwner) throw new BadRequestException('This partner is not registered as an agency');
     const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyStatus: 'SUSPENDED' } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'AGENCY_SUSPENDED', targetType: 'ServiceVendor', targetId: vendorId });
+    this.events.emit('agency.suspended', { userId: vendor.userId, vendorId });
     return updated;
   }
 
@@ -291,6 +293,7 @@ export class AdminService {
     if (!vendor.agencyOwnerId) throw new BadRequestException('This partner is not an agency team member');
     const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { memberStatus: 'FROZEN', isOnline: false } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_FROZEN', targetType: 'ServiceVendor', targetId: vendorId });
+    this.events.emit('member.frozen', { userId: vendor.userId, vendorId });
     return updated;
   }
 
@@ -300,6 +303,7 @@ export class AdminService {
     if (!vendor.agencyOwnerId) throw new BadRequestException('This partner is not an agency team member');
     const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { memberStatus: 'ACTIVE' } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_UNFROZEN', targetType: 'ServiceVendor', targetId: vendorId });
+    this.events.emit('member.unfrozen', { userId: vendor.userId, vendorId });
     return updated;
   }
 
@@ -313,6 +317,7 @@ export class AdminService {
     if (!newOwner || !newOwner.isAgencyOwner) throw new BadRequestException('Target is not an active agency owner');
     const updated = await this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { agencyOwnerId: newAgencyOwnerId } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'MEMBER_TRANSFERRED', targetType: 'ServiceVendor', targetId: vendorId, metadata: { fromAgencyOwnerId: member.agencyOwnerId, toAgencyOwnerId: newAgencyOwnerId } });
+    this.events.emit('member.transferred', { userId: member.userId, vendorId });
     return updated;
   }
 
@@ -343,6 +348,8 @@ export class AdminService {
       await tx.withdrawalRequest.update({ where: { id }, data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date(), settlementId: settlement.id } });
     });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_APPROVED', targetType: 'WithdrawalRequest', targetId: id, metadata: { amount: req.amount } });
+    const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
+    if (vendorForNotify) this.events.emit('withdrawal.approved', { userId: vendorForNotify.userId, amount: Number(req.amount), withdrawalId: id });
     return this.prisma.withdrawalRequest.findUnique({ where: { id } });
   }
 
@@ -352,6 +359,8 @@ export class AdminService {
     if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
     const updated = await this.prisma.withdrawalRequest.update({ where: { id }, data: { status: 'REJECTED', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date() } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_REJECTED', targetType: 'WithdrawalRequest', targetId: id });
+    const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
+    if (vendorForNotify) this.events.emit('withdrawal.rejected', { userId: vendorForNotify.userId, amount: Number(req.amount), withdrawalId: id, note });
     return updated;
   }
 

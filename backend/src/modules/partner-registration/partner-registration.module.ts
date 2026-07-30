@@ -3,6 +3,7 @@ import {
   UseGuards, BadRequestException, NotFoundException, Logger,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.module';
 import { Public, JwtAuthGuard, RolesGuard, Roles, normalizeSkillKey } from '../../common';
 import { UserRole } from '@prisma/client';
@@ -22,7 +23,7 @@ function generateRegistrationId(): string {
 export class PartnerRegistrationService {
   private readonly logger = new Logger(PartnerRegistrationService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private events: EventEmitter2) {}
 
   /** Send/resend OTP — delegates to auth flow, here we just create the draft record */
   async initRegistration(phone: string, language: string) {
@@ -228,6 +229,13 @@ export class PartnerRegistrationService {
       await this._activatePartner(reg);
     }
 
+    // Agency-invited member rejected — approval's own 'member.approved' emit happens
+    // inside _activatePartner() once the ServiceVendor row actually exists.
+    if (status === 'REJECTED' && reg.invitedByAgencyId) {
+      const owner = await this.prisma.serviceVendor.findUnique({ where: { id: reg.invitedByAgencyId }, select: { userId: true } });
+      if (owner) this.events.emit('member.rejected', { agencyOwnerUserId: owner.userId, memberName: reg.fullName || 'Applicant' });
+    }
+
     return updated;
   }
 
@@ -321,6 +329,11 @@ export class PartnerRegistrationService {
             });
           }
         }
+      }
+
+      if (reg.invitedByAgencyId && sv) {
+        const owner = await this.prisma.serviceVendor.findUnique({ where: { id: reg.invitedByAgencyId }, select: { userId: true } });
+        if (owner) this.events.emit('member.approved', { agencyOwnerUserId: owner.userId, memberName: reg.fullName || 'New member', vendorId: sv.id });
       }
 
       this.logger.log(`✅ Partner activated: ${reg.fullName} (${reg.phone}) → userId ${user.id}`);
