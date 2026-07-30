@@ -227,13 +227,15 @@ export class AdminService {
     });
   }
 
-  async allVendors(opts: { status?: VendorStatus; q?: string; limit?: number }) {
+  async allVendors(opts: { status?: VendorStatus; q?: string; limit?: number; agencyOwner?: boolean; agencyOwnerId?: string }) {
     return this.prisma.serviceVendor.findMany({
       where: {
         ...(opts.status ? { status: opts.status } : {}),
         ...(opts.q ? { OR: [{ fullName: { contains: opts.q, mode: 'insensitive' } }, { businessName: { contains: opts.q, mode: 'insensitive' } }] } : {}),
+        ...(opts.agencyOwner ? { isAgencyOwner: true } : {}),
+        ...(opts.agencyOwnerId ? { agencyOwnerId: opts.agencyOwnerId } : {}),
       },
-      include: { user: { select: { name: true, phone: true, email: true } } },
+      include: { user: { select: { name: true, phone: true, email: true } }, _count: { select: { members: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 100,
     });
@@ -2231,7 +2233,12 @@ export class AdminController {
 
   // Vendors
   @Get('vendors/pending') pending() { return this.admin.pendingVendorApprovals(); }
-  @Get('vendors') allVendors(@Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number) { return this.admin.allVendors({ status, q, limit }); }
+  @Get('vendors') allVendors(
+    @Query('status') status?: VendorStatus, @Query('q') q?: string, @Query('limit') limit?: number,
+    @Query('agencyOwner') agencyOwner?: string, @Query('agencyOwnerId') agencyOwnerId?: string,
+  ) {
+    return this.admin.allVendors({ status, q, limit, agencyOwner: agencyOwner === 'true', agencyOwnerId });
+  }
   @Patch('vendors/:id/approve') approve(@Param('id') id: string) { return this.admin.approveVendor(id); }
   @Patch('vendors/:id/reject') reject(@Param('id') id: string, @Body() b: { reason: string }) { return this.admin.rejectVendor(id, b.reason); }
   @Patch('vendors/:id/suspend') suspend(@Param('id') id: string) { return this.admin.suspendVendor(id); }

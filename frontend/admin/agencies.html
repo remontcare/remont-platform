@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agencies — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Agencies</h1><p>Agency partners, team members, and withdrawal requests</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL AGENCIES</div><div style="font-size:22px;font-weight:800" id="s-total">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">ACTIVE AGENCIES</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="s-active">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL TEAM MEMBERS</div><div style="font-size:22px;font-weight:800;color:#3b82f6" id="s-members">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">PENDING WITHDRAWALS</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="s-pending-withdrawals">—</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Agency Partners</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:200px" placeholder="Search agency name…" oninput="loadAgencies()">
+          <button class="btn btn-outline btn-sm" onclick="loadAgencies()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl-agencies" class="loading">Loading…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Withdrawal Requests</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-wstatus" class="form-control" style="width:150px" onchange="loadWithdrawals()">
+            <option value="PENDING">Pending</option>
+            <option value="">All</option>
+            <option value="APPROVED">Approved</option>
+            <option value="PAID">Paid</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadWithdrawals()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl-withdrawals" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Members Modal -->
+<div id="members-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <span class="modal-title" id="mm-title">Team Members</span>
+      <button class="modal-close" onclick="closeModal('members-overlay')">×</button>
+    </div>
+    <div id="mm-body" class="table-wrap"><div class="loading">Loading…</div></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('members-overlay')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transfer Modal -->
+<div id="transfer-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Transfer Member</span>
+      <button class="modal-close" onclick="closeModal('transfer-overlay')">×</button>
+    </div>
+    <div style="margin-bottom:12px;padding:10px;background:#f9fafb;border-radius:8px">
+      <div style="font-weight:600" id="tf-name">Member</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Agency Owner ID *</label>
+      <input id="tf-owner-id" class="form-control" placeholder="Target agency owner's vendor ID">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('transfer-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTransfer()">Transfer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Withdrawal Modal -->
+<div id="reject-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Reject Withdrawal</span>
+      <button class="modal-close" onclick="closeModal('reject-overlay')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Reason</label>
+      <input id="rj-note" class="form-control" placeholder="Reason for rejection">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('reject-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitReject()">Reject</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('agencies');
+requireAuth();
+var transferMemberId = null, rejectWithdrawalId = null;
+
+function loadAgencies() {
+  var q = document.getElementById('filter-q').value;
+  var params = ['agencyOwner=true'];
+  if (q) params.push('q=' + encodeURIComponent(q));
+  api('GET', '/admin/vendors?' + params.join('&'))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      document.getElementById('s-total').textContent = arr.length;
+      document.getElementById('s-active').textContent = arr.filter(function(a){ return a.agencyStatus === 'ACTIVE'; }).length;
+      document.getElementById('s-members').textContent = arr.reduce(function(s,a){ return s + (a._count ? a._count.members : 0); }, 0);
+      if (!arr.length) { document.getElementById('tbl-agencies').innerHTML = '<div class="empty-state">No agency partners yet.</div>'; return; }
+      document.getElementById('tbl-agencies').innerHTML = '<table><thead><tr><th>Agency</th><th>City</th><th>Status</th><th>Members</th><th>Total Earnings</th><th>Pending Payout</th><th>Rating</th><th>Actions</th></tr></thead><tbody>' +
+        arr.map(function(a) {
+          var statusBadge = a.agencyStatus === 'ACTIVE' ? '<span style="color:#22c55e;font-weight:600">Active</span>'
+            : a.agencyStatus === 'SUSPENDED' ? '<span style="color:#ef4444;font-weight:600">Suspended</span>'
+            : '<span style="color:#f59e0b;font-weight:600">Pending Approval</span>';
+          return '<tr>' +
+            '<td><strong>' + escape(a.businessName || a.fullName) + '</strong><br><small style="color:#6b7280">' + escape(a.fullName) + ' · ' + escape((a.user&&a.user.phone)||'') + '</small></td>' +
+            '<td>' + escape(a.baseCity||'') + '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td><a href="javascript:void(0)" onclick="viewMembers(\''+a.id+'\',\''+escape(a.businessName||a.fullName)+'\')">' + (a._count?a._count.members:0) + ' →</a></td>' +
+            '<td style="color:#22c55e">' + fmtCur(a.totalEarnings||0) + '</td>' +
+            '<td style="color:#f59e0b">' + fmtCur(a.pendingPayout||0) + '</td>' +
+            '<td>' + (a.rating ? '⭐ '+Number(a.rating).toFixed(1) : '—') + '</td>' +
+            '<td>' +
+              (a.agencyStatus === 'ACTIVE'
+                ? '<button class="btn btn-xs btn-outline" onclick="suspendAgency(\''+a.id+'\')">Suspend</button>'
+                : '<button class="btn btn-xs btn-primary" onclick="approveAgency(\''+a.id+'\')">Approve</button>') +
+            '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl-agencies').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function approveAgency(id) {
+  api('PATCH', '/admin/agencies/' + id + '/approve').then(function(){ toast('Agency approved','success'); loadAgencies(); }).catch(function(e){ toast(e.message,'error'); });
+}
+function suspendAgency(id) {
+  if (!confirm('Suspend this agency? Team members keep working independently.')) return;
+  api('PATCH', '/admin/agencies/' + id + '/suspend').then(function(){ toast('Agency suspended','success'); loadAgencies(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function viewMembers(ownerId, ownerName) {
+  document.getElementById('mm-title').textContent = 'Team Members — ' + ownerName;
+  document.getElementById('mm-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('members-overlay').style.display = 'flex';
+  api('GET', '/admin/vendors?agencyOwnerId=' + ownerId).then(function(data) {
+    var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+    if (!arr.length) { document.getElementById('mm-body').innerHTML = '<div class="empty-state">No team members yet.</div>'; return; }
+    document.getElementById('mm-body').innerHTML = '<table><thead><tr><th>Name</th><th>Skills</th><th>Status</th><th>Jobs</th><th>Actions</th></tr></thead><tbody>' +
+      arr.map(function(m) {
+        var statusBadge = {ACTIVE:'<span style="color:#22c55e">Active</span>', FROZEN:'<span style="color:#ef4444">Frozen</span>', PENDING_APPROVAL:'<span style="color:#f59e0b">Pending</span>', REJECTED:'<span style="color:#ef4444">Rejected</span>'}[m.memberStatus] || (m.memberStatus||'—');
+        return '<tr>' +
+          '<td><strong>' + escape(m.fullName) + '</strong></td>' +
+          '<td>' + escape((m.skills||[]).join(', ')) + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + (m.completedJobs||0) + '</td>' +
+          '<td>' +
+            (m.memberStatus === 'FROZEN'
+              ? '<button class="btn btn-xs btn-primary" onclick="unfreezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escape(ownerName)+'\')">Unfreeze</button>'
+              : '<button class="btn btn-xs btn-outline" onclick="freezeMember(\''+m.id+'\',\''+ownerId+'\',\''+escape(ownerName)+'\')">Freeze</button>') +
+            ' <button class="btn btn-xs btn-outline" onclick="openTransfer(\''+m.id+'\',\''+escape(m.fullName)+'\')">Transfer</button>' +
+          '</td>' +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+  }).catch(function(e) { document.getElementById('mm-body').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+function freezeMember(id, ownerId, ownerName) {
+  api('PATCH', '/admin/agencies/members/' + id + '/freeze').then(function(){ toast('Member frozen','success'); viewMembers(ownerId, ownerName); }).catch(function(e){ toast(e.message,'error'); });
+}
+function unfreezeMember(id, ownerId, ownerName) {
+  api('PATCH', '/admin/agencies/members/' + id + '/unfreeze').then(function(){ toast('Member unfrozen','success'); viewMembers(ownerId, ownerName); }).catch(function(e){ toast(e.message,'error'); });
+}
+function openTransfer(memberId, name) {
+  transferMemberId = memberId;
+  document.getElementById('tf-name').textContent = name;
+  document.getElementById('tf-owner-id').value = '';
+  document.getElementById('transfer-overlay').style.display = 'flex';
+}
+function submitTransfer() {
+  var newOwnerId = document.getElementById('tf-owner-id').value.trim();
+  if (!newOwnerId) { toast('Enter the target agency owner ID', 'error'); return; }
+  api('PATCH', '/admin/agencies/members/' + transferMemberId + '/transfer', { newAgencyOwnerId: newOwnerId })
+    .then(function(){ toast('Member transferred','success'); closeModal('transfer-overlay'); closeModal('members-overlay'); loadAgencies(); })
+    .catch(function(e){ toast(e.message,'error'); });
+}
+
+function loadWithdrawals() {
+  var status = document.getElementById('filter-wstatus').value;
+  api('GET', '/vendors/withdrawals' + (status ? '?status=' + status : ''))
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      var pendingAmt = arr.filter(function(w){ return w.status === 'PENDING'; }).reduce(function(s,w){ return s + Number(w.amount); }, 0);
+      document.getElementById('s-pending-withdrawals').textContent = fmtCur(pendingAmt);
+      if (!arr.length) { document.getElementById('tbl-withdrawals').innerHTML = '<div class="empty-state">No withdrawal requests.</div>'; return; }
+      document.getElementById('tbl-withdrawals').innerHTML = '<table><thead><tr><th>Partner</th><th>Amount</th><th>Available at Request</th><th>Status</th><th>Requested</th><th>Actions</th></tr></thead><tbody>' +
+        arr.map(function(w) {
+          var v = w.vendor || {};
+          var statusBadge = {PENDING:'<span style="color:#f59e0b">Pending</span>', APPROVED:'<span style="color:#3b82f6">Approved</span>', PAID:'<span style="color:#22c55e">Paid</span>', REJECTED:'<span style="color:#ef4444">Rejected</span>'}[w.status] || w.status;
+          return '<tr>' +
+            '<td><strong>' + escape(v.fullName||'—') + '</strong>' + (v.isAgencyOwner ? ' <small style="color:#6b7280">(Agency)</small>' : '') + '<br><small style="color:#6b7280">' + escape(v.baseCity||'') + '</small></td>' +
+            '<td><strong>' + fmtCur(w.amount) + '</strong></td>' +
+            '<td>' + fmtCur(w.availableBalanceAtRequest) + '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td>' + fmtDate(w.createdAt) + '</td>' +
+            '<td>' + (w.status === 'PENDING'
+              ? '<button class="btn btn-xs btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">✓ Approve</button> <button class="btn btn-xs btn-outline" onclick="openReject(\''+w.id+'\')">✕ Reject</button>'
+              : (w.reviewNote ? '<small style="color:#6b7280">' + escape(w.reviewNote) + '</small>' : '—')) +
+            '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl-withdrawals').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+function approveWithdrawal(id) {
+  if (!confirm('Approve this withdrawal and record the payout?')) return;
+  api('PATCH', '/admin/withdrawals/' + id + '/approve').then(function(){ toast('Withdrawal approved and paid out','success'); loadWithdrawals(); }).catch(function(e){ toast(e.message,'error'); });
+}
+function openReject(id) {
+  rejectWithdrawalId = id;
+  document.getElementById('rj-note').value = '';
+  document.getElementById('reject-overlay').style.display = 'flex';
+}
+function submitReject() {
+  var note = document.getElementById('rj-note').value.trim();
+  api('PATCH', '/admin/withdrawals/' + rejectWithdrawalId + '/reject', { note: note || undefined })
+    .then(function(){ toast('Withdrawal rejected','success'); closeModal('reject-overlay'); loadWithdrawals(); })
+    .catch(function(e){ toast(e.message,'error'); });
+}
+
+loadAgencies();
+loadWithdrawals();
+</script>
+</body>
+</html>

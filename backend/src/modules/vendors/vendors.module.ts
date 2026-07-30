@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
+import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // ─── Service Vendor ───
 @Injectable()
@@ -350,7 +351,11 @@ export class ProductVendorsController {
 // what an agency owner does for their own team.
 @Injectable()
 export class AgencyService {
-  constructor(private prisma: PrismaService, private registrations: PartnerRegistrationService) {}
+  constructor(
+    private prisma: PrismaService,
+    private registrations: PartnerRegistrationService,
+    private ledger: PartnerLedgerService,
+  ) {}
 
   private async resolveOwner(userId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
@@ -374,6 +379,41 @@ export class AgencyService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  // Stage G — one aggregate endpoint, same "Promise.all of counts/aggregates, spread into
+  // one object" idiom as AdminService.globalStats()/fullStats().
+  async dashboard(userId: string) {
+    const owner = await this.resolveOwner(userId);
+    const members = await this.prisma.serviceVendor.findMany({
+      where: { agencyOwnerId: owner.id },
+      select: { id: true, fullName: true, totalEarnings: true, pendingPayout: true, completedJobs: true, rating: true, memberStatus: true },
+    });
+    const allIds = [owner.id, ...members.map((m) => m.id)];
+
+    const [totalJobs, completedJobs, pendingJobs, revenueAgg, availableBalance, settlementHistory, withdrawalHistory] = await Promise.all([
+      this.prisma.order.count({ where: { vendorId: { in: allIds } } }),
+      this.prisma.order.count({ where: { vendorId: { in: allIds }, status: 'COMPLETED' } }),
+      this.prisma.order.count({ where: { vendorId: { in: allIds }, status: { in: ['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] as any[] } } }),
+      this.prisma.order.aggregate({ where: { vendorId: { in: allIds }, status: 'COMPLETED' }, _sum: { totalAmount: true } }),
+      this.ledger.availableBalance(owner.id),
+      this.prisma.partnerSettlement.findMany({ where: { vendorId: { in: allIds } }, orderBy: { paidAt: 'desc' }, take: 100 }),
+      this.prisma.withdrawalRequest.findMany({ where: { vendorId: owner.id }, orderBy: { createdAt: 'desc' }, take: 50 }),
+    ]);
+
+    return {
+      jobs: { total: totalJobs, completed: completedJobs, pending: pendingJobs },
+      activeMemberCount: members.filter((m) => m.memberStatus === 'ACTIVE').length,
+      totalMemberCount: members.length,
+      revenue: revenueAgg._sum.totalAmount || 0,
+      availableBalance,
+      perMemberEarnings: members.map((m) => ({
+        vendorId: m.id, fullName: m.fullName, totalEarnings: m.totalEarnings,
+        pendingPayout: m.pendingPayout, completedJobs: m.completedJobs, rating: m.rating, memberStatus: m.memberStatus,
+      })),
+      settlementHistory,
+      withdrawalHistory,
+    };
   }
 
   async attendance(userId: string, dateStr?: string) {
@@ -400,10 +440,11 @@ export class AgencyController {
   }
   @Get('members') members(@CurrentUser() u: JwtPayload) { return this.agency.listMembers(u.sub); }
   @Get('attendance') attendance(@CurrentUser() u: JwtPayload, @Query('date') date?: string) { return this.agency.attendance(u.sub, date); }
+  @Get('dashboard') dashboard(@CurrentUser() u: JwtPayload) { return this.agency.dashboard(u.sub); }
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],
