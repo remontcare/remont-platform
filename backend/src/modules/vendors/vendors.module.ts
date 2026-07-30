@@ -54,6 +54,37 @@ export class ServiceVendorsService {
     return this.prisma.serviceVendor.update({ where: { userId }, data: { isOnline } });
   }
 
+  // Phase 2 — minimal daily attendance. `date` is always normalized to midnight so the
+  // (vendorId, date) unique constraint upserts the same row across multiple check-ins/outs
+  // in a day, same "one row per day" idiom @db.Date columns are meant for.
+  private todayDate() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  async checkIn(userId: string, lat?: number, lng?: number) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+    const date = this.todayDate();
+    return this.prisma.vendorAttendance.upsert({
+      where: { vendorId_date: { vendorId: v.id, date } },
+      create: { vendorId: v.id, date, checkInAt: new Date(), checkInLat: lat, checkInLng: lng },
+      update: { checkInAt: new Date(), checkInLat: lat, checkInLng: lng },
+    });
+  }
+
+  async checkOut(userId: string) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+    const date = this.todayDate();
+    return this.prisma.vendorAttendance.upsert({
+      where: { vendorId_date: { vendorId: v.id, date } },
+      create: { vendorId: v.id, date, checkOutAt: new Date() },
+      update: { checkOutAt: new Date() },
+    });
+  }
+
   async earnings(userId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
@@ -196,6 +227,8 @@ export class ServiceVendorsController {
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
   @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: { lat: number; lng: number }) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: { isOnline: boolean }) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
+  @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: { lat?: number; lng?: number }) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
+  @Patch('me/attendance/check-out') checkOut(@CurrentUser() u: JwtPayload) { return this.vs.checkOut(u.sub); }
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
   @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }
   @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub); }
@@ -342,6 +375,18 @@ export class AgencyService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async attendance(userId: string, dateStr?: string) {
+    const owner = await this.resolveOwner(userId);
+    const date = dateStr ? new Date(dateStr) : new Date();
+    date.setHours(0, 0, 0, 0);
+    const members = await this.prisma.serviceVendor.findMany({ where: { agencyOwnerId: owner.id }, select: { id: true } });
+    const vendorIds = [owner.id, ...members.map((m) => m.id)];
+    return this.prisma.vendorAttendance.findMany({
+      where: { vendorId: { in: vendorIds }, date },
+      include: { vendor: { select: { fullName: true } } },
+    });
+  }
 }
 
 @ApiTags('Vendors')
@@ -354,6 +399,7 @@ export class AgencyController {
     return this.agency.inviteMember(u.sub, b.phone, b.fullName, b.skills);
   }
   @Get('members') members(@CurrentUser() u: JwtPayload) { return this.agency.listMembers(u.sub); }
+  @Get('attendance') attendance(@CurrentUser() u: JwtPayload, @Query('date') date?: string) { return this.agency.attendance(u.sub, date); }
 }
 
 @Module({

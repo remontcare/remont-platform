@@ -443,6 +443,12 @@ a{color:inherit;text-decoration:none}
           <div class="profile-phone" id="prof-phone">+91 98765 43210</div>
         </div>
 
+        <div class="section-title" data-en="Attendance" data-hi="उपस्थिति">Attendance</div>
+        <div class="profile-row" style="cursor:default">
+          <div class="pr-left"><span class="pr-icon">🕐</span><span id="attendance-status" data-en="Not checked in today" data-hi="आज चेक-इन नहीं किया">Not checked in today</span></div>
+          <div class="pr-right"><button class="btn-outline" id="attendance-btn" style="padding:6px 14px;font-size:12px" onclick="toggleAttendance()">Check In</button></div>
+        </div>
+
         <div id="agency-team-block" style="display:none">
           <div class="section-title" data-en="My Team" data-hi="मेरी टीम">My Team</div>
           <div id="team-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
@@ -452,6 +458,11 @@ a{color:inherit;text-decoration:none}
         <div id="team-ledger-block" style="display:none">
           <div class="section-title" data-en="Team Ledger" data-hi="टीम लेजर">Team Ledger</div>
           <div id="team-ledger-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
+        </div>
+
+        <div id="team-attendance-block" style="display:none">
+          <div class="section-title" data-en="Team Attendance Today" data-hi="आज की टीम उपस्थिति">Team Attendance Today</div>
+          <div id="team-attendance-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
         </div>
 
         <div class="section-title" data-en="Settings" data-hi="सेटिंग्स">Settings</div>
@@ -657,10 +668,11 @@ function enterDashboard(){
   document.getElementById('online-label').textContent = onlineState?'Online':'Offline';
   document.getElementById('agency-team-block').style.display = vendorProfile.isAgencyOwner ? 'block':'none';
   document.getElementById('team-ledger-block').style.display = vendorProfile.isAgencyOwner ? 'block':'none';
+  document.getElementById('team-attendance-block').style.display = vendorProfile.isAgencyOwner ? 'block':'none';
   showScreen('screen-app');
   loadEarnings();
   loadJobs();
-  if (vendorProfile.isAgencyOwner) { loadTeamMembers(); loadTeamLedger(); }
+  if (vendorProfile.isAgencyOwner) { loadTeamMembers(); loadTeamLedger(); loadTeamAttendance(); }
   loadMyLedger();
   loadWithdrawals();
 }
@@ -1214,6 +1226,35 @@ function jfCollectBalancePayment(btn){
     });
 }
 
+/* ── ATTENDANCE ── */
+var attendanceCheckedIn = false;
+function toggleAttendance(){
+  var btn = document.getElementById('attendance-btn');
+  var statusEl = document.getElementById('attendance-status');
+  btn.disabled = true;
+  var path = attendanceCheckedIn ? '/vendors/service/me/attendance/check-out' : '/vendors/service/me/attendance/check-in';
+  function submit(lat, lng){
+    var body = attendanceCheckedIn ? {} : { lat: lat, lng: lng };
+    apiFetch(path, { method:'PATCH', body: JSON.stringify(body) })
+      .then(function(){
+        attendanceCheckedIn = !attendanceCheckedIn;
+        statusEl.textContent = attendanceCheckedIn ? 'Checked in today' : 'Checked out today';
+        btn.textContent = attendanceCheckedIn ? 'Check Out' : 'Check In';
+      })
+      .catch(function(e){ alert('Could not update attendance: ' + e.message); })
+      .then(function(){ btn.disabled = false; });
+  }
+  if (!attendanceCheckedIn && navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      function(pos){ submit(pos.coords.latitude, pos.coords.longitude); },
+      function(){ submit(undefined, undefined); },
+      { timeout: 5000 }
+    );
+  } else {
+    submit(undefined, undefined);
+  }
+}
+
 /* ── AGENCY TEAM ── */
 function loadTeamMembers(){
   apiFetch('/vendors/agency/members').then(function(list){
@@ -1244,6 +1285,18 @@ function requestFreezeMember(memberId, memberName){
   if (!confirm('Request Remont support to freeze '+memberName+'\'s account?')) return;
   var msg = encodeURIComponent('Hi Remont, please freeze team member account: ' + memberName + ' (ID: ' + memberId + ')');
   window.open('https://wa.me/919232071064?text=' + msg, '_blank');
+}
+
+function loadTeamAttendance(){
+  apiFetch('/vendors/agency/attendance').then(function(list){
+    var el = document.getElementById('team-attendance-list');
+    if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No check-ins today</div></div>'; return; }
+    el.innerHTML = list.map(function(a){
+      var inT = a.checkInAt ? new Date(a.checkInAt).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'}) : '—';
+      var outT = a.checkOutAt ? new Date(a.checkOutAt).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'}) : '—';
+      return '<div class="team-row"><div class="team-avatar">🕐</div><div class="team-info"><div class="team-name">'+escapeHtmlRR(a.vendor.fullName)+'</div><div class="team-sub">In '+inT+' · Out '+outT+'</div></div></div>';
+    }).join('');
+  }).catch(function(e){ document.getElementById('team-attendance-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load attendance: '+e.message+'</div></div>'; });
 }
 
 /* ── PARTNER LEDGER & WITHDRAWALS ── */

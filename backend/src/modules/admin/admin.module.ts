@@ -314,6 +314,21 @@ export class AdminService {
     return updated;
   }
 
+  // Admin-wide view of Stage F's per-day attendance — the agency-owner-scoped
+  // equivalent lives on AgencyController (vendors.module.ts) since that one is
+  // self-service; this is the "or all (for admin)" half of the same spec line.
+  async vendorAttendance(dateStr?: string, agencyOwnerId?: string) {
+    const date = dateStr ? new Date(dateStr) : new Date();
+    date.setHours(0, 0, 0, 0);
+    const where: any = { date };
+    if (agencyOwnerId) where.vendor = { OR: [{ id: agencyOwnerId }, { agencyOwnerId }] };
+    return this.prisma.vendorAttendance.findMany({
+      where,
+      include: { vendor: { select: { fullName: true, isAgencyOwner: true, agencyOwnerId: true } } },
+      orderBy: { checkInAt: 'desc' },
+    });
+  }
+
   async approveWithdrawal(id: string, adminId: string, note?: string) {
     const req = await this.prisma.withdrawalRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Withdrawal request not found');
@@ -2233,6 +2248,9 @@ export class AdminController {
   @Patch('agencies/members/:id/unfreeze') unfreezeMember(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.unfreezeMember(id, u.sub); }
   @Patch('agencies/members/:id/transfer') transferMember(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { newAgencyOwnerId: string }) {
     return this.admin.transferMember(id, b.newAgencyOwnerId, u.sub);
+  }
+  @Get('vendors/attendance') vendorAttendance(@Query('date') date?: string, @Query('agencyOwnerId') agencyOwnerId?: string) {
+    return this.admin.vendorAttendance(date, agencyOwnerId);
   }
   @Patch('withdrawals/:id/approve') approveWithdrawal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note?: string }) {
     return this.admin.approveWithdrawal(id, u.sub, b?.note);
