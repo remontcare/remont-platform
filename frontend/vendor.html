@@ -45,8 +45,8 @@ a{color:inherit;text-decoration:none}
 .field input:focus{border-color:var(--sienna);box-shadow:0 0 0 3px rgba(196,96,26,.1)}
 .phone-input-row{display:flex;gap:8px}
 .phone-prefix{display:flex;align-items:center;padding:0 14px;border:1.5px solid var(--mist);border-radius:10px;font-size:15px;font-weight:600;background:var(--cream);flex-shrink:0}
-.otp-row{display:flex;gap:10px;justify-content:center;margin:20px 0 8px}
-.otp-digit{width:52px;height:58px;border:2px solid var(--mist);border-radius:12px;text-align:center;font-size:24px;font-weight:700;background:#fff;transition:all .2s}
+.otp-row{display:flex;gap:8px;justify-content:center;margin:20px 0 8px}
+.otp-digit{flex:1;min-width:0;max-width:52px;height:58px;border:2px solid var(--mist);border-radius:12px;text-align:center;font-size:24px;font-weight:700;background:#fff;transition:all .2s}
 .otp-digit:focus{border-color:var(--sienna);box-shadow:0 0 0 3px rgba(196,96,26,.1)}
 .otp-digit.filled{border-color:var(--sienna);background:#fff7f3}
 .otp-hint{text-align:center;font-size:12px;color:#9ca3af;margin-bottom:20px}
@@ -271,10 +271,12 @@ a{color:inherit;text-decoration:none}
         <div class="auth-title" data-en="Verify OTP" data-hi="OTP सत्यापित करें">Verify OTP</div>
         <div class="auth-sub" id="otp-sent-to">Code sent to +91 XXXXXXXXXX</div>
         <div class="otp-row">
-          <input class="otp-digit" maxlength="1" id="lotp-0" oninput="otpJump(this,0)">
-          <input class="otp-digit" maxlength="1" id="lotp-1" oninput="otpJump(this,1)">
-          <input class="otp-digit" maxlength="1" id="lotp-2" oninput="otpJump(this,2)">
-          <input class="otp-digit" maxlength="1" id="lotp-3" oninput="otpJump(this,3)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-0" oninput="otpJump(this,0)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-1" oninput="otpJump(this,1)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-2" oninput="otpJump(this,2)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-3" oninput="otpJump(this,3)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-4" oninput="otpJump(this,4)">
+          <input class="otp-digit" maxlength="1" inputmode="numeric" id="lotp-5" oninput="otpJump(this,5)">
         </div>
         <div class="auth-error" id="otp-err"></div>
         <button class="btn-primary" id="verify-otp-btn" onclick="verifyLoginOtp()" data-en="Verify & Continue" data-hi="सत्यापित करें">Verify & Continue</button>
@@ -604,9 +606,9 @@ function sendLoginOtp(){
     .then(function(){ btn.disabled=false; btn.textContent='Send OTP →'; });
 }
 function verifyLoginOtp(){
-  var code=['0','1','2','3'].map(function(i){return document.getElementById('lotp-'+i).value}).join('');
+  var code=['0','1','2','3','4','5'].map(function(i){return document.getElementById('lotp-'+i).value}).join('');
   var err=document.getElementById('otp-err'); err.textContent='';
-  if(code.length!==4){err.textContent='Enter the 4-digit OTP';return;}
+  if(code.length!==6){err.textContent='Enter the 6-digit OTP';return;}
   var btn=document.getElementById('verify-otp-btn'); btn.disabled=true; btn.textContent='Verifying…';
   RemontAuth.verifyOtp(pendingPhone, code, {role:'SERVICE_VENDOR'})
     .then(function(res){

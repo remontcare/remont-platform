@@ -2958,9 +2958,9 @@
       font-size: 16px; letter-spacing: 1px; font-family: inherit;
     }
     .pa-input:focus { outline: none; border-color: var(--sienna); }
-    .pa-otp-row { display: flex; gap: 10px; justify-content: center; margin: 16px 0 10px; }
+    .pa-otp-row { display: flex; gap: 8px; justify-content: center; margin: 16px 0 10px; }
     .pa-otp-dig {
-      width: 54px; height: 58px; border: 2px solid #e5e7eb; border-radius: 12px;
+      flex: 1; min-width: 0; max-width: 54px; height: 58px; border: 2px solid #e5e7eb; border-radius: 12px;
       text-align: center; font-size: 24px; font-weight: 700; font-family: inherit;
     }
     .pa-otp-dig:focus { border-color: var(--sienna); outline: none; }
@@ -8421,7 +8421,7 @@ function cartCheckout() {
     <div id="auth-step-otp" style="display:none">
       <p style="font-size:13px;color:#374151;margin-bottom:12px">OTP sent to <strong id="auth-phone-display"></strong></p>
       <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px">Enter OTP</label>
-      <input id="auth-otp" type="text" placeholder="4-digit OTP" maxlength="6"
+      <input id="auth-otp" type="text" placeholder="6-digit OTP" maxlength="6"
         style="width:100%;padding:12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:18px;letter-spacing:8px;text-align:center;outline:none;margin-bottom:16px"
         onkeydown="if(event.key==='Enter')verifyOtpAuth()" />
       <button onclick="verifyOtpAuth()" id="auth-verify-btn"
@@ -10578,20 +10578,20 @@ window.paSendOtp = function() {
   setTimeout(function() { document.getElementById('pa-d0').focus(); }, 100);
 
   // Wire digit auto-advance
-  ['pa-d0','pa-d1','pa-d2','pa-d3'].forEach(function(id, i) {
+  ['pa-d0','pa-d1','pa-d2','pa-d3','pa-d4','pa-d5'].forEach(function(id, i) {
     var el = document.getElementById(id);
     el.value = '';
     el.oninput = function() {
       this.value = this.value.replace(/\D/g,'').slice(-1);
       if (this.value) {
-        var next = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3'][i+1]);
+        var next = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3','pa-d4','pa-d5'][i+1]);
         if (next) next.focus();
-        if (i === 3) window.paVerifyOtp();
+        if (i === 5) window.paVerifyOtp();
       }
     };
     el.onkeydown = function(e) {
       if (e.key === 'Backspace' && !this.value) {
-        var prev = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3'][i-1]);
+        var prev = document.getElementById(['pa-d0','pa-d1','pa-d2','pa-d3','pa-d4','pa-d5'][i-1]);
         if (prev) prev.focus();
       }
     };
@@ -10605,8 +10605,8 @@ window.paSendOtp = function() {
 };
 
 window.paVerifyOtp = function() {
-  var otp = ['pa-d0','pa-d1','pa-d2','pa-d3'].map(function(id) { return document.getElementById(id).value; }).join('');
-  if (otp.length < 4) return;
+  var otp = ['pa-d0','pa-d1','pa-d2','pa-d3','pa-d4','pa-d5'].map(function(id) { return document.getElementById(id).value; }).join('');
+  if (otp.length < 6) return;
   var phone = '+91' + document.getElementById('pa-phone').value.trim();
   document.getElementById('pa-otp-msg').textContent = '';
 
@@ -11092,6 +11092,8 @@ window.closeCustPartner = function() {
         <input class="pa-otp-dig" type="tel" id="pa-d1" maxlength="1" inputmode="numeric">
         <input class="pa-otp-dig" type="tel" id="pa-d2" maxlength="1" inputmode="numeric">
         <input class="pa-otp-dig" type="tel" id="pa-d3" maxlength="1" inputmode="numeric">
+        <input class="pa-otp-dig" type="tel" id="pa-d4" maxlength="1" inputmode="numeric">
+        <input class="pa-otp-dig" type="tel" id="pa-d5" maxlength="1" inputmode="numeric">
       </div>
       <div id="pa-otp-msg" style="text-align:center;font-size:12px;color:#ef4444;min-height:18px;margin-bottom:10px"></div>
       <button class="pa-btn" onclick="paVerifyOtp()">Verify & Continue</button>

@@ -62,8 +62,8 @@ input:focus,textarea:focus,select:focus{outline:none}
 .field-hint{font-size:11px;color:#9ca3af;margin-top:4px}
 .field-error{font-size:11px;color:var(--error);margin-top:4px}
 
-.otp-row{display:flex;gap:10px;justify-content:center;margin:16px 0}
-.otp-digit{width:54px;height:60px;border:2px solid var(--mist);border-radius:12px;text-align:center;font-size:24px;font-weight:700;color:var(--charcoal);background:var(--ivory);transition:all .2s}
+.otp-row{display:flex;gap:8px;justify-content:center;margin:16px 0}
+.otp-digit{flex:1;min-width:0;max-width:54px;height:60px;border:2px solid var(--mist);border-radius:12px;text-align:center;font-size:24px;font-weight:700;color:var(--charcoal);background:var(--ivory);transition:all .2s}
 .otp-digit:focus{border-color:var(--sienna);background:#fff;box-shadow:0 0 0 3px rgba(196,96,26,.1)}
 .otp-digit.filled{border-color:var(--sienna);background:#fff7f3}
 
@@ -203,10 +203,12 @@ input:focus,textarea:focus,select:focus{outline:none}
       <div class="field">
         <label>Enter OTP <span class="req">*</span></label>
         <div class="otp-row">
-          <input class="otp-digit" type="tel" maxlength="1" id="otp-0">
-          <input class="otp-digit" type="tel" maxlength="1" id="otp-1">
-          <input class="otp-digit" type="tel" maxlength="1" id="otp-2">
-          <input class="otp-digit" type="tel" maxlength="1" id="otp-3">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-0">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-1">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-2">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-3">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-4">
+          <input class="otp-digit" type="tel" maxlength="1" inputmode="numeric" id="otp-5">
         </div>
         <div id="otp-msg" style="text-align:center;font-size:13px;color:#6b7280">
           Didn't receive? <button id="resend-btn" style="color:var(--sienna);font-weight:600;font-size:13px" onclick="sendOtp(true)">Resend OTP</button>
@@ -469,14 +471,14 @@ function startOtpTimer(sec) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  for (var i = 0; i < 4; i++) {
+  for (var i = 0; i < 6; i++) {
     (function(idx) {
       var el = document.getElementById('otp-' + idx);
       el.addEventListener('input', function() {
         this.value = this.value.replace(/\D/g,'').slice(-1);
-        if (this.value && idx < 3) document.getElementById('otp-' + (idx+1)).focus();
+        if (this.value && idx < 5) document.getElementById('otp-' + (idx+1)).focus();
         el.classList.toggle('filled', !!this.value);
-        if ([0,1,2,3].every(function(j){ return document.getElementById('otp-'+j).value; })) verifyOtp();
+        if ([0,1,2,3,4,5].every(function(j){ return document.getElementById('otp-'+j).value; })) verifyOtp();
       });
       el.addEventListener('keydown', function(e) {
         if (e.key === 'Backspace' && !this.value && idx > 0) document.getElementById('otp-' + (idx-1)).focus();
@@ -488,8 +490,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function verifyOtp() {
-  var otp = [0,1,2,3].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
-  if (otp.length < 4) return;
+  var otp = [0,1,2,3,4,5].map(function(i){ return document.getElementById('otp-'+i).value; }).join('');
+  if (otp.length < 6) return;
   showMsg('otp-verify-msg', 'Verifying…');
   var phone = '+91' + val('f-phone');
   fetch(API_BASE + '/api/v1/auth/verify-otp', {
