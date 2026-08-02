@@ -9,6 +9,7 @@ import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { WalletService, WalletModule } from '../wallet/wallet.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
+import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // Business rule (highest priority, per product): a refund is NEVER automatic, even for an
 // online payment. Full pipeline: customer raises a request -> evidence -> partner response
@@ -27,7 +28,7 @@ interface DecideOptions {
 export class RefundsService {
   constructor(
     private prisma: PrismaService, private payments: PaymentsService, private wallet: WalletService,
-    private paymentNotify: PaymentNotificationsService,
+    private paymentNotify: PaymentNotificationsService, private ledger: PartnerLedgerService,
   ) {}
 
   private log(refundRequestId: string, actorId: string | undefined, actorRole: UserRole | undefined, action: string, notes?: string) {
@@ -237,6 +238,20 @@ export class RefundsService {
     }
 
     const approvedAmount = walletCreditAmount + gatewayRefundAmount || opts.approvedAmount || 0;
+
+    // Vendor Wallet: a refund that actually returns money is deducted from that order's
+    // Warranty Hold first (if one is still live), rather than clawed back from the vendor's
+    // live balance — see PartnerLedgerService.deductFromHold. NO_REFUND/FREE_REWORK/
+    // DISCOUNT_COUPON never move money here, so there's nothing to deduct.
+    if (rr.orderId && approvedAmount > 0) {
+      const hold = await this.prisma.partnerHold.findFirst({
+        where: { orderId: rr.orderId, status: 'HELD', type: 'WARRANTY_HOLD' },
+      });
+      if (hold) {
+        await this.prisma.$transaction((tx) => this.ledger.deductFromHold(tx, hold.id, approvedAmount));
+      }
+    }
+
     const updated = await this.prisma.refundRequest.update({
       where: { id: refundRequestId },
       data: {
@@ -321,7 +336,7 @@ export class RefundsController {
 }
 
 @Module({
-  imports: [PaymentsModule, WalletModule, PaymentNotificationsModule],
+  imports: [PaymentsModule, WalletModule, PaymentNotificationsModule, PartnerLedgerModule],
   controllers: [RefundsController],
   providers: [RefundsService],
   exports: [RefundsService],

@@ -749,7 +749,10 @@ export class OrdersService {
   async complete(vendorUserId: string, orderId: string, otp: string, photosAfter: string[], videoUrl?: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { service: { include: { category: true } } },
+    });
     if (!order || order.vendorId !== v.id) throw new ForbiddenException();
     if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
       throw new BadRequestException('Order cannot be completed at this stage');
@@ -759,23 +762,61 @@ export class OrdersService {
     // Orders created before this field existed have endOtp === null — skip the check for
     // those rather than permanently locking them out of completion.
     if (order.endOtp && order.endOtp !== otp) throw new BadRequestException('Invalid completion OTP');
+
+    // Vendor Wallet true-up: Lead Cost was already deducted in full at accept time as an
+    // advance against this job's commission (see ServiceVendorsService.acceptJob) — only the
+    // remainder of the commission is collected here. Reconstructing the gross amount from
+    // vendorPayout+remontCommission (both already fully resolved, including any approved
+    // extra work via ExtraWorkService.recalc()) avoids re-deriving totals from scratch.
+    // When leadCostAmount is 0 (every order that predates this feature, or if it's ever
+    // disabled) this reduces exactly to remainingCommission=fullCommission and
+    // completionCredit=vendorPayout — byte-identical to the pre-existing behavior.
+    const fullCommission = Number(order.remontCommission);
+    const leadCostPaid = Number(order.leadCostAmount);
+    const remainingCommission = Math.max(0, fullCommission - leadCostPaid);
+    const grossAmount = Number(order.vendorPayout) + fullCommission;
+    const completionCredit = grossAmount - remainingCommission; // == vendorPayout + leadCostPaid
+
+    const { days, percent } = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
+    const holdAmount = percent > 0 ? Math.round(completionCredit * percent) / 100 : 0;
+    const releasedNow = completionCredit - holdAmount;
+
     // Job-completion → ledger update is Phase 2's "Settlement Engine" backbone: previously
     // the order update and the ServiceVendor earnings update were two separate, non-atomic
-    // writes — wrapping them (plus the new ledger entry) in one $transaction closes that gap.
+    // writes — wrapping them (plus the new ledger entries) in one $transaction closes that gap.
+    //
+    // Race condition fix: the status check above reads `order` outside any lock — two
+    // concurrent completion requests (a flaky-connection double-tap, a client retry) could
+    // both pass that check before either commits, and both would then post a full
+    // JOB_EARNING/COMMISSION/HOLD sequence for the same job — double-paying the vendor. The
+    // conditional updateMany() below re-checks the status atomically inside the transaction
+    // (only one concurrent caller's WHERE can match), exactly mirroring the order-claim lock
+    // in ServiceVendorsService.acceptJob() — every ledger/balance write that follows only
+    // runs for whichever request actually won the count===1 check.
     const completed = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: orderId },
+      const claimed = await tx.order.updateMany({
+        where: { id: orderId, status: { in: ['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } },
         data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl, endOtpVerified: !!order.endOtp },
       });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('Order cannot be completed at this stage');
+      }
+      const updated = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       await tx.serviceVendor.update({
         where: { id: v.id },
         data: {
           completedJobs: { increment: 1 },
-          totalEarnings: { increment: Number(order.vendorPayout) },
-          pendingPayout: { increment: Number(order.vendorPayout) },
+          totalEarnings: { increment: Number(order.vendorPayout) }, // unchanged formula/timing — lifetime-gross metric
+          pendingPayout: { increment: releasedNow },
         },
       });
-      await this.ledger.postEntry(tx, v.id, 'JOB_EARNING', Number(order.vendorPayout), { orderId });
+      await this.ledger.postEntry(tx, v.id, 'JOB_EARNING', grossAmount, { orderId });
+      await this.ledger.trueUpCommission(tx, v.id, orderId, remainingCommission);
+      if (holdAmount > 0) {
+        const releaseDueAt = new Date();
+        releaseDueAt.setDate(releaseDueAt.getDate() + days);
+        await this.ledger.postHold(tx, v.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
+      }
       return updated;
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
@@ -929,9 +970,31 @@ export class OrdersService {
     if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
       throw new BadRequestException('Cannot cancel at this stage');
     }
-    const cancelled = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
+    // Customer-initiated cancellation refunds any Lead Cost already charged to the assigned
+    // vendor — per spec, only a vendor-side drop (rejectJob) forfeits it.
+    //
+    // Race condition fix: `order` above is a stale read taken before the transaction opens —
+    // two concurrent cancel attempts (a double-tap, or this racing AdminService's own
+    // adminCancelOrder() for the same order) could both see leadCostRefunded:false and both
+    // refund. The updateMany() below is a compare-and-swap on that exact flag: only the
+    // request whose WHERE actually matches (count===1) proceeds to credit the ledger — the
+    // same conditional-update idiom as ServiceVendorsService.acceptJob()'s claim lock.
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
+      });
+      if (order.vendorId && Number(order.leadCostAmount) > 0) {
+        const claimed = await tx.order.updateMany({
+          where: { id: orderId, leadCostRefunded: false },
+          data: { leadCostRefunded: true },
+        });
+        if (claimed.count === 1) {
+          await this.ledger.refundLeadCost(tx, order.vendorId, orderId, Number(order.leadCostAmount));
+          await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { increment: Number(order.leadCostAmount) } } });
+        }
+      }
+      return updated;
     });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CANCELLED, note: reason, actorId: userId, actorRole: UserRole.CUSTOMER });
     return cancelled;

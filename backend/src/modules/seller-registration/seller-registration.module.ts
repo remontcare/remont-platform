@@ -58,8 +58,11 @@ export class SellerRegistrationService {
       throw new BadRequestException('Registration already submitted');
     }
 
-    // Sanitize: strip status/id/relation fields the client must never set directly
-    const { id, status, createdAt, updatedAt, registrationId: _rid, pickupLocations, ...safe } = data;
+    // Sanitize: strip status/id/relation/trust fields the client must never set directly.
+    // agreedTerms/agreedAt are the legal-consent flags — only submit() may set them, so a
+    // draft save can never fast-forward a registration to "submitted" state. userId is set
+    // only by _activateSeller() once an application is actually approved.
+    const { id, status, createdAt, updatedAt, registrationId: _rid, pickupLocations, userId, agreedTerms, agreedAt, ...safe } = data;
 
     await this.prisma.sellerRegistration.update({
       where: { registrationId },

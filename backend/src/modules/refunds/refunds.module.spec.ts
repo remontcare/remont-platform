@@ -15,12 +15,16 @@ function makeService() {
     },
     refundRequestLog: { create: jest.fn(async () => ({})) },
     user: { findUnique: jest.fn(async () => ({ phone: '9999999999' })) },
+    // No live Warranty Hold in these tests by default — the deductFromHold hook is a no-op.
+    partnerHold: { findFirst: jest.fn(async () => null) },
+    $transaction: jest.fn(async (fn: any) => fn(prisma)),
   };
   const payments: any = { refundPayment: jest.fn(async () => ({ refundId: 'rfnd_1', gateway: 'RAZORPAY' })) };
   const wallet: any = { credit: jest.fn(async () => ({})) };
   const paymentNotify: any = { refundProcessed: jest.fn(async () => {}) };
-  const svc = new RefundsService(prisma, payments, wallet, paymentNotify);
-  return { svc, prisma, payments, wallet, paymentNotify };
+  const ledger: any = { deductFromHold: jest.fn(async () => ({})) };
+  const svc = new RefundsService(prisma, payments, wallet, paymentNotify, ledger);
+  return { svc, prisma, payments, wallet, paymentNotify, ledger };
 }
 
 describe('RefundsService.raise', () => {

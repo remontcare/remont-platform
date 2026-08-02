@@ -242,6 +242,11 @@
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:8px"><input type="checkbox" id="cat-active" checked> Active</label>
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold Days</label><input id="cat-warranty-days" class="form-control" type="number" min="0" placeholder="Blank = platform default"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold %</label><input id="cat-warranty-pct" class="form-control" type="number" min="0" max="100" step="0.1" placeholder="Blank = platform default"></div>
+      </div>
+      <small style="color:#9ca3af;font-size:11px">Vendor Wallet: % of a completed job's payout in this category held back for this many days before auto-release. Leave both blank to use the platform-wide default from Settings → Vendor Wallet.</small>
     </div>
 
     <div id="cat-seo" class="modal-pane">
@@ -516,6 +521,8 @@ function openCatModal(cat) {
   document.getElementById('cat-sort').value = cat ? cat.sortOrder : 0;
   document.getElementById('cat-premium').checked = cat ? cat.isPremium : false;
   document.getElementById('cat-active').checked = cat ? cat.isActive : true;
+  document.getElementById('cat-warranty-days').value = (cat && cat.warrantyDays != null) ? cat.warrantyDays : '';
+  document.getElementById('cat-warranty-pct').value = (cat && cat.warrantyHoldPercent != null) ? cat.warrantyHoldPercent : '';
   document.getElementById('cat-slug').value = cat ? (cat.slug||'') : '';
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
   document.getElementById('cat-seo-desc').value = cat ? (cat.seoDesc||'') : '';
@@ -539,6 +546,10 @@ function saveCategory() {
     seoDesc: document.getElementById('cat-seo-desc').value.trim() || undefined,
     seoKeywords: document.getElementById('cat-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
   };
+  var warrantyDaysVal = document.getElementById('cat-warranty-days').value.trim();
+  var warrantyPctVal = document.getElementById('cat-warranty-pct').value.trim();
+  data.warrantyDays = warrantyDaysVal === '' ? null : parseInt(warrantyDaysVal);
+  data.warrantyHoldPercent = warrantyPctVal === '' ? null : parseFloat(warrantyPctVal);
   if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
   var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);
   p.then(function(){ toast(id?'Category updated':'Category created','success'); closeModal('cat-overlay'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });

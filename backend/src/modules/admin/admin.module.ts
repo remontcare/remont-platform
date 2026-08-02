@@ -259,6 +259,39 @@ export class AdminService {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { staffType } });
   }
 
+  // ─── Vendor Wallet: Base Hold + admin hold/release ─────────────────────
+  // Base Hold is a pure withdrawal-floor threshold (see PartnerLedgerService.availableBalance)
+  // — no ledger entry, just the stored field an admin can adjust per vendor.
+  async setVendorBaseHold(vendorId: string, amount: number) {
+    if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('Enter a valid, non-negative Base Hold amount');
+    return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { baseHoldAmount: amount } });
+  }
+
+  async createAdminHold(vendorId: string, amount: number, adminId: string, notes?: string) {
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('Enter a valid hold amount');
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    return this.prisma.$transaction((tx) => this.ledger.postHold(tx, vendorId, 'ADMIN_MANUAL', amount, { createdBy: adminId, notes }));
+  }
+
+  async releaseHold(holdId: string, adminId: string) {
+    return this.prisma.$transaction((tx) => this.ledger.releaseHold(tx, holdId, adminId));
+  }
+
+  async forfeitHold(holdId: string, reason?: string) {
+    return this.prisma.$transaction((tx) => this.ledger.forfeitHold(tx, holdId, reason));
+  }
+
+  async extendHold(holdId: string, releaseDueAt: string) {
+    const date = new Date(releaseDueAt);
+    if (isNaN(date.getTime())) throw new BadRequestException('Invalid release date');
+    return this.prisma.partnerHold.update({ where: { id: holdId }, data: { releaseDueAt: date } });
+  }
+
+  async vendorHolds(vendorId: string) {
+    return this.prisma.partnerHold.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: 200 });
+  }
+
   // ─── Phase 2: Agency Partner Management ────────────────────────────
   // Same shape as approveVendor/suspendVendor above — an agency owner is just a
   // ServiceVendor with isAgencyOwner:true, so these are targeted additions next
@@ -633,7 +666,26 @@ export class AdminService {
   }
 
   async adminCancelOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    // Same Lead Cost refund guard as OrdersService.cancel() (orders.module.ts) — "admin
+    // approves" from the spec maps to this admin-initiated cancel path. The updateMany()
+    // compare-and-swap on leadCostRefunded (rather than a plain read-then-write) is what
+    // actually prevents a double-refund if this races the customer cancel path for the same
+    // order — see the race-condition fix comment on OrdersService.cancel().
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const cancelled = await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+      if (order?.vendorId && Number(order.leadCostAmount) > 0) {
+        const claimed = await tx.order.updateMany({
+          where: { id: orderId, leadCostRefunded: false },
+          data: { leadCostRefunded: true },
+        });
+        if (claimed.count === 1) {
+          await this.ledger.refundLeadCost(tx, order.vendorId, orderId, Number(order.leadCostAmount));
+          await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { increment: Number(order.leadCostAmount) } } });
+        }
+      }
+      return cancelled;
+    });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.CANCELLED, note: reason, actorId, actorRole });
     return updated;
   }
@@ -2255,6 +2307,16 @@ export class AdminController {
   @Patch('vendors/:id/staff-type') setStaffType(@Param('id') id: string, @Body() b: { staffType: 'IN_HOUSE' | 'PARTNER' }) {
     return this.admin.setVendorStaffType(id, b.staffType);
   }
+  @Patch('vendors/:id/base-hold') setBaseHold(@Param('id') id: string, @Body() b: { amount: number }) {
+    return this.admin.setVendorBaseHold(id, b.amount);
+  }
+  @Get('vendors/:id/holds') vendorHolds(@Param('id') id: string) { return this.admin.vendorHolds(id); }
+  @Post('vendors/:id/hold') createHold(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { amount: number; notes?: string }) {
+    return this.admin.createAdminHold(id, b.amount, u.sub, b.notes);
+  }
+  @Post('holds/:id/release') releaseHold(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.releaseHold(id, u.sub); }
+  @Post('holds/:id/forfeit') forfeitHold(@Param('id') id: string, @Body() b: { reason?: string }) { return this.admin.forfeitHold(id, b.reason); }
+  @Patch('holds/:id/extend') extendHold(@Param('id') id: string, @Body() b: { releaseDueAt: string }) { return this.admin.extendHold(id, b.releaseDueAt); }
   @Roles(UserRole.SUPER_ADMIN)
   @Delete('vendors/:id') deleteVendorDirect(@Param('id') id: string) { return this.admin.deleteServiceVendorDirect(id); }
 

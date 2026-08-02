@@ -101,8 +101,13 @@ export class PartnerRegistrationService {
       throw new BadRequestException('Registration already submitted');
     }
 
-    // Sanitize: strip any status/id fields from client payload
-    const { id, status, createdAt, updatedAt, registrationId: _rid, ...safe } = data;
+    // Sanitize: strip status/id/trust fields from client payload. agreedTerms/agreedAt are
+    // the legal-consent flags — only submit() may set them. invitedByAgencyId is an
+    // agency-membership grant and must only come from inviteAgencyMember() (an authenticated
+    // agency owner's own action) — never from the applicant's own self-served draft, or any
+    // applicant could link themselves into an arbitrary agency by guessing/copying its id.
+    // userId is set only by _activatePartner() once an application is actually approved.
+    const { id, status, createdAt, updatedAt, registrationId: _rid, userId, agreedTerms, agreedAt, invitedByAgencyId, ...safe } = data;
 
     await this.prisma.partnerRegistration.update({
       where: { registrationId },

@@ -4,32 +4,69 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { UserRole } from '@prisma/client';
+import { AgencyStatus, Language, OrderStatus, UserRole, VendorStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
+export class ServiceVendorRegistrationDto {
+  @IsString() fullName: string;
+  @IsString() baseCity: string;
+  @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) skills: string[];
+  @IsOptional() @IsString() businessName?: string;
+  @IsOptional() @IsBoolean() isAgencyOwner?: boolean;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) serviceRadius?: number;
+  @IsOptional() @IsEnum(Language) preferredLanguage?: Language;
+}
+
+export class VendorLocationDto {
+  @Type(() => Number) @IsNumber() @Min(-90) @Max(90) lat: number;
+  @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng: number;
+}
+
+export class VendorOnlineStatusDto {
+  @IsBoolean() isOnline: boolean;
+}
+
+export class VendorAttendanceDto {
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(-90) @Max(90) lat?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng?: number;
+}
+
 // ─── Service Vendor ───
 @Injectable()
 export class ServiceVendorsService {
-  constructor(private prisma: PrismaService, private wa: WhatsappService, private events: EventEmitter2) {}
+  constructor(
+    private prisma: PrismaService,
+    private wa: WhatsappService,
+    private events: EventEmitter2,
+    private ledger: PartnerLedgerService,
+  ) {}
 
-  async register(userId: string, data: any) {
-    // Strip fields a vendor must not self-assign. isAgencyOwner is deliberately NOT
-    // stripped — it's the real "individual vs agency" declaration made at registration
-    // (vendor.html's type-individual/type-agency toggle), same trust level as businessName.
-    // Becoming an agency stays gated behind admin approval regardless: agencyStatus is
-    // never set here, so a self-declared agency starts with agencyStatus:null until
-    // AdminService.approveAgency() flips it to ACTIVE.
-    const { status, rating, completedJobs, totalEarnings, pendingPayout, isOnline, agencyOwnerId, agencyStatus, memberStatus, ...safeData } = data;
-    // Normalize onto real ServiceCategory.key values — see normalizeSkillKey() for why
-    // (this free-text field has never matched the DispatchService lookup otherwise).
-    if (Array.isArray(safeData.skills)) safeData.skills = safeData.skills.map(normalizeSkillKey);
+  async register(userId: string, data: ServiceVendorRegistrationDto) {
+    // Agency ownership is only a registration declaration. Approval and routing-priority
+    // fields are never copied from a vendor-controlled request.
+    const skills = Array.from(new Set(data.skills.map(normalizeSkillKey).filter(Boolean)));
+    if (!skills.length) throw new BadRequestException('At least one valid skill is required');
+    const safeData = {
+      fullName: data.fullName.trim(),
+      baseCity: data.baseCity.trim(),
+      skills,
+      ...(data.businessName !== undefined ? { businessName: data.businessName.trim() } : {}),
+      ...(data.isAgencyOwner !== undefined ? { isAgencyOwner: data.isAgencyOwner } : {}),
+      ...(data.serviceRadius !== undefined ? { serviceRadius: data.serviceRadius } : {}),
+      ...(data.preferredLanguage !== undefined ? { preferredLanguage: data.preferredLanguage } : {}),
+    };
+    // Base Hold starts at the platform default on first registration only — never
+    // overwritten on a later profile-edit upsert, so an admin's per-vendor adjustment sticks.
+    const baseHoldAmount = await this.ledger.getBaseHoldDefault();
     return this.prisma.serviceVendor.upsert({
       where: { userId },
-      create: { userId, ...safeData },
+      create: { userId, baseHoldAmount, ...safeData },
       update: safeData,
     });
   }
@@ -44,15 +81,40 @@ export class ServiceVendorsService {
   }
 
   async updateLocation(userId: string, lat: number, lng: number) {
+    const vendor = await this.requireActiveVendor(userId);
     return this.prisma.serviceVendor.update({
-      where: { userId },
+      where: { id: vendor.id },
       data: { currentLatitude: lat, currentLongitude: lng, lastLocationUpdate: new Date(), isOnline: true },
       select: { id: true, isOnline: true },
     });
   }
 
   async setOnlineStatus(userId: string, isOnline: boolean) {
-    return this.prisma.serviceVendor.update({ where: { userId }, data: { isOnline } });
+    const vendor = await this.requireActiveVendor(userId);
+    return this.prisma.serviceVendor.update({ where: { id: vendor.id }, data: { isOnline } });
+  }
+
+  private async requireActiveVendor(userId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    if (vendor.status !== VendorStatus.ACTIVE) {
+      throw new ForbiddenException('Your vendor account is not active');
+    }
+    if (vendor.memberStatus === 'FROZEN') {
+      throw new ForbiddenException('Your account is frozen — contact your agency or Remont support');
+    }
+    return vendor;
+  }
+
+  private isEligibleForOrder(vendor: any, order: any) {
+    const skill = order.service?.category?.key;
+    if (!skill || !vendor.skills.includes(skill)) return false;
+    const address = order.address;
+    if (vendor.currentLatitude != null && vendor.currentLongitude != null) {
+      if (address?.latitude == null || address?.longitude == null) return true;
+      return haversineKm(vendor.currentLatitude, vendor.currentLongitude, address.latitude, address.longitude) <= vendor.serviceRadius;
+    }
+    return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
   }
 
   // Phase 2 — minimal daily attendance. `date` is always normalized to midnight so the
@@ -64,10 +126,27 @@ export class ServiceVendorsService {
     return d;
   }
 
+  // Plausibility bound, not a real anti-spoofing system (that needs device attestation) —
+  // rejects the cheap case of a malformed/off-the-map coordinate (e.g. 0,0 from a stubbed
+  // location API) while still allowing a legitimate vendor working anywhere in India.
+  private isPlausibleIndianCoordinate(lat?: number, lng?: number): boolean {
+    if (lat == null || lng == null) return true;
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
+  }
+
   async checkIn(userId: string, lat?: number, lng?: number) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
+    if (!this.isPlausibleIndianCoordinate(lat, lng)) {
+      throw new BadRequestException('Location looks invalid — please enable GPS and try again');
+    }
     const date = this.todayDate();
+    // One check-in per (vendor, date): a second call must not silently overwrite the first
+    // check-in's timestamp/location, which is exactly what the previous upsert did.
+    const existing = await this.prisma.vendorAttendance.findUnique({ where: { vendorId_date: { vendorId: v.id, date } } });
+    if (existing?.checkInAt) {
+      throw new BadRequestException('You have already checked in today');
+    }
     return this.prisma.vendorAttendance.upsert({
       where: { vendorId_date: { vendorId: v.id, date } },
       create: { vendorId: v.id, date, checkInAt: new Date(), checkInLat: lat, checkInLng: lng },
@@ -79,10 +158,16 @@ export class ServiceVendorsService {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
     const date = this.todayDate();
-    return this.prisma.vendorAttendance.upsert({
+    const existing = await this.prisma.vendorAttendance.findUnique({ where: { vendorId_date: { vendorId: v.id, date } } });
+    if (!existing?.checkInAt) {
+      throw new BadRequestException('You must check in before checking out');
+    }
+    if (existing.checkOutAt) {
+      throw new BadRequestException('You have already checked out today');
+    }
+    return this.prisma.vendorAttendance.update({
       where: { vendorId_date: { vendorId: v.id, date } },
-      create: { vendorId: v.id, date, checkOutAt: new Date() },
-      update: { checkOutAt: new Date() },
+      data: { checkOutAt: new Date() },
     });
   }
 
@@ -111,8 +196,11 @@ export class ServiceVendorsService {
   async myJobs(userId: string, status?: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException();
+    if (status && !Object.values(OrderStatus).includes(status as OrderStatus)) {
+      throw new BadRequestException('Invalid order status');
+    }
     return this.prisma.order.findMany({
-      where: { vendorId: v.id, ...(status ? { status: status as any } : {}) },
+      where: { vendorId: v.id, ...(status ? { status: status as OrderStatus } : {}) },
       include: {
         customer: { select: { name: true, phone: true } },
         service: true, address: true, extraWorkItems: true,
@@ -123,51 +211,71 @@ export class ServiceVendorsService {
   }
 
   async availableJobs(userId: string) {
-    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
-    if (!v) throw new NotFoundException();
+    const v = await this.requireActiveVendor(userId);
 
     // Same category-matching rule as DispatchService's WhatsApp push, so what a vendor
     // sees when they manually check is never a superset of what they'd be notified for.
     const orders = await this.prisma.order.findMany({
       where: {
         vendorId: null,
-        status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] as any[] },
+        // PENDING_PAYMENT orders are not a job offer. Confirmed COD orders remain
+        // eligible, because their lifecycle status is CONFIRMED.
+        status: OrderStatus.CONFIRMED,
         service: { category: { key: { in: v.skills } } },
       },
       include: {
         service: { select: { name: true, categoryId: true } },
-        address: { select: { fullAddress: true, city: true, pincode: true, latitude: true, longitude: true } },
+        // Use coordinates only for eligibility; do not reveal an unassigned customer's
+        // full address, pincode or precise location.
+        address: { select: { city: true, latitude: true, longitude: true } },
       },
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
 
-    // Proximity: prefer live location + service radius (matches DispatchService); fall
-    // back to same-city matching if the vendor hasn't shared a live location yet.
-    if (v.currentLatitude != null && v.currentLongitude != null) {
-      return orders
-        .filter((o) => {
-          if (o.address?.latitude == null || o.address?.longitude == null) return true;
-          return haversineKm(v.currentLatitude!, v.currentLongitude!, o.address.latitude, o.address.longitude) <= v.serviceRadius;
-        })
-        .slice(0, 20);
-    }
     return orders
-      .filter((o) => !o.address?.city || o.address.city.toLowerCase() === v.baseCity.toLowerCase())
-      .slice(0, 20);
+      .filter((o) => this.isEligibleForOrder(v, o))
+      .slice(0, 20)
+      .map(({ address, ...order }) => ({ ...order, address: address ? { city: address.city } : null }));
   }
 
   async acceptJob(userId: string, orderId: string) {
-    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
-    if (!v) throw new NotFoundException();
-    if (v.memberStatus === 'FROZEN') throw new ForbiddenException('Your account is frozen — contact your agency or Remont support');
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!order) throw new NotFoundException();
-    if (order.vendorId && order.vendorId !== v.id) throw new BadRequestException('Already assigned');
-
-    const updated = await this.prisma.order.update({
+    const v = await this.requireActiveVendor(userId);
+    const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      data: { vendorId: v.id, status: 'VENDOR_ASSIGNED' },
+      include: { service: { include: { category: { select: { key: true } } } }, address: true },
+    });
+    if (!order) throw new NotFoundException();
+    if (order.vendorId || order.status !== OrderStatus.CONFIRMED) {
+      throw new BadRequestException('This job is no longer available');
+    }
+    if (!this.isEligibleForOrder(v, order)) {
+      throw new ForbiddenException('This job is not available to your vendor account');
+    }
+
+    // Resolved before the transaction — reading a SiteSetting doesn't need to be part of
+    // the atomic claim, only the debit itself does.
+    const leadCostAmount = await this.ledger.getLeadCostAmount();
+
+    // This conditional update is the claim lock: only one concurrent request can change
+    // an unassigned confirmed order to VENDOR_ASSIGNED. The Lead Cost debit rides in the
+    // same transaction so a vendor is never charged for a claim that didn't actually win.
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.order.updateMany({
+        where: { id: orderId, vendorId: null, status: OrderStatus.CONFIRMED },
+        data: { vendorId: v.id, status: 'VENDOR_ASSIGNED' },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This job was just assigned to another vendor');
+      }
+      if (leadCostAmount > 0) {
+        await tx.order.update({ where: { id: orderId }, data: { leadCostAmount } });
+        await this.ledger.postLeadCost(tx, v.id, orderId, leadCostAmount);
+        await tx.serviceVendor.update({ where: { id: v.id }, data: { pendingPayout: { decrement: leadCostAmount } } });
+      }
+    });
+    const updated = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
       include: { customer: true, address: true, service: true },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: 'VENDOR_ASSIGNED', actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
@@ -203,8 +311,7 @@ export class ServiceVendorsService {
   // different (and here, incomplete) business logic.
 
   async getJobDetail(userId: string, orderId: string) {
-    const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
-    if (!v) throw new NotFoundException();
+    const v = await this.requireActiveVendor(userId);
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -213,7 +320,7 @@ export class ServiceVendorsService {
       },
     });
     if (!order) throw new NotFoundException();
-    if (order.vendorId && order.vendorId !== v.id) throw new ForbiddenException();
+    if (order.vendorId !== v.id) throw new ForbiddenException('This job is not assigned to you');
     return order;
   }
 }
@@ -224,11 +331,11 @@ export class ServiceVendorsService {
 @Controller('vendors/service')
 export class ServiceVendorsController {
   constructor(private vs: ServiceVendorsService) {}
-  @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.vs.register(u.sub, b); }
+  @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: ServiceVendorRegistrationDto) { return this.vs.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
-  @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: { lat: number; lng: number }) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
-  @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: { isOnline: boolean }) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
-  @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: { lat?: number; lng?: number }) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
+  @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: VendorLocationDto) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
+  @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: VendorOnlineStatusDto) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
+  @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
   @Patch('me/attendance/check-out') checkOut(@CurrentUser() u: JwtPayload) { return this.vs.checkOut(u.sub); }
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
   @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }

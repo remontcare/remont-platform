@@ -138,6 +138,9 @@ export class ProductsService {
   async create(userId: string, data: any) {
     const vendor = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!vendor) throw new ForbiddenException('Not a product vendor');
+    if (vendor.status !== 'ACTIVE') {
+      throw new ForbiddenException('Your seller account is not approved to publish products');
+    }
 
     const slug = slugify(`${data.name}-${Date.now()}`);
     const sku = data.sku || `RMNT-${Date.now()}`;
@@ -162,6 +165,9 @@ export class ProductsService {
   async update(userId: string, id: string, data: any) {
     const vendor = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!vendor) throw new ForbiddenException('Not a vendor');
+    if (vendor.status !== 'ACTIVE') {
+      throw new ForbiddenException('Your seller account is not approved to update products');
+    }
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing || existing.vendorId !== vendor.id) throw new ForbiddenException();
     // Strip vendorId (a seller must never reassign their own product to a different vendor

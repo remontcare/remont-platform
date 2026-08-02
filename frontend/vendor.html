@@ -579,6 +579,25 @@ function apiFetch(path, opts, _isRetry){
 }
 function fmtMoney(n){ return '₹' + Number(n||0).toLocaleString('en-IN'); }
 
+// Keep API and user supplied values as text whenever this portal renders HTML.
+// This page uses a few template-based views, so centralising the encoder makes
+// those views safe without changing their layout or behaviour.
+function escapeHtml(value){
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(char){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char];
+  });
+}
+
+function mapsNavigationHref(lat, lng){
+  var latitude = Number(lat);
+  var longitude = Number(lng);
+  if (Number.isFinite(latitude) && Number.isFinite(longitude) &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180) {
+    return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(latitude + ',' + longitude);
+  }
+  return 'https://www.google.com/maps/dir/?api=1&destination=23.2599,77.4126';
+}
+
 /* ── LANG ── */
 function setLang(l){LANG=l;document.querySelectorAll('.lang-btn').forEach(function(b){b.classList.remove('active')});
   event.target.classList.add('active');
@@ -732,38 +751,28 @@ function loadRefundRequests(){
     var el = document.getElementById('refund-requests-list');
     var pending = (list || []).filter(function(r){ return r.status === 'REQUESTED'; });
     if (!pending.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Nothing needs your response right now</div></div>'; return; }
-    el.innerHTML = pending.map(function(r){
+    el.innerHTML = pending.map(function(r, index){
       return '<div class="customer-card" style="margin-bottom:10px">' +
         '<div style="font-size:12px;color:#6b7280;margin-bottom:4px">' + new Date(r.createdAt).toLocaleDateString('en-IN') + '</div>' +
-        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + escapeHtmlRR(r.reason) + '</div>' +
-        '<textarea id="rr-resp-' + r.id + '" rows="2" placeholder="Your response to this refund request…" style="width:100%;border:1px solid var(--mist);border-radius:8px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box;margin-bottom:8px"></textarea>' +
-        '<button class="btn-outline" style="width:100%" onclick="respondToRefund(\'' + r.id + '\')">Submit Response</button>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + escapeHtml(r.reason) + '</div>' +
+        '<textarea id="rr-resp-' + index + '" rows="2" placeholder="Your response to this refund request…" style="width:100%;border:1px solid var(--mist);border-radius:8px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box;margin-bottom:8px"></textarea>' +
+        '<button class="btn-outline refund-response-btn" style="width:100%" data-refund-index="' + index + '">Submit Response</button>' +
         '</div>';
     }).join('');
+    el.querySelectorAll('.refund-response-btn').forEach(function(button){
+      button.addEventListener('click', function(){
+        var index = Number(button.getAttribute('data-refund-index'));
+        var request = pending[index];
+        var textEl = document.getElementById('rr-resp-' + index);
+        if (request && textEl) respondToRefund(request.id, textEl);
+      });
+    });
   }).catch(function(e){ console.warn('refund requests load failed', e.message); });
 }
-function escapeHtmlRR(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-// For a value embedded as a single-quoted JS string argument inside an inline
-// onclick="...('...')" attribute (team roster "Request Freeze" button below) — NOT a
-// substitute for escapeHtmlRR() on plain text content. The browser HTML-decodes attribute
-// values before parsing them as JS, so HTML-entity-escaping a quote decodes right back to
-// ' before the JS parser sees it and does not prevent breaking out of the string literal
-// (e.g. via a partner's own self-set fullName containing one). This escapes the
-// backslash/quote for the JS layer first, then HTML-escapes the result for the attribute.
-function escapeJsAttr(s){
-  return String(s||'')
-    .replace(/\\/g,'\\\\')
-    .replace(/'/g,"\\'")
-    .replace(/&/g,'&amp;')
-    .replace(/"/g,'&quot;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
-}
-function respondToRefund(id){
-  var textEl = document.getElementById('rr-resp-' + id);
+function respondToRefund(id, textEl){
   var response = textEl.value.trim();
   if (!response) { alert('Please enter your response'); return; }
-  apiFetch('/refunds/' + id + '/partner-respond', { method:'POST', body: JSON.stringify({ response: response }) })
+  apiFetch('/refunds/' + encodeURIComponent(String(id)) + '/partner-respond', { method:'POST', body: JSON.stringify({ response: response }) })
     .then(function(){ loadRefundRequests(); })
     .catch(function(e){ alert('Could not submit response: ' + e.message); });
 }
@@ -780,7 +789,7 @@ function togglePayoutHistory(){
       el.innerHTML = list.map(function(s){
         var date = new Date(s.paidAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
         var modeLabel = {BANK_TRANSFER:'Bank Transfer', UPI:'UPI', CASH:'Cash', CHEQUE:'Cheque'}[s.mode] || s.mode;
-        return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+modeLabel+(s.referenceNumber?' · '+s.referenceNumber:'')+'</div><div class="tr-date">'+date+'</div></div><div class="txn-amt pos">'+fmtMoney(s.amount)+'</div></div>';
+        return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+escapeHtml(modeLabel)+(s.referenceNumber?' · '+escapeHtml(s.referenceNumber):'')+'</div><div class="tr-date">'+escapeHtml(date)+'</div></div><div class="txn-amt pos">'+fmtMoney(s.amount)+'</div></div>';
       }).join('');
     }).catch(function(e){
       document.getElementById('payout-history-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load payout history</div></div>';
@@ -818,12 +827,13 @@ function statusLabel(s){
   return map[s]||s;
 }
 function jobCardHtml(j){
+  j = j || {};
   var title=((j.service&&j.service.name)||'Service')+' — '+((j.customer&&j.customer.name)||'Customer');
   var meta=((j.address&&j.address.city)||'')+' · '+new Date(j.createdAt).toLocaleDateString('en-IN');
   var amt=fmtMoney(j.status==='COMPLETED' ? j.vendorPayout : j.totalAmount);
   var badgeClass = j.status==='COMPLETED' ? 'done' : 'active';
   var clickable = j.status!=='COMPLETED' && j.status!=='CANCELLED';
-  return `<div class="job-card" data-order-id="${j.id}" data-clickable="${clickable}"><div class="jc-icon">🔧</div><div class="jc-info"><div class="jc-title">${title}</div><div class="jc-meta">${meta}</div></div><div class="jc-right"><div class="jc-amount">${amt}</div><span class="badge ${badgeClass}">${statusLabel(j.status)}</span></div></div>`;
+  return `<div class="job-card" data-order-id="${escapeHtml(j.id)}" data-clickable="${clickable}"><div class="jc-icon">🔧</div><div class="jc-info"><div class="jc-title">${escapeHtml(title)}</div><div class="jc-meta">${escapeHtml(meta)}</div></div><div class="jc-right"><div class="jc-amount">${amt}</div><span class="badge ${badgeClass}">${escapeHtml(statusLabel(j.status))}</span></div></div>`;
 }
 function attachJobCardClicks(container){
   container.querySelectorAll('.job-card[data-clickable="true"]').forEach(function(card){
@@ -852,7 +862,7 @@ function renderTransactions(){
   el.innerHTML = completed.map(function(j){
     var title=((j.service&&j.service.name)||'Service')+' Payment';
     var date = j.completedAt ? new Date(j.completedAt).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}) : '';
-    return `<div class="txn-row"><div class="txn-info"><div class="tr-title">${title}</div><div class="tr-date">${date}</div></div><div class="txn-amt pos">+${fmtMoney(j.vendorPayout)}</div></div>`;
+    return `<div class="txn-row"><div class="txn-info"><div class="tr-title">${escapeHtml(title)}</div><div class="tr-date">${escapeHtml(date)}</div></div><div class="txn-amt pos">+${fmtMoney(j.vendorPayout)}</div></div>`;
   }).join('');
 }
 function resumeJob(orderId){
@@ -944,23 +954,27 @@ function renderJfStep(){
   var s=jfState.step;
   var html='', foot='';
   var d=jfDisplay();
+  var customerText=escapeHtml(d.customer);
+  var serviceText=escapeHtml(d.service);
+  var areaText=escapeHtml(d.area);
+  var addressText=escapeHtml(d.address);
 
   if(s===1){
     html = `<div class="jf-step-tag">Step 1 of 9 — Accepted</div><div class="jf-title">Job Accepted!</div>
       <div class="jf-sub">Here are the partial job details. Full address unlocks once you start.</div>
-      <div class="customer-card"><div class="cc-top"><div class="cc-avatar">🧑</div><div><div class="cc-name">${d.customer}</div><div class="cc-phone">Contact unlocks after start</div></div></div>
-      <div class="cc-detail-row"><span class="cdl">Service</span><span class="cdr">${d.service}</span></div>
-      <div class="cc-detail-row"><span class="cdl">Area</span><span class="cdr">${d.area}</span></div>
+      <div class="customer-card"><div class="cc-top"><div class="cc-avatar">🧑</div><div><div class="cc-name">${customerText}</div><div class="cc-phone">Contact unlocks after start</div></div></div>
+      <div class="cc-detail-row"><span class="cdl">Service</span><span class="cdr">${serviceText}</span></div>
+      <div class="cc-detail-row"><span class="cdl">Area</span><span class="cdr">${areaText}</span></div>
       <div class="cc-detail-row"><span class="cdl">Est. Amount</span><span class="cdr">${fmtMoney(d.amount)}</span></div></div>`;
     foot = `<button class="btn-primary" id="jf-start-btn" onclick="jfStartHeading()">Start Job →</button>` +
       (!jfState.mock && jfState.orderId ? `<button class="btn-outline" style="width:100%;margin-top:10px;color:var(--error);border-color:var(--error)" onclick="jfRejectJob()">Can't take this job</button>` : '');
   }
   else if(s===2){
-    var mapHref = (!jfState.mock && d.lat && d.lng) ? `https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}` : 'https://www.google.com/maps/dir/?api=1&destination=23.2599,77.4126';
+    var mapHref = jfState.mock ? mapsNavigationHref() : mapsNavigationHref(d.lat, d.lng);
     html = `<div class="jf-step-tag">Step 2 of 9 — En Route</div><div class="jf-title">Head to Customer</div>
       <div class="jf-sub">Navigate to the customer location using Google Maps.</div>
-      <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${d.address||'Unlocked after accept'}</span></div></div>`;
-    foot = `<a class="map-nav-btn" href="${mapHref}" target="_blank">🗺️ Start Navigation</a>
+      <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${addressText||'Unlocked after accept'}</span></div></div>`;
+    foot = `<a class="map-nav-btn" href="${escapeHtml(mapHref)}" target="_blank" rel="noopener noreferrer">🗺️ Start Navigation</a>
       <button class="btn-primary" onclick="jfGoto(3)">I've Arrived →</button>`;
   }
   else if(s===3){
@@ -984,7 +998,7 @@ function renderJfStep(){
   else if(s===5){
     html = `<div class="jf-step-tag">Step 5 of 9 — Working</div><div class="jf-title">Job In Progress</div>
       <div class="jf-sub">Add extra work if needed, or mark the job complete.</div>
-      <div class="customer-card" style="text-align:center;padding:30px 18px"><div style="font-size:40px;margin-bottom:10px">🔧</div><div style="font-weight:700;font-size:15px">Working on: ${d.service}</div></div>`;
+      <div class="customer-card" style="text-align:center;padding:30px 18px"><div style="font-size:40px;margin-bottom:10px">🔧</div><div style="font-weight:700;font-size:15px">Working on: ${serviceText}</div></div>`;
     foot = `<div style="display:flex;gap:10px"><button class="btn-outline" style="flex:1" onclick="jfGoto(6)">+ Extra Work</button><button class="btn-primary" style="flex:1" onclick="jfGoto(7)">Mark Complete →</button></div>`;
   }
   else if(s===6){
@@ -1141,11 +1155,15 @@ function addPhoto(input,arrName,gridId){
 }
 function renderPhotoGrid(arrName,gridId){
   var grid=document.getElementById(gridId); if(!grid)return;
-  grid.innerHTML=jfState[arrName].map(function(src,i){
-    return `<div class="photo-thumb"><img src="${src}"><div class="pt-x" data-arr="${arrName}" data-grid="${gridId}" data-i="${i}">✕</div></div>`;
-  }).join('');
-  grid.querySelectorAll('.pt-x').forEach(function(x){
-    x.addEventListener('click', function(){ removePhoto(x.getAttribute('data-arr'), x.getAttribute('data-grid'), parseInt(x.getAttribute('data-i'),10)); });
+  grid.textContent='';
+  jfState[arrName].forEach(function(src,i){
+    var thumb=document.createElement('div'); thumb.className='photo-thumb';
+    var image=document.createElement('img'); image.src=String(src); image.alt='Uploaded job photo';
+    var remove=document.createElement('div'); remove.className='pt-x'; remove.textContent='✕';
+    remove.addEventListener('click', function(){ removePhoto(arrName, gridId, i); });
+    thumb.appendChild(image);
+    thumb.appendChild(remove);
+    grid.appendChild(thumb);
   });
   var btnId = arrName==='photosBefore' ? 'before-next-btn' : 'after-next-btn';
   var btn=document.getElementById(btnId); if(btn) btn.disabled = jfState[arrName].length===0;
@@ -1161,7 +1179,7 @@ function addExtraItem(){
 }
 function renderExtraList(){
   var wrap=document.getElementById('extra-list'); if(!wrap)return;
-  wrap.innerHTML=jfState.extras.map(function(e){ return `<div class="extra-item"><span>${e.description}</span><span style="font-weight:700">${fmtMoney(e.amount)}</span></div>`; }).join('');
+  wrap.innerHTML=jfState.extras.map(function(e){ return `<div class="extra-item"><span>${escapeHtml(e.description)}</span><span style="font-weight:700">${fmtMoney(e.amount)}</span></div>`; }).join('');
 }
 function sendExtraForApproval(){
   var pending=jfState.extras.filter(function(e){return e._pending;});
@@ -1279,14 +1297,20 @@ function loadTeamMembers(){
   apiFetch('/vendors/agency/members').then(function(list){
     var el = document.getElementById('team-list');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No team members yet</div></div>'; return; }
-    el.innerHTML = list.map(function(m){
+    el.innerHTML = list.map(function(m, index){
       var statusMap = {PENDING_APPROVAL:'Pending Approval', ACTIVE:'Active', FROZEN:'Frozen', REJECTED:'Rejected'};
       var sub = '⭐ '+Number(m.rating||0).toFixed(1)+' · '+((m.skills&&m.skills[0])||'Partner')+' · '+(statusMap[m.memberStatus]||m.memberStatus||'—');
-      return '<div class="team-row"><div class="team-avatar">👨‍🔧</div><div class="team-info"><div class="team-name">'+escapeHtmlRR(m.fullName)+'</div><div class="team-sub">'+sub+'</div></div>'+
-        (m.memberStatus==='FROZEN' ? '' : '<button class="team-remove" onclick="requestFreezeMember(\''+m.id+'\',\''+escapeJsAttr(m.fullName)+'\')">Request Freeze</button>') +
+      return '<div class="team-row"><div class="team-avatar">👨‍🔧</div><div class="team-info"><div class="team-name">'+escapeHtml(m.fullName)+'</div><div class="team-sub">'+escapeHtml(sub)+'</div></div>'+
+        (m.memberStatus==='FROZEN' ? '' : '<button class="team-remove" data-member-index="'+index+'">Request Freeze</button>') +
         '</div>';
     }).join('');
-  }).catch(function(e){ document.getElementById('team-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team: '+e.message+'</div></div>'; });
+    el.querySelectorAll('.team-remove[data-member-index]').forEach(function(button){
+      button.addEventListener('click', function(){
+        var member = list[Number(button.getAttribute('data-member-index'))];
+        if (member) requestFreezeMember(member.id, member.fullName);
+      });
+    });
+  }).catch(function(e){ document.getElementById('team-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team: '+escapeHtml(e.message)+'</div></div>'; });
 }
 function addMember(){
   var phone = prompt('Team member\'s 10-digit mobile number:');
@@ -1313,9 +1337,9 @@ function loadTeamAttendance(){
     el.innerHTML = list.map(function(a){
       var inT = a.checkInAt ? new Date(a.checkInAt).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'}) : '—';
       var outT = a.checkOutAt ? new Date(a.checkOutAt).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'}) : '—';
-      return '<div class="team-row"><div class="team-avatar">🕐</div><div class="team-info"><div class="team-name">'+escapeHtmlRR(a.vendor.fullName)+'</div><div class="team-sub">In '+inT+' · Out '+outT+'</div></div></div>';
+      return '<div class="team-row"><div class="team-avatar">🕐</div><div class="team-info"><div class="team-name">'+escapeHtml(a.vendor.fullName)+'</div><div class="team-sub">In '+escapeHtml(inT)+' · Out '+escapeHtml(outT)+'</div></div></div>';
     }).join('');
-  }).catch(function(e){ document.getElementById('team-attendance-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load attendance: '+e.message+'</div></div>'; });
+  }).catch(function(e){ document.getElementById('team-attendance-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load attendance: '+escapeHtml(e.message)+'</div></div>'; });
 }
 
 /* ── PARTNER LEDGER & WITHDRAWALS ── */
@@ -1328,10 +1352,10 @@ function loadMyLedger(){
   }).catch(function(e){ console.warn('ledger load failed', e.message); });
 }
 function ledgerRowHtml(l){
-  var typeLabel = {JOB_EARNING:'Job Earning', INCENTIVE:'Incentive', BONUS:'Bonus', PENALTY:'Penalty', ADVANCE:'Advance', ADJUSTMENT:'Adjustment', COMMISSION:'Commission', WITHDRAWAL:'Withdrawal', GST:'GST', TDS:'TDS'}[l.type] || l.type;
+  var typeLabel = {JOB_EARNING:'Job Earning', INCENTIVE:'Incentive', BONUS:'Bonus', PENALTY:'Penalty', ADVANCE:'Advance', ADJUSTMENT:'Adjustment', COMMISSION:'Commission', WITHDRAWAL:'Withdrawal', GST:'GST', TDS:'TDS', LEAD_COST:'Lead Cost', HOLD:'Held', HOLD_RELEASE:'Hold Released'}[l.type] || l.type;
   var amt = Number(l.amount);
   var date = new Date(l.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
-  return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+typeLabel+'</div><div class="tr-date">'+date+' · Balance '+fmtMoney(l.balanceAfter)+'</div></div><div class="txn-amt '+(amt>=0?'pos':'neg')+'">'+(amt>=0?'+':'')+fmtMoney(amt)+'</div></div>';
+  return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+escapeHtml(typeLabel)+'</div><div class="tr-date">'+escapeHtml(date)+' · Balance '+fmtMoney(l.balanceAfter)+'</div></div><div class="txn-amt '+(amt>=0?'pos':'neg')+'">'+(amt>=0?'+':'')+fmtMoney(amt)+'</div></div>';
 }
 var withdrawalsMine = [], teamLedgerTotal = 0;
 function loadTeamLedger(){
@@ -1342,9 +1366,11 @@ function loadTeamLedger(){
     var el = document.getElementById('team-ledger-list');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No team members yet</div></div>'; return; }
     el.innerHTML = list.map(function(m){
-      return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+escapeHtmlRR(m.fullName)+'</div><div class="tr-date">'+(m.completedJobs||0)+' jobs · ⭐ '+Number(m.rating||0).toFixed(1)+'</div></div><div class="txn-amt pos">'+fmtMoney(m.balance)+'</div></div>';
+      var completedJobs=Number(m.completedJobs||0);
+      if (!Number.isFinite(completedJobs)) completedJobs=0;
+      return '<div class="txn-row"><div class="txn-info"><div class="tr-title">'+escapeHtml(m.fullName)+'</div><div class="tr-date">'+completedJobs+' jobs · ⭐ '+Number(m.rating||0).toFixed(1)+'</div></div><div class="txn-amt pos">'+fmtMoney(m.balance)+'</div></div>';
     }).join('');
-  }).catch(function(e){ document.getElementById('team-ledger-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team ledger: '+e.message+'</div></div>'; });
+  }).catch(function(e){ document.getElementById('team-ledger-list').innerHTML = '<div class="empty-state"><div class="es-text">Could not load team ledger: '+escapeHtml(e.message)+'</div></div>'; });
 }
 function loadWithdrawals(){
   apiFetch('/vendors/withdrawals/me').then(function(list){
@@ -1360,7 +1386,7 @@ function renderWithdrawalHistory(){
   var badgeClass = {PENDING:'pending', APPROVED:'active', PAID:'done', REJECTED:'pending'};
   el.innerHTML = withdrawalsMine.map(function(w){
     var date = new Date(w.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
-    return '<div class="txn-row"><div class="txn-info"><div class="tr-title">Withdrawal Request</div><div class="tr-date">'+date+'</div></div><div style="text-align:right"><div class="txn-amt">'+fmtMoney(w.amount)+'</div><span class="badge '+(badgeClass[w.status]||'pending')+'">'+w.status+'</span></div></div>';
+    return '<div class="txn-row"><div class="txn-info"><div class="tr-title">Withdrawal Request</div><div class="tr-date">'+escapeHtml(date)+'</div></div><div style="text-align:right"><div class="txn-amt">'+fmtMoney(w.amount)+'</div><span class="badge '+(badgeClass[w.status]||'pending')+'">'+escapeHtml(w.status)+'</span></div></div>';
   }).join('');
 }
 function updateAvailableBalanceDisplay(){
@@ -1384,16 +1410,27 @@ function requestWithdrawal(){
 
 /* ── AI CHAT ── */
 function toggleAI(){ var p=document.getElementById('ai-panel'); p.style.display = p.style.display==='flex' ? 'none':'flex'; }
+function appendAiMessage(wrap, message, isVendor){
+  var bubble=document.createElement('div');
+  bubble.style.background=isVendor ? 'var(--sienna)' : 'var(--cream)';
+  bubble.style.padding='10px 14px';
+  bubble.style.borderRadius='14px';
+  bubble.style.fontSize='13px';
+  bubble.style.maxWidth='85%';
+  if(isVendor) { bubble.style.color='#fff'; bubble.style.borderBottomRightRadius='4px'; bubble.style.alignSelf='flex-end'; }
+  else { bubble.style.borderBottomLeftRadius='4px'; }
+  bubble.textContent=String(message == null ? '' : message);
+  wrap.appendChild(bubble);
+  wrap.scrollTop=wrap.scrollHeight;
+}
 function aiSend(){
   var input=document.getElementById('ai-input'); var msg=input.value.trim(); if(!msg)return;
   var wrap=document.getElementById('ai-msgs');
-  wrap.innerHTML += `<div style="background:var(--sienna);color:#fff;padding:10px 14px;border-radius:14px;border-bottom-right-radius:4px;font-size:13px;max-width:85%;align-self:flex-end">${msg}</div>`;
+  appendAiMessage(wrap, msg, true);
   input.value='';
   setTimeout(function(){
-    wrap.innerHTML += '<div style="background:var(--cream);padding:10px 14px;border-radius:14px;border-bottom-left-radius:4px;font-size:13px;max-width:85%">This is a demo response. In the live app I will answer using your real job & account data.</div>';
-    wrap.scrollTop=wrap.scrollHeight;
+    appendAiMessage(wrap, 'This is a demo response. In the live app I will answer using your real job & account data.', false);
   },600);
-  wrap.scrollTop=wrap.scrollHeight;
 }
 
 /* ── SESSION RESTORE ── */
