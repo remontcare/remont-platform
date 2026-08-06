@@ -26,4 +26,4 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>&1 && echo '✓ Schema pushed' || echo '⚠ DB push failed'; node dist/main"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>&1 || echo '⚠ DB push failed'; exec node dist/main"]
