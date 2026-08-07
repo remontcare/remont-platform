@@ -5124,6 +5124,10 @@
     }
   };
 
+  // Escape value for safe use inside HTML markup. Must be defined before renderService()
+  // is called further down in this same block.
+  function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(char){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }
+
   // Escape value for safe use inside inline JS string attributes
   function escJs(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
@@ -8353,8 +8357,6 @@ function renderCartDrawer() {
     '<button onclick="cartCheckout()" style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px">Proceed to Book →</button>' +
     '<button onclick="cartClear()" style="width:100%;padding:10px;background:none;border:1.5px solid #e5e7eb;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer;color:#6b7280">Clear Cart</button>';
 }
-
-function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(char){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }
 
 function cartQty(idx, delta) {
   var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
