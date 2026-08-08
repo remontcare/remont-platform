@@ -306,3 +306,78 @@ footer.site-footer { background: #111; color: rgba(255,255,255,0.6); padding: 64
 .svp-avail-success { display: none; text-align: center; color: var(--success); font-weight: 600; font-size: 13.5px; padding: 12px 0; }
 .svp-avail-success.show { display: block; }
 .svp-avail-modal.submitted .svp-avail-form, .svp-avail-modal.submitted [data-svp-avail-submit] { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CUSTOMER JOURNEY SELECTOR — new, purely additive section between the Hero
+   and the existing 5-tab sub-nav. Does not replace or alter the sub-nav.
+   ══════════════════════════════════════════════════════════════════════════ */
+.svp-journey { padding: 48px 0 56px; background: var(--cream); }
+.svp-journey-head { text-align: center; max-width: 560px; margin: 0 auto 32px; }
+.svp-journey-head h2 { font-family: var(--ff-display); font-size: clamp(24px, 2.8vw, 32px); font-weight: 600; margin-bottom: 8px; }
+.svp-journey-head p { color: var(--txt-muted); font-size: 14.5px; }
+.svp-journey-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 900px; margin: 0 auto; }
+.svp-journey-choice { background: #fff; border: 2px solid var(--mist); border-radius: var(--radius-lg); padding: 28px 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.svp-journey-choice:hover { border-color: var(--sienna); box-shadow: var(--shadow); }
+.svp-journey-choice.active { border-color: var(--sienna); background: #fff7f3; }
+.svp-journey-choice .ic { font-size: 34px; margin-bottom: 10px; }
+.svp-journey-choice h3 { font-family: var(--ff-display); font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+.svp-journey-choice p { color: var(--txt-muted); font-size: 13px; line-height: 1.5; }
+@media (max-width: 700px) { .svp-journey-choices { grid-template-columns: 1fr; } }
+
+.svp-journey-path { display: none; max-width: 1000px; margin: 32px auto 0; }
+.svp-journey-path.open { display: block; }
+.svp-journey-step { background: #fff; border: 1px solid var(--mist); border-radius: var(--radius-lg); padding: 24px; margin-bottom: 18px; }
+.svp-journey-step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.svp-journey-step-head .num { width: 26px; height: 26px; border-radius: 50%; background: var(--sienna); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; flex-shrink: 0; }
+.svp-journey-step-head h4 { font-size: 15px; font-weight: 700; }
+.svp-journey-step-sub { font-size: 12.5px; color: var(--txt-muted); margin: -8px 0 14px 36px; }
+
+/* Inspiration gallery */
+.svp-insp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.svp-insp-card { position: relative; border-radius: var(--radius); overflow: hidden; aspect-ratio: 1; cursor: pointer; }
+.svp-insp-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s; }
+.svp-insp-card:hover img { transform: scale(1.05); }
+.svp-insp-card .tag { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 100px; }
+@media (max-width: 600px) { .svp-insp-grid { grid-template-columns: 1fr 1fr; } }
+
+/* Budget estimator */
+.svp-estimator-row { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 10px; align-items: end; }
+.svp-estimator-row label { display: block; font-size: 11.5px; font-weight: 600; color: var(--txt-muted); margin-bottom: 5px; }
+.svp-estimator-row select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--mist); background: var(--cream); font-family: var(--ff-body); font-size: 13px; }
+.svp-estimate-result { display: none; margin-top: 16px; padding: 14px 18px; background: rgba(196,96,26,0.07); border-radius: var(--radius); font-size: 14px; }
+.svp-estimate-result.show { display: block; }
+.svp-estimate-result strong { color: var(--sienna); font-size: 17px; }
+@media (max-width: 700px) { .svp-estimator-row { grid-template-columns: 1fr 1fr; } .svp-estimator-row > *:nth-child(4) { grid-column: 1 / -1; } }
+
+/* Designer matching + filters */
+.svp-filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.svp-filter-bar select { padding: 8px 12px; border-radius: 8px; border: 1.5px solid var(--mist); background: #fff; font-size: 12.5px; font-family: var(--ff-body); }
+.svp-designer-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.svp-designer-card { border: 1.5px solid var(--mist); border-radius: var(--radius); padding: 16px; display: flex; gap: 12px; align-items: flex-start; transition: border-color 0.2s; }
+.svp-designer-card.selected { border-color: var(--sienna); background: #fff7f3; }
+.svp-designer-card .av { font-size: 26px; width: 44px; height: 44px; border-radius: 50%; background: var(--cream); display: grid; place-items: center; flex-shrink: 0; }
+.svp-designer-card .nm { font-weight: 700; font-size: 14px; }
+.svp-designer-card .meta { font-size: 11.5px; color: var(--txt-muted); margin: 2px 0 8px; }
+.svp-designer-card .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.svp-designer-card .tag { font-size: 10.5px; font-weight: 600; padding: 2px 9px; border-radius: 100px; background: var(--cream); color: var(--graphite); }
+.svp-designer-card label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.svp-designer-card.hidden { display: none; }
+@media (max-width: 700px) { .svp-designer-grid { grid-template-columns: 1fr; } }
+
+/* Kitchen add-on */
+.svp-addon-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.svp-addon-chip { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 100px; border: 1.5px solid var(--mist); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.svp-addon-chip.selected { border-color: var(--sienna); background: #fff7f3; color: var(--sienna); }
+
+/* Compare table */
+.svp-compare-wrap { overflow-x: auto; margin-top: 8px; }
+.svp-compare-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 480px; }
+.svp-compare-table th, .svp-compare-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--mist); }
+.svp-compare-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--txt-muted); }
+.svp-compare-table td.hl { color: var(--sienna); font-weight: 700; }
+
+/* Stage 4 — informational only, not a fake live dashboard */
+.svp-stage4-strip { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.svp-stage4-item { flex: 1; min-width: 120px; text-align: center; font-size: 12.5px; font-weight: 600; }
+.svp-stage4-item .ic { font-size: 22px; display: block; margin-bottom: 6px; }
+.svp-stage4-arrow { color: var(--mist); font-size: 18px; }

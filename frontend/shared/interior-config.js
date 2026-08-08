@@ -83,6 +83,60 @@ window.INTERIOR_CONFIG = {
     wallColours: ['Warm White', 'Beige', 'Sage', 'Charcoal', 'Blue'],
   },
 
+  /* ── Customer journey — "Just Exploring" (self-planning) vs "Ready to
+     Build" (designer matching) paths shown in the new journey selector
+     section. Pure addition — none of the existing tabs read from this. ── */
+  journey: {
+    budgetEstimator: {
+      // priceAnchorSlug must match a slug in services.residential/commercial
+      // above — the estimator reads that item's priceLabel as its base.
+      spaceOptions: [
+        { label: 'Full Home', priceAnchorSlug: 'full-home-interior' },
+        { label: 'Modular Kitchen', priceAnchorSlug: 'modular-kitchen' },
+        { label: 'Bedroom', priceAnchorSlug: 'bedroom-interior' },
+        { label: 'Living Room', priceAnchorSlug: 'living-room' },
+        { label: 'Bathroom', priceAnchorSlug: 'bathroom-interior' },
+        { label: 'Office', priceAnchorSlug: 'office-interior' },
+      ],
+      sizeTiers: [
+        { label: 'Compact', multiplier: 0.8 },
+        { label: 'Standard', multiplier: 1 },
+        { label: 'Large', multiplier: 1.4 },
+      ],
+      finishTiers: [
+        { label: 'Essential', multiplier: 0.85 },
+        { label: 'Premium', multiplier: 1 },
+        { label: 'Luxury', multiplier: 1.6 },
+      ],
+    },
+    // Style inspiration gallery — clicking an image jumps into the (already
+    // built) AI Design Studio tab with that style pre-selected.
+    inspiration: [
+      { style: 'Modern', img: 'https://images.unsplash.com/photo-1615873968403-89e068629265?w=500&q=75' },
+      { style: 'Minimal', img: 'https://images.unsplash.com/photo-1613545325278-f24b0cae1224?w=500&q=75' },
+      { style: 'Luxury', img: 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?w=500&q=75' },
+      { style: 'Traditional', img: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=500&q=75' },
+    ],
+    // Budget-conscious designer matching — these are Remont's own in-house,
+    // background-verified designers (same "Verified Designers" promise as
+    // the Why Choose section below), not an external/unaffiliated
+    // marketplace — matches how the rest of this page already talks about
+    // "your dedicated designer".
+    designers: [
+      { id: 'd1', name: 'Studio Verve', avatar: '🎨', style: 'Modern', budgetTier: 'Budget', city: 'Bhopal', rating: '4.9', quoteLabel: 'from ₹1.6L', timelineWeeks: 5 },
+      { id: 'd2', name: 'Casa Interiors', avatar: '🏡', style: 'Traditional', budgetTier: 'Mid-range', city: 'Bhopal', rating: '4.8', quoteLabel: 'from ₹2.4L', timelineWeeks: 7 },
+      { id: 'd3', name: 'Minimal Co.', avatar: '⬜', style: 'Minimal', budgetTier: 'Budget', city: 'Indore', rating: '4.7', quoteLabel: 'from ₹1.4L', timelineWeeks: 4 },
+      { id: 'd4', name: 'Luxe Design House', avatar: '✨', style: 'Luxury', budgetTier: 'Premium', city: 'Indore', rating: '5.0', quoteLabel: 'from ₹4.5L', timelineWeeks: 9 },
+    ],
+    // Optional add-on off the designer-matching path.
+    kitchenBrands: [
+      { name: 'HomeLane Modular', priceLabel: 'from ₹95,000' },
+      { name: 'Livspace Select', priceLabel: 'from ₹1,10,000' },
+      { name: 'Sleek Kitchens', priceLabel: 'from ₹1,35,000' },
+      { name: 'Godrej Interio', priceLabel: 'from ₹90,000' },
+    ],
+  },
+
   /* ── Integrations — swap these to go live. Nothing in interior.html or
      service-page.js needs to change: every CTA already calls RemontCTA.*,
      RemontCity.*, RemontLead.*, or RemontAI.*, which all read their behavior

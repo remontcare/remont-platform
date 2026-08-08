@@ -531,6 +531,173 @@
     io.observe(hero);
   }
 
+  /* ══════════════════════════════════════════════════════════════════════
+     CUSTOMER JOURNEY — "Just Exploring" (self-planning) vs "Ready to Build"
+     (designer matching) paths. Entirely new/additive: reads window.INTERIOR_CONFIG.journey,
+     writes only into the new .svp-journey section, and reuses the *existing*
+     AI Studio tab and RemontCTA.book() rather than duplicating them.
+     ══════════════════════════════════════════════════════════════════════ */
+  function initJourneySelector() {
+    var choices = document.querySelectorAll('[data-svp-journey-choice]');
+    if (!choices.length) return;
+    choices.forEach(function (choice) {
+      choice.addEventListener('click', function () {
+        var path = choice.getAttribute('data-svp-journey-choice');
+        choices.forEach(function (c) { c.classList.toggle('active', c === choice); });
+        document.querySelectorAll('[data-svp-journey-path]').forEach(function (p) {
+          p.classList.toggle('open', p.getAttribute('data-svp-journey-path') === path);
+        });
+        var target = document.querySelector('[data-svp-journey-path="' + path + '"]');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }
+
+  // Stage 1 — Idea & Inspiration Gallery. Clicking a style jumps into the
+  // already-built AI Studio tab and pre-highlights that style chip there
+  // (purely visual — the chip is still disabled until payment, same as always).
+  function renderInspirationGallery() {
+    var c = window.INTERIOR_CONFIG;
+    var grid = document.querySelector('[data-svp-render="inspiration"]');
+    if (!c || !grid || !c.journey) return;
+    grid.innerHTML = c.journey.inspiration.map(function (item) {
+      return '<div class="svp-insp-card" data-svp-insp-style="' + item.style + '">' +
+        '<img src="' + item.img + '" alt="' + item.style + ' interior style inspiration" loading="lazy" />' +
+        '<span class="tag">' + item.style + '</span></div>';
+    }).join('');
+    grid.addEventListener('click', function (e) {
+      var card = e.target.closest('[data-svp-insp-style]');
+      if (!card) return;
+      var style = card.getAttribute('data-svp-insp-style');
+      SVP.activateTab('ai-studio', { scrollIntoView: true });
+      document.querySelectorAll('[data-svp-render="ai-styles"] .svp-chip').forEach(function (chip) {
+        chip.classList.toggle('selected', chip.textContent.trim() === style);
+      });
+    });
+  }
+
+  // Stage 1 — Rough Budget Estimator. Pure client-side arithmetic off the
+  // existing services config (no backend, no real quote — clearly labeled).
+  function initBudgetEstimator() {
+    var c = window.INTERIOR_CONFIG;
+    var wrap = document.querySelector('[data-svp-estimator]');
+    if (!c || !wrap || !c.journey) return;
+    var est = c.journey.budgetEstimator;
+    var spaceSel = wrap.querySelector('[name="est-space"]');
+    var sizeSel = wrap.querySelector('[name="est-size"]');
+    var finishSel = wrap.querySelector('[name="est-finish"]');
+    spaceSel.innerHTML = est.spaceOptions.map(function (o, i) { return '<option value="' + i + '">' + o.label + '</option>'; }).join('');
+    sizeSel.innerHTML = est.sizeTiers.map(function (o, i) { return '<option value="' + i + '">' + o.label + '</option>'; }).join('');
+    finishSel.innerHTML = est.finishTiers.map(function (o, i) { return '<option value="' + i + '">' + o.label + '</option>'; }).join('');
+
+    function findAnchorPrice(slug) {
+      var all = c.services.residential.concat(c.services.commercial);
+      var match = all.find(function (s) { return s.slug === slug; });
+      if (!match) return null;
+      var digits = (match.priceLabel.match(/[\d,]+/) || [])[0];
+      return digits ? parseInt(digits.replace(/,/g, ''), 10) : null;
+    }
+
+    wrap.querySelector('[data-svp-estimate-btn]').addEventListener('click', function () {
+      var space = est.spaceOptions[+spaceSel.value];
+      var size = est.sizeTiers[+sizeSel.value];
+      var finish = est.finishTiers[+finishSel.value];
+      var base = findAnchorPrice(space.priceAnchorSlug);
+      var resultEl = wrap.querySelector('[data-svp-estimate-result]');
+      if (!base) { resultEl.textContent = 'Estimate unavailable for this combination — book a free consultation instead.'; resultEl.classList.add('show'); return; }
+      var low = Math.round(base * size.multiplier * finish.multiplier / 1000) * 1000;
+      var high = Math.round(low * 1.25 / 1000) * 1000;
+      var fmt = function (n) { return '₹' + n.toLocaleString('en-IN'); };
+      resultEl.innerHTML = 'Rough estimate for ' + space.label + ' (' + size.label + ', ' + finish.label + '): <strong>' + fmt(low) + ' – ' + fmt(high) + '</strong><br><span style="font-size:11.5px;color:var(--txt-muted)">Indicative only — final quote confirmed after a free site visit.</span>';
+      resultEl.classList.add('show');
+    });
+  }
+
+  // Stage 2 — Budget-conscious designer matching + client-side filters.
+  function renderDesigners() {
+    var c = window.INTERIOR_CONFIG;
+    var grid = document.querySelector('[data-svp-render="designers"]');
+    if (!c || !grid || !c.journey) return;
+    grid.innerHTML = c.journey.designers.map(function (d) {
+      return '<div class="svp-designer-card" data-svp-designer="' + d.id + '" data-budget="' + d.budgetTier + '" data-style="' + d.style + '" data-city="' + d.city + '">' +
+        '<div class="av">' + d.avatar + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="nm">' + d.name + '</div>' +
+          '<div class="meta">⭐ ' + d.rating + ' · ' + d.city + ' · ' + d.quoteLabel + '</div>' +
+          '<div class="tags"><span class="tag">' + d.style + '</span><span class="tag">' + d.budgetTier + '</span><span class="tag">~' + d.timelineWeeks + ' wks</span></div>' +
+          '<label><input type="checkbox" data-svp-designer-select /> Compare this designer</label>' +
+        '</div></div>';
+    }).join('');
+  }
+  function initArchitectFilters() {
+    var c = window.INTERIOR_CONFIG;
+    var bar = document.querySelector('[data-svp-filter-bar]');
+    if (!c || !bar || !c.journey) return;
+    var budgets = Array.from(new Set(c.journey.designers.map(function (d) { return d.budgetTier; })));
+    var styles = Array.from(new Set(c.journey.designers.map(function (d) { return d.style; })));
+    var cities = Array.from(new Set(c.journey.designers.map(function (d) { return d.city; })));
+    function opts(arr) { return '<option value="">Any</option>' + arr.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join(''); }
+    bar.querySelector('[name="f-budget"]').innerHTML = opts(budgets);
+    bar.querySelector('[name="f-style"]').innerHTML = opts(styles);
+    bar.querySelector('[name="f-city"]').innerHTML = opts(cities);
+    try {
+      var myCity = localStorage.getItem('remont_city');
+      if (myCity && cities.indexOf(myCity) !== -1) bar.querySelector('[name="f-city"]').value = myCity;
+    } catch (e) { /* private mode — leave "Any" selected */ }
+
+    function applyFilters() {
+      var fb = bar.querySelector('[name="f-budget"]').value;
+      var fs = bar.querySelector('[name="f-style"]').value;
+      var fc = bar.querySelector('[name="f-city"]').value;
+      document.querySelectorAll('[data-svp-designer]').forEach(function (card) {
+        var match = (!fb || card.dataset.budget === fb) && (!fs || card.dataset.style === fs) && (!fc || card.dataset.city === fc);
+        card.classList.toggle('hidden', !match);
+      });
+    }
+    bar.querySelectorAll('select').forEach(function (s) { s.addEventListener('change', applyFilters); });
+    applyFilters();
+  }
+
+  // Optional add-on — Multi-Brand Modular Kitchen (visual toggle only, feeds
+  // the compare summary; does not create a cart item).
+  function renderKitchenAddon() {
+    var c = window.INTERIOR_CONFIG;
+    var row = document.querySelector('[data-svp-render="kitchen-addon"]');
+    if (!c || !row || !c.journey) return;
+    row.innerHTML = c.journey.kitchenBrands.map(function (b) {
+      return '<div class="svp-addon-chip" data-svp-addon>' + b.name + ' <span style="opacity:.6">— ' + b.priceLabel + '</span></div>';
+    }).join('');
+    row.querySelectorAll('[data-svp-addon]').forEach(function (chip) {
+      chip.addEventListener('click', function () { chip.classList.toggle('selected'); });
+    });
+  }
+
+  // Stage 3 — Compare up to 3 selected designers side by side (static/mocked
+  // quote data already on each designer card — no live quote requests sent).
+  function initCompare() {
+    var btn = document.querySelector('[data-svp-compare-btn]');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var selected = Array.from(document.querySelectorAll('[data-svp-designer]')).filter(function (card) {
+        return card.querySelector('[data-svp-designer-select]').checked;
+      });
+      var wrap = document.querySelector('[data-svp-compare-wrap]');
+      if (!selected.length) { wrap.innerHTML = '<p style="color:var(--txt-muted);font-size:13px">Select at least one designer above to compare.</p>'; wrap.style.display = 'block'; return; }
+      var c = window.INTERIOR_CONFIG;
+      var ids = selected.map(function (card) { return card.getAttribute('data-svp-designer'); });
+      var rows = c.journey.designers.filter(function (d) { return ids.indexOf(d.id) !== -1; });
+      var html = '<div class="svp-compare-wrap"><table class="svp-compare-table"><thead><tr><th>Designer</th><th>Style</th><th>Quote</th><th>Timeline</th><th></th></tr></thead><tbody>';
+      rows.forEach(function (d) {
+        html += '<tr><td>' + d.avatar + ' ' + d.name + '</td><td>' + d.style + '</td><td class="hl">' + d.quoteLabel + '</td><td>~' + d.timelineWeeks + ' weeks</td>' +
+          '<td><button class="svp-btn svp-btn-primary" style="padding:7px 16px;font-size:12.5px" data-svp-book data-slug="' + d.id + '" data-service-type="onsite" data-category-key="interior" data-label="Proceed with ' + d.name + '">Proceed →</button></td></tr>';
+      });
+      html += '</tbody></table></div>';
+      wrap.innerHTML = html;
+      wrap.style.display = 'block';
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+
   /* ── Scroll reveal ── */
   function initReveal() {
     var els = document.querySelectorAll('.reveal');
@@ -559,5 +726,12 @@
     initAiStudioUi();
     initStickyBar();
     initReveal();
+    initJourneySelector();
+    renderInspirationGallery();
+    initBudgetEstimator();
+    renderDesigners();
+    initArchitectFilters();
+    renderKitchenAddon();
+    initCompare();
   });
 })();

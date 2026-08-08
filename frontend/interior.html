@@ -146,6 +146,100 @@
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
+     CUSTOMER JOURNEY — new, additive section. Does not touch the 5 tabs
+     below; Path A reuses the already-built AI Studio tab, Path B's final
+     CTA reuses the already-built booking/city-gating architecture.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section class="svp-journey">
+  <div class="inner">
+    <div class="svp-journey-head">
+      <h2>Not sure where to start?</h2>
+      <p>Tell us what stage you're at — we'll guide you from there.</p>
+    </div>
+
+    <div class="svp-journey-choices">
+      <div class="svp-journey-choice" data-svp-journey-choice="explore">
+        <div class="ic">🎨</div>
+        <h3>Just Exploring</h3>
+        <p>Get inspired, try the AI Room Designer, and see a rough budget — no commitment.</p>
+      </div>
+      <div class="svp-journey-choice" data-svp-journey-choice="build">
+        <div class="ic">🏗️</div>
+        <h3>Ready to Build</h3>
+        <p>Get matched with a budget-fit designer, compare options, and start your project.</p>
+      </div>
+    </div>
+
+    <!-- Stage 1 — Self-Planning (AI / Tech) -->
+    <div class="svp-journey-path" data-svp-journey-path="explore">
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">1</span><h4>AI Room Designer</h4></div>
+        <div class="svp-journey-step-sub">Style + layout ideas in seconds</div>
+        <button class="svp-btn svp-btn-dark" onclick="SVP.activateTab('ai-studio',{scrollIntoView:true})">🤖 Try AI Room Designer →</button>
+      </div>
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">2</span><h4>Idea &amp; Inspiration Gallery</h4></div>
+        <div class="svp-journey-step-sub">Tap a style to try it in the AI Room Designer</div>
+        <div class="svp-insp-grid" data-svp-render="inspiration"></div>
+      </div>
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">3</span><h4>Auto Rough Budget Estimate</h4></div>
+        <div class="svp-journey-step-sub">Indicative only — final quote after a free site visit</div>
+        <div data-svp-estimator>
+          <div class="svp-estimator-row">
+            <div><label>Space</label><select name="est-space"></select></div>
+            <div><label>Size</label><select name="est-size"></select></div>
+            <div><label>Finish</label><select name="est-finish"></select></div>
+            <button class="svp-btn svp-btn-primary" data-svp-estimate-btn>Get Estimate</button>
+          </div>
+          <div class="svp-estimate-result" data-svp-estimate-result></div>
+        </div>
+      </div>
+      <div class="svp-center-cta">
+        <button class="svp-btn svp-btn-outline" data-svp-journey-choice="build">Ready to move forward? See matched designers →</button>
+      </div>
+    </div>
+
+    <!-- Stage 2/3/4 — Designer Matching, Price Comparison, Consultant + Execution -->
+    <div class="svp-journey-path" data-svp-journey-path="build">
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">1</span><h4>Budget-conscious Designers</h4></div>
+        <div class="svp-journey-step-sub">Filter by budget, style, or location — select up to 3 to compare</div>
+        <div class="svp-filter-bar" data-svp-filter-bar>
+          <select name="f-budget"></select>
+          <select name="f-style"></select>
+          <select name="f-city"></select>
+        </div>
+        <div class="svp-designer-grid" data-svp-render="designers"></div>
+      </div>
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">+</span><h4>Optional Add-on: Multi-Brand Modular Kitchen</h4></div>
+        <div class="svp-addon-row" data-svp-render="kitchen-addon"></div>
+      </div>
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">2</span><h4>Compare Quotes, Designs &amp; Timelines</h4></div>
+        <button class="svp-btn svp-btn-dark" data-svp-compare-btn>⚖️ Compare Selected Designers</button>
+        <div data-svp-compare-wrap style="display:none;margin-top:16px"></div>
+      </div>
+      <div class="svp-journey-step">
+        <div class="svp-journey-step-head"><span class="num">3</span><h4>Consultant + Execution</h4></div>
+        <div class="svp-journey-step-sub">What happens after you proceed</div>
+        <div class="svp-stage4-strip">
+          <div class="svp-stage4-item"><span class="ic">🧑‍💼</span>Consultant assigned</div>
+          <span class="svp-stage4-arrow">→</span>
+          <div class="svp-stage4-item"><span class="ic">📹</span>Execution monitoring</div>
+          <span class="svp-stage4-arrow">→</span>
+          <div class="svp-stage4-item"><span class="ic">✅</span>Quality check</div>
+          <span class="svp-stage4-arrow">→</span>
+          <div class="svp-stage4-item"><span class="ic">🏠</span>Delivered</div>
+        </div>
+        <p style="font-size:12px;color:var(--txt-muted);text-align:center;margin-top:14px">Once booked, track your live project anytime from <a href="/" style="color:var(--sienna);font-weight:600">My Orders</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
      BLOCK 2 — SUB-NAV (sticky, 5 tabs)
      ═══════════════════════════════════════════════════════════════════════ -->
 <nav class="svp-subnav">
