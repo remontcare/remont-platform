@@ -3870,7 +3870,7 @@
           </ul>
           <div class="premium-meta">
             <div class="premium-price">₹2L<small data-en=" onwards" data-hi=" से शुरू"> onwards</small></div>
-            <button class="premium-cta" data-en="Book Consultation →" data-hi="कंसल्टेशन बुक करें →">Book Consultation →</button>
+            <button class="premium-cta" onclick="window.location.href='/interior'" data-en="Book Consultation →" data-hi="कंसल्टेशन बुक करें →">Book Consultation →</button>
           </div>
         </div>
       </div>
@@ -5191,6 +5191,10 @@
   }
 
   function renderService(key, targetId) {
+    // Interior Design now has its own dedicated page — every entry point that
+    // used to render it inline (sidebar, mobile catalog, chips, search, city
+    // auto-select) funnels through here, so intercepting once covers them all.
+    if (key === 'interior') { window.location.href = '/interior'; return; }
     targetId = targetId || 'displayPanel';
     const d = serviceData[key];
     if (!d) return;
@@ -6773,7 +6777,7 @@
     if (entry.type === 'service') {
       if (entry.id) { openBookingModal(entry.id, entry.name, entry.priceLabel || ''); }
       else {
-        var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/services/interior-design', renovation:'/services/renovation', construction:'/services/construction' };
+        var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/interior', renovation:'/services/renovation', construction:'/services/construction' };
         if (svcSubpages[entry.categoryKey]) window.location.href = svcSubpages[entry.categoryKey];
         else openBookingModal('', entry.name, '');
       }
