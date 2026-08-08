@@ -38,6 +38,7 @@ import { SettlementsModule } from './modules/settlements/settlements.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
+import { EstimatesModule } from './modules/estimates/estimates.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.mod
     // Catalog
     ServicesModule,
     ProductsModule,
+    EstimatesModule,
 
     // Operations
     VendorsModule,

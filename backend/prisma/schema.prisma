@@ -295,6 +295,7 @@ enum LeadSource {
   ADS
   ORGANIC
   CRM_OUTBOUND
+  ESTIMATE_ENGINE
 }
 
 enum LeadStatus {
@@ -650,6 +651,7 @@ model ServiceCategory {
   services        Service[]
   subCategories   SubCategory[]
   commissionRules CommissionRule[]
+  priceModifiers  ServicePriceModifier[]
 }
 
 model SubCategory {
@@ -699,16 +701,111 @@ model Service {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  category        ServiceCategory  @relation(fields: [categoryId], references: [id])
-  subCategory     SubCategory?     @relation(fields: [subCategoryId], references: [id])
+  // ── Estimate Engine (Interior / Renovation / Architecture / future
+  //    services) — see backend/src/modules/estimates/estimate-engine.ts.
+  //    All nullable/defaulted so this is a purely additive change; existing
+  //    services keep working exactly as before with no data migration needed. ──
+  serviceType        ServiceDeliveryType @default(ONSITE)
+  pricingType         PricingType         @default(FIXED)
+  offerPrice          Decimal?            @db.Decimal(10, 2) // time-bound promo price; wins over basePrice when set
+  consultationFee     Decimal?            @db.Decimal(10, 2)
+  siteVisitFee        Decimal?            @db.Decimal(10, 2)
+  labourCost          Decimal?            @db.Decimal(10, 2)
+  materialCost        Decimal?            @db.Decimal(10, 2)
+  perSqftRate         Decimal?            @db.Decimal(10, 2) // used when pricingType = PER_SQFT
+  gstOverridePercent  Decimal?            @db.Decimal(5, 2)  // null = resolve from TaxConfig
+  timelineMinDays     Int?
+  timelineMaxDays     Int?
+
+  category        ServiceCategory        @relation(fields: [categoryId], references: [id])
+  subCategory     SubCategory?           @relation(fields: [subCategoryId], references: [id])
   orders          Order[]
   cityServices    CityService[]
   reviews         Review[]
   commissionRules CommissionRule[]
+  priceModifiers  ServicePriceModifier[]
+  estimates       Estimate[]
 
   @@index([categoryId])
   @@index([subCategoryId])
   @@index([isActive, isPopular])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ESTIMATE ENGINE — reusable server-side pricing/estimate calculator for
+// Interior, Renovation, Architecture, and future service categories. See
+// backend/src/modules/estimates/estimate-engine.ts for the calculation logic;
+// nothing here is consumed by the frontend directly.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ServiceDeliveryType {
+  DIGITAL // PAN-India/worldwide, no city restriction ever applied
+  ONSITE // requires a professional physically present — city-gated
+  HYBRID // has both a remote and an on-site component — gated like ONSITE today
+}
+
+enum PricingType {
+  FIXED // basePrice/offerPrice is the final price
+  STARTING_FROM // basePrice/offerPrice is the low end of a range (see estimate_starting_from_spread_pct)
+  QUOTATION // no computed price — final cost confirmed after consultation/site visit
+  PER_SQFT // computed from perSqftRate * customer-supplied sqft
+}
+
+// Admin-configurable multiplier applied on top of a service's price for a given
+// customer selection (e.g. group="size", label="Large", multiplier=1.4). A
+// serviceId-scoped row overrides a categoryId-scoped row for the same group —
+// same override pattern as CommissionRule (service beats category).
+model ServicePriceModifier {
+  id         String   @id @default(cuid())
+  serviceId  String?
+  categoryId String?
+  group      String // e.g. "size", "finish" — options within a group are mutually exclusive in the UI
+  label      String // e.g. "Large", "Luxury"
+  multiplier Decimal  @default(1.0) @db.Decimal(4, 2)
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  service  Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  category ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, group])
+  @@index([categoryId, group])
+}
+
+// One row per estimate request — audit trail, lead follow-up context, and
+// analytics. cityId/customerId/leadId are intentionally plain (unrelated)
+// scalar columns rather than Prisma relations, so this migration never has to
+// touch the City/User/Lead models.
+model Estimate {
+  id         String  @id @default(cuid())
+  serviceId  String
+  cityId     String?
+  customerId String?
+  leadId     String?
+
+  inputsJson         Json
+  estimatedLow        Decimal? @db.Decimal(10, 2)
+  estimatedHigh        Decimal? @db.Decimal(10, 2)
+  breakdownJson       Json
+  gstPercent          Decimal  @db.Decimal(5, 2)
+  gstAmount           Decimal  @db.Decimal(10, 2)
+  finalPayableAmount  Decimal  @db.Decimal(10, 2)
+  timelineMinDays     Int?
+  timelineMaxDays     Int?
+  bookingEligible     Boolean
+  eligibilityReason   String
+  eligibilityMessage  String?
+  convertedOrderId    String? // set later if this estimate turns into a real Order
+
+  createdAt DateTime @default(now())
+
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@index([serviceId])
+  @@index([cityId])
+  @@index([leadId])
+  @@index([createdAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
