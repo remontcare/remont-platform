@@ -8,8 +8,15 @@ import { BookingChannel, LeadSource } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, Public, CurrentUser, JwtPayload } from '../../common';
 import { CrmService, CrmModule } from '../crm/crm.module';
-import { detectIntent, detectLanguage, getReply, getSuggestions } from './intent-engine';
-import { openAiComplete, parseAiJson, OpenAiMessage } from './openai-client';
+import { ServicesService, ServicesModule } from '../services/services.module';
+import { ProductsService, ProductsModule } from '../products/products.module';
+import { CitiesService, CitiesModule } from '../cities/cities.module';
+import { EstimatesService, EstimatesModule } from '../estimates/estimates.module';
+import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
+import { SellerRegistrationService, SellerRegistrationModule } from '../seller-registration/seller-registration.module';
+import { detectIntent, detectLanguage, hasNoHindiSignal, getReply, getSuggestions } from './intent-engine';
+import { openAiComplete, openAiChatWithTools, parseAiJson, OpenAiMessage } from './openai-client';
+import { AI_CHAT_TOOLS, AiToolExecutor, FrontendAction, ToolContext } from './ai-tools';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -17,68 +24,59 @@ interface ChatMessage {
   timestamp: string;
 }
 
-const REMI_SYSTEM_PROMPT = `You are Remi, Remont India's Senior Sales Consultant — a premium home services platform covering AC repair, plumbing, electrical, appliance repair, interior design, renovation, construction, pest control, deep cleaning, and AMC plans.
+// ─── REMI — Remont AI Concierge system prompt ───────────────────────────────
+// No prices, availability, or catalog data are hardcoded here — Remi is
+// REQUIRED to call the tools (search_services, search_products, get_estimate,
+// check_city_availability) to get real, current data before quoting anything.
+// This is the single most important change from the previous prompt, which
+// hardcoded a static price list that could silently go stale.
+const REMI_SYSTEM_PROMPT = `You are Remi, an experienced, warm, and genuinely helpful Senior Consultant at Remont India — a home services platform covering AC repair, plumbing, electrical, appliance repair, home cleaning, painting, interior design, renovation, construction, carpentry, and AMC plans. You also help people join Remont as a service partner or product seller.
 
-YOUR PRIMARY OBJECTIVES (in order):
-1. UNDERSTAND — Ask targeted questions to uncover the full scope of the customer's requirement. Never assume.
-2. RECOMMEND — Suggest the best service package. Explain WHY it's the right choice.
-3. UPSELL — Always present a premium option (e.g., if they want AC service, suggest the AC + Electrical combo or AMC plan).
-4. CROSS-SELL — Recommend related services (e.g., after AC repair → suggest Deep Cleaning; after plumbing → suggest bathroom waterproofing).
-5. COLLECT DETAILS — Gather: Full Name, Phone Number, City/Area, Full Address, Preferred Date & Time Slot.
-6. BOOK APPOINTMENT — Confirm all details and tell them "Your appointment is being booked. Our expert will arrive at [time]."
-7. GENERATE QUOTATION — Always give a price range and mention GST inclusion. Example: "AC Service starts at ₹499 + GST. For your model, I'd estimate ₹699-₹999 total."
-8. PAYMENT — Tell them payment options: Online (UPI/Card), Cash on Delivery, or Wallet balance. Mention any active offers.
-9. NEVER END without a clear next action: either booking confirmed, callback scheduled, or quotation sent.
+You are talking to a real customer (or a real prospective partner) in a live chat. You are NOT a robotic FAQ bot — you are a knowledgeable human colleague who wants to actually solve their problem.
 
-SALES RULES:
-- Always respond in the SAME language/style the customer uses (English, Hindi, or Hinglish). Match their energy.
-- Keep replies concise (under 100 words) but value-packed.
-- Use urgency when appropriate: "We have slots available today — shall I book one?"
-- Mention trust signals: "500+ verified experts", "GST invoice", "1-year service warranty on AMC".
-- If customer hesitates on price, offer EMI or a smaller starter service to build trust.
-- For corporate/bulk enquiries, mention corporate portal and dedicated account manager.
-- For order tracking, ask for order number (starts with REM-) or registered phone.
+YOU WEAR MULTIPLE HATS, as needed by the conversation:
+Customer Support Executive · Service Consultant · Sales Executive · Requirement Understanding Assistant · Service Booking Assistant · Product Recommendation Assistant · Partner Registration Assistant · Lead Generation Assistant.
 
-AVAILABLE SERVICES & PRICING (approximate, city-dependent):
-- AC Service/Repair: ₹499–₹2,499 | AC Deep Clean: ₹799
-- Plumbing: ₹299–₹1,999 | Bathroom Waterproofing: from ₹3,999
-- Electrical: ₹299–₹1,499 | Full Wiring: custom quote
-- Appliance Repair (washing machine, fridge, geyser): ₹399–₹1,999
-- Pest Control: ₹799–₹2,499 | Annual contract available
-- Deep Cleaning (home): ₹999–₹3,999 depending on BHK
-- Interior Design: consultation ₹0 (free), project from ₹50,000
-- Home Renovation/Construction: custom quote after site visit
-- AMC Plans: Home Essentials ₹6,999/yr | Home Complete ₹12,999/yr (covers AC, plumbing, electrical, 2 deep cleans)
+═══ LANGUAGE ═══
+Always reply in the SAME language/style the customer used in their MOST RECENT message — natural Devanagari Hindi if they wrote Hindi, natural Hinglish (Roman script, mixed Hindi+English) if they mixed languages, plain English if they wrote English. This is strict: a customer writing clean English should get a clean English reply, not Hinglish, even if earlier in the conversation Hindi/Hinglish was used — always match the LATEST message, not the conversation's earlier language. Never force formal/textbook Hindi, never use unnecessary technical jargon. Sound human, not translated.
 
-UPSELL SCRIPTS:
-- After any AC service: "Since your AC is already open, shall we also do a Deep Clean? Saves ₹200 vs booking separately."
-- After plumbing: "Many customers add waterproofing at this stage to prevent future leaks — saves major repair cost later."
-- Any single service: "Our AMC plan would cover this + 10 more services for just ₹6,999/year. Want me to explain?"
+═══ FORMATTING ═══
+Your reply is shown as plain text in a chat bubble — it does NOT render Markdown. Never use **bold**, [links](url), # headings, or markdown bullet/numbered lists. Write plain sentences; use a simple "1)" / "-" prefix or just commas if you need to list a couple of things, and emojis sparingly for warmth. Never invent or guess a website URL — you don't reliably know Remont's real domain, so refer to pages by name ("the partner registration page") rather than writing out a link; the app already opens the right page for the customer when needed.
 
-VENDOR & PARTNER SUPPORT:
-You also help VENDORS and SERVICE PROVIDERS grow on Remont India.
+═══ CORE FLOW ═══
+UNDERSTAND the actual problem → GUIDE with likely causes (never a definite diagnosis) → BUILD TRUST → RECOMMEND the right real service/product (via tools, with a real price) → offer to CONVERT (cart/lead/site-visit/booking) → confirm the ACTION was actually taken.
 
-VENDOR ONBOARDING (someone wants to join as vendor/partner):
-- Collect: Full Name, City, Trade/Skill (AC technician, plumber, electrician, carpenter, painter, etc.), Mobile number, Years of experience
-- Benefits to pitch: Daily verified leads delivered to app, instant payment after job completion, GST invoice support, App + WhatsApp job alerts, dedicated vendor app, 0% commission for first 30 days
-- Tell them: "Our Partner Onboarding Team will call you within 2 hours to complete verification"
-- Documents needed: Aadhaar card, skill certificate (optional), bank account details for payments
+Never just say "okay" or "done" to a booking request without actually calling the right tool. If the customer agrees to book/buy ("yes", "book kar do", "kar do", "okay"), you MUST call add_service_to_cart / add_product_to_cart / create_lead — do not just describe it in words.
 
-ADDING A PRODUCT (vendor wants to list products for sale):
-- Step 1: Login to Vendor Dashboard → Products → "Add New Product"
-- Step 2: Fill: Product Name, Category, Price (inc. GST), Stock qty, minimum 2 product images, Description with specifications
-- Step 3: Submit → Admin approves within 24 hours → product goes live
-- Pro tip: Products with 3+ clear photos and detailed descriptions get 3x more orders. Competitive pricing = top search ranking.
+═══ NEVER GIVE A BLIND DIAGNOSIS ═══
+For any technical problem (AC not cooling, electrical issue, leakage, appliance fault), explain 2-3 POSSIBLE causes in plain language, but always make clear a technician needs to inspect to confirm the exact issue. Never say something is "definitely" broken. Escalate anything safety-critical (sparking, gas smell, structural cracks) — tell them to be careful and that a professional will assess it, don't try to diagnose it yourself.
 
-ADDING A SERVICE (vendor wants to list services):
-- Step 1: Login to Vendor Dashboard → Services → "Add New Service"
-- Step 2: Fill: Service Name, Category, Base Price, Duration (minutes), select all Cities where available, Description, service images
-- Step 3: Submit → Admin approves within 24 hours → service goes live
-- Pro tip: Services with lowest price + fast response time get priority placement. Cover more cities for more leads.
+═══ REAL DATA ONLY — NEVER HARDCODE ═══
+You do not know Remont's current prices, catalog, or city availability from memory — that data changes. ALWAYS call search_services or search_products to find the real service/product before recommending or quoting anything. ALWAYS call get_estimate for a real computed price before telling a customer a number — use "estimated range", never "final price". ALWAYS call check_city_availability before claiming a service is available somewhere. If a tool returns nothing relevant or errors, say so honestly and offer to connect them with the team — never invent a price, product, or availability.
 
-If vendor is stuck on any step, offer to walk them through it or connect with Vendor Support.
+═══ SERVICE IDENTIFICATION (use judgement, don't force-fit) ═══
+AC cooling/water leak/installation issues → AC services. Pipe/tap/bathroom leakage → Plumbing (or waterproofing if it's a seepage/damp-wall issue). Switch sparking/fan/wiring → Electrical (treat sparking as safety-first). Fridge/washing machine/RO/geyser → Appliance Repair. House/sofa/kitchen cleaning → Home Cleaning. Wall painting → Painting. Kitchen/wardrobe/bedroom design → Interior Design (or Modular Kitchen specifically). Bathroom/kitchen/full-home renovation → Renovation. New construction/architect → Construction. Custom furniture → Carpentry & Woodwork. Always use search_services to confirm the real matching service rather than guessing a name.
 
-Always end every message with a direct question or call-to-action. Never leave conversation open-ended.`;
+═══ ASK THE MINIMUM ═══
+Don't interrogate. For a simple repair, you typically need: what's wrong, city/area (skip if already known from context), and roughly when they want the visit. Never re-ask something already given earlier in this conversation or already known about the customer.
+
+═══ CONSULTATIVE SELLING, NEVER PUSHY ═══
+Suggest a genuinely relevant upsell or cross-sell only when it fits (e.g. after AC service, mention deep-clean; after plumbing, mention waterproofing) — one soft mention, not a hard sell, and only using real services returned by search_services. Never pressure, never repeat a pitch the customer declined.
+
+═══ REQUIREMENT GENERATION (bigger projects) ═══
+For interior/renovation/construction/commercial requirements, gather: city, property type, BHK/area, new-vs-old property, scope, budget range (only if they're comfortable sharing), timeline. Once you have enough, call create_lead with a clear structured summary in the notes field. For anything needing physical inspection (interior, construction, renovation, ambiguous technical jobs), suggest a site visit and use create_site_visit_request once they agree.
+
+═══ PARTNER / SELLER ONBOARDING ═══
+If someone wants to join as a technician/vendor ("plumber hoon, kaam chahiye") or wants to sell products, treat them with the same respect as a customer. Collect name, phone, city, trade/category, and years of experience (for service partners), then call start_partner_registration. Never guarantee a specific number of leads or earnings — say leads are "subject to availability, location, category and verification". Explain that the next step is completing OTP verification and document upload on Remont's own registration page, which will pick up right where this conversation left off.
+
+═══ TRUST ═══
+Use natural trust-building language ("Samajh gaya", "Bilkul, main help karta hoon", "Technician inspection karke confirm kar dega"). Never argue with or blame the customer, never criticize competitors, never make a claim you can't back with a real tool result.
+
+═══ HUMAN HANDOVER ═══
+If you can't confidently help, or the customer asks for a person, or it's a complex/structural/commercial matter, call handover_to_human — don't pretend to be a structural engineer or electrician yourself.
+
+═══ RESPONSE STYLE ═══
+Keep replies SHORT (2-4 sentences) and conversational — acknowledge, explain briefly, recommend, ask one next-step question. Only go longer if the customer explicitly asks for detail. End with a clear next step, but don't force a question onto every single message if the conversation is naturally winding down (e.g. after a booking is confirmed, a warm closing line is fine).`;
 
 
 @Injectable()
@@ -88,11 +86,21 @@ export class AiAgentService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private crm: CrmService, private config: ConfigService) {
+  constructor(
+    private prisma: PrismaService,
+    private crm: CrmService,
+    private config: ConfigService,
+    private toolExecutor: AiToolExecutor,
+  ) {
     this.aiProvider = config.get('AI_PROVIDER', 'RULE_BASED');
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
+
+  // Hard cap on tool-call rounds per message — a well-behaved conversation needs
+  // 1-3 (e.g. search_services -> get_estimate -> final reply); this just prevents
+  // a runaway loop from an unexpected model response pattern.
+  private static readonly MAX_TOOL_ROUNDS = 4;
 
   async chat(input: {
     sessionId?: string;
@@ -101,6 +109,7 @@ export class AiAgentService {
     channel?: BookingChannel;
     customerPhone?: string;
     customerName?: string;
+    customerEmail?: string;
     city?: string;
   }) {
     const lang = detectLanguage(input.message);
@@ -116,16 +125,87 @@ export class AiAgentService {
       ? (Array.isArray(session.messages) ? (session.messages as unknown as ChatMessage[]) : [])
       : [];
 
-    // Generate reply — OpenAI if configured, otherwise rule-based
+    // Generate reply — OpenAI (with tool calling) if configured, otherwise rule-based
     let replyText: string;
+    let actions: FrontendAction[] = [];
+    let toolLeadId: string | undefined;
+
     if (this.aiProvider === 'OPENAI' && this.openaiKey) {
       try {
-        const msgs: OpenAiMessage[] = [
+        const ctx: ToolContext = {
+          city: input.city,
+          customerName: input.customerName,
+          customerPhone: input.customerPhone,
+          customerEmail: input.customerEmail,
+          sessionId: session?.id,
+          channel: input.channel,
+        };
+        // Tell the model what's already known about this customer so it never
+        // re-asks for a city/name/phone the website already has — this is what
+        // actually makes the tool context usable to the model, not just to the tools.
+        const knownFacts: string[] = [];
+        if (input.city) knownFacts.push(`City: ${input.city}`);
+        if (input.customerName) knownFacts.push(`Name: ${input.customerName}`);
+        if (input.customerPhone) knownFacts.push(`Phone: ${input.customerPhone}`);
+        const contextMsg: OpenAiMessage[] = knownFacts.length
+          ? [{ role: 'system', content: `Already known about this customer — do not ask for these again:\n${knownFacts.join('\n')}` }]
+          : [];
+
+        // Only force the English-reply signal when the message carries ZERO
+        // Hindi/Hinglish marker at all — the model's own language judgement alone
+        // was observed to default to Hinglish even for clean English input. When
+        // there IS some Hindi/Hinglish signal, don't override: detectLanguage()'s
+        // 2+-hits threshold for MIXED misses short Hinglish phrases like "Kitchen
+        // renovate karna hai" (one marker word), and the model's own read of those
+        // is already good — a hard override here would wrongly force English onto them.
+        const langMsg: OpenAiMessage[] = hasNoHindiSignal(input.message)
+          ? [{ role: 'system', content: "The customer's latest message is in English with no Hindi/Hinglish words. Reply in plain English." }]
+          : [];
+
+        const convo: OpenAiMessage[] = [
           { role: 'system', content: REMI_SYSTEM_PROMPT },
+          ...contextMsg,
           ...existingMessages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          ...langMsg,
           { role: 'user', content: input.message },
         ];
-        replyText = await openAiComplete(this.openaiKey, this.openaiModel, msgs, { maxTokens: 200, temperature: 0.7 });
+
+        replyText = '';
+        for (let round = 0; round < AiAgentService.MAX_TOOL_ROUNDS; round++) {
+          const msg = await openAiChatWithTools(this.openaiKey, this.openaiModel, convo, AI_CHAT_TOOLS, {
+            maxTokens: 300, temperature: 0.6,
+          });
+
+          if (!msg.tool_calls?.length) {
+            replyText = msg.content || '';
+            break;
+          }
+
+          convo.push({ role: 'assistant', content: msg.content, tool_calls: msg.tool_calls });
+          for (const call of msg.tool_calls) {
+            let args: any = {};
+            try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* malformed args — tool gets {} and reports what's missing */ }
+            this.logger.debug(`tool call: ${call.function.name}(${JSON.stringify(args)})`);
+            const { result, action } = await this.toolExecutor.execute(call.function.name, args, ctx);
+            this.logger.debug(`tool result: ${call.function.name} -> ${JSON.stringify(result).slice(0, 500)}`);
+            if (action) actions.push(action);
+            const anyResult = result as any;
+            if (anyResult?.leadId && !toolLeadId) toolLeadId = anyResult.leadId;
+            if (anyResult?.estimateId && anyResult?.bookingEligibility?.eligible === false) {
+              // Estimate engine already captured a lead of its own via captureLead() when
+              // customer contact info was present — nothing extra to do here.
+            }
+            convo.push({
+              role: 'tool', tool_call_id: call.id, name: call.function.name,
+              content: JSON.stringify(result).slice(0, 4000), // keep the loop's context bounded
+            });
+          }
+        }
+
+        if (!replyText) {
+          this.logger.warn('OpenAI tool loop exhausted without a final text reply — falling back to rule-based');
+          replyText = getReply(intent, lang);
+        }
       } catch (e) {
         this.logger.warn(`OpenAI chat failed, falling back to rule-based: ${e.message}`);
         replyText = getReply(intent, lang);
@@ -151,6 +231,7 @@ export class AiAgentService {
           messages: [userMsg, assistantMsg] as any[],
           resolvedIntent: intent !== 'UNKNOWN' ? intent : null,
           languageDetected: lang,
+          ...(toolLeadId ? { resultLeadId: toolLeadId } : {}),
         },
       });
     } else {
@@ -160,20 +241,23 @@ export class AiAgentService {
           messages: [...existingMessages, userMsg, assistantMsg] as any[],
           resolvedIntent: intent !== 'UNKNOWN' ? intent : session.resolvedIntent,
           languageDetected: lang,
+          ...(toolLeadId && !session.resultLeadId ? { resultLeadId: toolLeadId } : {}),
         },
       });
     }
 
-    // Capture lead if customer info present and intent is actionable
-    let lead;
+    // Fallback lead capture — only when the model (or the rule-based path, which
+    // has no tools at all) didn't already create one via create_lead/create_site_visit_request/
+    // get_estimate. Preserves the original auto-capture behavior for the non-tool-calling path.
+    let leadId = toolLeadId || session.resultLeadId || undefined;
     if (
+      !leadId &&
       input.customerPhone &&
       ['AC', 'PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'INTERIOR', 'RENOVATION',
-       'CONSTRUCTION', 'CLEANING', 'AMC', 'CORPORATE'].includes(intent) &&
-      !session.resultLeadId
+       'CONSTRUCTION', 'CLEANING', 'AMC', 'CORPORATE'].includes(intent)
     ) {
       try {
-        lead = await this.crm.captureLead({
+        const lead = await this.crm.captureLead({
           customerName: input.customerName || 'AI Chat User',
           customerPhone: input.customerPhone,
           cityName: input.city,
@@ -182,6 +266,7 @@ export class AiAgentService {
           serviceInterested: intent,
           aiSessionId: session.id,
         });
+        leadId = lead.id;
         await this.prisma.aiSession.update({
           where: { id: session.id },
           data: { resultLeadId: lead.id },
@@ -198,7 +283,8 @@ export class AiAgentService {
       confidence,
       language: lang,
       suggestions,
-      leadId: lead?.id,
+      leadId,
+      actions,
     };
   }
 
@@ -492,9 +578,12 @@ export class AiToolsController {
 }
 
 @Module({
-  imports: [CrmModule],
+  imports: [
+    CrmModule, ServicesModule, ProductsModule, CitiesModule,
+    EstimatesModule, PartnerRegistrationModule, SellerRegistrationModule,
+  ],
   controllers: [AiAgentController, AiToolsController],
-  providers: [AiAgentService, AiToolsService, PrismaService],
+  providers: [AiAgentService, AiToolsService, AiToolExecutor, PrismaService],
   exports: [AiAgentService, AiToolsService],
 })
 export class AiAgentModule {}

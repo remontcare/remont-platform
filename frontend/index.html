@@ -6263,7 +6263,8 @@
     if (chatMsgEl) chatMsgEl.textContent = '...';
     apiPost('/api/v1/ai/chat', {
       message: message,
-      city: typeof currentCity !== 'undefined' ? currentCity : undefined
+      city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+      customerPhone: localStorage.getItem('remont_phone') || undefined
     }).then(function(res) {
       var d = res.data || res; // unwrap NestJS envelope
       if (chatMsgEl) chatMsgEl.textContent = d.reply || message;
@@ -6333,6 +6334,31 @@
     remiSendMessage(msg);
   }
 
+  // Executes the AI's decided actions using functions that already exist on this
+  // page (addToCart, openCart) — the backend can only add to a client-side cart
+  // or hand off to a real page by asking the browser to do it; it never invents
+  // a new client mechanism. See ai-tools.ts (FrontendAction) for the contract.
+  function remiHandleActions(actions) {
+    if (!actions || !actions.length) return;
+    actions.forEach(function(a) {
+      try {
+        if ((a.type === 'ADD_SERVICE_TO_CART' || a.type === 'ADD_PRODUCT_TO_CART') && typeof addToCart === 'function') {
+          addToCart(a.payload);
+          if (typeof openCart === 'function') openCart();
+        } else if (a.type === 'OPEN_CART' && typeof openCart === 'function') {
+          openCart();
+        } else if (a.type === 'CONTINUE_PARTNER_REGISTRATION' && a.payload && a.payload.registrationId) {
+          localStorage.setItem('pr_reg_id', a.payload.registrationId);
+        } else if (a.type === 'CONTINUE_SELLER_REGISTRATION' && a.payload && a.payload.registrationId) {
+          localStorage.setItem('sr_reg_id', a.payload.registrationId);
+        } else if (a.type === 'OPEN_WHATSAPP') {
+          var num = (a.payload && a.payload.number) || '919232071064';
+          window.open('https://wa.me/' + num, '_blank', 'noopener');
+        }
+      } catch (e) { console.error('Remi action failed:', a, e); }
+    });
+  }
+
   function remiSendMessage(msg) {
     remiAddBubble('user', msg);
     document.getElementById('remi-suggestions').innerHTML = '';
@@ -6343,7 +6369,11 @@
       body: JSON.stringify({
         message: msg,
         sessionId: _remiSessionId,
-        city: typeof currentCity !== 'undefined' ? currentCity : undefined
+        city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+        // Already-known customer identity — reused as-is from the same key
+        // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
+        // customer is never asked their phone number again in chat.
+        customerPhone: localStorage.getItem('remont_phone') || undefined
       })
     })
     .then(function(r) { return r.json(); })
@@ -6352,6 +6382,7 @@
       _remiSessionId = d.sessionId || _remiSessionId;
       typingEl.textContent = d.reply || 'Ek second...';
       remiRenderSuggestions(d.suggestions);
+      remiHandleActions(d.actions);
     })
     .catch(function() {
       typingEl.textContent = 'Sorry, abhi connect nahi ho pa raha. Please call +91-98765-43210.';

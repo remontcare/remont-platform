@@ -111,6 +111,21 @@ export function detectLanguage(text: string): Language {
   return Language.EN;
 }
 
+/**
+ * True only when a message has ZERO Hindi/Hinglish signal at all — no Devanagari,
+ * no Hinglish marker word. Deliberately more conservative than detectLanguage()'s
+ * MIXED threshold (which requires 2+ hits and so misses short Hinglish phrases
+ * like "Kitchen renovate karna hai" that carry just one marker word): this is used
+ * where being wrong in the Hindi/Hinglish direction is cheap (an LLM prompt hint
+ * that can just be skipped) but wrongly forcing English onto a Hinglish message
+ * is not.
+ */
+export function hasNoHindiSignal(text: string): boolean {
+  if (HINDI_REGEX.test(text)) return false;
+  const lower = text.toLowerCase();
+  return !HINGLISH_HINTS.some((h) => new RegExp(`\\b${h}\\b`).test(lower));
+}
+
 /** Main intent detection — swap this function for LLM calls later */
 export function detectIntent(text: string): { intent: Intent; confidence: number } {
   const lower = text.toLowerCase();
@@ -120,8 +135,11 @@ export function detectIntent(text: string): { intent: Intent; confidence: number
     if (intent === 'UNKNOWN') continue;
     let score = 0;
     for (const kw of keywords) {
-      // Exact word match scores higher than partial
-      if (new RegExp(`\\b${kw}\\b`).test(lower)) score += 2;
+      // Exact word match scores higher than partial; a multi-word phrase match
+      // (e.g. "naya ghar") is more specific than a single-word match (e.g. "naya"
+      // alone, which also appears in a different category's list) and must outrank
+      // it rather than lose a same-score tie to whichever category is iterated first.
+      if (new RegExp(`\\b${kw}\\b`).test(lower)) score += kw.includes(' ') ? 3 : 2;
       else if (lower.includes(kw)) score += 1;
     }
     if (score > best.score) best = { intent: intent as Intent, score };
