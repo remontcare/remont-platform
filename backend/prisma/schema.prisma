@@ -698,6 +698,7 @@ model Service {
   isActive        Boolean         @default(true)
   isPopular       Boolean         @default(false)
   isPremium       Boolean         @default(false)
+  paymentMode     ServicePaymentMode @default(ANY)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
@@ -749,6 +750,15 @@ enum PricingType {
   STARTING_FROM // basePrice/offerPrice is the low end of a range (see estimate_starting_from_spread_pct)
   QUOTATION // no computed price — final cost confirmed after consultation/site visit
   PER_SQFT // computed from perSqftRate * customer-supplied sqft
+}
+
+// Admin-configurable, per-service payment-method eligibility — the single source of
+// truth read by both the website checkout and the Flutter app, and re-checked
+// server-side in OrdersService.switchToCod(), GuestBookingService.book() and
+// MasterOrdersService.checkout() so a stale client can never bypass it.
+enum ServicePaymentMode {
+  ANY // Online or Cash on Delivery, customer's choice (default)
+  ONLINE_ONLY // Cash on Delivery is not offered for this service
 }
 
 // Admin-configurable multiplier applied on top of a service's price for a given

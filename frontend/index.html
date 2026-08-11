@@ -7494,6 +7494,7 @@
     window._bmCoupon = null;
     window._bmPayMethod = 'COD';
     _bmGpsChecked = false; // re-check GPS proximity fresh for every new booking session
+    _bmApplyPaymentEligibility(svcId);
 
     var today = new Date().toISOString().slice(0, 10);
     document.getElementById('bm-date').value = today;
@@ -7584,6 +7585,34 @@
     window._bmPayMethod = method;
     document.querySelectorAll('.bm-pay-opt').forEach(function(o){ o.classList.remove('sel'); });
     el.classList.add('sel');
+  }
+
+  // Payment-method eligibility is admin-configured per service (Service.paymentMode) and
+  // enforced server-side (OrdersService.switchToCod / GuestBookingService.book) — this just
+  // fetches the live value so the picker never shows an option the backend would reject.
+  // Fetched fresh per booking rather than read from any cached category/service list, since
+  // an admin may have changed it since that list was loaded.
+  function _bmApplyPaymentEligibility(svcId) {
+    var codLabel = document.getElementById('bm-pay-cod');
+    var onlineLabel = document.getElementById('bm-pay-online');
+    var note = document.getElementById('bm-pay-online-only-note');
+    // Reset to the default (Online + COD, COD pre-selected) while the fresh check is in flight.
+    codLabel.style.display = '';
+    note.style.display = 'none';
+    if (!svcId) return;
+    apiGet('/api/v1/services/' + svcId).then(function(res) {
+      var svc = (res && res.data) ? res.data : res;
+      if (svc && svc.paymentMode === 'ONLINE_ONLY') {
+        codLabel.style.display = 'none';
+        note.style.display = '';
+        window._bmPayMethod = 'ONLINE';
+        codLabel.classList.remove('sel');
+        onlineLabel.classList.add('sel');
+      }
+    }).catch(function() {
+      // Can't confirm eligibility — leave the default showing. The backend re-checks
+      // this on submit regardless, so this never lets an actual restriction through.
+    });
   }
 
   function bmGoStep(n) {
@@ -8185,16 +8214,19 @@
   <!-- STEP 3: Payment Method -->
   <div class="bm-panel" id="bm-panel-3">
    <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:14px;text-transform:uppercase;letter-spacing:.5px">Choose Payment Method</div>
-   <label class="bm-pay-opt sel" onclick="bmSelPay('COD',this)">
+   <label class="bm-pay-opt sel" id="bm-pay-cod" onclick="bmSelPay('COD',this)">
     <input type="radio" name="bm-pay" value="COD" checked>
     <span class="po-icon">💵</span>
     <div><div class="po-title">Cash on Delivery</div><div class="po-sub">Pay when our professional arrives</div></div>
    </label>
-   <label class="bm-pay-opt" onclick="bmSelPay('ONLINE',this)">
+   <label class="bm-pay-opt" id="bm-pay-online" onclick="bmSelPay('ONLINE',this)">
     <input type="radio" name="bm-pay" value="ONLINE">
     <span class="po-icon">📱</span>
     <div><div class="po-title">Online Payment (UPI / Card)</div><div class="po-sub">Secure payment via Razorpay · Instant confirmation</div></div>
    </label>
+   <div id="bm-pay-online-only-note" style="display:none;font-size:12px;color:#9a6b00;background:#fff8e6;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    ℹ️ This service requires online payment — Cash on Delivery isn't available for it.
+   </div>
 
    <!-- Shown only if an online payment attempt fails/is dismissed -->
    <div id="bm-payment-failed" style="display:none;background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:14px 16px;margin-top:14px">
@@ -8732,6 +8764,7 @@ function cartCheckout() {
         </label>
       </div>
       <p id="co-coupon-cod-note" style="display:none;font-size:11px;color:#9ca3af;margin:0 0 14px">Cash payment isn't available with a coupon applied — pay online to use this coupon.</p>
+      <p id="co-online-only-note" style="display:none;font-size:11px;color:#9a6b00;margin:0 0 14px">ℹ️ A service in your cart requires online payment — Cash isn't available for this order.</p>
 
       <button onclick="submitCheckoutOrder()" id="co-submit-btn"
         style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px">
@@ -9280,10 +9313,32 @@ function openCheckoutModal() {
   }
 
   document.getElementById('co-msg').style.display = 'none';
-  updatePaymentUI();
+  window._coOnlineOnlyService = null;
+  updatePaymentUI(); // immediate paint with defaults while the live eligibility check is in flight
+  _coCheckPaymentEligibility();
   document.getElementById('co-submit-btn').disabled = false;
   document.getElementById('checkout-modal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
+}
+
+// Payment-method eligibility is admin-configured per service (Service.paymentMode) and
+// enforced server-side (MasterOrdersService.checkout) — this fetches the live value for
+// every service in the cart so the picker never shows Cash when the backend would reject
+// it. Fetched fresh on every checkout-modal open rather than from any cached service list.
+function _coCheckPaymentEligibility() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var serviceIds = cart.filter(function(i){ return i.type === 'service'; }).map(function(i){ return i.id; });
+  serviceIds = serviceIds.filter(function(id, idx){ return serviceIds.indexOf(id) === idx; });
+  if (!serviceIds.length) { window._coOnlineOnlyService = null; updatePaymentUI(); return; }
+  Promise.all(serviceIds.map(function(id) {
+    return apiGet('/api/v1/services/' + id).then(function(res) {
+      return (res && res.data) ? res.data : res;
+    }).catch(function() { return null; });
+  })).then(function(services) {
+    var restricted = services.find(function(s) { return s && s.paymentMode === 'ONLINE_ONLY'; });
+    window._coOnlineOnlyService = restricted ? restricted.name : null;
+    updatePaymentUI();
+  });
 }
 
 function closeCheckoutModal() {
@@ -9415,20 +9470,27 @@ function updatePaymentUI() {
   }
 
   // A coupon requires an online payment (so the discount can't be walked away from at
-  // the door) — lock the Cash option while one is applied.
+  // the door) — lock the Cash option while one is applied. Same lock applies if any
+  // service in the cart is admin-configured Online-only (Service.paymentMode, checked
+  // live via _coCheckPaymentEligibility()) — one payment covers the whole cart, so a
+  // single restricted service makes the entire checkout online-only.
   var codRadio = document.querySelector('input[name="co-payment"][value="COD"]');
   var codLabel = document.getElementById('co-cod-label');
   var couponNote = document.getElementById('co-coupon-cod-note');
-  if (_coCoupon) {
+  var onlineOnlyNote = document.getElementById('co-online-only-note');
+  var forceOnline = !!_coCoupon || !!window._coOnlineOnlyService;
+  if (forceOnline) {
     var onlineRadio = document.querySelector('input[name="co-payment"][value="ONLINE"]');
     if (onlineRadio) onlineRadio.checked = true;
     if (codRadio) { codRadio.checked = false; codRadio.disabled = true; }
     if (codLabel) { codLabel.style.opacity = '0.45'; codLabel.style.pointerEvents = 'none'; }
-    if (couponNote) couponNote.style.display = 'block';
+    if (couponNote) couponNote.style.display = _coCoupon ? 'block' : 'none';
+    if (onlineOnlyNote) onlineOnlyNote.style.display = window._coOnlineOnlyService ? 'block' : 'none';
   } else {
     if (codRadio) codRadio.disabled = false;
     if (codLabel) { codLabel.style.opacity = '1'; codLabel.style.pointerEvents = 'auto'; }
     if (couponNote) couponNote.style.display = 'none';
+    if (onlineOnlyNote) onlineOnlyNote.style.display = 'none';
   }
 
   var sel = document.querySelector('input[name="co-payment"]:checked');

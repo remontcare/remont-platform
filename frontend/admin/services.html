@@ -363,6 +363,14 @@
           <option value="PROJECT">Project Work (manual, project-scale)</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="form-label">💳 Payment Method</label>
+        <select id="svc-payment-mode" class="form-control">
+          <option value="ANY">Online + Cash on Delivery (customer's choice)</option>
+          <option value="ONLINE_ONLY">Online payment only (no Cash on Delivery)</option>
+        </select>
+        <small style="color:#9ca3af">Enforced by the backend for every checkout path — website and the mobile app both read this live.</small>
+      </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-active" checked> Active</label>
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="svc-popular"> Popular</label>
@@ -722,7 +730,7 @@ function loadServices() {
         '<td>' + badge(cityCount > 0 ? cityCount + ' cities' : 'All cities', cityCount > 0 ? 'blue' : 'gray') + '</td>' +
         '<td>' + badge((s.fulfillmentType||'DIRECT_PARTNER').replace('_',' '), s.fulfillmentType==='PROJECT'?'purple':(s.fulfillmentType==='ADMIN_TEAM'?'yellow':'gray')) + '</td>' +
         '<td>' + badge(commLabel, commColor) + '</td>' +
-        '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + '</td>' +
+        '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + (s.paymentMode==='ONLINE_ONLY'?' '+badge('Online only','orange'):'') + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick="editService(\'' + s.id + '\')">Edit</button>' +
           '<button class="btn btn-xs btn-warning" onclick="toggleSvc(\'' + s.id + '\',' + (!s.isActive) + ')">' + (s.isActive?'Disable':'Enable') + '</button>' +
@@ -755,6 +763,7 @@ function openSvcModal(svc) {
   document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
   document.getElementById('svc-premium').checked = svc ? svc.isPremium : false;
   document.getElementById('svc-fulfillment').value = svc ? (svc.fulfillmentType || 'DIRECT_PARTNER') : 'DIRECT_PARTNER';
+  document.getElementById('svc-payment-mode').value = svc ? (svc.paymentMode || 'ANY') : 'ANY';
   document.getElementById('svc-seo-title').value = svc ? (svc.seoTitle||'') : '';
   document.getElementById('svc-seo-desc').value = svc ? (svc.seoDesc||'') : '';
   document.getElementById('svc-seo-kw').value = svc ? (svc.seoKeywords||[]).join(', ') : '';
@@ -811,6 +820,7 @@ function saveService() {
     isPopular: document.getElementById('svc-popular').checked,
     isPremium: document.getElementById('svc-premium').checked,
     fulfillmentType: document.getElementById('svc-fulfillment').value,
+    paymentMode: document.getElementById('svc-payment-mode').value,
     seoTitle: document.getElementById('svc-seo-title').value.trim()||undefined,
     seoDesc: document.getElementById('svc-seo-desc').value.trim()||undefined,
     seoKeywords: document.getElementById('svc-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),

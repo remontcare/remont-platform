@@ -543,6 +543,15 @@ export class OrdersService {
     if (order.status !== OrderStatus.PENDING_PAYMENT) {
       throw new BadRequestException('Order has already moved past payment — cannot switch to Cash on Delivery now');
     }
+    // Service-level payment restriction (admin-configurable, Service.paymentMode) — the
+    // single source of truth both the website and the app read; re-checked here so a
+    // stale client UI can never actually force COD through on a since-restricted service.
+    if (order.serviceId) {
+      const svc = await this.prisma.service.findUnique({ where: { id: order.serviceId }, select: { name: true, paymentMode: true } });
+      if (svc?.paymentMode === 'ONLINE_ONLY') {
+        throw new BadRequestException(`${svc.name} requires online payment — Cash on Delivery isn't available for this service.`);
+      }
+    }
 
     const updated = await this.prisma.order.update({
       where: { id: orderId },
@@ -1035,6 +1044,13 @@ export class GuestBookingService {
       include: { category: true },
     });
     if (!svc || !svc.isActive) throw new NotFoundException('Service not found or inactive');
+    // Service-level payment restriction (admin-configurable, Service.paymentMode) —
+    // mirrors the check in switchToCod()/MasterOrdersService.checkout() so this is
+    // enforced identically no matter which booking path (website quick-book, website
+    // cart, or the app) the customer came through.
+    if (svc.paymentMode === 'ONLINE_ONLY' && dto.paymentMethod !== 'ONLINE') {
+      throw new BadRequestException(`${svc.name} requires online payment — Cash on Delivery isn't available for this service.`);
+    }
 
     // Verify city
     const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });

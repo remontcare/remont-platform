@@ -359,6 +359,19 @@ export class MasterOrdersService {
     const paymentMethod = opts.paymentMethod || 'ONLINE';
     const confirmUpfront = paymentMethod === 'COD';
 
+    // Service-level payment restriction (admin-configurable, Service.paymentMode) — if
+    // any service in this cart is Online-only, the whole checkout (one payment for the
+    // cart) can't go COD. Same rule OrdersService.switchToCod()/GuestBookingService.book()
+    // enforce, so a mixed cart can never quietly bypass it via the Master Order path.
+    if (paymentMethod === 'COD') {
+      const restrictedService = services.find((s) => s.paymentMode === 'ONLINE_ONLY');
+      if (restrictedService) {
+        throw new BadRequestException(
+          `${restrictedService.name} requires online payment — Cash on Delivery isn't available for this order.`,
+        );
+      }
+    }
+
     // Allocate master-level discount/GST/wallet back down to each child group,
     // proportionally, exact-sum-preserving — so every child Order's own pricing fields
     // (read directly by the existing complete()/invoice-generation code) stay consistent.
