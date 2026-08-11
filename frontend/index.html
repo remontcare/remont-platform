@@ -6446,12 +6446,15 @@
     });
   }
 
-  // Close chat on outside click
+  // Close chat on outside click — excludes every element that OPENS the chat
+  // (desktop fab, mobile bottom-nav icon, AMC help card, partner-portal support
+  // menu — all four call openRemiChat()), not just the desktop fab, so opening
+  // from any of them doesn't immediately self-close on the same click bubbling here.
   document.addEventListener('click', function(e) {
     var modal = document.getElementById('remi-chat-modal');
     if (modal && modal.style.display === 'flex') {
-      var fab = document.querySelector('.fab.ai-chat');
-      if (!modal.contains(e.target) && fab && !fab.contains(e.target)) {
+      var opener = e.target.closest('[onclick*="openRemiChat"]');
+      if (!modal.contains(e.target) && !opener) {
         closeRemiChat();
       }
     }
