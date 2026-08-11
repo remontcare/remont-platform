@@ -139,6 +139,20 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
     expect(deps.crm.captureLead).not.toHaveBeenCalled();
   });
 
+  it('present_options is a pure UI signal — no service call, echoes back trimmed/capped options', async () => {
+    const { exec, deps } = makeExecutor();
+    const { result, action } = await exec.execute('present_options', { options: ['House', 'Flat', 'Commercial'] }, {});
+    expect(result).toEqual({ presented: true, options: ['House', 'Flat', 'Commercial'] });
+    expect(action).toBeUndefined();
+    expect(deps.crm.captureLead).not.toHaveBeenCalled();
+  });
+
+  it('present_options drops non-string/empty entries and caps at 6', async () => {
+    const { exec } = makeExecutor();
+    const { result } = await exec.execute('present_options', { options: ['1 BHK', '', '2 BHK', 42, '3 BHK', '4 BHK', '5 BHK', '6 BHK'] }, {});
+    expect((result as any).options).toEqual(['1 BHK', '2 BHK', '3 BHK', '4 BHK', '5 BHK', '6 BHK']);
+  });
+
   it('an unknown tool name returns a clean error instead of throwing', async () => {
     const { exec } = makeExecutor();
     const { result } = await exec.execute('delete_all_orders', {}, {});

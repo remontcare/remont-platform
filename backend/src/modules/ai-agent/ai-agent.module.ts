@@ -46,7 +46,7 @@ Your reply is shown as plain text in a chat bubble — it does NOT render Markdo
 ═══ CORE FLOW ═══
 UNDERSTAND the actual problem → GUIDE with likely causes (never a definite diagnosis) → BUILD TRUST → RECOMMEND the right real service/product (via tools, with a real price) → offer to CONVERT (cart/lead/site-visit/booking) → confirm the ACTION was actually taken.
 
-Never just say "okay" or "done" to a booking request without actually calling the right tool. If the customer agrees to book/buy ("yes", "book kar do", "kar do", "okay"), you MUST call add_service_to_cart / add_product_to_cart / create_lead — do not just describe it in words.
+Never just say "okay" or "done" to a booking request without actually calling the right tool. If the customer agrees to book/buy ("yes", "book kar do", "kar do", "okay"), you MUST call add_service_to_cart / add_product_to_cart / create_lead — do not just describe it in words. After adding to cart, the customer already sees a cart summary with its own Book Now button on screen — keep your reply to a short confirmation, don't repeat prices or re-ask if they want to book.
 
 ═══ NEVER GIVE A BLIND DIAGNOSIS ═══
 For any technical problem (AC not cooling, electrical issue, leakage, appliance fault), explain 2-3 POSSIBLE causes in plain language, but always make clear a technician needs to inspect to confirm the exact issue. Never say something is "definitely" broken. Escalate anything safety-critical (sparking, gas smell, structural cracks) — tell them to be careful and that a professional will assess it, don't try to diagnose it yourself.
@@ -59,6 +59,9 @@ AC cooling/water leak/installation issues → AC services. Pipe/tap/bathroom lea
 
 ═══ ASK THE MINIMUM ═══
 Don't interrogate. For a simple repair, you typically need: what's wrong, city/area (skip if already known from context), and roughly when they want the visit. Never re-ask something already given earlier in this conversation or already known about the customer.
+
+═══ TAP, DON'T TYPE ═══
+Whenever the next answer is one of a short known set — property type, BHK, room, budget range, urgency, yes/no, or picking between real services/products you already found — call present_options with those choices instead of asking an open question. Chain them naturally: e.g. property type → (if Flat) BHK → area/room, one present_options call per step, using whatever the customer already tapped/typed earlier so you never ask the same thing twice.
 
 ═══ CONSULTATIVE SELLING, NEVER PUSHY ═══
 Suggest a genuinely relevant upsell or cross-sell only when it fits (e.g. after AC service, mention deep-clean; after plumbing, mention waterproofing) — one soft mention, not a hard sell, and only using real services returned by search_services. Never pressure, never repeat a pitch the customer declined.
@@ -129,6 +132,7 @@ export class AiAgentService {
     let replyText: string;
     let actions: FrontendAction[] = [];
     let toolLeadId: string | undefined;
+    let dynamicOptions: string[] | undefined;
 
     if (this.aiProvider === 'OPENAI' && this.openaiKey) {
       try {
@@ -191,6 +195,7 @@ export class AiAgentService {
             if (action) actions.push(action);
             const anyResult = result as any;
             if (anyResult?.leadId && !toolLeadId) toolLeadId = anyResult.leadId;
+            if (call.function.name === 'present_options' && anyResult?.presented) dynamicOptions = anyResult.options;
             if (anyResult?.estimateId && anyResult?.bookingEligibility?.eligible === false) {
               // Estimate engine already captured a lead of its own via captureLead() when
               // customer contact info was present — nothing extra to do here.
@@ -282,7 +287,9 @@ export class AiAgentService {
       intent,
       confidence,
       language: lang,
-      suggestions,
+      // present_options this turn wins over the generic per-intent fallback list —
+      // it's what actually drives the "answer by tapping, not typing" flow.
+      suggestions: dynamicOptions || suggestions,
       leadId,
       actions,
     };

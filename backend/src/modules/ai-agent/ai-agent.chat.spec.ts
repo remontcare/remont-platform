@@ -104,6 +104,34 @@ describe('AiAgentService.chat() — tool-calling loop (OpenAI mocked, zero live 
     expect(prisma.aiSession.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ resultLeadId: 'lead-abc' }) }));
   });
 
+  it('present_options overrides the generic suggestions with the AI-chosen clickable choices', async () => {
+    mockedChat
+      .mockResolvedValueOnce({
+        role: 'assistant', content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'present_options', arguments: '{"options":["House","Flat","Commercial"]}' } }],
+      })
+      .mockResolvedValueOnce({ role: 'assistant', content: 'Property type?' });
+
+    const executeMock = jest.fn(async (name: string, args: any) =>
+      name === 'present_options' ? { result: { presented: true, options: args.options } } : { result: {} });
+    const toolExecutor = makeToolExecutor(executeMock);
+    const svc = new AiAgentService(makePrisma() as any, makeCrm() as any, makeConfig() as any, toolExecutor as any);
+
+    const res = await svc.chat({ message: 'painting karwani hai' });
+    expect(res.reply).toBe('Property type?');
+    expect(res.suggestions).toEqual(['House', 'Flat', 'Commercial']);
+  });
+
+  it('without a present_options call, suggestions fall back to the generic per-intent list as before', async () => {
+    mockedChat.mockResolvedValueOnce({ role: 'assistant', content: 'AC service book kar dete hain?' });
+    const toolExecutor = makeToolExecutor();
+    const svc = new AiAgentService(makePrisma() as any, makeCrm() as any, makeConfig() as any, toolExecutor as any);
+
+    const res = await svc.chat({ message: 'AC cooling nahi kar raha' });
+    expect(res.suggestions.length).toBeGreaterThan(0);
+    expect(res.suggestions).not.toEqual(['House', 'Flat', 'Commercial']);
+  });
+
   it('the loop is capped — a model that only ever calls tools does not run forever', async () => {
     mockedChat.mockResolvedValue({
       role: 'assistant', content: null,

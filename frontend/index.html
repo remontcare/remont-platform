@@ -3613,7 +3613,7 @@
     </div>
     <div class="m-amc-help">
       <span class="m-amc-help-txt">Need Help Choosing a Plan? Chat with our expert</span>
-      <button class="m-amc-help-btn" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()">Chat Now</button>
+      <button class="m-amc-help-btn" onclick="openRemiChat()">Chat Now</button>
     </div>
     <div style="height:16px"></div>
   </div>
@@ -3645,7 +3645,7 @@
   <button class="m-nav-item" onclick="mNavActive(this);openMyOrdersModal()">
     <span class="m-nav-ic">📋</span><span data-en="Orders" data-hi="ऑर्डर">Orders</span>
   </button>
-  <button class="m-nav-item m-nav-chat" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()">
+  <button class="m-nav-item m-nav-chat" onclick="openRemiChat()">
     <span class="m-nav-ic">💬</span><span data-en="Chat" data-hi="चैट">Chat</span>
   </button>
   <button class="m-nav-item" onclick="mNavActive(this);openCart()">
@@ -6338,13 +6338,69 @@
   // page (addToCart, openCart) — the backend can only add to a client-side cart
   // or hand off to a real page by asking the browser to do it; it never invents
   // a new client mechanism. See ai-tools.ts (FrontendAction) for the contract.
+  // In-chat Service Cart card — same real cart (localStorage.remont_cart) and
+  // same subtotal/GST/total formula as the existing cart drawer (renderCartDrawer,
+  // 8321), just rendered as a summary bubble inside the Remi conversation instead
+  // of the separate drawer overlay. Prices are whatever addToCart() was given,
+  // which the AI only ever gets from search_services/search_products/get_estimate —
+  // never hardcoded here.
+  function remiRenderCartCard() {
+    var msgs = document.getElementById('remi-messages');
+    if (!msgs) return;
+    var old = document.getElementById('remi-cart-card');
+    if (old) old.remove();
+
+    var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+    if (!cart.length) return;
+
+    var subtotal = 0;
+    var rows = cart.map(function(item) {
+      var price = parseFloat(String(item.price).replace(/[^0-9.]/g, '')) || 0;
+      var qty = item.qty || 1;
+      var lineTotal = price * qty;
+      subtotal += lineTotal;
+      return '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0">' +
+        '<span>' + escHtml(item.name) + (qty > 1 ? ' × ' + qty : '') + '</span>' +
+        '<span>₹' + lineTotal.toLocaleString('en-IN') + '</span></div>';
+    }).join('');
+    var gst = Math.round(subtotal * 0.18 * 100) / 100; // same formula as renderCartDrawer()
+    var total = subtotal + gst;
+
+    var card = document.createElement('div');
+    card.id = 'remi-cart-card';
+    card.style.cssText = 'align-self:flex-start;max-width:88%;background:#fff;border:1.5px solid #f0ac6b;border-radius:14px;padding:12px 14px;font-size:13px;color:#111;box-shadow:0 1px 6px rgba(0,0,0,.08)';
+    card.innerHTML =
+      '<div style="font-weight:700;margin-bottom:6px">🛒 Service Cart</div>' +
+      rows +
+      '<div style="border-top:1px dashed #e5e7eb;margin:8px 0 6px"></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#6b7280"><span>Subtotal</span><span>₹' + subtotal.toLocaleString('en-IN') + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#6b7280;margin-bottom:6px"><span>GST (18%)</span><span>₹' + gst.toLocaleString('en-IN') + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-weight:700;margin-bottom:10px"><span>Total</span><span style="color:#c4601a">₹' + total.toLocaleString('en-IN') + '</span></div>' +
+      '<div style="display:flex;gap:8px">' +
+        '<button onclick="remiSendMessage(\'Mujhe ek aur service add karni hai\')" style="flex:1;padding:8px 10px;border:1.5px solid #c4601a;border-radius:20px;background:#fff;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Add Service</button>' +
+        '<button onclick="remiBookNow()" style="flex:1;padding:8px 10px;border:none;border-radius:20px;background:#c4601a;color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Book Now</button>' +
+      '</div>';
+
+    msgs.appendChild(card);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  // Book Now — hands off to the existing, full booking/checkout flow (Name →
+  // Mobile → Address → Date/Time → Payment). Minimizes the chat first so the
+  // checkout modal isn't fighting the chat panel for screen space.
+  function remiBookNow() {
+    closeRemiChat();
+    if (typeof cartCheckout === 'function') cartCheckout();
+  }
+
   function remiHandleActions(actions) {
     if (!actions || !actions.length) return;
+    var cartChanged = false;
     actions.forEach(function(a) {
       try {
         if ((a.type === 'ADD_SERVICE_TO_CART' || a.type === 'ADD_PRODUCT_TO_CART') && typeof addToCart === 'function') {
           addToCart(a.payload);
-          if (typeof openCart === 'function') openCart();
+          cartChanged = true;
         } else if (a.type === 'OPEN_CART' && typeof openCart === 'function') {
           openCart();
         } else if (a.type === 'CONTINUE_PARTNER_REGISTRATION' && a.payload && a.payload.registrationId) {
@@ -6357,6 +6413,7 @@
         }
       } catch (e) { console.error('Remi action failed:', a, e); }
     });
+    if (cartChanged) remiRenderCartCard();
   }
 
   function remiSendMessage(msg) {
@@ -11255,7 +11312,7 @@ window.closeCustPartner = function() {
         <button class="pp-menu-item"><span class="pp-mi-ic">⭐</span>My Reviews<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item"><span class="pp-mi-ic">📅</span>Schedule<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item"><span class="pp-mi-ic">🔔</span>Notifications<span class="pp-mi-chev">›</span></button>
-        <button class="pp-menu-item" onclick="document.querySelector('.ai-fab')&&document.querySelector('.ai-fab').click()"><span class="pp-mi-ic">🆘</span>Support Chat<span class="pp-mi-chev">›</span></button>
+        <button class="pp-menu-item" onclick="openRemiChat()"><span class="pp-mi-ic">🆘</span>Support Chat<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item"><span class="pp-mi-ic">⚙️</span>Settings<span class="pp-mi-chev">›</span></button>
         <button class="pp-menu-item" onclick="ppLogout()" style="color:#ef4444"><span class="pp-mi-ic">🚪</span>Logout<span class="pp-mi-chev">›</span></button>
       </div>

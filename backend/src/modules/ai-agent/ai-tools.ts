@@ -228,6 +228,24 @@ export const AI_CHAT_TOOLS: OpenAiTool[] = [
   {
     type: 'function',
     function: {
+      name: 'present_options',
+      description:
+        "Show the customer clickable buttons for their next answer instead of asking them to type it. Use this whenever the valid answers are a short known set — property type, BHK, room/area, budget range, urgency, yes/no confirmations, choosing between real services or products you already found, etc. Prefer this over a free-text question whenever possible so the customer doesn't have to type. Keep your accompanying text reply short (just the question itself, e.g. 'Property type?') — do not repeat the option list in the text since it's already shown as buttons.",
+      parameters: {
+        type: 'object',
+        properties: {
+          options: {
+            type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 6,
+            description: "2-6 short button labels, e.g. ['House','Flat','Commercial'] or ['1 BHK','2 BHK','3 BHK','4 BHK']",
+          },
+        },
+        required: ['options'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'handover_to_human',
       description:
         "Escalate to a human team member — use when you can't confidently help, the customer explicitly asks for a person, or the issue is a complex/structural/safety matter that genuinely needs an expert rather than chat guidance.",
@@ -279,6 +297,8 @@ export class AiToolExecutor {
           return { result: await this.createSiteVisit(args, ctx) };
         case 'start_partner_registration':
           return this.startPartnerRegistration(args);
+        case 'present_options':
+          return this.presentOptions(args);
         case 'handover_to_human':
           return this.handoverToHuman(args, ctx);
         default:
@@ -417,6 +437,15 @@ export class AiToolExecutor {
     return registrationId
       ? { result, action: { type: 'CONTINUE_PARTNER_REGISTRATION', payload: { registrationId, continueUrl: result.continueUrl } } }
       : { result };
+  }
+
+  // No service call — this is a pure UI signal. AiAgentService.chat() reads
+  // the returned options straight out of the tool result and uses them as this
+  // turn's clickable suggestion chips (the same chip UI/click-to-send flow the
+  // page already has), instead of the generic per-intent fallback list.
+  private presentOptions(args: any): ToolResult {
+    const options = Array.isArray(args.options) ? args.options.filter((o: any) => typeof o === 'string' && o.trim()).slice(0, 6) : [];
+    return { result: { presented: options.length > 0, options } };
   }
 
   private handoverToHuman(args: any, ctx: ToolContext): ToolResult {
