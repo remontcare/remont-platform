@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, resolveCommission } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -87,6 +87,25 @@ export function allocateAcrossGroups(groupAmounts: number[], subtotal: number, t
   const remainder = Math.round((total - allocatedSum) * 100) / 100;
   allocations[allocations.length - 1] = Math.round((allocations[allocations.length - 1] + remainder) * 100) / 100;
   return allocations;
+}
+
+// Payment Mode business rules — Service.paymentMode is ANY (Online + COD), ONLINE_ONLY, or
+// COD_ONLY. A checkout can mix services from several categories (Smart Order Grouping still
+// splits them into separate child Orders), but the customer picks ONE payment method for the
+// whole cart/checkout — so the cart-wide answer is the intersection of what every individual
+// service allows: Online is blocked if ANY item is COD_ONLY; COD is blocked if ANY item is
+// ONLINE_ONLY. Pure function — no DB — so both directions are trivially unit-testable.
+export function resolveCheckoutPaymentOptions(
+  services: { name: string; paymentMode: string }[],
+): { online: boolean; cod: boolean; onlineBlockedBy: string | null; codBlockedBy: string | null } {
+  const codOnly = services.find((s) => s.paymentMode === 'COD_ONLY') || null;
+  const onlineOnly = services.find((s) => s.paymentMode === 'ONLINE_ONLY') || null;
+  return {
+    online: !codOnly,
+    cod: !onlineOnly,
+    onlineBlockedBy: codOnly?.name ?? null,
+    codBlockedBy: onlineOnly?.name ?? null,
+  };
 }
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'INVOICED', 'CLOSED']);
@@ -374,17 +393,21 @@ export class MasterOrdersService {
     const paymentMethod = opts.paymentMethod || 'ONLINE';
     const confirmUpfront = paymentMethod === 'COD';
 
-    // Service-level payment restriction (admin-configurable, Service.paymentMode) — if
-    // any service in this cart is Online-only, the whole checkout (one payment for the
-    // cart) can't go COD. Same rule OrdersService.switchToCod()/GuestBookingService.book()
-    // enforce, so a mixed cart can never quietly bypass it via the Master Order path.
-    if (paymentMethod === 'COD') {
-      const restrictedService = services.find((s) => s.paymentMode === 'ONLINE_ONLY');
-      if (restrictedService) {
-        throw new BadRequestException(
-          `${restrictedService.name} requires online payment — Cash on Delivery isn't available for this order.`,
-        );
-      }
+    // Service-level payment restriction (admin-configurable, Service.paymentMode) — the
+    // whole checkout is one payment for the cart, so every service in it must actually
+    // allow the chosen method. Same rule OrdersService.switchToCod()/retryPayment() and
+    // GuestBookingService.book() enforce, so a mixed cart can never quietly bypass it via
+    // the Master Order path.
+    const paymentOptions = resolveCheckoutPaymentOptions(services);
+    if (paymentMethod === 'COD' && !paymentOptions.cod) {
+      throw new BadRequestException(
+        `${paymentOptions.codBlockedBy} requires online payment — Cash on Delivery isn't available for this order.`,
+      );
+    }
+    if (paymentMethod === 'ONLINE' && !paymentOptions.online) {
+      throw new BadRequestException(
+        `${paymentOptions.onlineBlockedBy} is Cash on Delivery only — online payment isn't available for this order.`,
+      );
     }
 
     // Allocate master-level discount/GST/wallet back down to each child group,
@@ -575,6 +598,74 @@ export class MasterOrdersService {
     await this.paymentNotify.paymentSuccess(mo.customerId, phone, mo.masterOrderNumber, Number(mo.totalAmount), mo.id);
   }
 
+  /**
+   * Re-initiates a gateway payment for an existing, still-unpaid Master Order — mirrors
+   * OrdersService.retryPayment() exactly (guest-safe phone check, PAID/locked-status
+   * guards, never creates a new order or child orders), just against the master total
+   * instead of one child's. Only valid while the whole checkout is still awaiting its
+   * first payment — once CONFIRMED (COD or already paid), this no longer applies.
+   */
+  async retryPayment(masterOrderId: string, phone: string) {
+    const mo = await this.prisma.masterOrder.findUnique({ where: { id: masterOrderId } });
+    if (!mo) throw new NotFoundException('Order not found');
+    const owner = mo.guestPhone || (await this.prisma.user.findUnique({ where: { id: mo.customerId }, select: { phone: true } }))?.phone;
+    if (owner && owner !== phone) throw new ForbiddenException('Phone number does not match this order');
+    if (mo.paymentStatus === 'PAID') throw new BadRequestException('Order is already paid');
+    if (mo.status !== MasterOrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException('Payment can no longer be changed for this order');
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder: any = await this.payments.initiatePayment(mo.customerId, Number(mo.totalAmount), mo.id, frontendUrl);
+    return {
+      masterOrderId: mo.id, masterOrderNumber: mo.masterOrderNumber, totalAmount: mo.totalAmount,
+      gateway: payOrder.gateway, gatewayOrderId: payOrder.gatewayOrderId, razorpayKeyId: payOrder.keyId,
+      redirectUrl: payOrder.redirectUrl, txId: payOrder.txId,
+    };
+  }
+
+  /**
+   * The reverse of retryPayment(): a Master Order booked Online that never got paid can
+   * switch the WHOLE checkout to Cash on Delivery instead of endlessly retrying the same
+   * gateway — cascades to every child order in one transaction (mirrors confirmPayment()'s
+   * cascade pattern). Blocked if ANY grouped service is ONLINE_ONLY, exactly like a fresh
+   * COD checkout would be (resolveCheckoutPaymentOptions is the single source of truth for
+   * both).
+   */
+  async switchToCod(masterOrderId: string, phone: string) {
+    const existing = await this.prisma.masterOrder.findUnique({
+      where: { id: masterOrderId },
+      include: { childOrders: { include: { service: true } } },
+    });
+    if (!existing) throw new NotFoundException('Order not found');
+    const owner = existing.guestPhone || (await this.prisma.user.findUnique({ where: { id: existing.customerId }, select: { phone: true } }))?.phone;
+    if (owner && owner !== phone) throw new ForbiddenException('Phone number does not match this order');
+    if (existing.paymentStatus === 'PAID') throw new BadRequestException('Order is already paid online');
+    if (existing.status !== MasterOrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException('Order has already moved past payment — cannot switch to Cash on Delivery now');
+    }
+
+    const services = existing.childOrders.map((c) => c.service).filter(Boolean) as { name: string; paymentMode: string }[];
+    const options = resolveCheckoutPaymentOptions(services);
+    if (!options.cod) {
+      throw new BadRequestException(`${options.codBlockedBy} requires online payment — Cash on Delivery isn't available for this order.`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.masterOrder.update({ where: { id: masterOrderId }, data: { status: MasterOrderStatus.CONFIRMED, paymentMethod: 'COD' } });
+      for (const child of existing.childOrders) {
+        await tx.order.update({ where: { id: child.id }, data: { status: OrderStatus.CONFIRMED, paymentMethod: 'COD' } });
+        await writeOrderTimeline(tx, { orderId: child.id, status: OrderStatus.CONFIRMED, note: 'Switched from Online to Cash on Delivery' });
+      }
+    });
+
+    for (const child of existing.childOrders) {
+      if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+    }
+
+    return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
+  }
+
   async findMine(customerId: string) {
     const orders = await this.prisma.masterOrder.findMany({
       where: { customerId },
@@ -724,6 +815,20 @@ export class PublicMasterOrderController {
   @Public() @Post('confirm-payment')
   confirmPayment(@Body() b: { dbOrderId: string; gatewayOrderId: string; paymentId: string; signature: string }) {
     return this.masterOrders.confirmPayment(b.dbOrderId, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  // Retry a failed/abandoned payment for the whole checkout — never creates a new order.
+  // Phone-verified since guests have no JWT. Mirrors orders/public/:id/retry-payment.
+  @Public() @Post(':id/retry-payment')
+  retryPayment(@Param('id') id: string, @Body() b: { phone: string }) {
+    return this.masterOrders.retryPayment(id, b.phone);
+  }
+
+  // The reverse of retry-payment: a checkout booked Online that never got paid can switch
+  // the whole cart to Cash on Delivery. Mirrors orders/public/:id/switch-to-cod.
+  @Public() @Post(':id/switch-to-cod')
+  switchToCod(@Param('id') id: string, @Body() b: { phone: string }) {
+    return this.masterOrders.switchToCod(id, b.phone);
   }
 
   @Public() @Get('track/:masterOrderNumber')

@@ -755,11 +755,12 @@ enum PricingType {
 
 // Admin-configurable, per-service payment-method eligibility — the single source of
 // truth read by both the website checkout and the Flutter app, and re-checked
-// server-side in OrdersService.switchToCod(), GuestBookingService.book() and
-// MasterOrdersService.checkout() so a stale client can never bypass it.
+// server-side in OrdersService.switchToCod()/retryPayment(), GuestBookingService.book()
+// and MasterOrdersService.checkout()/switchToCod() so a stale client can never bypass it.
 enum ServicePaymentMode {
-  ANY // Online or Cash on Delivery, customer's choice (default)
+  ANY // Online AND Cash on Delivery — customer's choice (default)
   ONLINE_ONLY // Cash on Delivery is not offered for this service
+  COD_ONLY // Online payment is not offered for this service
 }
 
 // Admin-configurable multiplier applied on top of a service's price for a given

@@ -8754,7 +8754,7 @@ function cartCheckout() {
 
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:10px">Payment Method</h4>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <label class="co-payment-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+        <label class="co-payment-label" id="co-online-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
           <input type="radio" name="co-payment" value="ONLINE" checked onchange="updatePaymentUI()">
           <div><div style="font-size:13px;font-weight:600">💳 Pay Online</div><div style="font-size:11px;color:#6b7280">UPI, Card, Net Banking</div></div>
         </label>
@@ -8765,8 +8765,10 @@ function cartCheckout() {
       </div>
       <p id="co-coupon-cod-note" style="display:none;font-size:11px;color:#9ca3af;margin:0 0 14px">Cash payment isn't available with a coupon applied — pay online to use this coupon.</p>
       <p id="co-online-only-note" style="display:none;font-size:11px;color:#9a6b00;margin:0 0 14px">ℹ️ A service in your cart requires online payment — Cash isn't available for this order.</p>
+      <p id="co-cod-only-note" style="display:none;font-size:11px;color:#9a6b00;margin:0 0 14px">ℹ️ A service in your cart is Cash on Delivery only — online payment isn't available for this order.</p>
+      <p id="co-conflict-note" style="display:none;font-size:11px;color:#dc2626;margin:0 0 14px;font-weight:600"></p>
 
-      <button onclick="submitCheckoutOrder()" id="co-submit-btn"
+      <button onclick="handleCheckoutSubmit()" id="co-submit-btn"
         style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px">
         Pay Online →
       </button>
@@ -8885,6 +8887,12 @@ function cartCheckout() {
 
 var _authCallback = null;
 var _checkoutOrderId = null;
+// Set alongside _checkoutOrderId once a checkout attempt has created the (still
+// PENDING_PAYMENT) Master Order — lets a second tap on "Pay Online"/"Place Order" after a
+// failure retry/switch-payment-method on that SAME order instead of submitting the cart
+// again, which would otherwise create a duplicate Master Order every retry.
+var _checkoutOrderNumber = null;
+var _checkoutTotalAmount = null;
 
 // Real SMS/WhatsApp delivery isn't configured yet (no MSG91_AUTH_KEY on Railway), so OTP
 // "1234" is accepted as a fixed test code — but now via the real backend (DEV_OTP_OVERRIDE
@@ -9314,6 +9322,13 @@ function openCheckoutModal() {
 
   document.getElementById('co-msg').style.display = 'none';
   window._coOnlineOnlyService = null;
+  window._coCodOnlyService = null;
+  // A fresh modal open always starts a fresh checkout attempt — never reuse a pending
+  // order id left over from a previous cart/session (that would misroute a brand new
+  // submission into retry-payment against a stale/unrelated order).
+  _checkoutOrderId = null;
+  _checkoutOrderNumber = null;
+  _checkoutTotalAmount = null;
   updatePaymentUI(); // immediate paint with defaults while the live eligibility check is in flight
   _coCheckPaymentEligibility();
   document.getElementById('co-submit-btn').disabled = false;
@@ -9329,14 +9344,16 @@ function _coCheckPaymentEligibility() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   var serviceIds = cart.filter(function(i){ return i.type === 'service'; }).map(function(i){ return i.id; });
   serviceIds = serviceIds.filter(function(id, idx){ return serviceIds.indexOf(id) === idx; });
-  if (!serviceIds.length) { window._coOnlineOnlyService = null; updatePaymentUI(); return; }
+  if (!serviceIds.length) { window._coOnlineOnlyService = null; window._coCodOnlyService = null; updatePaymentUI(); return; }
   Promise.all(serviceIds.map(function(id) {
     return apiGet('/api/v1/services/' + id).then(function(res) {
       return (res && res.data) ? res.data : res;
     }).catch(function() { return null; });
   })).then(function(services) {
     var restricted = services.find(function(s) { return s && s.paymentMode === 'ONLINE_ONLY'; });
+    var codOnly = services.find(function(s) { return s && s.paymentMode === 'COD_ONLY'; });
     window._coOnlineOnlyService = restricted ? restricted.name : null;
+    window._coCodOnlyService = codOnly ? codOnly.name : null;
     updatePaymentUI();
   });
 }
@@ -9349,6 +9366,83 @@ function closeCheckoutModal() {
 function showCoMsg(msg) {
   var el = document.getElementById('co-msg');
   el.textContent = msg; el.style.display = '';
+}
+
+// Online payment failed/was abandoned for an already-created (PENDING_PAYMENT) order —
+// the order itself was never confirmed (see MasterOrdersService.checkout/switchToCod: the
+// order only ever moves to CONFIRMED on an actually-verified payment or an explicit COD
+// switch). Tells the customer that plainly, and — when COD is actually available for this
+// cart — offers a one-tap way to place the order as Cash on Delivery instead of leaving
+// them stuck retrying the same failed gateway.
+function showCoPaymentFailed(reason, isMaster) {
+  var el = document.getElementById('co-msg');
+  if (!el) { if (typeof showToast === 'function') showToast('Payment Failed. Your order has not been confirmed.', 'error'); return; }
+  var offerCod = !window._coOnlineOnlyService && !!_checkoutOrderId;
+  el.innerHTML =
+    '<div style="text-align:left">' +
+      '<div style="font-weight:700;color:#ef4444;margin-bottom:2px">Payment Failed. Your order has not been confirmed.</div>' +
+      (reason ? '<div style="font-size:12px;color:#6b7280;margin-bottom:8px">' + escHtml(reason) + '</div>' : '') +
+      (offerCod
+        ? '<button type="button" onclick="coSwitchToCod(' + (isMaster ? 'true' : 'false') + ',this)" style="padding:6px 14px;background:#fff;border:1.5px solid #c4601a;color:#c4601a;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Switch to Cash on Delivery</button>'
+        : '') +
+    '</div>';
+  el.style.display = '';
+}
+
+// Switches the ALREADY-CREATED (still PENDING_PAYMENT) order from this failed Online
+// attempt to Cash on Delivery — never submits the cart again, so this can never create a
+// second/duplicate order alongside the one already sitting PENDING_PAYMENT from the first
+// attempt. Server re-validates COD eligibility (Service.paymentMode) regardless of what the
+// client believed was available.
+function coSwitchToCod(isMaster, btnEl) {
+  if (!_checkoutOrderId) { showToast('No pending order to switch.', 'error'); return; }
+  var phoneEl = document.getElementById('co-phone');
+  var phone = '+91' + (phoneEl ? phoneEl.value.replace(/\D/g, '') : '');
+  var btn = btnEl || document.getElementById('co-submit-btn');
+  var originalText = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Switching…';
+  var path = (isMaster ? '/api/v1/master-orders/public/' : '/api/v1/orders/public/') + _checkoutOrderId + '/switch-to-cod';
+  apiPost(path, { phone: phone }).then(function(res) {
+    var r = (res && res.data) ? res.data : res;
+    var orderNum = r.orderNumber || r.masterOrderNumber || _checkoutOrderNumber || '';
+    var amt = Number(r.totalAmount || _checkoutTotalAmount || 0);
+    if (typeof _autosaveProfileFromCheckout === 'function') {
+      var n = document.getElementById('co-name'); var a = document.getElementById('co-address'); var z = document.getElementById('co-pincode');
+      if (n && a) _autosaveProfileFromCheckout(n.value.trim(), phone, a.value.trim(), z ? z.value.trim() : '');
+    }
+    _checkoutOrderId = null; _checkoutOrderNumber = null; _checkoutTotalAmount = null;
+    closeCheckoutModal();
+    localStorage.removeItem('remont_cart');
+    if (typeof updateCartBadge === 'function') updateCartBadge();
+    openOrderSuccessModal(orderNum, amt, 'Cash on Delivery — please keep exact change ready at the time of delivery.');
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = originalText;
+    showCoMsg('Could not switch to Cash on Delivery: ' + (e && e.message ? e.message : 'unknown error'));
+  });
+}
+
+// Submit-button entry point — a prior attempt in this same modal session may have already
+// created the (PENDING_PAYMENT) order if Online payment just failed/was dismissed. Retrying
+// or switching payment method on THAT existing order (retryPayment/coSwitchToCod) instead
+// of calling submitCheckoutOrder() again is what stops a second tap on "Pay Online" from
+// creating a duplicate Master Order for the identical cart.
+function handleCheckoutSubmit() {
+  if (_checkoutOrderId) {
+    var sel = document.querySelector('input[name="co-payment"]:checked');
+    var isCOD = sel && sel.value === 'COD';
+    // The order was just booked under whatever phone is in this checkout form right now —
+    // pass it explicitly rather than letting retryPayment() fall back to remont_phone,
+    // which is empty/wrong for a guest checkout with no logged-in session yet.
+    var phoneEl = document.getElementById('co-phone');
+    var phone = '+91' + (phoneEl ? phoneEl.value.replace(/\D/g, '') : '');
+    if (isCOD) {
+      coSwitchToCod(true);
+    } else {
+      retryPayment(_checkoutOrderId, _checkoutTotalAmount, _checkoutOrderNumber, document.getElementById('co-submit-btn'), true, phone);
+    }
+    return;
+  }
+  submitCheckoutOrder();
 }
 
 // Recomputes and renders the price breakdown from the current cart + applied coupon +
@@ -9469,34 +9563,66 @@ function updatePaymentUI() {
     }
   }
 
-  // A coupon requires an online payment (so the discount can't be walked away from at
-  // the door) — lock the Cash option while one is applied. Same lock applies if any
-  // service in the cart is admin-configured Online-only (Service.paymentMode, checked
-  // live via _coCheckPaymentEligibility()) — one payment covers the whole cart, so a
-  // single restricted service makes the entire checkout online-only.
+  // Service.paymentMode drives which methods this cart can even offer (checked live via
+  // _coCheckPaymentEligibility()): ONLINE_ONLY forces Online (same lock a coupon applies —
+  // the discount can't be walked away from at the door), COD_ONLY forces Cash. One payment
+  // covers the whole cart, so a single restricted service applies to the entire checkout.
+  // A cart that somehow mixes an ONLINE_ONLY and a COD_ONLY service (or a coupon with a
+  // COD_ONLY service) has no payment method that satisfies both — block checkout entirely
+  // rather than silently picking one side, matching what the backend would reject anyway.
   var codRadio = document.querySelector('input[name="co-payment"][value="COD"]');
   var codLabel = document.getElementById('co-cod-label');
+  var onlineRadio = document.querySelector('input[name="co-payment"][value="ONLINE"]');
+  var onlineLabel = document.getElementById('co-online-label');
   var couponNote = document.getElementById('co-coupon-cod-note');
   var onlineOnlyNote = document.getElementById('co-online-only-note');
+  var codOnlyNote = document.getElementById('co-cod-only-note');
+  var conflictNote = document.getElementById('co-conflict-note');
+  var btn = document.getElementById('co-submit-btn');
+
   var forceOnline = !!_coCoupon || !!window._coOnlineOnlyService;
-  if (forceOnline) {
-    var onlineRadio = document.querySelector('input[name="co-payment"][value="ONLINE"]');
-    if (onlineRadio) onlineRadio.checked = true;
+  var forceCod = !!window._coCodOnlyService;
+  var conflict = forceOnline && forceCod;
+
+  [couponNote, onlineOnlyNote, codOnlyNote, conflictNote].forEach(function(n) { if (n) n.style.display = 'none'; });
+
+  if (conflict) {
+    if (onlineRadio) onlineRadio.disabled = true;
+    if (codRadio) codRadio.disabled = true;
+    if (onlineLabel) { onlineLabel.style.opacity = '0.45'; onlineLabel.style.pointerEvents = 'none'; }
+    if (codLabel) { codLabel.style.opacity = '0.45'; codLabel.style.pointerEvents = 'none'; }
+    if (conflictNote) {
+      conflictNote.textContent = '⚠️ ' + (window._coOnlineOnlyService || 'A service') + ' requires online payment, but ' +
+        (window._coCodOnlyService || 'another service') + ' is Cash on Delivery only — please book them in separate orders.';
+      conflictNote.style.display = 'block';
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Split into separate orders to continue'; }
+  } else if (forceCod) {
+    if (codRadio) { codRadio.checked = true; codRadio.disabled = false; }
+    if (onlineRadio) { onlineRadio.checked = false; onlineRadio.disabled = true; }
+    if (onlineLabel) { onlineLabel.style.opacity = '0.45'; onlineLabel.style.pointerEvents = 'none'; }
+    if (codLabel) { codLabel.style.opacity = '1'; codLabel.style.pointerEvents = 'auto'; }
+    if (codOnlyNote) codOnlyNote.style.display = 'block';
+    if (btn) btn.disabled = false;
+  } else if (forceOnline) {
+    if (onlineRadio) { onlineRadio.checked = true; onlineRadio.disabled = false; }
     if (codRadio) { codRadio.checked = false; codRadio.disabled = true; }
     if (codLabel) { codLabel.style.opacity = '0.45'; codLabel.style.pointerEvents = 'none'; }
+    if (onlineLabel) { onlineLabel.style.opacity = '1'; onlineLabel.style.pointerEvents = 'auto'; }
     if (couponNote) couponNote.style.display = _coCoupon ? 'block' : 'none';
     if (onlineOnlyNote) onlineOnlyNote.style.display = window._coOnlineOnlyService ? 'block' : 'none';
+    if (btn) btn.disabled = false;
   } else {
     if (codRadio) codRadio.disabled = false;
+    if (onlineRadio) onlineRadio.disabled = false;
     if (codLabel) { codLabel.style.opacity = '1'; codLabel.style.pointerEvents = 'auto'; }
-    if (couponNote) couponNote.style.display = 'none';
-    if (onlineOnlyNote) onlineOnlyNote.style.display = 'none';
+    if (onlineLabel) { onlineLabel.style.opacity = '1'; onlineLabel.style.pointerEvents = 'auto'; }
+    if (btn) btn.disabled = false;
   }
 
   var sel = document.querySelector('input[name="co-payment"]:checked');
   var isCOD = sel && sel.value === 'COD';
-  var btn = document.getElementById('co-submit-btn');
-  if (btn) btn.textContent = isCOD ? 'Place Order (Cash) →' : 'Pay Online →';
+  if (btn && !conflict) btn.textContent = isCOD ? 'Place Order (Cash) →' : 'Pay Online →';
   document.querySelectorAll('.co-payment-label').forEach(function(l) {
     var inp = l.querySelector('input[type="radio"]');
     l.style.borderColor = (inp && inp.checked) ? '#c4601a' : '#e5e7eb';
@@ -9599,9 +9725,12 @@ function submitCheckoutOrder() {
     var orderNumber = d.masterOrderNumber;
     var totalAmount = Number(d.totalAmount || 0);
     _checkoutOrderId = d.masterOrderId;
+    _checkoutOrderNumber = orderNumber;
+    _checkoutTotalAmount = totalAmount;
 
     if (d.isCOD) {
       _autosaveProfileFromCheckout(name, '+91' + phoneRaw, address, pincode);
+      _checkoutOrderId = null; _checkoutOrderNumber = null; _checkoutTotalAmount = null;
       closeCheckoutModal();
       localStorage.removeItem('remont_cart');
       if (typeof updateCartBadge === 'function') updateCartBadge();
@@ -9702,6 +9831,7 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
               var a = document.getElementById('co-address'); var z = document.getElementById('co-pincode');
               if (n && p && a) _autosaveProfileFromCheckout(n.value.trim(), '+91' + p.value.replace(/\D/g,''), a.value.trim(), z ? z.value.trim() : '');
             }
+            _checkoutOrderId = null; _checkoutOrderNumber = null; _checkoutTotalAmount = null;
             if (typeof closeCheckoutModal === 'function') closeCheckoutModal();
             localStorage.removeItem('remont_cart');
             if (typeof updateCartBadge === 'function') updateCartBadge();
@@ -9719,7 +9849,11 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
         notes: { orderId: _checkoutOrderId },
         theme: { color: '#c4601a' },
         modal: {
-          ondismiss: function() { btn.textContent = 'Pay Online →'; btn.disabled = false; reject(new Error('dismissed')); }
+          ondismiss: function() {
+            btn.textContent = 'Pay Online →'; btn.disabled = false;
+            showCoPaymentFailed('Payment was not completed.', isMaster);
+            reject(new Error('dismissed'));
+          }
         }
       };
 
@@ -9734,10 +9868,8 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
         try {
           var rzp = new window.Razorpay(options);
           rzp.on('payment.failed', function(resp) {
-            var msg = 'Payment failed: ' + (resp.error && resp.error.description || 'Unknown error');
-            if (typeof showCoMsg === 'function') showCoMsg(msg);
-            else if (typeof showToast === 'function') showToast(msg, 'error');
             btn.textContent = 'Pay Online →'; btn.disabled = false;
+            showCoPaymentFailed(resp.error && resp.error.description || 'Unknown error', isMaster);
           });
           rzp.open();
         } catch(e) {
@@ -10377,7 +10509,7 @@ function pdDownloadReceipt() {
   });
 }
 
-function retryPayment(orderId, totalAmount, orderNumber, btnEl, isMaster) {
+function retryPayment(orderId, totalAmount, orderNumber, btnEl, isMaster, phone) {
   _checkoutOrderId = orderId;
   // Use the real tapped button (when available) so Razorpay's own loading/disabled
   // states actually reach the DOM — a plain placeholder object here meant the button
@@ -10385,8 +10517,22 @@ function retryPayment(orderId, totalAmount, orderNumber, btnEl, isMaster) {
   var btn = btnEl || { textContent: 'Pay', disabled: false };
   var originalText = btn.textContent;
   if (btnEl) { btn.disabled = true; btn.textContent = 'Processing…'; }
-  apiPost('/api/v1/payments/create-order', { amount: totalAmount, orderId: orderId }).then(function(payment) {
-    return launchRazorpay(payment, { orderNumber: orderNumber }, totalAmount, btn, isMaster);
+  // `phone` is passed explicitly by callers that know the exact phone this order was
+  // booked under (e.g. handleCheckoutSubmit reads the just-typed #co-phone field — the
+  // guest checkout form has no logged-in session yet, so remont_phone would be wrong/empty
+  // here). Callers with no better source (the "My Orders" list, always behind a login) fall
+  // back to the logged-in account's phone.
+  var phoneToSend = phone || localStorage.getItem('remont_phone') || '';
+  // Go through the server-validated retry-payment endpoint (not a raw payments/create-order
+  // call) so the backend re-checks ownership, PAID/locked-status, and Service.paymentMode
+  // (COD_ONLY) every time — a stale/compromised client can never pay an amount, order, or
+  // payment method the backend wouldn't otherwise allow. Master vs single-order path
+  // mirrors launchRazorpay's own isMaster branch below.
+  var path = (isMaster ? '/api/v1/master-orders/public/' : '/api/v1/orders/public/') + orderId + '/retry-payment';
+  apiPost(path, { phone: phoneToSend }).then(function(res) {
+    var r = (res && res.data) ? res.data : res;
+    var payment = { gatewayOrderId: r.gatewayOrderId, amount: Number(r.totalAmount || totalAmount), currency: 'INR', keyId: r.razorpayKeyId };
+    return launchRazorpay(payment, { orderNumber: r.orderNumber || orderNumber }, Number(r.totalAmount || totalAmount), btn, isMaster);
   }).catch(function(e) {
     showToast('Payment initiation failed: ' + (e && e.message || 'unknown error'), 'error');
     if (btnEl) { btn.disabled = false; btn.textContent = originalText; }

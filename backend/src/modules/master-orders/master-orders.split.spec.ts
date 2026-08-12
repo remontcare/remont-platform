@@ -1,4 +1,4 @@
-import { groupCartForSplit, allocateAcrossGroups, deriveMasterProgress, SplitCartItem } from './master-orders.module';
+import { groupCartForSplit, allocateAcrossGroups, deriveMasterProgress, resolveCheckoutPaymentOptions, SplitCartItem } from './master-orders.module';
 
 describe('groupCartForSplit', () => {
   it('gives a single service its own group', () => {
@@ -190,5 +190,45 @@ describe('deriveMasterProgress', () => {
 
   it('ignores cancelled siblings when the rest are still in progress', () => {
     expect(deriveMasterProgress(['CANCELLED', 'CONFIRMED'])).toBe('IN_PROGRESS');
+  });
+});
+
+describe('resolveCheckoutPaymentOptions — Payment Mode business rules', () => {
+  it('allows both Online and COD when every service is ANY (Online + COD)', () => {
+    const opts = resolveCheckoutPaymentOptions([{ name: 'Tap Repair', paymentMode: 'ANY' }]);
+    expect(opts).toEqual({ online: true, cod: true, onlineBlockedBy: null, codBlockedBy: null });
+  });
+
+  it('blocks COD when any service is ONLINE_ONLY, but leaves Online available', () => {
+    const opts = resolveCheckoutPaymentOptions([
+      { name: 'Tap Repair', paymentMode: 'ANY' },
+      { name: 'Premium AC Install', paymentMode: 'ONLINE_ONLY' },
+    ]);
+    expect(opts.online).toBe(true);
+    expect(opts.cod).toBe(false);
+    expect(opts.codBlockedBy).toBe('Premium AC Install');
+  });
+
+  it('blocks Online when any service is COD_ONLY, but leaves COD available', () => {
+    const opts = resolveCheckoutPaymentOptions([
+      { name: 'Tap Repair', paymentMode: 'ANY' },
+      { name: 'Cash-Only Handyman Visit', paymentMode: 'COD_ONLY' },
+    ]);
+    expect(opts.online).toBe(false);
+    expect(opts.cod).toBe(true);
+    expect(opts.onlineBlockedBy).toBe('Cash-Only Handyman Visit');
+  });
+
+  it('blocks BOTH methods when the cart mixes an ONLINE_ONLY and a COD_ONLY service — no method satisfies both', () => {
+    const opts = resolveCheckoutPaymentOptions([
+      { name: 'Premium AC Install', paymentMode: 'ONLINE_ONLY' },
+      { name: 'Cash-Only Handyman Visit', paymentMode: 'COD_ONLY' },
+    ]);
+    expect(opts.online).toBe(false);
+    expect(opts.cod).toBe(false);
+  });
+
+  it('allows both methods for an empty service list (product-only cart)', () => {
+    expect(resolveCheckoutPaymentOptions([])).toEqual({ online: true, cod: true, onlineBlockedBy: null, codBlockedBy: null });
   });
 });

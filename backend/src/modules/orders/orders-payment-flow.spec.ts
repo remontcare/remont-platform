@@ -17,6 +17,9 @@ function makeService() {
     },
     user: { findUnique: jest.fn() },
     siteSetting: { findUnique: jest.fn(async () => null) },
+    // Service-level payment-mode restriction check (switchToCod/retryPayment) — defaults to
+    // "no restriction" (ANY) unless a test opts a specific service into ONLINE_ONLY/COD_ONLY.
+    service: { findUnique: jest.fn(async () => ({ name: 'Test Service', paymentMode: 'ANY' })) },
   };
   // writeOrderTimeline/writeOtpLog (imported from ../../common) hit these — stub them too.
   prisma.orderTimeline = { create: jest.fn() };
@@ -90,6 +93,17 @@ describe('OrdersService.retryPayment — retry/COD-to-Online conversion without 
       await expect(svc.retryPayment('o1', '9999999999')).resolves.toBeDefined();
     }
   });
+
+  it('rejects retry/COD-to-Online conversion for a Cash-on-Delivery-only service — it must never reach the online gateway', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', guestPhone: '9999999999', paymentStatus: 'PENDING', status: 'PENDING_PAYMENT',
+      customerId: 'u1', totalAmount: 500, orderNumber: 'REM-1', serviceId: 'svc-cod-only',
+    });
+    prisma.service.findUnique.mockResolvedValue({ name: 'Cash-Only Handyman Visit', paymentMode: 'COD_ONLY' });
+    await expect(svc.retryPayment('o1', '9999999999')).rejects.toThrow(BadRequestException);
+    expect(payments.initiatePayment).not.toHaveBeenCalled();
+  });
 });
 
 describe('OrdersService.switchToCod — "Change Payment Method" after a failed Online payment', () => {
@@ -117,6 +131,28 @@ describe('OrdersService.switchToCod — "Change Payment Method" after a failed O
     }));
     expect(result.status).toBe('CONFIRMED');
     expect(routing.route).toHaveBeenCalledWith('o1');
+  });
+
+  it('rejects switching to COD for an Online-only service — a stale client can never bypass the admin-configured restriction', async () => {
+    const { svc, prisma, routing } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', guestPhone: '9999999999', paymentStatus: 'PENDING', status: 'PENDING_PAYMENT', serviceId: 'svc-online-only',
+    });
+    prisma.service.findUnique.mockResolvedValue({ name: 'Premium AC Install', paymentMode: 'ONLINE_ONLY' });
+    await expect(svc.switchToCod('o1', '9999999999')).rejects.toThrow(BadRequestException);
+    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(routing.route).not.toHaveBeenCalled();
+  });
+
+  it('allows switching to COD for a Cash-on-Delivery-only service (COD_ONLY never blocks COD)', async () => {
+    const { svc, prisma } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', guestPhone: '9999999999', paymentStatus: 'PENDING', status: 'PENDING_PAYMENT', serviceId: 'svc-cod-only',
+    });
+    prisma.service.findUnique.mockResolvedValue({ name: 'Cash-Only Handyman Visit', paymentMode: 'COD_ONLY' });
+    prisma.order.update.mockImplementation(async (args: any) => ({ id: 'o1', serviceId: 'svc-cod-only', ...args.data }));
+    const result = await svc.switchToCod('o1', '9999999999');
+    expect(result.status).toBe('CONFIRMED');
   });
 });
 

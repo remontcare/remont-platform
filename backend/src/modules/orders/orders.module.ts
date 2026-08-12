@@ -512,6 +512,16 @@ export class OrdersService {
     if (lockedStatuses.includes(order.status)) {
       throw new BadRequestException('Payment can no longer be changed for this order');
     }
+    // Service-level payment restriction (admin-configurable, Service.paymentMode) — this
+    // always ends up charging Online (fresh retry or COD→Online conversion alike), so a
+    // Cash-on-Delivery-only service must never reach the gateway here, same as switchToCod()
+    // blocks the opposite direction for an Online-only service.
+    if (order.serviceId) {
+      const svc = await this.prisma.service.findUnique({ where: { id: order.serviceId }, select: { name: true, paymentMode: true } });
+      if (svc?.paymentMode === 'COD_ONLY') {
+        throw new BadRequestException(`${svc.name} is Cash on Delivery only — online payment isn't available for this service.`);
+      }
+    }
 
     const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
     const payOrder: any = await this.payments.initiatePayment(order.customerId, Number(order.totalAmount), order.id, frontendUrl);
@@ -1052,6 +1062,9 @@ export class GuestBookingService {
     // cart, or the app) the customer came through.
     if (svc.paymentMode === 'ONLINE_ONLY' && dto.paymentMethod !== 'ONLINE') {
       throw new BadRequestException(`${svc.name} requires online payment — Cash on Delivery isn't available for this service.`);
+    }
+    if (svc.paymentMode === 'COD_ONLY' && dto.paymentMethod === 'ONLINE') {
+      throw new BadRequestException(`${svc.name} is Cash on Delivery only — online payment isn't available for this service.`);
     }
 
     // Verify city

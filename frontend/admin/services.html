@@ -368,6 +368,7 @@
         <select id="svc-payment-mode" class="form-control">
           <option value="ANY">Online + Cash on Delivery (customer's choice)</option>
           <option value="ONLINE_ONLY">Online payment only (no Cash on Delivery)</option>
+          <option value="COD_ONLY">Cash on Delivery only (no online payment)</option>
         </select>
         <small style="color:#9ca3af">Enforced by the backend for every checkout path — website and the mobile app both read this live.</small>
       </div>
@@ -730,7 +731,7 @@ function loadServices() {
         '<td>' + badge(cityCount > 0 ? cityCount + ' cities' : 'All cities', cityCount > 0 ? 'blue' : 'gray') + '</td>' +
         '<td>' + badge((s.fulfillmentType||'DIRECT_PARTNER').replace('_',' '), s.fulfillmentType==='PROJECT'?'purple':(s.fulfillmentType==='ADMIN_TEAM'?'yellow':'gray')) + '</td>' +
         '<td>' + badge(commLabel, commColor) + '</td>' +
-        '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + (s.paymentMode==='ONLINE_ONLY'?' '+badge('Online only','orange'):'') + '</td>' +
+        '<td>' + badge(s.isActive?'Active':'Inactive',s.isActive?'green':'gray') + (s.isPopular?' '+badge('Popular','blue'):'') + (s.isPremium?' '+badge('Premium','purple'):'') + (s.paymentMode==='ONLINE_ONLY'?' '+badge('Online only','orange'):'') + (s.paymentMode==='COD_ONLY'?' '+badge('COD only','orange'):'') + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick="editService(\'' + s.id + '\')">Edit</button>' +
           '<button class="btn btn-xs btn-warning" onclick="toggleSvc(\'' + s.id + '\',' + (!s.isActive) + ')">' + (s.isActive?'Disable':'Enable') + '</button>' +
