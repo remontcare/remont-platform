@@ -39,6 +39,7 @@ import { RefundsModule } from './modules/refunds/refunds.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
 import { EstimatesModule } from './modules/estimates/estimates.module';
+import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { EstimatesModule } from './modules/estimates/estimates.module';
     ServicesModule,
     ProductsModule,
     EstimatesModule,
+    CatalogRelationsModule,
 
     // Operations
     VendorsModule,

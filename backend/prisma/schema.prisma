@@ -876,6 +876,56 @@ model Product {
   @@index([coverageType])
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CATALOG RELATIONS — the Service ↔ Product recommendation/cross-sell engine.
+// One generic, directional edge per relationship (Product/Service can each be
+// on either end) instead of four separate join tables — mirrors how this
+// schema already uses plain arrays for loosely-structured catalog data
+// (Service.inclusions/exclusions, Product.seoKeywords) rather than rigid
+// per-case tables. fromId/toId are plain strings, not @relation FKs, because
+// each can point at either a Product or a Service row (Prisma has no native
+// polymorphic association) — validity is enforced application-side in
+// CatalogRelationsService, not by the database.
+//
+// Bidirectionality without duplicate rows: a single (Service "AC
+// Installation" → REQUIRED → Product "Outdoor Unit Stand") row answers BOTH
+// "what does AC Installation need?" (forward query: fromType/fromId) AND
+// "what service does the Outdoor Unit Stand need?" (reverse query:
+// toType/toId) — the read side queries both directions and merges.
+// ═══════════════════════════════════════════════════════════════════════════
+enum CatalogEntityType {
+  PRODUCT
+  SERVICE
+}
+
+// Priority order the read API sorts by (REQUIRED first, RELATED last) —
+// matches the "Smart Priority" ranking the recommendation UI needs.
+enum CatalogRelationType {
+  REQUIRED // normally needed to complete the other side (AC Installation → Copper Pipe)
+  COMPATIBLE // fits/works with (Outdoor Unit Stand compatible with a specific AC model)
+  INSTALLATION_SERVICE // the service that installs/sets up this product (AC → AC Installation)
+  FREQUENTLY_BOUGHT_TOGETHER
+  RECOMMENDED // convenience/AOV add-on, not required (AC → AC Cover)
+  RELATED // loosely related, lowest priority (Tap → Plumbing Service)
+}
+
+model CatalogRelation {
+  id           String              @id @default(cuid())
+  fromType     CatalogEntityType
+  fromId       String
+  toType       CatalogEntityType
+  toId         String
+  relationType CatalogRelationType @default(RECOMMENDED)
+  sortOrder    Int                 @default(0)
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  createdBy    String? // admin User.id, for audit only — no FK (admin users can be deleted)
+
+  @@unique([fromType, fromId, toType, toId, relationType])
+  @@index([fromType, fromId])
+  @@index([toType, toId])
+}
+
 // Pincode/area-level coverage — schema exists now per the "future ready" requirement,
 // but nothing in products.module.ts's filtering logic reads this yet. When zone-level
 // enforcement is actually built, ProductCoverageType.ZONES should start consulting this

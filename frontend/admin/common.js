@@ -180,6 +180,7 @@ var SIDEBAR_NAV = [
   { section: '🛠 SERVICES', items: [
     { key:'services', label:'Service Management', icon:'🔧', href:'/admin/services.html' },
     { key:'service-pricing', label:'Service Pricing', icon:'💲', href:'/admin/service-pricing.html' },
+    { key:'catalog-relations', label:'Recommendations', icon:'🔗', href:'/admin/catalog-relations.html' },
   ]},
   { section: '🛒 PRODUCTS', items: [
     { key:'products', label:'Products', icon:'📦', href:'/admin/products.html' },

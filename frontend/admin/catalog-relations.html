@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Recommendations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+  .cr-search-box{position:relative}
+  .cr-search-results{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.08);max-height:280px;overflow-y:auto;z-index:20;display:none}
+  .cr-search-results.open{display:block}
+  .cr-search-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+  .cr-search-item:hover{background:#f9fafb}
+  .cr-anchor-card{display:flex;align-items:center;gap:12px;background:#fff7f3;border:1.5px solid #f0ac6b;border-radius:10px;padding:12px 16px;margin-bottom:16px}
+  .cr-anchor-card .cac-clear{margin-left:auto;color:#ef4444;cursor:pointer;font-size:12px;font-weight:600}
+  .cr-add-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:16px}
+  .cr-add-row .form-group{margin-bottom:0}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Recommendations</h1><p>Service ↔ Product cross-sell relationships (required / recommended / related)</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Step 1 — Pick a Product or Service</span></div>
+      <div style="padding:16px">
+        <div id="anchor-picker">
+          <div style="display:flex;gap:10px;margin-bottom:10px">
+            <select id="anchor-type" class="form-control" style="width:160px" onchange="clearAnchorSearch()">
+              <option value="SERVICE">Service</option>
+              <option value="PRODUCT">Product</option>
+            </select>
+            <div class="cr-search-box" style="flex:1">
+              <input id="anchor-search" class="form-control" placeholder="Search by name…" oninput="onAnchorSearch()">
+              <div id="anchor-results" class="cr-search-results"></div>
+            </div>
+          </div>
+        </div>
+        <div id="anchor-selected"></div>
+      </div>
+    </div>
+
+    <div id="relations-section" style="display:none">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Step 2 — Add a Relationship</span></div>
+        <div style="padding:16px">
+          <div class="cr-add-row">
+            <div class="form-group">
+              <label class="form-label">Relation Type</label>
+              <select id="add-reltype" class="form-control" style="width:220px">
+                <option value="REQUIRED">Required</option>
+                <option value="COMPATIBLE">Compatible</option>
+                <option value="INSTALLATION_SERVICE">Installation Service</option>
+                <option value="FREQUENTLY_BOUGHT_TOGETHER">Frequently Bought Together</option>
+                <option value="RECOMMENDED" selected>Recommended</option>
+                <option value="RELATED">Related</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Link to</label>
+              <select id="add-othertype" class="form-control" style="width:140px" onchange="clearOtherSearch()">
+                <option value="PRODUCT">Product</option>
+                <option value="SERVICE">Service</option>
+              </select>
+            </div>
+            <div class="form-group cr-search-box" style="flex:1;min-width:220px">
+              <label class="form-label">Search item</label>
+              <input id="other-search" class="form-control" placeholder="Search by name…" oninput="onOtherSearch()">
+              <div id="other-results" class="cr-search-results"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Sort Order</label>
+              <input id="add-sort" class="form-control" type="number" value="0" style="width:90px">
+            </div>
+          </div>
+          <div id="other-selected" style="margin-bottom:10px"></div>
+          <button class="btn btn-primary" id="add-btn" onclick="addRelation()" disabled>+ Add Relationship</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Existing Relationships</span></div>
+        <div class="table-wrap"><div id="rel-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('catalog-relations');
+requireAuth();
+
+var anchorType = 'SERVICE';
+var anchor = null; // {id, name, kind}
+var otherType = 'PRODUCT';
+var otherSelected = null; // {id, name, kind}
+var searchTimer = null;
+
+function relLabel(t) {
+  return { REQUIRED:'Required', COMPATIBLE:'Compatible', INSTALLATION_SERVICE:'Installation Service',
+    FREQUENTLY_BOUGHT_TOGETHER:'Frequently Bought Together', RECOMMENDED:'Recommended', RELATED:'Related' }[t] || t;
+}
+function relColor(t) {
+  return { REQUIRED:'red', COMPATIBLE:'blue', INSTALLATION_SERVICE:'purple',
+    FREQUENTLY_BOUGHT_TOGETHER:'yellow', RECOMMENDED:'green', RELATED:'gray' }[t] || 'gray';
+}
+
+// ── Generic entity search — reuses the existing admin product/service list
+// endpoints (GET /admin/products?q=, GET /admin/services?q=) instead of a
+// new search endpoint. ──
+function searchEntities(type, q, cb) {
+  if (!q || q.trim().length < 2) { cb([]); return; }
+  var path = type === 'PRODUCT' ? '/admin/products?q=' + encodeURIComponent(q) + '&limit=15'
+                                 : '/admin/services?q=' + encodeURIComponent(q) + '&limit=15';
+  api('GET', path).then(function(list) {
+    cb((list || []).map(function(x) { return { id: x.id, name: x.name, kind: type }; }));
+  }).catch(function() { cb([]); });
+}
+
+function clearAnchorSearch() {
+  document.getElementById('anchor-search').value = '';
+  document.getElementById('anchor-results').classList.remove('open');
+}
+function onAnchorSearch() {
+  anchorType = document.getElementById('anchor-type').value;
+  var q = document.getElementById('anchor-search').value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function() {
+    searchEntities(anchorType, q, function(results) {
+      var el = document.getElementById('anchor-results');
+      if (!results.length) { el.classList.remove('open'); return; }
+      el.innerHTML = results.map(function(r) {
+        return '<div class="cr-search-item" onclick=\'selectAnchor(' + JSON.stringify(r) + ')\'>' +
+          '<span>' + escape(r.name) + '</span>' + badge(r.kind, r.kind === 'PRODUCT' ? 'blue' : 'purple') + '</div>';
+      }).join('');
+      el.classList.add('open');
+    });
+  }, 250);
+}
+function selectAnchor(r) {
+  anchor = r;
+  document.getElementById('anchor-results').classList.remove('open');
+  document.getElementById('anchor-search').value = '';
+  document.getElementById('anchor-selected').innerHTML =
+    '<div class="cr-anchor-card">' + badge(r.kind, r.kind === 'PRODUCT' ? 'blue' : 'purple') +
+    '<strong>' + escape(r.name) + '</strong>' +
+    '<span class="cac-clear" onclick="anchor=null;document.getElementById(\'anchor-selected\').innerHTML=\'\';document.getElementById(\'relations-section\').style.display=\'none\'">Change</span></div>';
+  document.getElementById('relations-section').style.display = 'block';
+  loadRelations();
+}
+
+function clearOtherSearch() {
+  otherType = document.getElementById('add-othertype').value;
+  otherSelected = null;
+  document.getElementById('other-search').value = '';
+  document.getElementById('other-selected').innerHTML = '';
+  document.getElementById('other-results').classList.remove('open');
+  document.getElementById('add-btn').disabled = true;
+}
+function onOtherSearch() {
+  var q = document.getElementById('other-search').value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function() {
+    searchEntities(otherType, q, function(results) {
+      var el = document.getElementById('other-results');
+      if (!results.length) { el.classList.remove('open'); return; }
+      el.innerHTML = results.map(function(r) {
+        return '<div class="cr-search-item" onclick=\'selectOther(' + JSON.stringify(r) + ')\'>' +
+          '<span>' + escape(r.name) + '</span>' + badge(r.kind, r.kind === 'PRODUCT' ? 'blue' : 'purple') + '</div>';
+      }).join('');
+      el.classList.add('open');
+    });
+  }, 250);
+}
+function selectOther(r) {
+  otherSelected = r;
+  document.getElementById('other-results').classList.remove('open');
+  document.getElementById('other-search').value = r.name;
+  document.getElementById('other-selected').innerHTML =
+    '<div style="font-size:12px;color:#16a34a">✓ Selected: ' + escape(r.name) + '</div>';
+  document.getElementById('add-btn').disabled = false;
+}
+
+function loadRelations() {
+  var tbl = document.getElementById('rel-tbl');
+  tbl.innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/catalog-relations?type=' + anchor.kind + '&id=' + anchor.id).then(function(list) {
+    if (!list || !list.length) { tbl.innerHTML = '<div class="empty-state"><div class="empty-icon">🔗</div><h3>No relationships yet</h3><p>Add one above.</p></div>'; return; }
+    var rows = list.map(function(r) {
+      var other = r.other || { name: '(deleted)', kind: '?' };
+      var dirLabel = r.direction === 'FORWARD'
+        ? escape(anchor.name) + ' → ' + escape(other.name)
+        : escape(other.name) + ' → ' + escape(anchor.name);
+      return '<tr>' +
+        '<td>' + dirLabel + '</td>' +
+        '<td>' + badge(other.kind, other.kind === 'PRODUCT' ? 'blue' : 'purple') + '</td>' +
+        '<td>' + badge(relLabel(r.relationType), relColor(r.relationType)) + '</td>' +
+        '<td>' + r.sortOrder + '</td>' +
+        '<td><button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="removeRelation(\'' + r.id + '\')">Remove</button></td>' +
+        '</tr>';
+    }).join('');
+    tbl.innerHTML = '<table><thead><tr><th>Relationship</th><th>Type</th><th>Priority</th><th>Sort</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e) { tbl.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function addRelation() {
+  if (!anchor || !otherSelected) return;
+  var data = {
+    fromType: anchor.kind, fromId: anchor.id,
+    toType: otherSelected.kind, toId: otherSelected.id,
+    relationType: document.getElementById('add-reltype').value,
+    sortOrder: parseInt(document.getElementById('add-sort').value) || 0,
+  };
+  api('POST', '/admin/catalog-relations', data).then(function() {
+    toast('Relationship added', 'success');
+    clearOtherSearch();
+    document.getElementById('add-sort').value = 0;
+    loadRelations();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function removeRelation(id) {
+  if (!confirm('Remove this relationship?')) return;
+  api('DELETE', '/admin/catalog-relations/' + id).then(function() {
+    toast('Removed', 'warning');
+    loadRelations();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.cr-search-box')) {
+    document.getElementById('anchor-results').classList.remove('open');
+    document.getElementById('other-results').classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>
