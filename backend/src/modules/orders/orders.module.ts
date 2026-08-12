@@ -929,6 +929,7 @@ export class OrdersService {
       where: { customerId, ...(status ? { status } : {}) },
       include: {
         service: true, items: { include: { product: true } },
+        serviceItems: { include: { service: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, delivery: true,
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
@@ -943,6 +944,7 @@ export class OrdersService {
       include: {
         customer: { select: { name: true, phone: true, email: true } },
         service: true, items: { include: { product: true } },
+        serviceItems: { include: { service: true } },
         vendor: { include: { user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, invoice: true, delivery: true,
         timeline: { orderBy: { createdAt: 'asc' } },

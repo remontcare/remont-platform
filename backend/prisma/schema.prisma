@@ -721,6 +721,7 @@ model Service {
   category        ServiceCategory        @relation(fields: [categoryId], references: [id])
   subCategory     SubCategory?           @relation(fields: [subCategoryId], references: [id])
   orders          Order[]
+  orderServiceItems OrderServiceItem[]
   cityServices    CityService[]
   reviews         Review[]
   commissionRules CommissionRule[]
@@ -1475,6 +1476,7 @@ model Order {
   delivery        Delivery?        @relation(fields: [deliveryId], references: [id])
   amcSubscription AmcSubscription? @relation(fields: [amcSubscriptionId], references: [id])
   items           OrderItem[]
+  serviceItems    OrderServiceItem[]
   extraWorkItems  ExtraWorkItem[]
   invoice         Invoice?
   reviews         Review[]
@@ -1517,6 +1519,30 @@ model OrderItem {
   @@index([orderId])
   @@index([pickupLocationId])
   @@index([vendorId])
+}
+
+// One line item per distinct service inside a service-type Order — lets the Child Order
+// Engine (MasterOrdersService.checkout) group every service from the same category, same
+// address, same checkout into ONE Order instead of one Order per service. Order.serviceId
+// stays populated with the first/primary service for backward compatibility with every
+// existing single-service read path (order.service.name, routing, dispatch); this table is
+// the source of truth for the full per-service breakdown (name via the relation, price,
+// quantity) whenever an Order groups more than one service. Purely additive: orders created
+// before this table existed simply have zero rows here, and callers fall back to
+// Order.service in that case.
+model OrderServiceItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  serviceId  String
+  quantity   Int     @default(1)
+  unitPrice  Decimal @db.Decimal(10, 2)
+  totalPrice Decimal @db.Decimal(10, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@index([orderId])
+  @@index([serviceId])
 }
 
 // Append-only status-change log per Order — not the general event-driven architecture

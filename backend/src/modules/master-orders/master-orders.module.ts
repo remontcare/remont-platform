@@ -21,28 +21,34 @@ import { PaymentNotificationsService, PaymentNotificationsModule } from '../paym
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
 export type SplitCartItem =
-  | { type: 'SERVICE'; serviceId: string; quantity: number }
+  | { type: 'SERVICE'; serviceId: string; categoryId: string; quantity: number }
   | { type: 'PRODUCT'; productId: string; vendorId: string | null; quantity: number };
 
 export type SplitGroup =
-  | { type: 'SERVICE'; serviceId: string; quantity: number }
+  | { type: 'SERVICE'; categoryId: string; services: { serviceId: string; quantity: number }[] }
   | { type: 'PRODUCT'; vendorId: string | null; items: { productId: string; quantity: number }[] };
 
-// Splits a mixed cart by the priority the product requires: category is a property of
-// serviceId (each service belongs to exactly one category), so grouping by distinct
-// serviceId already keeps a category together whenever only one service in it was picked,
-// while correctly giving each *distinct* service its own child order otherwise — matching
-// the real schema constraint (Order.serviceId is a single scalar, one service per Order)
-// instead of the current frontend behavior, which silently drops every service but the
-// first when a category group has more than one. Products are grouped by distinct
-// Product.vendorId — the one genuinely new splitting axis, since nothing does this today.
+// Smart Order Grouping: Same Customer + Same Address + Same Service Category + Same
+// Checkout = ONE Order. This function only owns the last axis (category/seller grouping);
+// "same customer/address/checkout" falls out for free because checkout() below runs once
+// per HTTP request against one resolved address for the whole cart — a second checkout
+// (even seconds later, even the identical cart) always produces a new MasterOrder and thus
+// new, separate child Orders, so nothing here needs to re-check those three.
+//
+// Services are grouped by distinct Service.categoryId — every service in the same category
+// (e.g. Electrical: Fan Installation + Switch Board Installation) collapses into one child
+// Order carrying multiple OrderServiceItem rows (see master-orders.module.ts's
+// checkout()/schema.prisma's OrderServiceItem), one per distinct category becomes one
+// Order. Products are grouped by distinct Product.vendorId — one child order per seller.
 export function groupCartForSplit(items: SplitCartItem[]): SplitGroup[] {
-  const serviceQty = new Map<string, number>();
+  const servicesByCategory = new Map<string, Map<string, number>>();
   const productsByVendor = new Map<string, Map<string, number>>();
 
   for (const item of items) {
     if (item.type === 'SERVICE') {
-      serviceQty.set(item.serviceId, (serviceQty.get(item.serviceId) || 0) + (item.quantity || 1));
+      if (!servicesByCategory.has(item.categoryId)) servicesByCategory.set(item.categoryId, new Map());
+      const perCategory = servicesByCategory.get(item.categoryId)!;
+      perCategory.set(item.serviceId, (perCategory.get(item.serviceId) || 0) + (item.quantity || 1));
     } else {
       const vendorKey = item.vendorId || '__unassigned__';
       if (!productsByVendor.has(vendorKey)) productsByVendor.set(vendorKey, new Map());
@@ -52,8 +58,12 @@ export function groupCartForSplit(items: SplitCartItem[]): SplitGroup[] {
   }
 
   const groups: SplitGroup[] = [];
-  for (const [serviceId, quantity] of serviceQty) {
-    groups.push({ type: 'SERVICE', serviceId, quantity });
+  for (const [categoryId, serviceQty] of servicesByCategory) {
+    groups.push({
+      type: 'SERVICE',
+      categoryId,
+      services: Array.from(serviceQty, ([serviceId, quantity]) => ({ serviceId, quantity })),
+    });
   }
   for (const [vendorKey, productQty] of productsByVendor) {
     groups.push({
@@ -163,10 +173,9 @@ interface CheckoutOpts {
 interface PricedGroup {
   type: 'SERVICE' | 'PRODUCT';
   amount: number;
-  serviceId?: string;
-  quantity?: number;
-  vendorId?: string | null;
-  items?: { productId: string; quantity: number; unitPrice: number; totalPrice: number }[];
+  categoryId?: string; // SERVICE groups
+  vendorId?: string | null; // PRODUCT groups
+  items: { serviceId?: string; productId?: string; quantity: number; unitPrice: number; totalPrice: number }[];
 }
 
 // ─── Service ───
@@ -249,7 +258,7 @@ export class MasterOrdersService {
       if (item.type === 'SERVICE') {
         const svc = item.serviceId ? serviceMap.get(item.serviceId) : undefined;
         if (!svc || !svc.isActive) throw new NotFoundException(`Service not found or inactive: ${item.serviceId}`);
-        splitItems.push({ type: 'SERVICE', serviceId: svc.id, quantity: item.quantity || 1 });
+        splitItems.push({ type: 'SERVICE', serviceId: svc.id, categoryId: svc.categoryId, quantity: item.quantity || 1 });
       } else {
         const p = item.productId ? productMap.get(item.productId) : undefined;
         if (!p || !p.isActive) throw new NotFoundException(`Product not found or inactive: ${item.productId}`);
@@ -268,23 +277,29 @@ export class MasterOrdersService {
     const pricedGroups: PricedGroup[] = [];
     for (const g of groups) {
       if (g.type === 'SERVICE') {
-        const svc = serviceMap.get(g.serviceId)!;
-        let unitPrice = Number(svc.basePrice);
-        if (dto.city) {
-          if (!cityPriceCache.has(g.serviceId)) {
-            cityPriceCache.set(g.serviceId, await this.cities.getServicePrice(dto.city, g.serviceId));
+        let amount = 0;
+        const items: PricedGroup['items'] = [];
+        for (const line of g.services) {
+          const svc = serviceMap.get(line.serviceId)!;
+          let unitPrice = Number(svc.basePrice);
+          if (dto.city) {
+            if (!cityPriceCache.has(line.serviceId)) {
+              cityPriceCache.set(line.serviceId, await this.cities.getServicePrice(dto.city, line.serviceId));
+            }
+            const override = cityPriceCache.get(line.serviceId);
+            if (override !== null && override !== undefined) unitPrice = override;
           }
-          const override = cityPriceCache.get(g.serviceId);
-          if (override !== null && override !== undefined) unitPrice = override;
+          const totalPrice = unitPrice * line.quantity;
+          amount += totalPrice;
+          commissionByService.set(line.serviceId, await resolveCommission(this.prisma, {
+            serviceId: svc.id, categoryId: svc.categoryId, cityId: orderCityId, amount: totalPrice,
+          }));
+          items.push({ serviceId: line.serviceId, quantity: line.quantity, unitPrice, totalPrice });
         }
-        const groupAmount = unitPrice * g.quantity;
-        commissionByService.set(g.serviceId, await resolveCommission(this.prisma, {
-          serviceId: svc.id, categoryId: svc.categoryId, cityId: orderCityId, amount: groupAmount,
-        }));
-        pricedGroups.push({ type: 'SERVICE', amount: groupAmount, serviceId: g.serviceId, quantity: g.quantity });
+        pricedGroups.push({ type: 'SERVICE', amount, categoryId: g.categoryId, items });
       } else {
         let amount = 0;
-        const items = g.items.map((it) => {
+        const items: PricedGroup['items'] = g.items.map((it) => {
           const p = productMap.get(it.productId)!;
           const totalPrice = Number(p.price) * it.quantity;
           amount += totalPrice;
@@ -411,11 +426,25 @@ export class MasterOrdersService {
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
         const childTotal = Math.max(0, g.amount - childDiscount + childGst - childWallet);
-        const childCommission = (g.type === 'SERVICE' && g.serviceId)
-          ? commissionByService.get(g.serviceId) || { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' }
-          : { commissionAmount: 0, ruleId: null, ruleLabel: 'Product line — no commission' };
-        const remontCommission = childCommission.commissionAmount;
+
+        // A SERVICE group can now hold several services from the same category (Smart
+        // Order Grouping) — sum each line's own commission for the order-level total, and
+        // key the order's single serviceId/commissionRule* display fields off the first
+        // line (matches every existing single-service read path unchanged; the full
+        // per-service breakdown lives in serviceItems below regardless of count).
+        let remontCommission = 0;
+        let primaryRule: { commissionAmount: number; ruleId: string | null; ruleLabel: string } = {
+          commissionAmount: 0, ruleId: null, ruleLabel: 'Product line — no commission',
+        };
+        if (g.type === 'SERVICE') {
+          for (const it of g.items) {
+            const c = commissionByService.get(it.serviceId!) || { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' };
+            remontCommission += c.commissionAmount;
+          }
+          primaryRule = commissionByService.get(g.items[0].serviceId!) || { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' };
+        }
         const vendorPayout = serviceAmount - remontCommission;
+        const primaryServiceId = g.type === 'SERVICE' ? g.items[0].serviceId : undefined;
         const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         const startOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
         const endOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
@@ -425,7 +454,7 @@ export class MasterOrdersService {
             orderNumber, masterOrderId: masterOrder.id, customerId,
             type: g.type === 'SERVICE' ? OrderType.SERVICE : OrderType.PRODUCT,
             channel: dto.channel || BookingChannel.WEBSITE,
-            serviceId: g.type === 'SERVICE' ? g.serviceId : undefined,
+            serviceId: primaryServiceId,
             addressId: resolvedAddressId,
             ...addressSnapshotFields(resolvedAddress),
             slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
@@ -436,19 +465,22 @@ export class MasterOrdersService {
             serviceAmount, productsAmount, subtotal: g.amount,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
             totalAmount: childTotal, remontCommission, vendorPayout,
-            commissionRuleId: childCommission.ruleId, commissionRuleLabel: childCommission.ruleLabel,
+            commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
             guestName: isGuest ? opts.guestName : undefined,
             guestPhone: isGuest ? opts.guestPhone : undefined,
             items: g.type === 'PRODUCT'
-              ? { create: g.items!.map((it) => ({ productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, vendorId: g.vendorId })) }
+              ? { create: g.items.map((it) => ({ productId: it.productId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, vendorId: g.vendorId })) }
+              : undefined,
+            serviceItems: g.type === 'SERVICE'
+              ? { create: g.items.map((it) => ({ serviceId: it.serviceId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice })) }
               : undefined,
           },
         });
         await tx.orderTimeline.create({ data: { orderId: childOrder.id, status: childOrder.status } });
         if (g.type === 'SERVICE') {
-          // Each service child gets its own independent OTP pair (see startOtp/endOtp
-          // above, generated fresh per loop iteration) — logged individually here so a
-          // master order with N different service partners has N separate audit trails.
+          // One OTP pair per child Order (= one vendor visit), regardless of how many
+          // grouped services that visit covers — logged individually here so a master
+          // order with N distinct category visits has N separate audit trails.
           await writeOtpLog(tx, { orderId: childOrder.id, otpType: 'START', otp: startOtp!, action: 'GENERATED', requestedByRole: 'SYSTEM' });
           await writeOtpLog(tx, { orderId: childOrder.id, otpType: 'END', otp: endOtp!, action: 'GENERATED', requestedByRole: 'SYSTEM' });
         }
@@ -548,7 +580,13 @@ export class MasterOrdersService {
       where: { customerId },
       include: {
         address: true,
-        childOrders: { include: { service: true, items: { include: { product: true } }, delivery: true } },
+        childOrders: {
+          include: {
+            service: true, items: { include: { product: true } },
+            serviceItems: { include: { service: true } },
+            delivery: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -571,7 +609,11 @@ export class MasterOrdersService {
         address: true,
         customer: { select: { phone: true } },
         childOrders: {
-          include: { service: true, vendor: { include: { user: { select: { name: true, phone: true } } } }, items: { include: { product: true } } },
+          include: {
+            service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
+            items: { include: { product: true } },
+            serviceItems: { include: { service: true } },
+          },
         },
       },
     });
@@ -620,6 +662,7 @@ export class MasterOrdersService {
           include: {
             service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
             items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
+            serviceItems: { include: { service: true } },
             invoice: true, delivery: true,
             timeline: { orderBy: { createdAt: 'asc' } },
           },

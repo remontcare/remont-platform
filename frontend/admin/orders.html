@@ -312,7 +312,9 @@ function load() {
       var cname = o.guestName || (o.customer&&o.customer.name) || '—';
       var cphone = o.guestPhone || (o.customer&&o.customer.phone) || '';
       var vendor = o.vendor ? (o.vendor.user&&o.vendor.user.name)||o.vendor.fullName : '<span style="color:#f59e0b;font-size:11px">Unassigned</span>';
-      var svc = o.service ? o.service.name : '—';
+      var svc = (o.serviceItems && o.serviceItems.length > 1)
+        ? o.serviceItems.map(function(si){ return si.service ? si.service.name : 'Service'; }).join(' + ')
+        : (o.service ? o.service.name : '—');
       var city = o.address ? o.address.city : '—';
       var slot = o.slotStart ? fmtDateShort(o.slotStart) : '—';
       var chColor = CHANNEL_COLORS[o.channel]||'#6b7280';
@@ -360,10 +362,19 @@ function openDetail(orderId) {
     var cphone = o.guestPhone||(o.customer&&o.customer.phone)||'—';
     document.getElementById('detail-customer').innerHTML = escape(cname)+'<br><small style="color:#9ca3af">'+escape(cphone)+'</small>';
 
-    // Service
-    var svcName = o.service?o.service.name:'—';
+    // Service — Smart Order Grouping can bundle several same-category services into this
+    // one order (see OrderServiceItem); list all of them, falling back to o.service for
+    // orders created before that feature existed.
     var catName = o.service&&o.service.category?o.service.category.name:'';
-    document.getElementById('detail-service').innerHTML = escape(svcName)+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');
+    if (o.serviceItems && o.serviceItems.length > 1) {
+      var svcLines = o.serviceItems.map(function(si){
+        return escape((si.service&&si.service.name)||'Service')+' × '+(si.quantity||1)+' — '+fmtCur(si.totalPrice);
+      }).join('<br>');
+      document.getElementById('detail-service').innerHTML = svcLines+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');
+    } else {
+      var svcName = o.service?o.service.name:'—';
+      document.getElementById('detail-service').innerHTML = escape(svcName)+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');
+    }
 
     // Slot
     document.getElementById('detail-slot').textContent = o.slotStart ? fmtDate(o.slotStart) + (o.slotEnd?' → '+fmtDate(o.slotEnd):'') : 'Not scheduled';

@@ -5139,7 +5139,7 @@
         <div class="pr">${s.o !== '—' ? `<small>${escHtml(s.o)}</small> ` : ''}${escHtml(s.p)} <span class="svc-unit">${escHtml(s.unit || 'per visit')}</span></div>
         ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).map(escHtml).join(' · ')}</div>` : ''}
         <div class="svc-card-btns">
-          <button class="svc-cart-btn" onclick="addSvcToCart(event,'${s.id}','${escJs(s.n)}',${s.pNum||0},'${escJs(s.unit||'per visit')}','${escJs(s.categoryKey||'')}',${JSON.stringify(s.inclusions||[])})">+ Cart</button>
+          <button class="svc-cart-btn" onclick="addSvcToCart(event,'${s.id}','${escJs(s.n)}',${s.pNum||0},'${escJs(s.unit||'per visit')}','${escJs(s.categoryKey||'')}',${escHtml(JSON.stringify(s.inclusions||[]))})">+ Cart</button>
           <button class="svc-book-btn" onclick="bookSvcNow(event,'${s.id}','${escJs(s.n)}','${escJs(s.p)}')">⚡ Book Now</button>
         </div>
       </div>
@@ -5163,11 +5163,11 @@
       </div>
       <div class="product-grid">
         ${d.products.map(p => `
-          <div class="product-card" data-product-id="${p.id || ''}" onclick="if(!event.target.closest('.product-cta')&&!event.target.closest('.product-info-btn')&&!event.target.closest('.product-fav'))showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${JSON.stringify(p.specs||{})})">
+          <div class="product-card" data-product-id="${p.id || ''}" onclick="if(!event.target.closest('.product-cta')&&!event.target.closest('.product-info-btn')&&!event.target.closest('.product-fav'))showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${escHtml(JSON.stringify(p.specs||{}))})">
             <div class="product-img" style="background-image:url('${escHtml(p.img)}');position:relative">
               ${p.badge ? `<div class="product-badge${p.badgeGreen ? ' green' : ''}">${escHtml(p.badge)}</div>` : ''}
               <div class="product-fav">♡</div>
-              ${(p.desc || p.unit) ? `<button class="product-info-btn" onclick="showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${JSON.stringify(p.specs||{})})">ℹ</button>` : ''}
+              ${(p.desc || p.unit) ? `<button class="product-info-btn" onclick="showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${escHtml(JSON.stringify(p.specs||{}))})">ℹ</button>` : ''}
             </div>
             <div class="product-body">
               <div class="product-brand">${escHtml(p.brand)}</div>
@@ -10015,7 +10015,12 @@ function _renderOrderCard(o) {
   var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
   var date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
   var total = o.totalAmount ? '₹' + Number(o.totalAmount).toLocaleString('en-IN') : '—';
-  var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
+  // Smart Order Grouping: a single Order can now bundle several same-category services
+  // (see OrderServiceItem) — show all of them; falls back to the single o.service for
+  // orders created before this feature (which have no serviceItems rows).
+  var serviceName = (o.serviceItems && o.serviceItems.length > 1)
+    ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+    : (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
   var isCompleted = o.status === 'COMPLETED' || o.status === 'INVOICED' || o.status === 'CLOSED';
   var reviewed = _reviewedOrderIds[o.id];
   // Payment lives at the Master Order level once one exists — retry against that (and its
@@ -10037,7 +10042,7 @@ function _renderOrderCard(o) {
       (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + payRetryId + '\',' + payRetryAmount + ',\'' + payRetryNumber + '\',this,' + payRetryIsMaster + ')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
        (o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' || o.status === 'VENDOR_EN_ROUTE' || o.status === 'IN_PROGRESS') && o.vendor ?
          '<div style="display:flex;gap:6px">' +
-           '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor || o.assignedVendor || {}) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
+           '<button onclick=\'showAssignedPartner(' + escHtml(JSON.stringify(o.vendor || o.assignedVendor || {})) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
            (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
          '</div>'
        : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' :
@@ -10459,7 +10464,20 @@ function _odSection(title, bodyHtml) {
 function _renderOrderDetails(o) {
   var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
   var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
-  var serviceName = (o.service && o.service.name) || (o.items && o.items.length ? (o.items[0].product && o.items[0].product.name) : null) || o.type || 'Service';
+  // Smart Order Grouping: this Order may bundle several same-category services (see
+  // OrderServiceItem) — list every one; falls back to o.service for orders created before
+  // this feature (which have no serviceItems rows).
+  var serviceName = (o.serviceItems && o.serviceItems.length > 1)
+    ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+    : (o.service && o.service.name) || (o.items && o.items.length ? (o.items[0].product && o.items[0].product.name) : null) || o.type || 'Service';
+
+  var servicesHtml = (o.serviceItems && o.serviceItems.length)
+    ? o.serviceItems.map(function(si) {
+        return '<div style="display:flex;justify-content:space-between;font-size:13px;color:#374151;padding:4px 0">' +
+          '<span>' + escHtml((si.service && si.service.name) || 'Service') + ' × ' + (si.quantity || 1) + '</span>' +
+          '<span>₹' + Number(si.totalPrice || 0).toLocaleString('en-IN') + '</span></div>';
+      }).join('')
+    : '';
 
   var itemsHtml = (o.items && o.items.length)
     ? o.items.map(function(it) {
@@ -10485,7 +10503,7 @@ function _renderOrderDetails(o) {
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
         '<div><div style="font-size:14px;font-weight:600;color:#111">' + escHtml(vName) + '</div>' +
         '<div style="font-size:12px;color:#9ca3af">⭐ ' + Number(o.vendor.rating || 0).toFixed(1) + '</div></div>' +
-        '<button onclick=\'showAssignedPartner(' + JSON.stringify(o.vendor) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">🪪 View Partner</button>' +
+        '<button onclick=\'showAssignedPartner(' + escHtml(JSON.stringify(o.vendor)) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">🪪 View Partner</button>' +
       '</div>';
   } else {
     vendorBlock = '<div style="color:#9ca3af;font-size:13px">Not yet assigned</div>';
@@ -10510,6 +10528,7 @@ function _renderOrderDetails(o) {
       '<div style="font-size:13px;color:#6b7280;margin-top:2px">' + escHtml(serviceName) + '</div></div>' +
       '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px;white-space:nowrap">' + statusLabel + '</span>' +
     '</div>' +
+    (servicesHtml ? _odSection('Services', servicesHtml) : '') +
     (itemsHtml ? _odSection('Items', itemsHtml) : '') +
     _odSection('Partner', vendorBlock) +
     _odSection('Service Address', '<div style="font-size:13px;color:#374151">' + escHtml(addr) + '</div>') +

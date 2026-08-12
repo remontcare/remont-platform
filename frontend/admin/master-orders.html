@@ -97,15 +97,24 @@ function _flattenMasterOrderItems(masterOrder) {
   var items = [];
   (masterOrder.childOrders || []).forEach(function(c) {
     if (c.type === 'SERVICE') {
-      items.push({
-        name: (c.service && c.service.name) || 'Service',
-        vendor: (c.vendor && c.vendor.user && c.vendor.user.name) || '—',
-        status: c.status,
-        qty: 1,
-        price: c.serviceAmount,
-        gst: c.gstAmount,
-        timeline: c.timeline || [],
-        childOrderNumber: c.orderNumber,
+      // Smart Order Grouping: this child order can bundle several same-category services
+      // (see OrderServiceItem) — flatten each one to its own row, proportioning GST the
+      // same way the PRODUCT branch below already does. Falls back to the single
+      // c.service for orders created before this feature (no serviceItems rows).
+      var svcLines = (c.serviceItems && c.serviceItems.length) ? c.serviceItems : [{ service: c.service, quantity: 1, totalPrice: c.serviceAmount }];
+      var serviceAmount = Number(c.serviceAmount) || 0;
+      svcLines.forEach(function(si) {
+        var share = serviceAmount > 0 ? (Number(si.totalPrice) / serviceAmount) : (1 / svcLines.length);
+        items.push({
+          name: (si.service && si.service.name) || 'Service',
+          vendor: (c.vendor && c.vendor.user && c.vendor.user.name) || '—',
+          status: c.status,
+          qty: si.quantity,
+          price: si.totalPrice,
+          gst: Math.round(Number(c.gstAmount) * share * 100) / 100,
+          timeline: c.timeline || [],
+          childOrderNumber: c.orderNumber,
+        });
       });
     } else {
       var productsAmount = Number(c.productsAmount) || 0;

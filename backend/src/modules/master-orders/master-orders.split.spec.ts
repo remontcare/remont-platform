@@ -2,31 +2,78 @@ import { groupCartForSplit, allocateAcrossGroups, deriveMasterProgress, SplitCar
 
 describe('groupCartForSplit', () => {
   it('gives a single service its own group', () => {
-    const items: SplitCartItem[] = [{ type: 'SERVICE', serviceId: 'svc-1', quantity: 1 }];
+    const items: SplitCartItem[] = [{ type: 'SERVICE', serviceId: 'svc-1', categoryId: 'cat-plumbing', quantity: 1 }];
     const groups = groupCartForSplit(items);
     expect(groups).toHaveLength(1);
-    expect(groups[0]).toEqual({ type: 'SERVICE', serviceId: 'svc-1', quantity: 1 });
+    expect(groups[0]).toEqual({ type: 'SERVICE', categoryId: 'cat-plumbing', services: [{ serviceId: 'svc-1', quantity: 1 }] });
   });
 
-  it('gives each distinct service its own group — the fix for the old "combined-price, first-service-only" bug', () => {
+  // Smart Order Grouping: Same Customer + Same Address + Same Service Category + Same
+  // Checkout = ONE Order. Two services from the same category (e.g. Electrical: Fan
+  // Installation + Switch Board Installation) must collapse into a single group/child
+  // Order carrying both — not one child order per service, and not the old
+  // "combined-price, first-service-only" bug either (both services survive, each with
+  // its own line item — see checkout()'s per-line pricing and the OrderServiceItem rows
+  // it creates).
+  it('groups two services from the SAME category into ONE group', () => {
     const items: SplitCartItem[] = [
-      { type: 'SERVICE', serviceId: 'tap-repair', quantity: 1 },
-      { type: 'SERVICE', serviceId: 'angle-valve', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'fan-install', categoryId: 'cat-electrical', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'switchboard-install', categoryId: 'cat-electrical', quantity: 1 },
+    ];
+    const groups = groupCartForSplit(items);
+    expect(groups).toHaveLength(1);
+    const g = groups[0] as any;
+    expect(g.type).toBe('SERVICE');
+    expect(g.categoryId).toBe('cat-electrical');
+    const serviceIds = g.services.map((s: any) => s.serviceId).sort();
+    expect(serviceIds).toEqual(['fan-install', 'switchboard-install']);
+  });
+
+  it('gives each DIFFERENT category its own group — Electrical + Carpenter = 2 groups', () => {
+    const items: SplitCartItem[] = [
+      { type: 'SERVICE', serviceId: 'fan-install', categoryId: 'cat-electrical', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'carpenter-svc', categoryId: 'cat-carpenter', quantity: 1 },
     ];
     const groups = groupCartForSplit(items);
     expect(groups).toHaveLength(2);
-    const serviceIds = groups.map((g: any) => g.serviceId).sort();
-    expect(serviceIds).toEqual(['angle-valve', 'tap-repair']);
+    const categoryIds = groups.map((g: any) => g.categoryId).sort();
+    expect(categoryIds).toEqual(['cat-carpenter', 'cat-electrical']);
   });
 
-  it('merges duplicate entries of the same service by summing quantity', () => {
+  it('splits Electrical + Plumbing + Carpenter into 3 groups', () => {
     const items: SplitCartItem[] = [
-      { type: 'SERVICE', serviceId: 'svc-1', quantity: 1 },
-      { type: 'SERVICE', serviceId: 'svc-1', quantity: 2 },
+      { type: 'SERVICE', serviceId: 'fan-install', categoryId: 'cat-electrical', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'tap-repair', categoryId: 'cat-plumbing', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'carpenter-svc', categoryId: 'cat-carpenter', quantity: 1 },
+    ];
+    const groups = groupCartForSplit(items);
+    expect(groups).toHaveLength(3);
+  });
+
+  it('groups two Electrical services + two Carpenter services into exactly 2 groups', () => {
+    const items: SplitCartItem[] = [
+      { type: 'SERVICE', serviceId: 'fan-install', categoryId: 'cat-electrical', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'switchboard-install', categoryId: 'cat-electrical', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'carpenter-a', categoryId: 'cat-carpenter', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'carpenter-b', categoryId: 'cat-carpenter', quantity: 1 },
+    ];
+    const groups = groupCartForSplit(items);
+    expect(groups).toHaveLength(2);
+    const electricalGroup = groups.find((g: any) => g.categoryId === 'cat-electrical') as any;
+    const carpenterGroup = groups.find((g: any) => g.categoryId === 'cat-carpenter') as any;
+    expect(electricalGroup.services).toHaveLength(2);
+    expect(carpenterGroup.services).toHaveLength(2);
+  });
+
+  it('merges duplicate entries of the same service within a category group by summing quantity', () => {
+    const items: SplitCartItem[] = [
+      { type: 'SERVICE', serviceId: 'svc-1', categoryId: 'cat-plumbing', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'svc-1', categoryId: 'cat-plumbing', quantity: 2 },
     ];
     const groups = groupCartForSplit(items);
     expect(groups).toHaveLength(1);
-    expect((groups[0] as any).quantity).toBe(3);
+    const g = groups[0] as any;
+    expect(g.services).toEqual([{ serviceId: 'svc-1', quantity: 3 }]);
   });
 
   it('groups products by distinct vendorId — one child order per seller', () => {
@@ -61,13 +108,26 @@ describe('groupCartForSplit', () => {
 
   it('splits a mixed cart into the right number of category/seller groups', () => {
     const items: SplitCartItem[] = [
-      { type: 'SERVICE', serviceId: 'plumbing-1', quantity: 1 },
-      { type: 'SERVICE', serviceId: 'electrical-1', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'plumbing-1', categoryId: 'cat-plumbing', quantity: 1 },
+      { type: 'SERVICE', serviceId: 'electrical-1', categoryId: 'cat-electrical', quantity: 1 },
       { type: 'PRODUCT', productId: 'p1', vendorId: 'seller-a', quantity: 1 },
       { type: 'PRODUCT', productId: 'p2', vendorId: 'seller-b', quantity: 1 },
     ];
     const groups = groupCartForSplit(items);
     expect(groups).toHaveLength(4);
+  });
+
+  it('same category but a different address/checkout call is out of scope for this pure function — each checkout() call groups only its own items', () => {
+    // The "different address ⇒ separate orders" and "different checkout ⇒ separate
+    // orders" rules aren't grouping logic at all: checkout() resolves exactly one
+    // address per HTTP request and groupCartForSplit only ever sees the items from that
+    // one request, so two separate checkout() calls (two addresses, or the same address
+    // twice) necessarily produce two separate MasterOrders/child Orders without this
+    // function needing to know about either address or checkout identity.
+    const checkoutA: SplitCartItem[] = [{ type: 'SERVICE', serviceId: 'fan-install', categoryId: 'cat-electrical', quantity: 1 }];
+    const checkoutB: SplitCartItem[] = [{ type: 'SERVICE', serviceId: 'switchboard-install', categoryId: 'cat-electrical', quantity: 1 }];
+    expect(groupCartForSplit(checkoutA)).toHaveLength(1);
+    expect(groupCartForSplit(checkoutB)).toHaveLength(1);
   });
 });
 
