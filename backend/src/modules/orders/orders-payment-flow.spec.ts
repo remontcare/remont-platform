@@ -543,8 +543,12 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
     expect(dispatch.dispatch).not.toHaveBeenCalled();
   });
 
-  it('DIRECT_PARTNER: falls back to a PARTNER when no IN_HOUSE staff match', async () => {
-    const { svc, prisma, events } = makeRouting();
+  it('DIRECT_PARTNER: a PARTNER-only match (no IN_HOUSE staff) is never direct-assigned — falls through to the ring/notify/accept flow instead', async () => {
+    // Regression test for a production incident: this path used to direct-assign the
+    // best-rated PARTNER candidate straight to VENDOR_ASSIGNED with zero ring/notification/
+    // accept step. A partner vendor must always get the same DispatchService ring flow
+    // as everyone else — only an actual IN_HOUSE employee may be auto-assigned outright.
+    const { svc, prisma, events, dispatch } = makeRouting();
     prisma.order.findUnique.mockResolvedValue({
       id: 'o1', orderNumber: 'REM-1', service: { fulfillmentType: 'DIRECT_PARTNER', requiredSkills: ['PLUMBING'] },
       address: { city: 'Bhopal' },
@@ -553,11 +557,10 @@ describe('RoutingService.route — service assignment routing (Task 8)', () => {
       { id: 'vendor-partner', userId: 'u-partner', staffType: 'PARTNER', fullName: 'Partner Pete', user: {} },
     ]);
     await svc.route('o1');
-    expect(prisma.order.update).toHaveBeenCalledWith({
-      where: { id: 'o1' },
-      data: { vendorId: 'vendor-partner', status: 'VENDOR_ASSIGNED', routingDecision: 'PARTNER' },
-    });
-    expect(events.emit).toHaveBeenCalledWith('job.offer.created', expect.objectContaining({ vendorUserId: 'u-partner', orderId: 'o1' }));
+    expect(prisma.order.update).toHaveBeenCalledWith({ where: { id: 'o1' }, data: { routingDecision: 'MANUAL_FALLBACK' } });
+    expect(prisma.order.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'VENDOR_ASSIGNED' }) }));
+    expect(dispatch.dispatch).toHaveBeenCalledWith('o1');
+    expect(events.emit).not.toHaveBeenCalledWith('job.offer.created', expect.objectContaining({ vendorUserId: 'u-partner' }));
   });
 
   it('DIRECT_PARTNER: falls back to manual assignment (flagged) and the existing dispatch notify flow when nobody matches', async () => {

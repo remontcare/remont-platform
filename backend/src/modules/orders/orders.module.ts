@@ -202,9 +202,18 @@ export class DispatchRetryService {
 // ─── Service assignment routing (Task 8) ───
 // Runs once when an order/child-part is confirmed, based on Service.fulfillmentType:
 //   PROJECT / ADMIN_TEAM  -> never auto-assigned, flagged for the admin queue instead.
-//   DIRECT_PARTNER        -> auto-match a vendor (in-house staff first, then partner)
-//                            by requiredSkills + order city; on no match, falls back to
-//                            today's unchanged notify-candidates DispatchService flow.
+//   DIRECT_PARTNER        -> auto-match ONLY an in-house staff member (an employee, who
+//                            doesn't get to accept/reject the way a gig-partner does) by
+//                            requiredSkills + order city; no in-house match (including
+//                            "only partner candidates exist") falls back to the ring/
+//                            notify/accept DispatchService flow every partner vendor goes
+//                            through — never a silent direct-assign for a partner. (Was
+//                            previously "in-house first, else best-rated partner,
+//                            direct-assign either way" — that contradicted the
+//                            vendor-must-accept requirement and, once the memberStatus
+//                            null-exclusion bug elsewhere in this file was fixed, started
+//                            actually firing for real partner vendors: no ring, no 30s
+//                            notification, straight into VENDOR_ASSIGNED.)
 // This never replaces the existing manual "Assign Vendor" admin action — it only
 // pre-selects to save time; admins can always reassign afterward the same way they do today.
 @Injectable()
@@ -244,23 +253,24 @@ export class RoutingService {
       orderBy: { rating: 'desc' },
     }) : [];
 
-    const chosen = candidates.find((v) => v.staffType === 'IN_HOUSE') || candidates[0];
+    const chosen = candidates.find((v) => v.staffType === 'IN_HOUSE');
 
     if (chosen) {
       await this.prisma.order.update({
         where: { id: orderId },
-        data: { vendorId: chosen.id, status: OrderStatus.VENDOR_ASSIGNED, routingDecision: chosen.staffType === 'IN_HOUSE' ? 'IN_HOUSE' : 'PARTNER' },
+        data: { vendorId: chosen.id, status: OrderStatus.VENDOR_ASSIGNED, routingDecision: 'IN_HOUSE' },
       });
       await writeOrderTimeline(this.prisma, {
         orderId, status: OrderStatus.VENDOR_ASSIGNED,
-        note: `Auto-routed to ${chosen.staffType === 'IN_HOUSE' ? 'in-house staff' : 'partner'}: ${chosen.fullName}`,
+        note: `Auto-routed to in-house staff: ${chosen.fullName}`,
       });
       this.events.emit('job.offer.created', { vendorUserId: chosen.userId, orderId: order.id, order });
       return;
     }
 
-    // No in-house or partner match found — flag it and fall back to the existing
-    // multi-candidate notify flow (unchanged), same as before this feature existed.
+    // No in-house match (whether or not partner candidates exist) — every partner vendor
+    // goes through the ring/notify/accept flow, never a silent direct-assign. Flag it and
+    // fall back to the existing multi-candidate notify flow.
     await this.prisma.order.update({ where: { id: orderId }, data: { routingDecision: 'MANUAL_FALLBACK' } });
     await this.dispatch.dispatch(orderId);
   }
