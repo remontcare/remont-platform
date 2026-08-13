@@ -9,7 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
-import { UserRole, FulfillmentType } from '@prisma/client';
+import { UserRole, FulfillmentType, MemberStatus } from '@prisma/client';
 
 // ─── DECORATORS ─────────────────────────────────────────────────────
 
@@ -182,6 +182,17 @@ export const OTP_REGEN_COOLDOWN_SECONDS = 45;
 // pull-list + accept path) both key off this same constant so there is exactly one place
 // to change the vendor-dispatchable set.
 export const VENDOR_DISPATCHABLE_FULFILLMENT_TYPES: FulfillmentType[] = [FulfillmentType.DIRECT_PARTNER];
+
+// ServiceVendor.memberStatus is nullable — null means "not an agency team member at all"
+// (an independent partner vendor), NOT "not frozen". A bare `memberStatus: { not: 'FROZEN' }`
+// compiles to SQL `<> 'FROZEN'`, and NULL <> 'FROZEN' evaluates to UNKNOWN (not TRUE) under
+// three-valued SQL logic — so that filter silently excludes every independent vendor, not
+// just frozen agency members. This was live in DispatchService.dispatch() and
+// RoutingService.route() (Phase 2 agency-management code), meaning automatic dispatch has
+// been skipping every non-agency vendor. Spread this into a Prisma `where` (as the `OR` key)
+// everywhere a "not a frozen agency member" filter is needed, instead of re-writing the
+// null-unsafe version.
+export const NOT_FROZEN_MEMBER_FILTER = { OR: [{ memberStatus: null }, { memberStatus: { not: MemberStatus.FROZEN } }] };
 
 // ─── Commission resolution (Task 9) ──────────────────────────────────────────
 // Category-level, service-level, and city-wise platform commission, with an

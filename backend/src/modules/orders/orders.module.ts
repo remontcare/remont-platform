@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -118,7 +118,7 @@ export class DispatchService {
         isOnline: true, status: 'ACTIVE',
         skills: { has: skill },
         currentLatitude: { not: null }, currentLongitude: { not: null },
-        memberStatus: { not: 'FROZEN' }, // Phase 2: a frozen agency team member is excluded from dispatch
+        ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
       },
       include: { user: true },
       take: 50,
@@ -173,7 +173,21 @@ export class DispatchRetryService {
       where: {
         status: OrderStatus.CONFIRMED,
         vendorId: null,
-        lastDispatchedAt: { lte: new Date(Date.now() - 60 * 60 * 1000) },
+        // Explicit allowlist guard (not just "lastDispatchedAt is set/stale") — a
+        // PROJECT/ADMIN_TEAM order also has lastDispatchedAt: null forever, since
+        // RoutingService never calls dispatch() for it. Before this fix that was
+        // incidentally safe only because a plain `lte` never matches NULL; now that we
+        // explicitly catch the null case below too, this filter is what actually keeps
+        // in-house orders out of the retry cycle.
+        service: { fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
+        // lastDispatchedAt: null must be caught explicitly — `lte` alone never matches a
+        // NULL column in SQL (three-valued logic), so an order that somehow never got a
+        // first dispatch wave (e.g. dispatchAttempts was backfilled to 0 by a migration
+        // adding this column) would otherwise stay permanently invisible to this sweep.
+        OR: [
+          { lastDispatchedAt: null },
+          { lastDispatchedAt: { lte: new Date(Date.now() - 60 * 60 * 1000) } },
+        ],
       },
       select: { id: true, orderNumber: true },
       take: 100,
@@ -223,7 +237,7 @@ export class RoutingService {
     const candidates = cityName ? await this.prisma.serviceVendor.findMany({
       where: {
         isOnline: true, status: 'ACTIVE', baseCity: cityName,
-        memberStatus: { not: 'FROZEN' }, // Phase 2: a frozen agency team member is excluded from routing
+        ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
         ...(requiredSkills.length ? { skills: { hasSome: requiredSkills } } : {}),
       },
       include: { user: true },
