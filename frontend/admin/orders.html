@@ -141,8 +141,9 @@
       <div class="detail-box"><label>Commission</label><div class="val" id="detail-commission">—</div></div>
     </div>
 
-    <!-- Vendor Assignment -->
-    <div style="margin-bottom:16px">
+    <!-- Vendor Assignment — Service Partners only; a product-only order has no service to
+         assign a Service Partner to, so this whole section is hidden for it (see openDetail). -->
+    <div id="vendor-assign-section" style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">ASSIGN VENDOR <span id="detail-current-vendor" style="font-weight:400;color:#9ca3af"></span></div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input id="vendor-search" class="form-control" style="flex:1" placeholder="Search vendor name or skill…" oninput="filterVendors()">
@@ -346,11 +347,15 @@ function openDetail(orderId) {
 
   Promise.all([
     api('GET','/admin/orders/'+orderId),
-    api('GET','/admin/orders/vendors'),
+    api('GET','/admin/orders/vendors?orderId='+orderId),
   ]).then(function(results) {
     var o = results[0];
     allVendors = results[1]||[];
     currentOrder = o;
+    // A product-only order (no o.serviceId) has no Service Partner to assign — the
+    // backend already returns [] for allVendors in that case; hide the whole section
+    // so it's not just an empty, confusing list.
+    document.getElementById('vendor-assign-section').style.display = o.serviceId ? '' : 'none';
 
     document.getElementById('detail-order-num').textContent = 'Order '+o.orderNumber;
     document.getElementById('detail-status-badge').innerHTML = statusBadge(o.status);

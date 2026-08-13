@@ -206,7 +206,11 @@ export class ServiceVendorsService {
       throw new BadRequestException('Invalid order status');
     }
     return this.prisma.order.findMany({
-      where: { vendorId: v.id, ...(status ? { status: status as OrderStatus } : {}) },
+      // A Service Partner's job list must never include a product-only order — vendorId
+      // is a plain FK with no type constraint, so if one ever got set on a product order
+      // (e.g. an admin mistake — this happened in production, see forceAssignVendor's
+      // guard), this stays the last line of defense against surfacing it here.
+      where: { vendorId: v.id, serviceId: { not: null }, ...(status ? { status: status as OrderStatus } : {}) },
       include: {
         customer: { select: { name: true, phone: true } },
         service: true, address: true, extraWorkItems: true,
@@ -345,6 +349,9 @@ export class ServiceVendorsService {
     });
     if (!order) throw new NotFoundException();
     if (order.vendorId !== v.id) throw new ForbiddenException('This job is not assigned to you');
+    // Same defense-in-depth as myJobs() — a product-only order is never a Service
+    // Partner's job, no matter how vendorId ended up set on it.
+    if (!order.serviceId) throw new ForbiddenException('This job is not assigned to you');
     return order;
   }
 }

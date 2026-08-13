@@ -608,6 +608,18 @@ export class AdminService {
   }
 
   async forceAssignVendor(orderId: string, vendorId: string, actorId?: string, actorRole?: UserRole) {
+    // Every automated routing/dispatch path (RoutingService, DispatchService,
+    // availableJobs/acceptJob) already refuses to touch a product-only order — this was
+    // the one unguarded path: an admin opening the "Assign Vendor" (Service Partner)
+    // panel on a pure-product order could force-assign it, even firing the same
+    // job.offer.created notification a real service job would. A Service Partner is
+    // never the right recipient for a product order — that belongs to the Product's
+    // own ProductVendor/Seller (see ProductVendorsService.myOrders()).
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true } });
+    if (!existing) throw new NotFoundException();
+    if (!existing.serviceId) {
+      throw new BadRequestException('This order has no service — a Service Partner cannot be assigned to a product-only order.');
+    }
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
@@ -683,6 +695,10 @@ export class AdminService {
 
     if (!orderId) return vendors;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { address: true } });
+    // A product-only order has no Service Partner to assign at all — same rule
+    // forceAssignVendor() enforces, applied here too so the admin UI never even offers a
+    // vendor list for one.
+    if (!order?.serviceId) return [];
     const lat = order?.address?.latitude, lng = order?.address?.longitude;
     if (lat == null || lng == null) return vendors;
 
