@@ -830,6 +830,21 @@ function renderRegDetail(r) {
     dItem('Alt Phone', r.emergencyAltPhone || '—') +
     '</div></div>';
 
+  // Edit details — correct a mistyped field before deciding status, without forcing the
+  // applicant to redo the whole form. Separate "Save Details" action from status change:
+  // editing data is never itself an approval decision.
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">✏️ Edit Details</strong>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6b7280">Full Name</label><input id="edit-fullName" class="form-control" value="' + escape(r.fullName || '') + '"></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6b7280">Phone</label><input id="edit-phone" class="form-control" value="' + escape(r.phone || '') + '"></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6b7280">Email</label><input id="edit-email" class="form-control" value="' + escape(r.email || '') + '"></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6b7280">City</label><input id="edit-city" class="form-control" value="' + escape(r.city || '') + '"></div>' +
+    '<div style="grid-column:1/-1"><label style="font-size:11px;font-weight:700;color:#6b7280">Categories (comma-separated)</label><input id="edit-categories" class="form-control" value="' + escape((r.categories||[]).join(', ')) + '"></div>' +
+    '</div>' +
+    '<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="saveRegDetails()">Save Details</button>' +
+    '</div>';
+
   // Admin notes
   html += '<div style="margin-bottom:8px"><label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">Internal Notes</label>' +
     '<textarea id="reg-admin-notes" class="form-control" rows="2" style="margin-top:6px" placeholder="Add admin notes…">' + escape(r.adminNotes || '') + '</textarea></div>';
@@ -847,6 +862,20 @@ function renderRegDetail(r) {
     '</select>' +
     '<button class="btn btn-primary" onclick="saveRegStatus()">Save Status</button>' +
     '<button class="btn btn-outline" onclick="closeModal(\'reg-detail-overlay\')">Close</button>';
+}
+
+function saveRegDetails() {
+  var categories = document.getElementById('edit-categories').value.split(',').map(function(s){ return s.trim().toUpperCase().replace(/\s+/g,'_'); }).filter(Boolean);
+  var body = {
+    fullName: document.getElementById('edit-fullName').value.trim(),
+    phone: document.getElementById('edit-phone').value.trim(),
+    email: document.getElementById('edit-email').value.trim() || null,
+    city: document.getElementById('edit-city').value.trim(),
+    categories: categories,
+  };
+  api('PATCH', '/admin/partner-registrations/' + currentRegId, body)
+    .then(function() { toast('Details updated', 'success'); viewReg(currentRegId); })
+    .catch(function(e){ toast(e.message, 'error'); });
 }
 
 function dItem(label, val, mono) {

@@ -17,6 +17,42 @@ function generateRegistrationId(): string {
   return `PR-${date}-${rand}`;
 }
 
+// Rough India bounding box (mainland + Andaman/Nicobar + Lakshadweep), with a small margin —
+// good enough to reject an obviously-wrong/spoofed location without misclassifying a real
+// border-area applicant. Not a precise polygon; that's an acceptable trade-off for this check.
+function isWithinIndiaBounds(lat: number, lng: number): boolean {
+  return lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
+}
+
+// Every document field is a client-supplied base64 data URL (see partner-register.html's
+// FileReader-based upload) — the frontend's file-type/size check is JS-only and trivially
+// bypassed by calling this public API directly, so it must be re-verified server-side.
+// Checking real magic bytes (not just the claimed data: URL mime prefix, which is also
+// entirely client-controlled) is what actually stops a renamed/relabeled file from passing.
+const DOCUMENT_FIELDS = [
+  'idProofFront', 'idProofBack', 'panCardUrl', 'profilePhotoUrl',
+  'skillCertificateUrl', 'policeVerificationUrl', 'cancelledChequeUrl',
+] as const;
+const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+const DOCUMENT_MAGIC_BYTES: Record<string, Buffer> = {
+  'image/jpeg': Buffer.from([0xff, 0xd8, 0xff]),
+  'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+  'application/pdf': Buffer.from([0x25, 0x50, 0x44, 0x46]),
+};
+
+function validateDocumentDataUrl(field: string, value: string): void {
+  const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if (!match) throw new BadRequestException(`${field}: invalid file — only JPG, PNG, or PDF uploads are allowed`);
+  const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
+  const magic = DOCUMENT_MAGIC_BYTES[mime];
+  if (!magic) throw new BadRequestException(`${field}: only JPG, PNG, or PDF files are allowed`);
+  const buf = Buffer.from(match[2], 'base64');
+  if (buf.length > MAX_DOCUMENT_BYTES) throw new BadRequestException(`${field}: file must be under 5MB`);
+  if (!buf.subarray(0, magic.length).equals(magic)) {
+    throw new BadRequestException(`${field}: file content does not match its declared type — upload rejected`);
+  }
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -97,7 +133,10 @@ export class PartnerRegistrationService {
   async saveStep(registrationId: string, step: number, data: Record<string, any>) {
     const rec = await this.prisma.partnerRegistration.findUnique({ where: { registrationId } });
     if (!rec) throw new NotFoundException('Registration not found');
-    if (rec.agreedTerms && rec.currentStep >= 8) {
+    // MORE_DOCS/HOLD are exactly "admin sent this back for a fix" states — the applicant must
+    // be able to edit and resubmit, or "request more docs" is a dead end with no way out.
+    const reopenedForEdit = rec.status === 'MORE_DOCS' || rec.status === 'HOLD';
+    if (rec.agreedTerms && rec.currentStep >= 8 && !reopenedForEdit) {
       throw new BadRequestException('Registration already submitted');
     }
 
@@ -108,6 +147,11 @@ export class PartnerRegistrationService {
     // applicant could link themselves into an arbitrary agency by guessing/copying its id.
     // userId is set only by _activatePartner() once an application is actually approved.
     const { id, status, createdAt, updatedAt, registrationId: _rid, userId, agreedTerms, agreedAt, invitedByAgencyId, ...safe } = data;
+
+    for (const field of DOCUMENT_FIELDS) {
+      const value = safe[field];
+      if (value && value !== '[uploaded]') validateDocumentDataUrl(field, value);
+    }
 
     await this.prisma.partnerRegistration.update({
       where: { registrationId },
@@ -130,8 +174,30 @@ export class PartnerRegistrationService {
       throw new BadRequestException('All agreements must be accepted');
     }
 
+    // GPS is mandatory, not optional — DispatchService can never find this partner without a
+    // real location, and a location outside India is rejected outright (a cheap, meaningful
+    // fraud/spoofing check on top of that).
+    if (rec.latitude == null || rec.longitude == null) {
+      throw new BadRequestException('Location is required — please allow GPS access to complete registration.');
+    }
+    if (!isWithinIndiaBounds(rec.latitude, rec.longitude)) {
+      throw new BadRequestException('Registration is only available for locations within India.');
+    }
+
+    // This is the one server-side proof that OTP was actually verified (see auth.module.ts's
+    // verifyOtp — real or DEV_OTP_OVERRIDE, both set isVerified:true the same way) — every
+    // endpoint up to this point (init/save-step) is @Public() with no such check, so without
+    // this a client could POST straight to /submit and create an application for a phone
+    // number nobody ever proved they controlled.
+    const verifiedUser = await this.prisma.user.findUnique({ where: { phone: rec.phone } });
+    if (!verifiedUser || !verifiedUser.isVerified) {
+      throw new BadRequestException('Phone number is not verified — please verify OTP before submitting.');
+    }
+
     await this.prisma.partnerRegistration.update({
       where: { registrationId },
+      // A MORE_DOCS/HOLD applicant resubmitting after fixing what admin flagged goes back to
+      // PENDING for a fresh review — same transition a first-time submission makes.
       data: { status: 'PENDING', currentStep: 8, agreedAt: new Date() },
     });
 
@@ -215,6 +281,26 @@ export class PartnerRegistrationService {
     const rec = await this.prisma.partnerRegistration.findUnique({ where: { id } });
     if (!rec) throw new NotFoundException('Registration not found');
     return rec;
+  }
+
+  // Full edit of an applicant's submitted details — e.g. correcting a mistyped phone/category
+  // before approving, without forcing the applicant to redo the whole form. Deliberately
+  // separate from adminUpdateStatus(): editing data never itself changes status/approval, an
+  // admin still takes that as its own explicit action.
+  async adminUpdateDetails(id: string, data: Record<string, any>) {
+    const rec = await this.prisma.partnerRegistration.findUnique({ where: { id } });
+    if (!rec) throw new NotFoundException('Registration not found');
+
+    // Same trust-boundary sanitization as saveStep() — an admin edits applicant-submitted
+    // data, never these system-owned fields directly through this endpoint.
+    const { id: _id, status, createdAt, updatedAt, registrationId, userId, agreedTerms, agreedAt, invitedByAgencyId, ...safe } = data;
+
+    for (const field of DOCUMENT_FIELDS) {
+      const value = safe[field];
+      if (value && value !== '[uploaded]') validateDocumentDataUrl(field, value);
+    }
+
+    return this.prisma.partnerRegistration.update({ where: { id }, data: safe });
   }
 
   async adminUpdateStatus(id: string, status: string, adminNotes?: string) {
@@ -417,6 +503,11 @@ export class AdminPartnerRegistrationController {
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() body: { status: string; adminNotes?: string }) {
     return this.svc.adminUpdateStatus(id, body.status, body.adminNotes);
+  }
+
+  @Patch(':id')
+  updateDetails(@Param('id') id: string, @Body() body: Record<string, any>) {
+    return this.svc.adminUpdateDetails(id, body);
   }
 }
 

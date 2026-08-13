@@ -464,6 +464,10 @@ input:focus,textarea:focus,select:focus{outline:none}
     <div class="step-title" data-en="Your Skills" data-hi="आपका कौशल">Your Skills</div>
     <div class="step-sub" data-en="Select all services you can provide. You can select multiple." data-hi="वे सभी सेवाएं चुनें जो आप दे सकते हैं। आप कई सेवाएं चुन सकते हैं।">Select all services you can provide. You can select multiple.</div>
     <div class="cat-grid" id="cat-grid"></div>
+    <div id="subcat-section" style="display:none;margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;color:#6b7280" data-en="Specializations (optional)" data-hi="विशेषज्ञता (वैकल्पिक)">Specializations (optional)</label>
+      <div id="subcat-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+    </div>
     <div class="field">
       <label><span data-en="Other (please specify)" data-hi="अन्य (कृपया बताएं)">Other (please specify)</span></label>
       <input type="text" id="f-cat-other" placeholder="e.g. Geyser Repair, Inverter Install…">
@@ -842,30 +846,32 @@ var STEP_LABELS = {
 };
 
 // ── CATEGORIES ──
-var CATS = [
-  {val:'ELECTRICIAN', icon:'⚡', en:'Electrician', hi:'इलेक्ट्रीशियन'},
-  {val:'PLUMBER', icon:'🔧', en:'Plumber', hi:'प्लंबर'},
-  {val:'CARPENTER', icon:'🪚', en:'Carpenter', hi:'बढ़ई'},
-  {val:'PAINTER', icon:'🎨', en:'Painter', hi:'पेंटर'},
-  {val:'CIVIL', icon:'🏗️', en:'Civil Contractor', hi:'सिविल ठेकेदार'},
-  {val:'INTERIOR', icon:'🏠', en:'Interior Designer', hi:'इंटीरियर डिज़ाइनर'},
-  {val:'MODULAR_KITCHEN', icon:'🍳', en:'Modular Kitchen', hi:'मॉड्यूलर किचन'},
-  {val:'WATERPROOFING', icon:'💧', en:'Waterproofing', hi:'वाटरप्रूफिंग'},
-  {val:'FALSE_CEILING', icon:'🏛️', en:'False Ceiling', hi:'फॉल्स सीलिंग'},
-  {val:'TILE_WORK', icon:'🪟', en:'Tile Work', hi:'टाइल वर्क'},
-  {val:'FABRICATION', icon:'⚙️', en:'Fabrication', hi:'फेब्रिकेशन'},
-  {val:'WELDER', icon:'🔩', en:'Welder', hi:'वेल्डर'},
-  {val:'CCTV', icon:'📷', en:'CCTV', hi:'CCTV'},
-  {val:'RO_TECH', icon:'🫧', en:'RO Technician', hi:'RO तकनीशियन'},
-  {val:'AC_TECH', icon:'❄️', en:'AC Technician', hi:'AC तकनीशियन'},
-  {val:'APPLIANCE', icon:'🔌', en:'Appliance Repair', hi:'उपकरण मरम्मत'},
-  {val:'SOLAR', icon:'☀️', en:'Solar', hi:'सोलर'},
-  {val:'PEST', icon:'🐛', en:'Pest Control', hi:'कीट नियंत्रण'},
-  {val:'CLEANING', icon:'🧹', en:'Cleaning', hi:'सफाई'},
-  {val:'HANDYMAN', icon:'🔨', en:'Handyman', hi:'हैंडीमैन'},
-  {val:'OTHER', icon:'➕', en:'Other', hi:'अन्य'},
-];
+// Populated from GET /services/categories (real ServiceCategory rows) in buildCatGrid() —
+// previously a hardcoded list whose values (ELECTRICIAN, CIVIL, PEST, CARPENTER, PAINTER,
+// INTERIOR, ...) mostly did NOT match any real ServiceCategory.key, and had no subCategory
+// picker at all. A vendor who picked one of the unmapped ones registered successfully but
+// could never match a real order — invisible to dispatch with no error anywhere, same failure
+// mode as a free-text typo. Fetching the real list (key/name/icon, isActive:true only —
+// deactivating a category here is how admin already controls what's offered) closes that.
+var CATS = [];
+var CAT_SUBCATS = {}; // categoryKey -> [{key, name}], only for categories that have any
 var selectedCats = [];
+var selectedSubCats = {}; // categoryKey -> [subCategoryKey, ...]
+
+function loadCategories() {
+  return fetch(API_BASE + '/api/v1/services/categories')
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      var cats = res.data || res || [];
+      CATS = cats.map(function(c) {
+        if (c.subCategories && c.subCategories.length) {
+          CAT_SUBCATS[c.key] = c.subCategories.map(function(sc){ return {key: sc.key, name: sc.name}; });
+        }
+        return {val: c.key, icon: c.icon || '🔧', en: c.name, hi: c.name};
+      });
+    })
+    .catch(function() { CATS = []; });
+}
 
 // ── LANGUAGE ──
 function setLang(l) {
@@ -942,7 +948,13 @@ function collectStepData(step) {
     if (locationData.latitude) { d.latitude = locationData.latitude; d.longitude = locationData.longitude; d.locationSource = locationData.source; }
   }
   if (step === 3 || step > 3) {
-    d.categories = selectedCats;
+    // Selected subcategories (optional, per-category specializations) fold into the same
+    // categories list — there's no separate subCategories column on PartnerRegistration, and
+    // dispatch matching today is category-level only (Service.category.key), so this is
+    // captured for admin visibility/profile detail rather than changing matching behavior.
+    var subKeys = [];
+    Object.keys(selectedSubCats).forEach(function(catKey){ subKeys = subKeys.concat(selectedSubCats[catKey] || []); });
+    d.categories = selectedCats.concat(subKeys);
     d.categoryOther = val('f-cat-other');
   }
   if (step === 4 || step > 4) {
@@ -1064,8 +1076,8 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     })(i);
   }
-  // Build category grid
-  buildCatGrid();
+  // Build category grid — from real ServiceCategory data (see loadCategories())
+  loadCategories().then(buildCatGrid);
   // AI welcome
   aiAddBubble(LANG === 'HI'
     ? 'नमस्ते! 👋 मैं Remi हूं, Remont India का AI सहायक। पार्टनर पंजीकरण में मदद के लिए यहां हूं!'
@@ -1205,9 +1217,21 @@ function submitRegistration() {
   if (!agreements.terms || !agreements.bg || !agreements.comm || !agreements.std) {
     showMsg('step8-msg', LANG === 'HI' ? 'कृपया सभी समझौते स्वीकार करें।' : 'Please accept all agreements.'); return;
   }
+  // Location is mandatory server-side now (submit() rejects without it) — check client-side
+  // first so a denied/skipped GPS step gets a clear, immediate message instead of a failed
+  // API round-trip after everything else was already filled in.
+  if (!locationData || !locationData.latitude) {
+    showMsg('step8-msg', LANG === 'HI' ? 'कृपया लोकेशन एक्सेस दें — रजिस्ट्रेशन के लिए जरूरी है।' : 'Please allow location access — it is required to complete registration.');
+    return;
+  }
   var btn = document.getElementById('submit-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> ' + (LANG === 'HI' ? 'जमा हो रहा है…' : 'Submitting…');
+
+  function resetButton() {
+    btn.disabled = false;
+    btn.innerHTML = LANG === 'HI' ? 'आवेदन जमा करें 🚀' : 'Submit Application 🚀';
+  }
 
   // Save final step data
   var finalData = collectStepData(8);
@@ -1221,8 +1245,18 @@ function submitRegistration() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({registrationId: registrationId})
     });
-  }).then(function(r){ return r.json(); }).then(function(res) {
-    var d = res.data || res;
+  }).then(function(r){
+    // A rejected submit() (missing OTP verification, missing/out-of-India GPS, invalid
+    // document, etc.) must never fall through to the success screen — check status first.
+    return r.json().then(function(body){ return {ok: r.ok, body: body}; });
+  }).then(function(result) {
+    if (!result.ok) {
+      resetButton();
+      var msg = (result.body && (result.body.message || result.body.error)) || (LANG === 'HI' ? 'सबमिट करने में त्रुटि। पुनः प्रयास करें।' : 'Submission failed. Please try again.');
+      showMsg('step8-msg', Array.isArray(msg) ? msg.join(' ') : msg);
+      return;
+    }
+    var d = result.body.data || result.body;
     document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
     document.getElementById('progress-wrap').style.display = 'none';
     document.getElementById('success-screen').style.display = '';
@@ -1231,8 +1265,7 @@ function submitRegistration() {
     localStorage.removeItem('pr_reg_id');
     window.scrollTo({top: 0, behavior: 'smooth'});
   }).catch(function() {
-    btn.disabled = false;
-    btn.innerHTML = LANG === 'HI' ? 'आवेदन जमा करें 🚀' : 'Submit Application 🚀';
+    resetButton();
     showMsg('step8-msg', LANG === 'HI' ? 'सबमिट करने में त्रुटि। पुनः प्रयास करें।' : 'Submission failed. Please try again.');
   });
 }
@@ -1252,7 +1285,33 @@ function buildCatGrid() {
 function toggleCat(el, val) {
   var idx = selectedCats.indexOf(val);
   if (idx === -1) { selectedCats.push(val); el.classList.add('selected'); }
-  else { selectedCats.splice(idx,1); el.classList.remove('selected'); }
+  else { selectedCats.splice(idx,1); el.classList.remove('selected'); delete selectedSubCats[val]; }
+  renderSubcatPicker();
+}
+// Optional specialization picker — only shown for a currently-selected category that has any
+// (SubCategory.isActive rows for it); admin controls what's offered simply by (de)activating
+// a SubCategory, no separate config UI needed. Never blocks progress — purely additive detail.
+function renderSubcatPicker() {
+  var section = document.getElementById('subcat-section');
+  var list = document.getElementById('subcat-list');
+  var html = '';
+  selectedCats.forEach(function(catKey) {
+    (CAT_SUBCATS[catKey] || []).forEach(function(sc) {
+      var checked = (selectedSubCats[catKey] || []).indexOf(sc.key) !== -1;
+      html += '<span onclick="toggleSubcat(\'' + catKey + '\',\'' + sc.key + '\',this)" style="cursor:pointer;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;border:1.5px solid ' + (checked ? 'var(--sienna,#c2410c)' : '#e5e7eb') + ';background:' + (checked ? 'var(--sienna,#c2410c)' : '#fff') + ';color:' + (checked ? '#fff' : '#374151') + '">' + escHtmlPR(sc.name) + '</span>';
+    });
+  });
+  list.innerHTML = html;
+  section.style.display = html ? '' : 'none';
+}
+function toggleSubcat(catKey, subKey, el) {
+  if (!selectedSubCats[catKey]) selectedSubCats[catKey] = [];
+  var idx = selectedSubCats[catKey].indexOf(subKey);
+  if (idx === -1) selectedSubCats[catKey].push(subKey); else selectedSubCats[catKey].splice(idx, 1);
+  renderSubcatPicker();
+}
+function escHtmlPR(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
 }
 
 // ── CARD SELECTOR (single-select) ──
