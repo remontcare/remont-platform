@@ -723,14 +723,34 @@ function toggleOnline(){
   onlineState=document.getElementById('online-toggle').checked;
   document.getElementById('online-pill').classList.toggle('on',onlineState);
   document.getElementById('online-label').textContent=onlineState?'Online':'Offline';
-  apiFetch('/vendors/service/me/status', {method:'PATCH', body: JSON.stringify({isOnline:onlineState})})
-    .catch(function(e){
-      onlineState=!onlineState;
-      document.getElementById('online-toggle').checked=onlineState;
-      document.getElementById('online-pill').classList.toggle('on',onlineState);
-      document.getElementById('online-label').textContent=onlineState?'Online':'Offline';
-      alert('Could not update status: '+e.message);
-    });
+  function revert(e){
+    onlineState=!onlineState;
+    document.getElementById('online-toggle').checked=onlineState;
+    document.getElementById('online-pill').classList.toggle('on',onlineState);
+    document.getElementById('online-label').textContent=onlineState?'Online':'Offline';
+    alert('Could not update status: '+e.message);
+  }
+  if (onlineState && navigator.geolocation) {
+    // Going online also refreshes ServiceVendor.currentLatitude/Longitude — the automatic
+    // dispatch/ring flow (DispatchService) can only ever find this vendor for a real push/
+    // WhatsApp job offer if that's set; this endpoint sets isOnline:true server-side too,
+    // so it replaces the separate /me/status call for the "going online" case. Same
+    // getCurrentPosition pattern already used by the attendance check-in flow below.
+    navigator.geolocation.getCurrentPosition(
+      function(pos){
+        apiFetch('/vendors/service/me/location', {method:'PATCH', body: JSON.stringify({lat: pos.coords.latitude, lng: pos.coords.longitude})}).catch(revert);
+      },
+      function(){
+        // Permission denied/unavailable — still go online so pull-based "Available Jobs"
+        // and admin manual assignment keep working, just without live push/WhatsApp offers
+        // until location is available.
+        apiFetch('/vendors/service/me/status', {method:'PATCH', body: JSON.stringify({isOnline:true})}).catch(revert);
+      },
+      { timeout: 5000 }
+    );
+  } else {
+    apiFetch('/vendors/service/me/status', {method:'PATCH', body: JSON.stringify({isOnline:onlineState})}).catch(revert);
+  }
 }
 
 /* ── EARNINGS ── */
