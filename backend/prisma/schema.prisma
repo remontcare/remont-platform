@@ -1432,6 +1432,14 @@ model Order {
   needsAdminReview Boolean @default(false)
   routingDecision  String? // ADMIN_TEAM | PROJECT | IN_HOUSE | PARTNER | MANUAL_FALLBACK
 
+  // Vendor auto-dispatch tracking — incremented every time DispatchService.dispatch()
+  // rings a wave of candidate vendors for this order. Lets the admin "stuck orders" queue
+  // (vendorId null + status CONFIRMED + dispatchAttempts >= 1) find orders nobody has
+  // accepted yet, and lets DispatchRetryService find orders whose last wave is stale
+  // enough (lastDispatchedAt) to re-dispatch a fresh cycle.
+  dispatchAttempts Int       @default(0)
+  lastDispatchedAt DateTime?
+
   // Job lifecycle
   slotStart          DateTime?
   slotEnd            DateTime?

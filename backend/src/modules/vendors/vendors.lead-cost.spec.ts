@@ -36,8 +36,9 @@ const vendor = {
 };
 
 const order = {
-  id: 'order-1', vendorId: null, status: 'CONFIRMED',
-  service: { category: { key: 'PLUMBING' } }, address: { city: 'Bhopal' },
+  id: 'order-1', vendorId: null, status: 'CONFIRMED', dispatchAttempts: 1,
+  service: { category: { key: 'PLUMBING' }, fulfillmentType: 'DIRECT_PARTNER' },
+  address: { city: 'Bhopal' },
 };
 
 describe('ServiceVendorsService.acceptJob — Lead Cost', () => {

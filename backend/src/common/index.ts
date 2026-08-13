@@ -9,7 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
-import { UserRole } from '@prisma/client';
+import { UserRole, FulfillmentType } from '@prisma/client';
 
 // ─── DECORATORS ─────────────────────────────────────────────────────
 
@@ -172,6 +172,16 @@ export async function writeOtpLog(prisma: any, entry: {
 // 30-60s cooldown window the requirement asks for, between "Request OTP Again" taps
 // for the same (order, otpType) — picked the middle of that range.
 export const OTP_REGEN_COOLDOWN_SECONDS = 45;
+
+// ─── Vendor dispatch eligibility (single source of truth) ────────────────────
+// Allowlist, deliberately not a blocklist of PROJECT/ADMIN_TEAM: a FulfillmentType this
+// list doesn't name is hidden from vendors by default. If a new in-house-only type gets
+// added to the FulfillmentType enum later, vendor visibility stays safe automatically —
+// nobody has to remember to also blocklist it here. RoutingService (which decides admin
+// queue vs. auto-dispatch) and VendorsService (availableJobs()/acceptJob(), the vendor
+// pull-list + accept path) both key off this same constant so there is exactly one place
+// to change the vendor-dispatchable set.
+export const VENDOR_DISPATCHABLE_FULFILLMENT_TYPES: FulfillmentType[] = [FulfillmentType.DIRECT_PARTNER];
 
 // ─── Commission resolution (Task 9) ──────────────────────────────────────────
 // Category-level, service-level, and city-wise platform commission, with an

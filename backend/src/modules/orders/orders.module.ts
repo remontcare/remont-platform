@@ -4,13 +4,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode } from '@prisma/client';
 import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -140,8 +141,47 @@ export class DispatchService {
       // module never imports the engine or WhatsappService directly.
       this.events.emit('job.offer.created', { vendorUserId: c.userId, orderId: order.id, order });
     }
+    // Tracked regardless of whether any candidate was found — an empty wave (e.g. no
+    // one live in that city right now) still needs lastDispatchedAt bumped so
+    // DispatchRetryService's hourly sweep knows to try this order again later, and
+    // still needs to surface in the admin "stuck orders" queue in the meantime.
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { dispatchAttempts: { increment: 1 }, lastDispatchedAt: new Date() },
+    });
     this.logger.log(`📡 Dispatched ${order.orderNumber} to ${top.length} vendors`);
     return top;
+  }
+}
+
+// ─── Dispatch retry sweep ───
+// If a dispatch wave goes out and nobody accepts (all 5 candidates ignore/decline/expire),
+// the order otherwise sits CONFIRMED with vendorId null forever — a vendor only ever finds
+// it again by manually browsing "available jobs". This sweep re-dispatches a fresh wave
+// (freshly-online vendors included) once an hour so the assignment keeps retrying on its
+// own, matching the "keep cycling through live vendors" requirement — the admin "stuck
+// orders" queue (see AdminService.listOrders `stuck` filter) is the parallel manual-override
+// path for orders that need a human to just call someone directly.
+@Injectable()
+export class DispatchRetryService {
+  private readonly logger = new Logger(DispatchRetryService.name);
+  constructor(private prisma: PrismaService, private dispatch: DispatchService) {}
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async sweep() {
+    const stale = await this.prisma.order.findMany({
+      where: {
+        status: OrderStatus.CONFIRMED,
+        vendorId: null,
+        lastDispatchedAt: { lte: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+      select: { id: true, orderNumber: true },
+      take: 100,
+    });
+    for (const o of stale) {
+      await this.dispatch.dispatch(o.id).catch((err) => this.logger.error(`Retry-dispatch failed for ${o.orderNumber}: ${err.message}`));
+    }
+    if (stale.length) this.logger.log(`🔁 Re-dispatched ${stale.length} stuck order(s)`);
   }
 }
 
@@ -166,7 +206,10 @@ export class RoutingService {
     if (!order || !order.service) return; // product-only child orders have nothing to route
 
     const fulfillmentType = order.service.fulfillmentType || 'DIRECT_PARTNER';
-    if (fulfillmentType === 'PROJECT' || fulfillmentType === 'ADMIN_TEAM') {
+    // Allowlist check (see VENDOR_DISPATCHABLE_FULFILLMENT_TYPES) — anything not
+    // explicitly vendor-dispatchable goes to the admin queue instead, so a new
+    // in-house-only FulfillmentType is safe-by-default without touching this file.
+    if (!VENDOR_DISPATCHABLE_FULFILLMENT_TYPES.includes(fulfillmentType)) {
       await this.prisma.order.update({
         where: { id: orderId },
         data: { needsAdminReview: true, routingDecision: fulfillmentType },
@@ -1453,7 +1496,7 @@ export class PublicBookingController {
 @Module({
   imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule],
   controllers: [OrdersController, PublicBookingController],
-  providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService],
+  providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService, DispatchRetryService],
   exports: [OrdersService, DispatchService, RoutingService],
 })
 export class OrdersModule {}

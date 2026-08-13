@@ -8,7 +8,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown, resolveCommission } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown, resolveCommission, haversineKm } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -485,19 +485,27 @@ export class AdminService {
   // ─── Orders ─────────────────────────────────────────────────────────
 
   async orderStats() {
-    const [total, newOrders, active, completed, cancelled, revenue] = await Promise.all([
+    const [total, newOrders, active, completed, cancelled, revenue, stuck] = await Promise.all([
       this.prisma.order.count(),
       this.prisma.order.count({ where: { status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } } }),
       this.prisma.order.count({ where: { status: { in: ['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } } }),
       this.prisma.order.count({ where: { status: 'COMPLETED' } }),
       this.prisma.order.count({ where: { status: 'CANCELLED' } }),
       this.prisma.order.aggregate({ _sum: { totalAmount: true }, where: { paymentStatus: 'PAID' } }),
+      // Confirmed, unassigned, at least one dispatch wave already went out with no
+      // takers — the count backing the admin "stuck orders" queue badge.
+      this.prisma.order.count({ where: { status: 'CONFIRMED', vendorId: null, dispatchAttempts: { gte: 1 } } }),
     ]);
-    return { total, new: newOrders, active, completed, cancelled, revenue: Number(revenue._sum.totalAmount || 0) };
+    return { total, new: newOrders, active, completed, cancelled, revenue: Number(revenue._sum.totalAmount || 0), stuck };
   }
 
-  async listOrders(opts: { status?: string; city?: string; q?: string; channel?: string; limit?: number; offset?: number }) {
+  async listOrders(opts: { status?: string; city?: string; q?: string; channel?: string; limit?: number; offset?: number; stuck?: boolean }) {
     const where: any = {
+      // "Stuck" = confirmed, unassigned, and at least one auto-dispatch wave already
+      // went out with nobody accepting — the admin queue this powers is exactly the
+      // "orders vendors keep declining/ignoring" list, so an admin can call someone
+      // directly and force-assign via listActiveVendors()/forceAssignVendor().
+      ...(opts.stuck ? { status: OrderStatus.CONFIRMED, vendorId: null, dispatchAttempts: { gte: 1 } } : {}),
       ...(opts.status ? { status: opts.status as OrderStatus } : {}),
       ...(opts.channel ? { channel: opts.channel as any } : {}),
       ...(opts.city ? { address: { city: { contains: opts.city, mode: 'insensitive' } } } : {}),
@@ -655,16 +663,37 @@ export class AdminService {
     return this.prisma.order.update({ where: { id: orderId }, data: { adminNotes: note } });
   }
 
-  async listActiveVendors(skill?: string) {
-    return this.prisma.serviceVendor.findMany({
+  // "Live vendors" for the admin to call/assign directly — mirrors DispatchService's
+  // isOnline + ACTIVE + not-FROZEN eligibility so what an admin sees to hand-assign is
+  // never a superset of who auto-dispatch would actually ring. Passing orderId sorts by
+  // distance to that order's address (nearest first, like DispatchService's scoring) so
+  // the admin can just call down the list; without it, falls back to rating-desc.
+  async listActiveVendors(skill?: string, orderId?: string) {
+    const vendors = await this.prisma.serviceVendor.findMany({
       where: {
         status: 'ACTIVE',
+        isOnline: true,
+        memberStatus: { not: 'FROZEN' },
         ...(skill ? { skills: { has: skill } } : {}),
       },
       include: { user: { select: { name: true, phone: true } } },
       orderBy: { rating: 'desc' },
       take: 100,
     });
+
+    if (!orderId) return vendors;
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { address: true } });
+    const lat = order?.address?.latitude, lng = order?.address?.longitude;
+    if (lat == null || lng == null) return vendors;
+
+    return vendors
+      .map((v) => ({
+        ...v,
+        distanceKm: v.currentLatitude != null && v.currentLongitude != null
+          ? Math.round(haversineKm(lat, lng, v.currentLatitude, v.currentLongitude) * 10) / 10
+          : null,
+      }))
+      .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
   }
 
   async adminCancelOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
@@ -2376,11 +2405,12 @@ export class AdminController {
   // Orders
   // Orders — stats + list + management
   @Get('orders/stats') orderStats() { return this.admin.orderStats(); }
-  @Get('orders/vendors') orderVendors(@Query('skill') skill?: string) { return this.admin.listActiveVendors(skill); }
+  @Get('orders/vendors') orderVendors(@Query('skill') skill?: string, @Query('orderId') orderId?: string) { return this.admin.listActiveVendors(skill, orderId); }
   @Get('orders') listOrders(
     @Query('status') status?: string, @Query('city') city?: string, @Query('q') q?: string,
     @Query('channel') channel?: string, @Query('limit') limit?: number, @Query('offset') offset?: number,
-  ) { return this.admin.listOrders({ status, city, q, channel, limit, offset }); }
+    @Query('stuck') stuck?: string,
+  ) { return this.admin.listOrders({ status, city, q, channel, limit, offset, stuck: stuck === 'true' }); }
   @Post('orders') adminCreateOrder(@Body() b: any) { return this.admin.adminCreateOrder(b); }
   @Get('orders/:id') adminGetOrder(@Param('id') id: string) { return this.admin.adminGetOrder(id); }
   @Patch('orders/:id/status') updateOrderStatus(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { status: string; note?: string }) { return this.admin.adminUpdateStatus(id, b.status, b.note, u.sub, u.role); }

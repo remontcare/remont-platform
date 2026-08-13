@@ -51,7 +51,8 @@ function eligibleOrder(overrides: Record<string, unknown> = {}) {
     id: 'order-1',
     vendorId: null,
     status: 'CONFIRMED',
-    service: { category: { key: 'PLUMBING' } },
+    dispatchAttempts: 1,
+    service: { category: { key: 'PLUMBING' }, fulfillmentType: 'DIRECT_PARTNER' },
     address: {
       city: 'Bhopal',
       latitude: 23.2599,

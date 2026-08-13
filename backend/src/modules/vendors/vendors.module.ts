@@ -8,7 +8,7 @@ import { AgencyStatus, Language, OrderStatus, UserRole, VendorStatus } from '@pr
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -104,6 +104,12 @@ export class ServiceVendorsService {
       throw new ForbiddenException('Your account is frozen — contact your agency or Remont support');
     }
     return vendor;
+  }
+
+  // Mirrors the availableJobs() where-clause gate (dispatchAttempts >= 1, fulfillmentType
+  // in the VENDOR_DISPATCHABLE_FULFILLMENT_TYPES allowlist) for the single-order accept path.
+  private isReleasedForVendorDispatch(order: any): boolean {
+    return order.dispatchAttempts >= 1 && VENDOR_DISPATCHABLE_FULFILLMENT_TYPES.includes(order.service?.fulfillmentType);
   }
 
   private isEligibleForOrder(vendor: any, order: any) {
@@ -215,13 +221,25 @@ export class ServiceVendorsService {
 
     // Same category-matching rule as DispatchService's WhatsApp push, so what a vendor
     // sees when they manually check is never a superset of what they'd be notified for.
+    // Two extra gates keep this a *released-for-vendor* list, not "every unassigned order":
+    //  - dispatchAttempts >= 1: DispatchService only stamps this once it has actually
+    //    rung a wave of candidates, so an order isn't pull-visible a moment before it's
+    //    push-visible. Doubles as the "stuck/released" gate — same field the admin
+    //    stuck-orders queue (AdminService.listOrders `stuck` filter) keys off.
+    //  - fulfillmentType in VENDOR_DISPATCHABLE_FULFILLMENT_TYPES (an allowlist, not a
+    //    PROJECT/ADMIN_TEAM blocklist — see that constant's comment in common/index.ts):
+    //    RoutingService.route() already never calls dispatch() for a non-dispatchable
+    //    type, so dispatchAttempts alone would already exclude them; this is
+    //    belt-and-suspenders against a future routing/dispatch change leaking one through,
+    //    and stays safe-by-default if a new in-house-only fulfillment type is added later.
     const orders = await this.prisma.order.findMany({
       where: {
         vendorId: null,
         // PENDING_PAYMENT orders are not a job offer. Confirmed COD orders remain
         // eligible, because their lifecycle status is CONFIRMED.
         status: OrderStatus.CONFIRMED,
-        service: { category: { key: { in: v.skills } } },
+        dispatchAttempts: { gte: 1 },
+        service: { category: { key: { in: v.skills } }, fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
       },
       include: {
         service: { select: { name: true, categoryId: true } },
@@ -248,6 +266,12 @@ export class ServiceVendorsService {
     if (!order) throw new NotFoundException();
     if (order.vendorId || order.status !== OrderStatus.CONFIRMED) {
       throw new BadRequestException('This job is no longer available');
+    }
+    // Server-side mirror of availableJobs()'s visibility gate — enforced here too so a
+    // vendor can't claim an unreleased or in-house-planned order just by guessing/reusing
+    // an orderId, independent of whatever the client actually listed.
+    if (!this.isReleasedForVendorDispatch(order)) {
+      throw new ForbiddenException('This job is not available to your vendor account');
     }
     if (!this.isEligibleForOrder(v, order)) {
       throw new ForbiddenException('This job is not available to your vendor account');
