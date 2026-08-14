@@ -381,9 +381,19 @@ export class ServiceVendorsController {
 export class ProductVendorsService {
   constructor(private prisma: PrismaService) {}
 
+  // Update-only: a ProductVendor row is created exclusively by
+  // SellerRegistrationService._activateSeller() once an admin approves a seller-registration
+  // application. This endpoint must never create one — a PRODUCT_VENDOR-role JWT is
+  // self-obtainable via /auth/send-otp+verify-otp (SELF_SIGNUP_ROLES), so an upsert here would
+  // let anyone activate a full seller account with mobile+OTP alone, bypassing the entire
+  // application/document/admin-approval flow.
   async register(userId: string, data: any) {
     const { status, rating, totalEarnings, ...safeData } = data;
-    return this.prisma.productVendor.upsert({ where: { userId }, create: { userId, ...safeData }, update: safeData });
+    const existing = await this.prisma.productVendor.findUnique({ where: { userId } });
+    if (!existing) {
+      throw new NotFoundException('No approved seller profile found — apply via seller-register.html and wait for admin approval before editing your profile');
+    }
+    return this.prisma.productVendor.update({ where: { userId }, data: safeData });
   }
 
   async profile(userId: string) {

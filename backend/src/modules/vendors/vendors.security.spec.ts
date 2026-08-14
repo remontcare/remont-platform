@@ -1,5 +1,5 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { ServiceVendorsService } from './vendors.module';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ServiceVendorsService, ProductVendorsService } from './vendors.module';
 
 /**
  * Security regressions for the vendor job-claim boundary.  These tests intentionally
@@ -165,5 +165,66 @@ describe('ServiceVendorsService security boundary', () => {
       expect(events.emit).not.toHaveBeenCalled();
       expect(prisma.orderTimeline.create).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * A PRODUCT_VENDOR-role JWT is self-obtainable via /auth/send-otp+verify-otp alone (see
+ * SELF_SIGNUP_ROLES in auth.module.ts) — no application, no documents, no admin review.
+ * register() must therefore never be able to create a ProductVendor row itself: that must stay
+ * the exclusive job of SellerRegistrationService._activateSeller(), which only runs once an
+ * admin approves a seller-registration application. Otherwise mobile number + OTP alone is
+ * enough to "activate" as a seller.
+ */
+describe('ProductVendorsService.register security boundary', () => {
+  it('refuses to create a ProductVendor for a user with no approved seller-registration', async () => {
+    const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(null), update: jest.fn() } };
+    const service = new ProductVendorsService(prisma);
+
+    await expect(service.register('user-1', { businessName: 'Self-Activated Store' }))
+      .rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.productVendor.update).not.toHaveBeenCalled();
+  });
+
+  it('allows an already-approved seller to update their own profile', async () => {
+    const prisma: any = {
+      productVendor: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'vendor-1', userId: 'user-1', status: 'ACTIVE' }),
+        update: jest.fn().mockResolvedValue({ id: 'vendor-1', userId: 'user-1', businessName: 'Updated Name' }),
+      },
+    };
+    const service = new ProductVendorsService(prisma);
+
+    await service.register('user-1', { businessName: 'Updated Name', status: 'ACTIVE' });
+
+    expect(prisma.productVendor.update).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      data: { businessName: 'Updated Name' },
+    });
+  });
+});
+
+/**
+ * profile() backs GET /vendors/product/me — the exact call seller.html makes right after OTP
+ * login (loadSellerProfile()) to decide whether to open the dashboard. This is the login-time
+ * gate: a role alone (self-obtainable via OTP) must never be enough, only an approved
+ * ProductVendor row — created solely by SellerRegistrationService._activateSeller() — grants
+ * dashboard access. This behavior itself is pre-existing/unchanged; these tests pin it down so a
+ * future edit can't silently reopen the register()-side bypass through this path instead.
+ */
+describe('ProductVendorsService.profile — seller-dashboard login gate', () => {
+  it('blocks dashboard access for a phone that only completed OTP login, no approved application', async () => {
+    const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(null) } };
+    const service = new ProductVendorsService(prisma);
+
+    await expect(service.profile('new-user-1')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('grants dashboard access to a seller admin already approved via seller-registration', async () => {
+    const approvedVendor = { id: 'vendor-1', userId: 'approved-user-1', status: 'ACTIVE', businessName: 'Approved Store', products: [] };
+    const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(approvedVendor) } };
+    const service = new ProductVendorsService(prisma);
+
+    await expect(service.profile('approved-user-1')).resolves.toBe(approvedVendor);
   });
 });
