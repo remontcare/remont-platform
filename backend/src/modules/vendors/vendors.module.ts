@@ -37,6 +37,28 @@ export class VendorAttendanceDto {
   @IsOptional() @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng?: number;
 }
 
+// Same client-supplied base64 data URL storage approach as PartnerRegistrationService's
+// document fields (partner-registration.module.ts) — the client-side size/type check is
+// JS-only and trivially bypassed, so magic bytes are re-verified server-side before the
+// data URL itself is persisted as the field value.
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const PHOTO_MAGIC_BYTES: Record<string, Buffer> = {
+  'image/jpeg': Buffer.from([0xff, 0xd8, 0xff]),
+  'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+};
+function validatePhotoDataUrl(value: string): void {
+  const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if (!match) throw new BadRequestException('photoBase64: invalid file — only JPG or PNG uploads are allowed');
+  const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
+  const magic = PHOTO_MAGIC_BYTES[mime];
+  if (!magic) throw new BadRequestException('photoBase64: only JPG or PNG files are allowed');
+  const buf = Buffer.from(match[2], 'base64');
+  if (buf.length > PHOTO_MAX_BYTES) throw new BadRequestException('photoBase64: file must be under 5MB');
+  if (!buf.subarray(0, magic.length).equals(magic)) {
+    throw new BadRequestException('photoBase64: file content does not match its declared type — upload rejected');
+  }
+}
+
 // ─── Service Vendor ───
 @Injectable()
 export class ServiceVendorsService {
@@ -78,6 +100,16 @@ export class ServiceVendorsService {
     });
     if (!v) throw new NotFoundException('Vendor profile not found');
     return v;
+  }
+
+  async updatePhoto(userId: string, photoBase64: string) {
+    validatePhotoDataUrl(photoBase64);
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    return this.prisma.serviceVendor.update({
+      where: { id: vendor.id },
+      data: { photoUrl: photoBase64 },
+    });
   }
 
   async updateLocation(userId: string, lat: number, lng: number) {
@@ -364,6 +396,7 @@ export class ServiceVendorsController {
   constructor(private vs: ServiceVendorsService) {}
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: ServiceVendorRegistrationDto) { return this.vs.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
+  @Patch('me/photo') photo(@CurrentUser() u: JwtPayload, @Body() b: { photoBase64: string }) { return this.vs.updatePhoto(u.sub, b.photoBase64); }
   @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: VendorLocationDto) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: VendorOnlineStatusDto) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
   @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }

@@ -953,6 +953,7 @@ model ServiceVendor {
   userId             String       @unique
   fullName           String
   businessName       String?
+  photoUrl           String?
   skills             String[]
   serviceRadius      Int          @default(10)
   baseCity           String
