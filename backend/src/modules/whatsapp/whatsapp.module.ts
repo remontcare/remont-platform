@@ -50,6 +50,10 @@ const TEMPLATES: Record<string, Record<string, (v: any) => string>> = {
     EN: (v) => `📝 Extra work for #${v.orderNumber}:\n${v.description}\nAmount: ₹${v.amount}\nApprove? YES/NO`,
     HI: (v) => `📝 Order #${v.orderNumber} extra:\n${v.description}\nAmount: ₹${v.amount}\nYES/NO?`,
   },
+  EXTRA_WORK_OTP: {
+    EN: (v) => `🔐 OTP to confirm extra work on order #${v.orderNumber} is ${v.otp}. Share only with your assigned technician.`,
+    HI: (v) => `🔐 Order #${v.orderNumber} ke extra work ko confirm karne ka OTP ${v.otp} hai. Sirf apne assigned technician ke saath share karein.`,
+  },
   EARNINGS_NUDGE: {
     EN: (v) => `💰 ${v.name}! ${v.openJobs} jobs near you ~₹${v.potential}. Open app to accept.`,
     HI: (v) => `💰 ${v.name}! Aapke area mein ${v.openJobs} jobs, ~₹${v.potential} earning.`,
@@ -143,6 +147,12 @@ export class WhatsappService {
     const otpLabel = otpType === 'START' ? 'arrival' : 'completion';
     const body = this.render('SERVICE_OTP_RESENT', lang, { orderNumber, otp, otpLabel });
     return this.send(phone, body, WhatsappMessageType.SERVICE_OTP_RESENT);
+  }
+
+  async sendExtraWorkOtp(phone: string, orderNumber: string, otp: string) {
+    const lang = await this.getLang(phone);
+    const body = this.render('EXTRA_WORK_OTP', lang, { orderNumber, otp });
+    return this.send(phone, body, WhatsappMessageType.EXTRA_WORK_OTP);
   }
 
   /** Plain-text message with no template — used by flows (like seller-registration review

@@ -300,6 +300,59 @@ class ExtraWorkService {
     return extra;
   }
 
+  async requestOtp(vendorUserId: string, orderId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!vendor) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true } });
+    if (!order) throw new NotFoundException();
+    if (order.vendorId !== vendor.id) throw new ForbiddenException();
+    if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+      throw new BadRequestException('Cannot confirm extras at this stage');
+    }
+    const pending = await this.prisma.extraWorkItem.findFirst({
+      where: { orderId, customerApproved: false },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!pending) throw new NotFoundException('No pending extra work item for this order');
+
+    if (pending.otpLastSentAt) {
+      const secsSince = (Date.now() - pending.otpLastSentAt.getTime()) / 1000;
+      if (secsSince < OTP_REGEN_COOLDOWN_SECONDS) {
+        throw new BadRequestException(`Please wait ${Math.ceil(OTP_REGEN_COOLDOWN_SECONDS - secsSince)}s before requesting another OTP`);
+      }
+    }
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const now = new Date();
+    await this.prisma.extraWorkItem.update({ where: { id: pending.id }, data: { otp, otpLastSentAt: now } });
+    const phone = order.guestPhone || order.customer.phone;
+    if (phone) {
+      this.wa.sendExtraWorkOtp(phone, order.orderNumber, otp).catch(() => {});
+    }
+    return { extraWorkItemId: pending.id, sentAt: now };
+  }
+
+  async verifyOtp(vendorUserId: string, orderId: string, otp: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!vendor) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException();
+    if (order.vendorId !== vendor.id) throw new ForbiddenException();
+
+    const pending = await this.prisma.extraWorkItem.findFirst({
+      where: { orderId, customerApproved: false, otp },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!pending) throw new BadRequestException('Invalid OTP');
+
+    const updated = await this.prisma.extraWorkItem.update({
+      where: { id: pending.id },
+      data: { otpVerified: true, customerApproved: true, approvedAt: new Date() },
+    });
+    await this.recalc(orderId);
+    return updated;
+  }
+
   async approve(customerId: string, extraId: string) {
     const extra = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, include: { order: { include: { customer: true } } } });
     if (!extra) throw new NotFoundException();
@@ -1440,6 +1493,12 @@ export class OrdersController {
   }
   @Patch('extra-work/:extraId/approve') approveExtra(@CurrentUser() u: JwtPayload, @Param('extraId') id: string) {
     return this.extras.approve(u.sub, id);
+  }
+  @Post(':id/extra-work/otp') extraOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.extras.requestOtp(u.sub, id);
+  }
+  @Post(':id/extra-work/verify-otp') extraVerify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
+    return this.extras.verifyOtp(u.sub, id, b.otp);
   }
   @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string }) {
     return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl);

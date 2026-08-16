@@ -246,6 +246,7 @@ enum WhatsappMessageType {
   EARNINGS_NUDGE
   REVIEW_REQUEST
   SERVICE_OTP_RESENT
+  EXTRA_WORK_OTP
   CUSTOM
 }
 
@@ -1626,6 +1627,9 @@ model ExtraWorkItem {
   customerApproved Boolean   @default(false)
   approvedAt       DateTime?
   createdAt        DateTime  @default(now())
+  otp              String?
+  otpVerified      Boolean   @default(false)
+  otpLastSentAt    DateTime?
 
   order  Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   vendor ServiceVendor @relation(fields: [addedBy], references: [id])

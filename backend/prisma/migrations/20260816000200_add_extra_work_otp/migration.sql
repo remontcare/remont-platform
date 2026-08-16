@@ -1,0 +1,5 @@
+ALTER TABLE "ExtraWorkItem" ADD COLUMN "otp" TEXT;
+ALTER TABLE "ExtraWorkItem" ADD COLUMN "otpVerified" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "ExtraWorkItem" ADD COLUMN "otpLastSentAt" TIMESTAMP(3);
+
+ALTER TYPE "WhatsappMessageType" ADD VALUE 'EXTRA_WORK_OTP';
