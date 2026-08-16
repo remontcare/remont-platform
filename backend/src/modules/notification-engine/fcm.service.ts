@@ -10,6 +10,18 @@ export class FcmService {
   private readonly logger = new Logger(FcmService.name);
   private app: App | null = null;
 
+  constructor() {
+    // Catches the easy-to-hit mistake of pasting the 3 Railway vars in one at a time and
+    // missing one — isConfigured() treats that identically to "none set" (safe no-op), so
+    // without this it fails silently instead of telling the admin what's missing.
+    const vars = { FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY };
+    const present = Object.values(vars).filter(Boolean).length;
+    if (present > 0 && present < 3) {
+      const missing = Object.entries(vars).filter(([, v]) => !v).map(([k]) => k);
+      this.logger.warn(`FCM push partially configured — missing ${missing.join(', ')}. All three must be set together or push stays disabled.`);
+    }
+  }
+
   isConfigured(): boolean {
     return !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
   }
