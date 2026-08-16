@@ -160,19 +160,38 @@ function render(data) {
 function openAdd() {
   editId = null;
   document.getElementById('edit-title').textContent = 'Add Service Pricing';
+  document.getElementById('f-service').value = '';
   document.getElementById('f-price').value = '';
   document.getElementById('f-dprice').value = '';
   document.getElementById('f-duration').value = '';
+  document.getElementById('f-city').value = '';
+  document.getElementById('f-tier').value = 'STANDARD';
   document.getElementById('edit-overlay').style.display = 'flex';
 }
 
 function openEdit(p) {
-  editId = p.id;
   document.getElementById('edit-title').textContent = 'Edit Service Pricing';
-  document.getElementById('f-price').value = (p.originalPrice != null && p.originalPrice > 0) ? p.originalPrice : (p.basePrice || p.price || '');
-  document.getElementById('f-dprice').value = p.basePrice || p.discountedPrice || p.salePrice || '';
-  document.getElementById('f-duration').value = p.durationMinutes || p.duration || '';
-  if (p.serviceId) document.getElementById('f-service').value = p.serviceId;
+  // A real ServicePricing row always has a `tier` field; a row handed in from
+  // renderFallback() (the raw Service catalog, shown until any pricing has been
+  // configured) never does — that distinction decides whether Save below does a
+  // PATCH against an existing row or a POST that creates the first one.
+  if (p.tier !== undefined) {
+    editId = p.id;
+    document.getElementById('f-service').value = p.serviceId || (p.service && p.service.id) || '';
+    document.getElementById('f-price').value = p.basePrice || '';
+    document.getElementById('f-dprice').value = p.discountedPrice != null ? p.discountedPrice : '';
+    document.getElementById('f-duration').value = p.duration != null ? p.duration : '';
+    document.getElementById('f-city').value = p.cityId || (p.city && p.city.id) || '';
+    document.getElementById('f-tier').value = p.tier;
+  } else {
+    editId = null;
+    document.getElementById('f-service').value = p.id || '';
+    document.getElementById('f-price').value = p.basePrice || '';
+    document.getElementById('f-dprice').value = '';
+    document.getElementById('f-duration').value = p.durationMinutes || '';
+    document.getElementById('f-city').value = '';
+    document.getElementById('f-tier').value = 'STANDARD';
+  }
   document.getElementById('edit-overlay').style.display = 'flex';
 }
 

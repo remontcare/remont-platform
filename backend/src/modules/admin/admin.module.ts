@@ -993,6 +993,112 @@ export class AdminService {
     return this.prisma.service.update({ where: { id }, data: { isActive: false } });
   }
 
+  // ─── Service Pricing (Admin → Service Pricing screen) ─────────────────
+  // Per-service, per-city, per-tier price sheet. STANDARD-tier rows feed real
+  // checkout pricing via CitiesService.getServicePrice() — see that method's doc
+  // comment for the full precedence chain. All money fields are validated here,
+  // server-side, never trusting whatever the admin form happened to send.
+
+  async listServicePricing(q?: string) {
+    return this.prisma.servicePricing.findMany({
+      where: q ? { service: { name: { contains: q, mode: 'insensitive' } } } : {},
+      include: { service: { select: { id: true, name: true } }, city: { select: { id: true, name: true } } },
+      orderBy: [{ service: { name: 'asc' } }, { tier: 'asc' }],
+    });
+  }
+
+  /** Shared validation for create/update — never trust client-supplied money/duration values. */
+  private validateServicePricingInput(data: any) {
+    const basePrice = Number(data.basePrice);
+    if (!Number.isFinite(basePrice) || basePrice <= 0) {
+      throw new BadRequestException('Base price must be a positive number');
+    }
+    let discountedPrice: number | null | undefined = undefined;
+    if (data.discountedPrice !== undefined && data.discountedPrice !== null && data.discountedPrice !== '') {
+      discountedPrice = Number(data.discountedPrice);
+      if (!Number.isFinite(discountedPrice) || discountedPrice <= 0) {
+        throw new BadRequestException('Discounted price must be a positive number');
+      }
+      if (discountedPrice > basePrice) {
+        throw new BadRequestException('Discounted price cannot be higher than the base price');
+      }
+    } else if (data.discountedPrice === null || data.discountedPrice === '') {
+      discountedPrice = null; // explicit clear
+    }
+    let duration: number | null | undefined = undefined;
+    if (data.duration !== undefined && data.duration !== null && data.duration !== '') {
+      duration = Number(data.duration);
+      if (!Number.isInteger(duration) || duration <= 0) {
+        throw new BadRequestException('Duration must be a positive whole number of minutes');
+      }
+    } else if (data.duration === null || data.duration === '') {
+      duration = null;
+    }
+    const tier = data.tier && ['STANDARD', 'PREMIUM', 'ECONOMY'].includes(data.tier) ? data.tier : 'STANDARD';
+    return { basePrice, discountedPrice, duration, tier };
+  }
+
+  async createServicePricing(data: any) {
+    if (!data.serviceId) throw new BadRequestException('Service is required');
+    const service = await this.prisma.service.findUnique({ where: { id: data.serviceId } });
+    if (!service) throw new NotFoundException('Service not found');
+    const cityId = data.cityId || null;
+    if (cityId) {
+      const city = await this.prisma.city.findUnique({ where: { id: cityId } });
+      if (!city) throw new NotFoundException('City not found');
+    }
+    const { basePrice, discountedPrice, duration, tier } = this.validateServicePricingInput(data);
+
+    const existing = await this.prisma.servicePricing.findFirst({ where: { serviceId: data.serviceId, cityId, tier } });
+    if (existing) {
+      throw new BadRequestException(`A ${tier} pricing row already exists for this service in ${cityId ? 'this city' : 'All Cities'} — edit it instead of creating a duplicate`);
+    }
+
+    return this.prisma.servicePricing.create({
+      data: { serviceId: data.serviceId, cityId, tier, basePrice, discountedPrice: discountedPrice ?? undefined, duration: duration ?? undefined },
+      include: { service: { select: { id: true, name: true } }, city: { select: { id: true, name: true } } },
+    });
+  }
+
+  async updateServicePricing(id: string, data: any) {
+    const existing = await this.prisma.servicePricing.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Pricing row not found');
+
+    const serviceId = data.serviceId || existing.serviceId;
+    if (data.serviceId) {
+      const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+      if (!service) throw new NotFoundException('Service not found');
+    }
+    const cityId = data.cityId !== undefined ? (data.cityId || null) : existing.cityId;
+    if (cityId) {
+      const city = await this.prisma.city.findUnique({ where: { id: cityId } });
+      if (!city) throw new NotFoundException('City not found');
+    }
+    const { basePrice, discountedPrice, duration, tier } = this.validateServicePricingInput({
+      basePrice: data.basePrice !== undefined ? data.basePrice : existing.basePrice,
+      discountedPrice: data.discountedPrice !== undefined ? data.discountedPrice : existing.discountedPrice,
+      duration: data.duration !== undefined ? data.duration : existing.duration,
+      tier: data.tier || existing.tier,
+    });
+
+    const dup = await this.prisma.servicePricing.findFirst({ where: { serviceId, cityId, tier, id: { not: id } } });
+    if (dup) {
+      throw new BadRequestException(`A ${tier} pricing row already exists for this service in ${cityId ? 'this city' : 'All Cities'}`);
+    }
+
+    return this.prisma.servicePricing.update({
+      where: { id },
+      data: { serviceId, cityId, tier, basePrice, discountedPrice, duration },
+      include: { service: { select: { id: true, name: true } }, city: { select: { id: true, name: true } } },
+    });
+  }
+
+  async deleteServicePricing(id: string) {
+    const existing = await this.prisma.servicePricing.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Pricing row not found');
+    return this.prisma.servicePricing.delete({ where: { id } });
+  }
+
   // ─── Delete Requests — regular admins request, SUPER_ADMIN approves ──────
 
   private async resolveDeleteTargetLabel(targetType: DeleteTargetType, targetId: string): Promise<string> {
@@ -2582,6 +2688,15 @@ export class AdminController {
   @Patch('services/:id/cities/:cityId') upsertServiceCity(@Param('id') sid: string, @Param('cityId') cid: string, @Body() b: { isActive: boolean; customPrice?: number }) {
     return this.admin.upsertServiceCity(sid, cid, b);
   }
+
+  // Service Pricing — per-service/city/tier price sheet (STANDARD tier feeds real
+  // checkout pricing, see CitiesService.getServicePrice). Inherits this controller's
+  // class-level @UseGuards(JwtAuthGuard, RolesGuard) + @Roles(ADMIN, SUPER_ADMIN) —
+  // same authorization already required for every other admin catalog/pricing route.
+  @Get('service-pricing') listServicePricing(@Query('q') q?: string) { return this.admin.listServicePricing(q); }
+  @Post('service-pricing') createServicePricing(@Body() b: any) { return this.admin.createServicePricing(b); }
+  @Patch('service-pricing/:id') updateServicePricing(@Param('id') id: string, @Body() b: any) { return this.admin.updateServicePricing(id, b); }
+  @Delete('service-pricing/:id') deleteServicePricing(@Param('id') id: string) { return this.admin.deleteServicePricing(id); }
 
   // Product Categories
   @Get('product-categories') listProductCats() { return this.admin.listProductCategories(); }

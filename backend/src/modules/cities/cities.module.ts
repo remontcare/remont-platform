@@ -48,13 +48,23 @@ export class CitiesService {
   }
 
   /**
-   * Resolve a service's real price for one city: per-service CityService override
-   * (if any) → else the city's blanket priceMultiplier on basePrice → else basePrice
-   * as-is. Previously this returned null (leaving callers to fall back to the
-   * unmultiplied basePrice) whenever no CityService row existed at all — meaning the
-   * multiplier only ever applied to services an admin had explicitly configured for
-   * that city, when it's meant to be the city-wide default and CityService rows are
-   * only for the services that need a specific override.
+   * Resolve a service's real price for one city. Precedence, most specific wins:
+   *   1. ServicePricing STANDARD-tier row for this exact (service, city)   — Admin →
+   *      Service Pricing screen; the newest, most deliberately-configured override.
+   *   2. CityService.customPrice for this (service, city)                 — the
+   *      pre-existing per-city override, unchanged from before ServicePricing existed.
+   *   3. ServicePricing STANDARD-tier row with cityId=null ("All Cities")  — a
+   *      city-agnostic tier default from the same screen.
+   *   4. Service.basePrice × City.priceMultiplier                         — original
+   *      city-wide fallback.
+   * A ServicePricing row's discountedPrice (if set) is what's actually charged;
+   * basePrice on that row is otherwise the reference/list price. PREMIUM/ECONOMY
+   * tier rows are intentionally not consulted here — there is no booking-flow UI yet
+   * for a customer to choose a tier, so only STANDARD (the implicit default every
+   * customer gets today) can affect what's actually charged.
+   *
+   * Nothing here changes for any (service, city) pair with zero ServicePricing rows
+   * — behavior is identical to before this precedence layer was added.
    */
   async getServicePrice(cityName: string, serviceId: string): Promise<number | null> {
     const city = await this.prisma.city.findUnique({ where: { name: cityName } });
@@ -65,7 +75,16 @@ export class CitiesService {
       where: { cityId_serviceId: { cityId: city.id, serviceId } },
     });
     if (cs && !cs.isActive) return null; // explicitly disabled for this city
-    if (cs && cs.customPrice) return Number(cs.customPrice); // service-level override wins
+
+    const [cityTier, globalTier] = await Promise.all([
+      this.prisma.servicePricing.findFirst({ where: { serviceId, cityId: city.id, tier: 'STANDARD' } }),
+      this.prisma.servicePricing.findFirst({ where: { serviceId, cityId: null, tier: 'STANDARD' } }),
+    ]);
+    const tierPrice = (row: typeof cityTier) => (row ? Number(row.discountedPrice ?? row.basePrice) : null);
+
+    if (cityTier) return tierPrice(cityTier)!;
+    if (cs && cs.customPrice) return Number(cs.customPrice); // pre-existing service-level override
+    if (globalTier) return tierPrice(globalTier)!;
     return Number(svc.basePrice) * Number(city.priceMultiplier);
   }
 

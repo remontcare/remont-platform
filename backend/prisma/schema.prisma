@@ -539,6 +539,7 @@ model City {
   services        CityService[]
   products        CityProduct[]
   commissionRules CommissionRule[]
+  pricingTiers    ServicePricing[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -734,10 +735,42 @@ model Service {
   commissionRules CommissionRule[]
   priceModifiers  ServicePriceModifier[]
   estimates       Estimate[]
+  pricingTiers    ServicePricing[]
 
   @@index([categoryId])
   @@index([subCategoryId])
   @@index([isActive, isPopular])
+}
+
+enum PricingTier {
+  STANDARD
+  PREMIUM
+  ECONOMY
+}
+
+// Admin-managed per-service, per-city, per-tier price sheet — the Admin → Service
+// Pricing screen. cityId null = "All Cities" (a city-agnostic tier default).
+// Only the STANDARD tier currently affects what a customer actually pays
+// (CitiesService.getServicePrice) — there is no booking-flow UI yet for a customer
+// to choose PREMIUM/ECONOMY, so those rows are admin-visible/manageable but inert
+// for pricing until that selection exists. See getServicePrice()'s doc comment for
+// the full precedence chain against the pre-existing CityService.customPrice.
+model ServicePricing {
+  id              String      @id @default(cuid())
+  serviceId       String
+  cityId          String?
+  tier            PricingTier @default(STANDARD)
+  basePrice       Decimal     @db.Decimal(10, 2)
+  discountedPrice Decimal?    @db.Decimal(10, 2)
+  duration        Int? // informational per-tier duration override; not read by scheduling
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  city    City?   @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@index([cityId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
