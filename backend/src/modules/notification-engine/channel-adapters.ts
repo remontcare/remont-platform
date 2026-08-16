@@ -58,11 +58,24 @@ export class ChannelAdapters {
       })),
     );
 
-    const dataPayload: Record<string, string> = { type: input.type, orderId: input.orderId || '' };
-    if (input.data) for (const k of Object.keys(input.data)) dataPayload[k] = String(input.data[k]);
+    // title/body are always included as flat strings — JOB_OFFER's client-side incoming-call
+    // UI (see below) has no `notification` block to read them from, so it needs them here.
+    const dataPayload: Record<string, string> = { type: input.type, orderId: input.orderId || '', title: input.title, body: input.body };
+    if (input.data) {
+      for (const k of Object.keys(input.data)) {
+        const v = input.data[k];
+        // Skip nested objects (e.g. the full `order` on JOB_OFFER) — FCM data values must be
+        // strings, and String(anObject) silently degrades to the useless "[object Object]".
+        if (v !== null && typeof v === 'object') continue;
+        dataPayload[k] = String(v);
+      }
+    }
 
+    // JOB_OFFER needs full client-side control (flutter_callkit_incoming's ringing UI) even when
+    // the app is killed — see FcmService.sendToTokens' dataOnly doc for why that requires
+    // skipping the `notification` block rather than just adding data alongside it.
     const result = await this.fcm.sendToTokens(tokens.map((t) => t.token), {
-      title: input.title, body: input.body, data: dataPayload,
+      title: input.title, body: input.body, data: dataPayload, dataOnly: input.type === 'JOB_OFFER',
     });
 
     await Promise.all(deliveries.map((d, i) =>

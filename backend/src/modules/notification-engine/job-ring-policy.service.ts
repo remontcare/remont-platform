@@ -21,10 +21,13 @@ export class JobRingPolicyService {
 
   @OnEvent('job.offer.created')
   async onJobOffer(p: { vendorUserId: string; orderId: string; order: any }) {
+    const amount = Number(p.order?.totalAmount ?? 0);
+    const amountLabel = amount > 0 ? `₹${amount.toLocaleString('en-IN')}` : '';
+    const bodyParts = [p.order?.service?.name || 'Service', p.order?.address?.city || '', amountLabel].filter(Boolean);
     await this.engine.notify({
       userId: p.vendorUserId,
       title: 'New Job Available',
-      body: `${p.order?.service?.name || 'Service'} • ${p.order?.address?.city || ''}`.trim(),
+      body: bodyParts.join(' • '),
       type: 'JOB_OFFER',
       data: { orderId: p.orderId, order: p.order },
       channels: [NotificationChannel.PUSH, NotificationChannel.IN_APP],

@@ -41,10 +41,19 @@ export class FcmService {
     return getMessaging(this.app);
   }
 
-  /** Sends to a batch of device tokens. Returns which tokens are dead so callers can prune them. */
+  /**
+   * Sends to a batch of device tokens. Returns which tokens are dead so callers can prune them.
+   *
+   * [dataOnly] skips the `notification` block entirely — required for JOB_OFFER, where the
+   * Flutter app needs to render its own full-screen incoming-call UI (flutter_callkit_incoming)
+   * instead of the OS auto-displaying a plain tray notification. A `notification` block would
+   * make Android show that default notification AND skip invoking the app's background message
+   * handler in some states, so the client never gets a chance to take over. `android.priority:
+   * 'high'` is also required for data-only messages so Doze/App-Standby still deliver it promptly.
+   */
   async sendToTokens(
     tokens: string[],
-    payload: { title: string; body: string; data?: Record<string, string>; imageUrl?: string },
+    payload: { title: string; body: string; data?: Record<string, string>; imageUrl?: string; dataOnly?: boolean },
   ): Promise<{ successCount: number; failureCount: number; deadTokens: string[] }> {
     if (!tokens.length) return { successCount: 0, failureCount: 0, deadTokens: [] };
     const messaging = this.getMessagingClient();
@@ -56,8 +65,9 @@ export class FcmService {
     try {
       const res = await messaging.sendEachForMulticast({
         tokens,
-        notification: { title: payload.title, body: payload.body, imageUrl: payload.imageUrl },
+        ...(payload.dataOnly ? {} : { notification: { title: payload.title, body: payload.body, imageUrl: payload.imageUrl } }),
         data: payload.data || {},
+        ...(payload.dataOnly ? { android: { priority: 'high' as const } } : {}),
         webpush: { fcmOptions: {}, notification: { icon: '/favicon.ico' } },
       });
       const deadTokens: string[] = [];
