@@ -116,11 +116,12 @@ export class SellerRegistrationService {
     if (!rec.phone) throw new BadRequestException('Phone number is required');
     if (!rec.pickupLocations.length) throw new BadRequestException('At least one pickup location is required');
     if (!rec.bankAccountNumber || !rec.bankIfsc) throw new BadRequestException('Bank account details are required');
-    if (!rec.agreedTerms) throw new BadRequestException('You must accept the terms and policies to continue');
+    // agreedTerms is never persisted via saveStep (stripped there — see its comment); calling
+    // submit() is the only way to set it, so there's nothing left on rec to check here.
 
     await this.prisma.sellerRegistration.update({
       where: { registrationId },
-      data: { status: 'PENDING', currentStep: 8, agreedAt: new Date() },
+      data: { status: 'PENDING', currentStep: 8, agreedTerms: true, agreedAt: new Date() },
     });
 
     this.logger.log(`Seller registration submitted: ${registrationId} — ${rec.businessName} (${rec.phone})`);

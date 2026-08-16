@@ -170,7 +170,10 @@ export class PartnerRegistrationService {
     if (!rec.fullName || rec.fullName === '') throw new BadRequestException('Full name is required');
     if (!rec.phone) throw new BadRequestException('Phone number is required');
     if (!rec.categories || rec.categories.length === 0) throw new BadRequestException('At least one service category is required');
-    if (!rec.agreedTerms || !rec.agreedBackground || !rec.agreedCommission || !rec.agreedStandards) {
+    // agreedTerms itself is never persisted via saveStep (stripped there — see its comment);
+    // calling submit() is the only way to set it, so reaching this line is the consent. The
+    // other three are ordinary step-8 fields saveStep does persist, so they're checked as-is.
+    if (!rec.agreedBackground || !rec.agreedCommission || !rec.agreedStandards) {
       throw new BadRequestException('All agreements must be accepted');
     }
 
@@ -198,7 +201,7 @@ export class PartnerRegistrationService {
       where: { registrationId },
       // A MORE_DOCS/HOLD applicant resubmitting after fixing what admin flagged goes back to
       // PENDING for a fresh review — same transition a first-time submission makes.
-      data: { status: 'PENDING', currentStep: 8, agreedAt: new Date() },
+      data: { status: 'PENDING', currentStep: 8, agreedTerms: true, agreedAt: new Date() },
     });
 
     this.logger.log(`Partner registration submitted: ${registrationId} — ${rec.fullName} (${rec.phone})`);
