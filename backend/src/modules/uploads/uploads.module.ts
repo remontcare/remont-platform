@@ -51,6 +51,21 @@ export class UploadsService {
 
     return { thumb: urls.thumb, card: urls.card, full: urls.full, url: urls.full };
   }
+
+  // Task 8 — promo video upload for categories/sub-categories/services. Sharp's resize
+  // pipeline only makes sense for images, so video just gets written to disk as-is
+  // (same ephemeral-storage caveat as processAndStore above).
+  async storeVideo(file: Express.Multer.File): Promise<{ url: string }> {
+    if (!file) throw new BadRequestException('No file uploaded');
+    if (!file.mimetype?.startsWith('video/')) throw new BadRequestException('File must be a video');
+
+    await fs.mkdir(this.uploadDir, { recursive: true });
+    const id = crypto.randomBytes(8).toString('hex');
+    const ext = path.extname(file.originalname) || '.mp4';
+    const filename = `${id}-video${ext}`;
+    await fs.writeFile(path.join(this.uploadDir, filename), file.buffer);
+    return { url: `/api/uploads/${filename}` };
+  }
 }
 
 @ApiTags('Uploads')
@@ -68,6 +83,15 @@ export class UploadsController {
   }))
   uploadImage(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.processAndStore(file);
+  }
+
+  @Post('video')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — generous for a short promo clip
+  }))
+  uploadVideo(@UploadedFile() file: Express.Multer.File) {
+    return this.uploads.storeVideo(file);
   }
 }
 

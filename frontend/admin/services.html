@@ -247,6 +247,8 @@
         <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold %</label><input id="cat-warranty-pct" class="form-control" type="number" min="0" max="100" step="0.1" placeholder="Blank = platform default"></div>
       </div>
       <small style="color:#9ca3af;font-size:11px">Vendor Wallet: % of a completed job's payout in this category held back for this many days before auto-release. Leave both blank to use the platform-wide default from Settings → Vendor Wallet.</small>
+      <div class="form-group"><label class="form-label">Cover Image</label><input id="cat-img" class="form-control" placeholder="https://…"></div>
+      <div class="form-group"><label class="form-label">Promo Video <small style="color:#9ca3af">(paste a URL or upload a file)</small></label><input id="cat-video" class="form-control" placeholder="https://youtube.com/…"></div>
     </div>
 
     <div id="cat-seo" class="modal-pane">
@@ -293,6 +295,8 @@
         <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="subcat-active" checked> Active</label>
       </div>
     </div>
+    <div class="form-group"><label class="form-label">Cover Image</label><input id="subcat-img" class="form-control" placeholder="https://…"></div>
+    <div class="form-group"><label class="form-label">Promo Video <small style="color:#9ca3af">(paste a URL or upload a file)</small></label><input id="subcat-video" class="form-control" placeholder="https://youtube.com/…"></div>
     <div class="modal-footer" style="margin-top:16px">
       <button class="btn btn-outline" onclick="closeModal('subcat-overlay')">Cancel</button>
       <button class="btn btn-primary" onclick="saveSubCategory()">Save Sub-Category</button>
@@ -382,6 +386,7 @@
     <div id="svc-media" class="modal-pane">
       <div class="form-group"><label class="form-label">Cover Image URL</label><input id="svc-img" class="form-control" placeholder="https://…" oninput="previewImg()"></div>
       <div id="svc-img-preview" style="margin-bottom:12px;display:none"><img id="svc-cover-preview" style="height:120px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb"></div>
+      <div class="form-group"><label class="form-label">Promo Video <small style="color:#9ca3af">(paste a URL or upload a file)</small></label><input id="svc-video" class="form-control" placeholder="https://youtube.com/…"></div>
       <div class="form-group">
         <label class="form-label">Gallery Images</label>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -536,6 +541,8 @@ function openCatModal(cat) {
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
   document.getElementById('cat-seo-desc').value = cat ? (cat.seoDesc||'') : '';
   document.getElementById('cat-seo-kw').value = cat ? (cat.seoKeywords||[]).join(', ') : '';
+  document.getElementById('cat-img').value = cat ? (cat.imageUrl||'') : '';
+  document.getElementById('cat-video').value = cat ? (cat.videoUrl||'') : '';
   document.getElementById('cat-ai-preview').style.display = 'none';
   document.getElementById('cat-overlay').style.display = 'flex';
 }
@@ -554,6 +561,8 @@ function saveCategory() {
     seoTitle: document.getElementById('cat-seo-title').value.trim() || undefined,
     seoDesc: document.getElementById('cat-seo-desc').value.trim() || undefined,
     seoKeywords: document.getElementById('cat-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
+    imageUrl: document.getElementById('cat-img').value.trim() || undefined,
+    videoUrl: document.getElementById('cat-video').value.trim() || undefined,
   };
   var warrantyDaysVal = document.getElementById('cat-warranty-days').value.trim();
   var warrantyPctVal = document.getElementById('cat-warranty-pct').value.trim();
@@ -636,6 +645,8 @@ function openSubCatModal(sc) {
   document.getElementById('subcat-desc').value = sc ? (sc.description||'') : '';
   document.getElementById('subcat-sort').value = sc ? sc.sortOrder : 0;
   document.getElementById('subcat-active').checked = sc ? sc.isActive : true;
+  document.getElementById('subcat-img').value = sc ? (sc.imageUrl||'') : '';
+  document.getElementById('subcat-video').value = sc ? (sc.videoUrl||'') : '';
   document.getElementById('subcat-overlay').style.display = 'flex';
 }
 
@@ -649,6 +660,8 @@ function saveSubCategory() {
     description: document.getElementById('subcat-desc').value.trim() || undefined,
     sortOrder: parseInt(document.getElementById('subcat-sort').value) || 0,
     isActive: document.getElementById('subcat-active').checked,
+    imageUrl: document.getElementById('subcat-img').value.trim() || undefined,
+    videoUrl: document.getElementById('subcat-video').value.trim() || undefined,
   };
   if (!data.categoryId) { toast('Select a category','error'); return; }
   if (!data.key || !data.name) { toast('Key and name required','error'); return; }
@@ -760,6 +773,7 @@ function openSvcModal(svc) {
   document.getElementById('svc-inclusions').value = svc ? (svc.inclusions||[]).join('\n') : '';
   document.getElementById('svc-exclusions').value = svc ? (svc.exclusions||[]).join('\n') : '';
   document.getElementById('svc-img').value = svc ? (svc.imageUrl||'') : '';
+  document.getElementById('svc-video').value = svc ? (svc.videoUrl||'') : '';
   document.getElementById('svc-active').checked = svc ? svc.isActive : true;
   document.getElementById('svc-popular').checked = svc ? svc.isPopular : false;
   document.getElementById('svc-premium').checked = svc ? svc.isPremium : false;
@@ -816,6 +830,7 @@ function saveService() {
     originalPrice: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     durationMinutes: parseInt(document.getElementById('svc-duration').value)||60,
     imageUrl: document.getElementById('svc-img').value.trim()||undefined,
+    videoUrl: document.getElementById('svc-video').value.trim()||undefined,
     images: galleryImages,
     isActive: document.getElementById('svc-active').checked,
     isPopular: document.getElementById('svc-popular').checked,
@@ -1228,6 +1243,11 @@ function exportServices() {
 // ── INIT ──────────────────────────────────────────────────────────────
 
 attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachImageUpload('cat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachImageUpload('subcat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachVideoUpload('svc-video');
+attachVideoUpload('cat-video');
+attachVideoUpload('subcat-video');
 attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200 });
 loadCategories();
 loadSubCategories();

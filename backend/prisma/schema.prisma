@@ -635,6 +635,8 @@ model ServiceCategory {
   slug        String?  @unique
   name        String
   icon        String
+  imageUrl    String?
+  videoUrl    String?
   description String?
   sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)
@@ -662,6 +664,8 @@ model SubCategory {
   slug        String? @unique
   name        String
   icon        String?
+  imageUrl    String?
+  videoUrl    String?
   description String?
   sortOrder   Int     @default(0)
   isActive    Boolean @default(true)
@@ -692,6 +696,7 @@ model Service {
   fulfillmentType FulfillmentType @default(DIRECT_PARTNER)
   imageUrl        String?
   images          String[]
+  videoUrl        String?
   faqJson         Json?
   seoTitle        String?
   seoDesc         String?

@@ -378,6 +378,68 @@ function attachImageUpload(inputId, opts) {
   p.insertBefore(thumb, row.nextSibling);
 }
 
+// Task 8 — promo video upload for categories/sub-categories/services, via
+// POST /api/v1/uploads/video. No client-side fallback (unlike images): a multi-MB
+// video as a data: URI is impractical, so a failed upload just surfaces an error toast
+// and the admin can still paste an external URL (YouTube/Vimeo/etc.) into the same field.
+function uploadVideoToServer(file, onDone, onError) {
+  var fd = new FormData();
+  fd.append('file', file);
+  fetch(API_BASE + '/api/v1/uploads/video', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getToken() },
+    body: fd,
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error((d && d.message) ? (Array.isArray(d.message) ? d.message.join(', ') : d.message) : ('HTTP ' + r.status));
+      return d.data !== undefined ? d.data : d;
+    });
+  }).then(onDone).catch(function(e) { if (onError) onError(e); });
+}
+
+// Attaches an "Upload video" button next to a text input that also accepts a pasted
+// external URL (YouTube/Vimeo/etc.) — mirrors attachImageUpload's button-next-to-input pattern.
+function attachVideoUpload(inputId) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+
+  var fileInp = document.createElement('input');
+  fileInp.type = 'file'; fileInp.accept = 'video/*'; fileInp.style.display = 'none';
+
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-outline btn-sm';
+  btn.style.cssText = 'margin-top:6px;font-size:12px;display:inline-flex;align-items:center;gap:5px;';
+  btn.innerHTML = '🎬 Upload Video';
+  btn.onclick = function() { fileInp.click(); };
+
+  var info = document.createElement('span');
+  info.style.cssText = 'display:none;font-size:11px;font-weight:600;color:#22c55e;margin-left:8px;vertical-align:middle';
+
+  fileInp.onchange = function() {
+    var file = fileInp.files[0]; if (!file) return;
+    btn.disabled = true; btn.innerHTML = '⏳ Uploading…';
+    uploadVideoToServer(file, function(res) {
+      input.value = res.url;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      info.textContent = '✓ Uploaded'; info.style.display = 'inline';
+      btn.disabled = false; btn.innerHTML = '🎬 Change Video';
+      fileInp.value = '';
+    }, function(e) {
+      btn.disabled = false; btn.innerHTML = '🎬 Upload Video';
+      fileInp.value = '';
+      if (typeof toast === 'function') toast('Video upload failed: ' + e.message, 'error');
+    });
+  };
+
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;';
+  row.appendChild(btn); row.appendChild(info);
+
+  var p = input.parentNode;
+  p.insertBefore(fileInp, input.nextSibling);
+  p.insertBefore(row, fileInp.nextSibling);
+}
+
 function attachGalleryUpload(inputId, addFn, opts) {
   var input = document.getElementById(inputId);
   if (!input) return;
