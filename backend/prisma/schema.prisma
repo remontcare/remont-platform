@@ -991,23 +991,47 @@ model ServiceVendor {
   agencyStatus  AgencyStatus?
   memberStatus  MemberStatus?
 
-  user               User                 @relation(fields: [userId], references: [id])
+  // Bank details — never written by the vendor directly (see VendorBankUpdateRequest);
+  // an approved request is the only path that lands values here.
+  bankAccountHolder String?
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankBranch        String?
+
+  user               User                       @relation(fields: [userId], references: [id])
   documents          VendorDocument[]
   orders             Order[]
   issuedInventory    IssuedInventory[]
   reviews            Review[]
   extraWorks         ExtraWorkItem[]
   settlements        PartnerSettlement[]
-  agencyOwner        ServiceVendor?       @relation("AgencyMembers", fields: [agencyOwnerId], references: [id])
-  members            ServiceVendor[]      @relation("AgencyMembers")
+  agencyOwner        ServiceVendor?             @relation("AgencyMembers", fields: [agencyOwnerId], references: [id])
+  members            ServiceVendor[]            @relation("AgencyMembers")
   ledgerEntries      PartnerLedgerEntry[]
   withdrawalRequests WithdrawalRequest[]
   attendance         VendorAttendance[]
   holds              PartnerHold[]
+  bankUpdateRequests VendorBankUpdateRequest[]
 
   @@index([status, isOnline])
   @@index([baseCity])
   @@index([agencyOwnerId])
+}
+
+model VendorBankUpdateRequest {
+  id            String    @id @default(cuid())
+  vendorId      String
+  accountName   String
+  accountNumber String
+  ifsc          String
+  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt     DateTime  @default(now())
+  reviewedAt    DateTime?
+  reviewedBy    String?
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+  @@index([vendorId])
 }
 
 model VendorDocument {

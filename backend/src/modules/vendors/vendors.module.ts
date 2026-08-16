@@ -138,6 +138,23 @@ export class ServiceVendorsService {
     });
   }
 
+  async requestBankUpdate(userId: string, data: { accountName: string; accountNumber: string; ifsc: string }) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    if (!data.accountName?.trim() || !data.accountNumber?.trim() || !data.ifsc?.trim()) {
+      throw new BadRequestException('accountName, accountNumber, and ifsc are all required');
+    }
+    const request = await this.prisma.vendorBankUpdateRequest.create({
+      data: {
+        vendorId: vendor.id,
+        accountName: data.accountName.trim(),
+        accountNumber: data.accountNumber.trim(),
+        ifsc: data.ifsc.trim(),
+      },
+    });
+    return { status: request.status, createdAt: request.createdAt };
+  }
+
   async updateLocation(userId: string, lat: number, lng: number) {
     const vendor = await this.requireActiveVendor(userId);
     return this.prisma.serviceVendor.update({
@@ -424,6 +441,7 @@ export class ServiceVendorsController {
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
   @Patch('me/photo') photo(@CurrentUser() u: JwtPayload, @Body() b: { photoBase64: string }) { return this.vs.updatePhoto(u.sub, b.photoBase64); }
   @Post('me/documents') doc(@CurrentUser() u: JwtPayload, @Body() b: { type: string; imageBase64: string }) { return this.vs.upsertDocument(u.sub, b.type, b.imageBase64); }
+  @Post('me/bank-update-request') bankReq(@CurrentUser() u: JwtPayload, @Body() b: { accountName: string; accountNumber: string; ifsc: string }) { return this.vs.requestBankUpdate(u.sub, b); }
   @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: VendorLocationDto) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: VendorOnlineStatusDto) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
   @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
