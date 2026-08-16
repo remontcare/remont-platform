@@ -247,6 +247,7 @@
         <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold %</label><input id="cat-warranty-pct" class="form-control" type="number" min="0" max="100" step="0.1" placeholder="Blank = platform default"></div>
       </div>
       <small style="color:#9ca3af;font-size:11px">Vendor Wallet: % of a completed job's payout in this category held back for this many days before auto-release. Leave both blank to use the platform-wide default from Settings → Vendor Wallet.</small>
+      <div class="form-group"><label class="form-label">Logo / Icon Image <small style="color:#9ca3af">(shown instead of the emoji on the site — upload a square logo/icon)</small></label><input id="cat-logo" class="form-control" placeholder="https://…"></div>
       <div class="form-group"><label class="form-label">Cover Image</label><input id="cat-img" class="form-control" placeholder="https://…"></div>
       <div class="form-group"><label class="form-label">Promo Video <small style="color:#9ca3af">(paste a URL or upload a file)</small></label><input id="cat-video" class="form-control" placeholder="https://youtube.com/…"></div>
     </div>
@@ -501,7 +502,7 @@ function loadCategories() {
     var rows = filtered.map(function(c) {
       return '<tr>' +
         '<td style="width:32px"><input type="checkbox" ' + (selectedCats.has(c.id) ? 'checked' : '') + ' onchange="toggleCatSel(\'' + c.id + '\',this.checked)"></td>' +
-        '<td style="width:40px;font-size:22px;text-align:center">' + escape(c.icon) + '</td>' +
+        '<td style="width:40px;font-size:22px;text-align:center">' + (c.logoUrl ? '<img src="' + escape(c.logoUrl) + '" style="width:28px;height:28px;object-fit:cover;border-radius:6px;vertical-align:middle">' : escape(c.icon)) + '</td>' +
         '<td><strong>' + escape(c.name) + '</strong>' + (c.description ? '<br><small style="color:#9ca3af">' + escape(c.description.slice(0,60)) + '</small>' : '') + '</td>' +
         '<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">' + escape(c.key) + '</code></td>' +
         '<td>' + (c.services ? c.services.length : 0) + ' svcs</td>' +
@@ -541,6 +542,7 @@ function openCatModal(cat) {
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
   document.getElementById('cat-seo-desc').value = cat ? (cat.seoDesc||'') : '';
   document.getElementById('cat-seo-kw').value = cat ? (cat.seoKeywords||[]).join(', ') : '';
+  document.getElementById('cat-logo').value = cat ? (cat.logoUrl||'') : '';
   document.getElementById('cat-img').value = cat ? (cat.imageUrl||'') : '';
   document.getElementById('cat-video').value = cat ? (cat.videoUrl||'') : '';
   document.getElementById('cat-ai-preview').style.display = 'none';
@@ -561,6 +563,7 @@ function saveCategory() {
     seoTitle: document.getElementById('cat-seo-title').value.trim() || undefined,
     seoDesc: document.getElementById('cat-seo-desc').value.trim() || undefined,
     seoKeywords: document.getElementById('cat-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
+    logoUrl: document.getElementById('cat-logo').value.trim() || undefined,
     imageUrl: document.getElementById('cat-img').value.trim() || undefined,
     videoUrl: document.getElementById('cat-video').value.trim() || undefined,
   };
@@ -1243,6 +1246,7 @@ function exportServices() {
 // ── INIT ──────────────────────────────────────────────────────────────
 
 attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachImageUpload('cat-logo', { maxDim: 300, previewW: 80, previewH: 80 });
 attachImageUpload('cat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
 attachImageUpload('subcat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
 attachVideoUpload('svc-video');

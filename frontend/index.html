@@ -585,6 +585,7 @@
   .cat-link:hover { background: var(--cream); color: var(--sienna); }
   .cat-link.active { background: var(--sienna); color: #fff; }
   .cat-link .ic { font-size: 14px; }
+  .cat-link .ic img { width: 16px; height: 16px; object-fit: cover; border-radius: 4px; vertical-align: -3px; }
   .cat-link.amc { border: 1px dashed var(--sage); color: var(--sage); }
   .cat-link.amc:hover { background: var(--sage); color: #fff; border-color: var(--sage); }
   .cat-link.premium-link {
@@ -939,7 +940,9 @@
     font-size: 20px;
     flex-shrink: 0;
     transition: background 0.2s;
+    overflow: hidden;
   }
+  .svc-icon-box img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
   .svc-item.active .svc-icon-box { background: var(--sienna); }
   .svc-item.active .svc-icon-box span { filter: brightness(0) invert(1); }
   .svc-text { flex: 1; min-width: 0; }
@@ -7037,6 +7040,12 @@
     applyCityFilter();
   }
 
+  // Renders a category's logo image when set, falling back to the emoji icon —
+  // a category with a blank/missing emoji otherwise shows nothing at all.
+  function catIconHtml(cat) {
+    return cat.logoUrl ? '<img src="'+cat.logoUrl+'" alt="">' : '<span>'+(cat.icon||'🔧')+'</span>';
+  }
+
   // ── Service categories — load from API ────────────────────────────
   function buildServicePanel(categories) {
     if (!categories || categories.length === 0) return;
@@ -7113,7 +7122,7 @@
       categories.forEach(function(cat) {
         var fkey = keyMap[cat.key] || cat.key.toLowerCase();
         newHtml += '<div class="svc-item" data-svc="'+fkey+'" onclick="switchService(this)">'+
-          '<div class="svc-icon-box"><span>'+cat.icon+'</span></div>'+
+          '<div class="svc-icon-box">'+catIconHtml(cat)+'</div>'+
           '<div class="svc-text"><h4>'+cat.name+'</h4><p>'+(cat.description||'')+'</p></div>'+
           '<span class="svc-arrow">→</span>'+
         '</div>';
@@ -7128,7 +7137,7 @@
       var navLinks = ['<a href="#shop" class="cat-link active" onclick="selectCategoryChip(this,\'ac\')"><span class="ic">⚡</span> Quick Repair</a>'];
       categories.forEach(function(cat){
         var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
-        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+cat.icon+'</span> '+cat.name+'</a>');
+        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
       });
       navLinks.push('<a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
       navLinks.push('<a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>');
