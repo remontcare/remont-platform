@@ -41,22 +41,32 @@ export class VendorAttendanceDto {
 // document fields (partner-registration.module.ts) — the client-side size/type check is
 // JS-only and trivially bypassed, so magic bytes are re-verified server-side before the
 // data URL itself is persisted as the field value.
-const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
-const PHOTO_MAGIC_BYTES: Record<string, Buffer> = {
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const IMAGE_MAGIC_BYTES: Record<string, Buffer> = {
   'image/jpeg': Buffer.from([0xff, 0xd8, 0xff]),
   'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
 };
-function validatePhotoDataUrl(value: string): void {
+const DOCUMENT_MAGIC_BYTES: Record<string, Buffer> = {
+  ...IMAGE_MAGIC_BYTES,
+  'application/pdf': Buffer.from([0x25, 0x50, 0x44, 0x46]),
+};
+function validateDataUrl(field: string, value: string, allowedMagicBytes: Record<string, Buffer>, allowedLabel: string): void {
   const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
-  if (!match) throw new BadRequestException('photoBase64: invalid file — only JPG or PNG uploads are allowed');
+  if (!match) throw new BadRequestException(`${field}: invalid file — only ${allowedLabel} uploads are allowed`);
   const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
-  const magic = PHOTO_MAGIC_BYTES[mime];
-  if (!magic) throw new BadRequestException('photoBase64: only JPG or PNG files are allowed');
+  const magic = allowedMagicBytes[mime];
+  if (!magic) throw new BadRequestException(`${field}: only ${allowedLabel} files are allowed`);
   const buf = Buffer.from(match[2], 'base64');
-  if (buf.length > PHOTO_MAX_BYTES) throw new BadRequestException('photoBase64: file must be under 5MB');
+  if (buf.length > MAX_UPLOAD_BYTES) throw new BadRequestException(`${field}: file must be under 5MB`);
   if (!buf.subarray(0, magic.length).equals(magic)) {
-    throw new BadRequestException('photoBase64: file content does not match its declared type — upload rejected');
+    throw new BadRequestException(`${field}: file content does not match its declared type — upload rejected`);
   }
+}
+function validatePhotoDataUrl(value: string): void {
+  validateDataUrl('photoBase64', value, IMAGE_MAGIC_BYTES, 'JPG or PNG');
+}
+function validateDocumentImageDataUrl(value: string): void {
+  validateDataUrl('imageBase64', value, DOCUMENT_MAGIC_BYTES, 'JPG, PNG, or PDF');
 }
 
 // ─── Service Vendor ───
@@ -109,6 +119,22 @@ export class ServiceVendorsService {
     return this.prisma.serviceVendor.update({
       where: { id: vendor.id },
       data: { photoUrl: photoBase64 },
+    });
+  }
+
+  async upsertDocument(userId: string, type: string, imageBase64: string) {
+    validateDocumentImageDataUrl(imageBase64);
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    const existing = await this.prisma.vendorDocument.findFirst({ where: { vendorId: vendor.id, type } });
+    if (existing) {
+      return this.prisma.vendorDocument.update({
+        where: { id: existing.id },
+        data: { url: imageBase64, verified: false },
+      });
+    }
+    return this.prisma.vendorDocument.create({
+      data: { vendorId: vendor.id, type, url: imageBase64, verified: false },
     });
   }
 
@@ -397,6 +423,7 @@ export class ServiceVendorsController {
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: ServiceVendorRegistrationDto) { return this.vs.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
   @Patch('me/photo') photo(@CurrentUser() u: JwtPayload, @Body() b: { photoBase64: string }) { return this.vs.updatePhoto(u.sub, b.photoBase64); }
+  @Post('me/documents') doc(@CurrentUser() u: JwtPayload, @Body() b: { type: string; imageBase64: string }) { return this.vs.upsertDocument(u.sub, b.type, b.imageBase64); }
   @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: VendorLocationDto) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: VendorOnlineStatusDto) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
   @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
