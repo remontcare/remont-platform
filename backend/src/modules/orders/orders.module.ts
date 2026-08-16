@@ -1061,7 +1061,7 @@ export class OrdersService {
       include: {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { include: { user: { select: { name: true, phone: true } } } },
+        vendor: { select: { photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, delivery: true,
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
@@ -1076,7 +1076,7 @@ export class OrdersService {
         customer: { select: { name: true, phone: true, email: true } },
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { include: { user: { select: { name: true, phone: true } } } },
+        vendor: { select: { userId: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, invoice: true, delivery: true,
         timeline: { orderBy: { createdAt: 'asc' } },
       },
@@ -1437,7 +1437,7 @@ export class GuestBookingService {
       where: { orderNumber },
       include: {
         service: { select: { name: true, imageUrl: true } },
-        vendor: { include: { user: { select: { name: true, phone: true } } } },
+        vendor: { select: { fullName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: { select: { city: true, fullAddress: true } },
         extraWorkItems: { where: { customerApproved: false } },
         customer: { select: { phone: true } },

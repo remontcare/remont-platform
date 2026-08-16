@@ -118,7 +118,7 @@ function load() {
         arr.map(function(v) {
           var pid = generatePartnerId(v);
           var skills = (v.skills||v.specializations||[]).slice(0,3);
-          var photoEl = v.profilePhoto || v.photo ? '<img src="'+(v.profilePhoto||v.photo)+'" alt="photo">' : (v.fullName||'?').charAt(0).toUpperCase();
+          var photoEl = v.photoUrl ? '<img src="'+v.photoUrl+'" alt="photo">' : (v.fullName||'?').charAt(0).toUpperCase();
           var isApproved = v.status === 'ACTIVE' || v.approvalStatus === 'APPROVED';
           return '<div class="id-card" onclick="viewDetail(\''+v.id+'\')">' +
             '<div class="idc-header">' +
@@ -157,7 +157,7 @@ function viewDetail(id) {
     document.getElementById('detail-body').innerHTML =
       '<div style="background:linear-gradient(135deg,#151c2c,#1e2d45);border-radius:12px;padding:20px;margin-bottom:16px">' +
         '<div style="display:flex;align-items:center;gap:12px">' +
-          '<div style="width:64px;height:64px;border-radius:50%;border:3px solid #f97316;background:#1e2d45;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#f97316;font-size:26px;font-weight:800;flex-shrink:0">' + (v.profilePhoto||v.photo ? '<img src="'+(v.profilePhoto||v.photo)+'" style="width:100%;height:100%;object-fit:cover">' : (v.fullName||'P').charAt(0).toUpperCase()) + '</div>' +
+          '<div style="width:64px;height:64px;border-radius:50%;border:3px solid #f97316;background:#1e2d45;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#f97316;font-size:26px;font-weight:800;flex-shrink:0">' + (v.photoUrl ? '<img src="'+v.photoUrl+'" style="width:100%;height:100%;object-fit:cover">' : (v.fullName||'P').charAt(0).toUpperCase()) + '</div>' +
           '<div><div style="color:#fff;font-size:16px;font-weight:800">' + escape((v.fullName||v.name||'').toUpperCase()) + '</div>' +
           '<div style="color:#f97316;font-size:11px;font-weight:600">' + escape(v.specialization||'SERVICE PARTNER') + '</div>' +
           '<div style="color:#94a3b8;font-size:11px;margin-top:4px">ID: <span style="font-family:monospace;color:#f97316">' + pid + '</span></div></div>' +
