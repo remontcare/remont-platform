@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./vendor/chart.umd.min.js"></script>
 <style>
 .welcome-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
 .welcome-bar h2{font-size:22px;font-weight:800;color:#1e293b}
@@ -287,7 +287,7 @@ function loadDashboard() {
     var s = res[0] || {}, a = res[1] || {};
     var orders = res[2] || []; if (!Array.isArray(orders)) orders = orders.data || [];
     var vendors = res[3] || []; if (!Array.isArray(vendors)) vendors = vendors.data || [];
-    var payments = res[4] || []; if (!Array.isArray(payments)) payments = payments.data || [];
+    var payments = res[4] || []; if (!Array.isArray(payments)) payments = payments.transactions || [];
     var lowStock = res[5] || []; if (!Array.isArray(lowStock)) lowStock = lowStock.data || [];
 
     if (s.cities && s.cities.active === 0) document.getElementById('seed-bar').style.display = 'flex';
@@ -311,14 +311,28 @@ function loadDashboard() {
     document.getElementById('mc-partners').textContent = totalPart.toLocaleString('en-IN');
     document.getElementById('mc-products').textContent = totalProd.toLocaleString('en-IN');
 
-    // Mock growth %
-    document.getElementById('mc-today-pct').textContent = '↑ 18.4%';
-    document.getElementById('mc-month-pct').textContent = '↑ 22.1%';
-    document.getElementById('mc-orders-pct').textContent = '↑ 12.6%';
-    document.getElementById('mc-cust-pct').textContent = '↑ 8.3%';
-    document.getElementById('mc-part-pct').textContent = '↑ 14.2%';
-    document.getElementById('mc-prod-pct').textContent = '↑ 9.7%';
+    // Real period-over-period trend % from the backend (s.trends) — a null value means
+    // there's no baseline to compare against yet (e.g. nothing recorded a month ago), shown
+    // as "—" rather than fabricating a number.
+    function pctLabel(el, pct) {
+      var node = document.getElementById(el);
+      if (pct === null || pct === undefined || !isFinite(pct)) { node.textContent = '—'; node.className = 'mc-up'; return; }
+      node.textContent = (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct) + '%';
+      node.className = pct >= 0 ? 'mc-up' : 'mc-dn';
+    }
+    var trends = s.trends || {};
+    pctLabel('mc-today-pct', trends.todayRevenuePct);
+    pctLabel('mc-month-pct', trends.monthRevenuePct);
+    pctLabel('mc-orders-pct', trends.ordersPct);
+    pctLabel('mc-cust-pct', trends.customersPct);
+    pctLabel('mc-part-pct', trends.partnersPct);
+    pctLabel('mc-prod-pct', trends.productsPct);
 
+    // Charts are wrapped in their own try/catch — a Chart.js failure (library missing,
+    // canvas error, malformed data) must never abort the widget rendering below it in this
+    // same callback; each widget's own fetch already has its own .catch() upstream, but this
+    // synchronous block did not, so a thrown error here used to abort everything after it.
+    try {
     // ── Revenue Chart ──
     var days = (a && a.daily) || [];
     var labels = [], revs = [], cnts = [];
@@ -394,13 +408,20 @@ function loadDashboard() {
     } else {
       document.getElementById('statusChart').parentElement.innerHTML = '<h3>Order Status Overview</h3><div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">No orders yet</div>';
     }
+    } catch (chartErr) {
+      console.error('Dashboard chart render failed (widgets below are unaffected):', chartErr);
+    }
 
     // ── Top Services ──
     var ts = (a && a.topServices) || [];
     document.getElementById('top-services').innerHTML = !ts.length
       ? '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px">No service data yet</div>'
       : ts.slice(0,5).map(function(t, i) {
-        return '<div class="rec-item"><div class="rec-av">' + ['🔧','🚿','⚡','🧹','🐛','🎨'][i]||'🔧' + '</div><div class="rec-info"><div class="rec-name">' + escape(t.name) + '</div><div class="rec-sub">' + (t.orders||0) + ' orders</div></div><div class="rec-right"><div class="rec-val">' + fmtCur(t.revenue||0) + '</div></div></div>';
+        // `+` binds tighter than `||` — an unparenthesized `a + b[i] || c` evaluates the
+        // `||` on the whole left-hand concatenation (always truthy) and silently discards
+        // everything after it, corrupting the row's HTML. Precomputing the icon avoids that.
+        var icon = ['🔧','🚿','⚡','🧹','🐛','🎨'][i] || '🔧';
+        return '<div class="rec-item"><div class="rec-av">' + icon + '</div><div class="rec-info"><div class="rec-name">' + escape(t.name) + '</div><div class="rec-sub">' + (t.orders||0) + ' orders</div></div><div class="rec-right"><div class="rec-val">' + fmtCur(t.revenue||0) + '</div></div></div>';
       }).join('');
 
     // ── Top Products ──
@@ -416,22 +437,22 @@ function loadDashboard() {
       ? '<div class="loading">No orders yet</div>'
       : '<table><thead><tr><th>#</th><th>Customer</th><th>Service</th><th>Status</th><th>Amount</th></tr></thead><tbody>' +
         orders.map(function(o) {
-          return '<tr><td style="font-size:11px;color:#9ca3af">' + escape('#' + (o.orderNumber||o.id||'').slice(-6)) + '</td><td><div style="font-size:12px;font-weight:600">' + escape((o.user&&o.user.name)||o.customerName||'—') + '</div></td><td style="font-size:12px">' + escape((o.service&&o.service.name)||o.serviceName||'—') + '</td><td>' + statusBadge(o.status) + '</td><td style="font-size:12px;font-weight:700;color:#f97316">' + fmtCur(o.totalAmount||o.amount) + '</td></tr>';
+          return '<tr><td style="font-size:11px;color:#9ca3af">' + escape('#' + (o.orderNumber||o.id||'').slice(-6)) + '</td><td><div style="font-size:12px;font-weight:600">' + escape(o.guestName || (o.customer&&o.customer.name) || '—') + '</div></td><td style="font-size:12px">' + escape((o.service&&o.service.name)||'—') + '</td><td>' + statusBadge(o.status) + '</td><td style="font-size:12px;font-weight:700;color:#f97316">' + fmtCur(o.totalAmount||o.amount) + '</td></tr>';
         }).join('') + '</tbody></table>';
 
     // ── Recent Partners ──
     document.getElementById('recent-partners').innerHTML = !vendors.length
       ? '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px">No partners yet</div>'
       : vendors.map(function(v) {
-        return '<div class="rec-item"><div class="rec-av">👷</div><div class="rec-info"><div class="rec-name">' + escape(v.fullName||v.name||'Partner') + '</div><div class="rec-sub">' + escape(v.city||v.specialization||'') + '</div></div><div class="rec-right"><div>' + statusBadge(v.approvalStatus||v.status||'PENDING') + '</div><div class="rec-date">' + fmtDateShort(v.createdAt) + '</div></div></div>';
+        return '<div class="rec-item"><div class="rec-av">👷</div><div class="rec-info"><div class="rec-name">' + escape(v.fullName||'Partner') + '</div><div class="rec-sub">' + escape(v.baseCity||'') + '</div></div><div class="rec-right"><div>' + statusBadge(v.status||'PENDING') + '</div><div class="rec-date">' + fmtDateShort(v.createdAt) + '</div></div></div>';
       }).join('');
 
     // ── Latest Payments ──
     document.getElementById('latest-payments').innerHTML = !payments.length
       ? '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px">No payment data yet</div>'
       : payments.map(function(p) {
-        var name = (p.user&&p.user.name) || (p.order&&p.order.user&&p.order.user.name) || 'Customer';
-        return '<div class="rec-item"><div class="rec-av">💳</div><div class="rec-info"><div class="rec-name">' + escape('#' + (p.id||'').slice(-6)) + ' — ' + escape(name) + '</div><div class="rec-sub">' + fmtDateShort(p.createdAt) + '</div></div><div class="rec-right"><div class="rec-val text-green">' + fmtCur(p.amount) + '</div><div>' + statusBadge(p.status||'PAID') + '</div></div></div>';
+        var label = p.orderNumber || ('#' + (p.id||'').slice(-6));
+        return '<div class="rec-item"><div class="rec-av">💳</div><div class="rec-info"><div class="rec-name">' + escape(label) + '</div><div class="rec-sub">' + fmtDateShort(p.createdAt) + '</div></div><div class="rec-right"><div class="rec-val text-green">' + fmtCur(p.amount) + '</div><div>' + statusBadge(p.status||'PAID') + '</div></div></div>';
       }).join('');
 
     // ── Low Stock ──

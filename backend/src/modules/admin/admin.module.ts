@@ -52,7 +52,15 @@ export class AdminService {
 
   async globalStats() {
     const sod = new Date(); sod.setHours(0, 0, 0, 0);
+    const yesterdayStart = new Date(sod); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     const som = new Date(); som.setDate(1); som.setHours(0, 0, 0, 0);
+    // MTD-vs-MTD: compare "this month so far" against the SAME number of days into last
+    // month, not last month's full total — otherwise a partial month always looks like a
+    // decline against a complete one, which isn't a real trend, just a calendar artifact.
+    const daysSoFarThisMonth = Math.floor((Date.now() - som.getTime()) / 86400000) + 1;
+    const somLastMonth = new Date(som); somLastMonth.setMonth(somLastMonth.getMonth() - 1);
+    const sameDayCutoffLastMonth = new Date(somLastMonth); sameDayCutoffLastMonth.setDate(sameDayCutoffLastMonth.getDate() + daysSoFarThisMonth);
+    const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30);
 
     const [
       totalUsers, totalCustomers, totalServiceVendors, totalProductVendors,
@@ -60,6 +68,8 @@ export class AdminService {
       todayOrders, todayGmv, mtdOrders, mtdGmv,
       activeAmc, totalLeads, conversions, totalCities,
       totalServices, totalProducts,
+      yesterdayGmv, lastMonthSameSpanGmv,
+      totalOrdersAllTime, customersMonthAgo, vendorsMonthAgo, productsMonthAgo, ordersMonthAgo,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({ where: { role: UserRole.CUSTOMER } }),
@@ -77,7 +87,18 @@ export class AdminService {
       this.prisma.city.count({ where: { isActive: true } }),
       this.prisma.service.count({ where: { isActive: true } }),
       this.prisma.product.count({ where: { isActive: true } }),
+      this.prisma.order.aggregate({ where: { createdAt: { gte: yesterdayStart, lt: sod }, paymentStatus: 'PAID' }, _sum: { totalAmount: true } }),
+      this.prisma.order.aggregate({ where: { createdAt: { gte: somLastMonth, lt: sameDayCutoffLastMonth }, paymentStatus: 'PAID' }, _sum: { totalAmount: true } }),
+      this.prisma.order.count(),
+      this.prisma.user.count({ where: { role: UserRole.CUSTOMER, createdAt: { lt: monthAgo } } }),
+      this.prisma.serviceVendor.count({ where: { createdAt: { lt: monthAgo } } }),
+      this.prisma.product.count({ where: { isActive: true, createdAt: { lt: monthAgo } } }),
+      this.prisma.order.count({ where: { createdAt: { lt: monthAgo } } }),
     ]);
+
+    // null (not 0) means "no baseline to compare against" — e.g. a brand-new platform with
+    // zero orders a month ago has nothing to compute a meaningful % change from.
+    const pct = (curr: number, prev: number): number | null => (prev > 0 ? Math.round(((curr - prev) / prev) * 1000) / 10 : null);
 
     return {
       users: { total: totalUsers, customers: totalCustomers },
@@ -90,6 +111,19 @@ export class AdminService {
       crm: { totalLeads, conversions, conversionRate: totalLeads > 0 ? ((conversions / totalLeads) * 100).toFixed(1) + '%' : '0%' },
       cities: { active: totalCities },
       catalog: { services: totalServices, products: totalProducts },
+      // Real period-over-period trend %, used by the dashboard's metric cards — previously
+      // those cards showed a hardcoded "↑ X%" regardless of actual data.
+      trends: {
+        todayRevenuePct: pct(Number(todayGmv._sum.totalAmount || 0), Number(yesterdayGmv._sum.totalAmount || 0)),
+        monthRevenuePct: pct(Number(mtdGmv._sum.totalAmount || 0), Number(lastMonthSameSpanGmv._sum.totalAmount || 0)),
+        // Total Orders/Customers/Partners/Products cards show cumulative all-time totals, so
+        // their "trend" is cumulative growth vs the same total 30 days ago — not new-this-
+        // month counts, which would be a different (and here, unlabeled) metric.
+        ordersPct: pct(totalOrdersAllTime, ordersMonthAgo),
+        customersPct: pct(totalCustomers, customersMonthAgo),
+        partnersPct: pct(totalServiceVendors, vendorsMonthAgo),
+        productsPct: pct(totalProducts, productsMonthAgo),
+      },
     };
   }
 
@@ -126,18 +160,38 @@ export class AdminService {
       statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
     });
 
+    // "Top selling" must not count orders that never actually resulted in a sale.
+    const sellableOrder = { status: { notIn: ['CANCELLED', 'REFUNDED'] as any[] } };
+
     // Top services
     const topServices = await this.prisma.order.groupBy({
       by: ['serviceId'],
-      where: { createdAt: { gte: since }, serviceId: { not: null } },
+      where: { createdAt: { gte: since }, serviceId: { not: null }, ...sellableOrder },
       _count: { id: true },
+      _sum: { totalAmount: true },
       orderBy: { _count: { id: 'desc' } },
       take: 5,
     });
     const svcDetails = await Promise.all(
       topServices.map(async (t) => {
         const svc = t.serviceId ? await this.prisma.service.findUnique({ where: { id: t.serviceId }, select: { name: true } }) : null;
-        return { name: svc?.name || 'Unknown', orders: t._count.id };
+        return { name: svc?.name || 'Unknown', orders: t._count?.id || 0, revenue: Number(t._sum?.totalAmount || 0) };
+      }),
+    );
+
+    // Top products
+    const topProductsRaw = await this.prisma.orderItem.groupBy({
+      by: ['productId'],
+      where: { order: { createdAt: { gte: since }, ...sellableOrder } },
+      _count: { id: true },
+      _sum: { totalPrice: true, quantity: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 5,
+    });
+    const prodDetails = await Promise.all(
+      topProductsRaw.map(async (t) => {
+        const prod = await this.prisma.product.findUnique({ where: { id: t.productId }, select: { name: true } });
+        return { name: prod?.name || 'Unknown', units: t._sum?.quantity || 0, revenue: Number(t._sum?.totalPrice || 0) };
       }),
     );
 
@@ -145,6 +199,7 @@ export class AdminService {
       daily: Object.values(byDay),
       statusBreakdown: statusCounts,
       topServices: svcDetails,
+      topProducts: prodDetails,
       totalOrders: orders.length,
       totalRevenue: orders.filter(o => o.paymentStatus === 'PAID').reduce((s, o) => s + Number(o.totalAmount || 0), 0),
     };
@@ -1078,11 +1133,15 @@ export class AdminService {
 
   // ─── Products ───────────────────────────────────────────────────────
 
-  async adminListProducts(opts: { q?: string; categoryId?: string; isActive?: boolean; limit?: number; offset?: number }) {
+  async adminListProducts(opts: { q?: string; categoryId?: string; isActive?: boolean; lowStock?: boolean; limit?: number; offset?: number }) {
     return this.prisma.product.findMany({
       where: {
         ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
         ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
+        // Same low-stock threshold already used elsewhere (seller dashboard's lowStockCount,
+        // vendors.module.ts:509, and seller.html:583) — kept consistent rather than inventing
+        // a second, different definition of "low stock" for the admin view.
+        ...(opts.lowStock ? { stock: { lte: 5 } } : {}),
         ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { sku: { contains: opts.q, mode: 'insensitive' } }, { brand: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
       include: {
@@ -1090,7 +1149,7 @@ export class AdminService {
         category: { select: { name: true, key: true } },
         _count: { select: { cityProducts: { where: { isActive: true } } } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: opts.lowStock ? { stock: 'asc' } : { createdAt: 'desc' },
       take: opts.limit || 100,
       skip: opts.offset || 0,
     });
@@ -1898,8 +1957,11 @@ Return JSON with:
       vendorId: v.id,
       vendorName: v.fullName,
       city: v.baseCity,
-      totalEarnings: v.totalEarnings,
-      pendingPayout: v.pendingPayout,
+      // Decimal fields serialize to JSON strings (decimal.js's toJSON = toString()) — must be
+      // Number()-converted here, same as totalPaid/commission below, or client-side summing
+      // (partner-earnings.html's summary cards) silently does string concatenation → NaN.
+      totalEarnings: Number(v.totalEarnings),
+      pendingPayout: Number(v.pendingPayout),
       totalPaid: Number(v.totalEarnings) - Number(v.pendingPayout),
       commission: commissionByVendor.get(v.id) || 0,
       jobsCompleted: v.completedJobs,
@@ -2012,7 +2074,10 @@ Return JSON with:
   async salesReport(opts: { from?: string; to?: string }) {
     const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 30 * 86400000);
     const to = opts.to ? new Date(opts.to) : new Date();
-    const [orders, revenue, byStatus, topProducts, byChannel] = await Promise.all([
+    // "Top selling" must not count line items from orders that never actually resulted in a
+    // sale — a CANCELLED/REFUNDED order's items would otherwise inflate these rankings.
+    const sellableOrder = { status: { notIn: ['CANCELLED', 'REFUNDED'] as any[] } };
+    const [orders, revenue, byStatus, topProductsRaw, topServicesRaw, byChannel, avgValue] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: from, lte: to } } }),
       this.prisma.order.aggregate({
         where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' },
@@ -2026,23 +2091,58 @@ Return JSON with:
       }),
       this.prisma.orderItem.groupBy({
         by: ['productId'],
-        where: { order: { createdAt: { gte: from, lte: to } } },
+        where: { order: { createdAt: { gte: from, lte: to }, ...sellableOrder } },
+        _count: { id: true },
+        _sum: { totalPrice: true },
+        orderBy: { _count: { id: 'desc' } },
+        take: 10,
+      }),
+      this.prisma.orderServiceItem.groupBy({
+        by: ['serviceId'],
+        where: { order: { createdAt: { gte: from, lte: to }, ...sellableOrder } },
         _count: { id: true },
         _sum: { totalPrice: true },
         orderBy: { _count: { id: 'desc' } },
         take: 10,
       }),
       this.prisma.order.groupBy({ by: ['channel'], where: { createdAt: { gte: from, lte: to } }, _count: true }),
+      this.prisma.order.aggregate({
+        where: { createdAt: { gte: from, lte: to }, paymentStatus: 'PAID' },
+        _avg: { totalAmount: true },
+      }),
     ]);
+
+    const [productNames, serviceNames] = await Promise.all([
+      this.prisma.product.findMany({ where: { id: { in: topProductsRaw.map((p) => p.productId) } }, select: { id: true, name: true } }),
+      this.prisma.service.findMany({ where: { id: { in: topServicesRaw.map((s) => s.serviceId) } }, select: { id: true, name: true } }),
+    ]);
+    const productNameById = new Map(productNames.map((p) => [p.id, p.name]));
+    const serviceNameById = new Map(serviceNames.map((s) => [s.id, s.name]));
+
+    const topProducts = topProductsRaw.map((p) => ({
+      productId: p.productId,
+      name: productNameById.get(p.productId) || 'Unknown product',
+      count: p._count?.id || 0,
+      revenue: Number(p._sum?.totalPrice || 0),
+    }));
+    const topServices = topServicesRaw.map((s) => ({
+      serviceId: s.serviceId,
+      name: serviceNameById.get(s.serviceId) || 'Unknown service',
+      count: s._count?.id || 0,
+      revenue: Number(s._sum?.totalPrice || 0),
+    }));
+
     return {
       period: { from, to },
       summary: {
         totalOrders: orders,
         totalRevenue: Number(revenue._sum.totalAmount || 0),
         platformCommission: Number(revenue._sum.remontCommission || 0),
+        avgOrderValue: Number(avgValue._avg.totalAmount || 0),
       },
       byStatus,
       topProducts,
+      topServices,
       byChannel,
     };
   }
@@ -2221,7 +2321,7 @@ Return JSON with:
       }),
     ]);
     return {
-      vendor: { id: vendor.id, fullName: vendor.fullName, totalEarnings: vendor.totalEarnings, pendingPayout: vendor.pendingPayout },
+      vendor: { id: vendor.id, fullName: vendor.fullName, totalEarnings: Number(vendor.totalEarnings), pendingPayout: Number(vendor.pendingPayout) },
       settlements,
       completedOrders,
     };
@@ -2491,9 +2591,9 @@ export class AdminController {
 
   // Products
   @Get('products/export') exportProds() { return this.admin.exportProducts(); }
-  @Get('products') allProducts(@Query('q') q?: string, @Query('categoryId') catId?: string, @Query('isActive') ia?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
+  @Get('products') allProducts(@Query('q') q?: string, @Query('categoryId') catId?: string, @Query('isActive') ia?: string, @Query('lowStock') lowStock?: string, @Query('limit') limit?: number, @Query('offset') offset?: number) {
     const isActive = ia === 'true' ? true : ia === 'false' ? false : undefined;
-    return this.admin.adminListProducts({ q, categoryId: catId, isActive, limit: limit ? +limit : 100, offset: offset ? +offset : 0 });
+    return this.admin.adminListProducts({ q, categoryId: catId, isActive, lowStock: lowStock === 'true', limit: limit ? +limit : 100, offset: offset ? +offset : 0 });
   }
   @Post('products') createProduct(@Body() b: any) { return this.admin.adminCreateProduct(b); }
   @Post('products/bulk') bulkProducts(@Body() b: { ids: string[]; isActive: boolean }) { return this.admin.bulkUpdateProducts(b.ids, { isActive: b.isActive }); }

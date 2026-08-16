@@ -63,7 +63,7 @@ function load() {
     var rows=banners.map(function(b){
       return '<tr>'+
         '<td style="text-align:center">'+b.sortOrder+'</td>'+
-        (b.imageUrl?'<td><img src="'+escape(b.imageUrl)+'" style="width:80px;height:48px;object-fit:cover;border-radius:4px"></td>':'<td><div style="width:80px;height:48px;border-radius:4px;background:'+(b.bgColor||'#1a1a2e')+'"></div></td>')+
+        (b.imageUrl?'<td><img src="'+escape(b.imageUrl)+'" alt="" style="width:80px;height:48px;object-fit:cover;border-radius:4px" onerror="this.outerHTML=\'<div style=&quot;width:80px;height:48px;border-radius:4px;background:'+(b.bgColor||'#1a1a2e')+'&quot; title=&quot;Image failed to load — re-upload required&quot;></div>\'"></td>':'<td><div style="width:80px;height:48px;border-radius:4px;background:'+(b.bgColor||'#1a1a2e')+'"></div></td>')+
         '<td><strong>'+escape(b.title)+'</strong><br><small style="color:#6b7280">'+escape(b.subtitle||'')+'</small></td>'+
         '<td>'+escape(b.tag||'—')+'</td>'+
         '<td>'+escape(b.ctaText||'—')+' → <code style="font-size:11px">'+escape(b.ctaUrl||'#')+'</code></td>'+

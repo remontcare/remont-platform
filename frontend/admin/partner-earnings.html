@@ -100,10 +100,13 @@ function load() {
   api('GET','/admin/vendor-earnings?' + params.join('&'))
     .then(function(data) {
       var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
-      var totalEarned = arr.reduce(function(s,e){return s+(e.totalEarnings||e.earned||0);},0);
-      var totalPending = arr.reduce(function(s,e){return s+(e.pendingPayout||e.pending||0);},0);
-      var totalPaid = arr.reduce(function(s,e){return s+(e.totalPaid||e.paid||0);},0);
-      var totalComm = arr.reduce(function(s,e){return s+(e.commission||e.platformCommission||0);},0);
+      // Number()-coerce every addend — a Decimal field serialized as a JSON string (e.g. if a
+      // future backend change reintroduces one) would otherwise silently string-concatenate
+      // instead of summing, producing ₹NaN once Number()'d at render time below.
+      var totalEarned = arr.reduce(function(s,e){return s+(Number(e.totalEarnings||e.earned)||0);},0);
+      var totalPending = arr.reduce(function(s,e){return s+(Number(e.pendingPayout||e.pending)||0);},0);
+      var totalPaid = arr.reduce(function(s,e){return s+(Number(e.totalPaid||e.paid)||0);},0);
+      var totalComm = arr.reduce(function(s,e){return s+(Number(e.commission||e.platformCommission)||0);},0);
       document.getElementById('e-total').textContent = fmtCur(totalEarned);
       document.getElementById('e-pending').textContent = fmtCur(totalPending);
       document.getElementById('e-paid').textContent = fmtCur(totalPaid);

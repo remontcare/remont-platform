@@ -5423,9 +5423,24 @@
     var slidesContainer = document.getElementById('slides');
     if (slidesContainer && banners.length > 0) {
       slidesContainer.innerHTML = banners.map(function(b, i) {
-        var style = b.imageUrl ? 'background-image:url(' + b.imageUrl + ');background-size:cover;background-position:center' : '';
-        return '<div class="slide' + (i === 0 ? ' active' : '') + '" id="slide-' + i + '"><div class="slide-bg" style="' + style + '"></div></div>';
+        return '<div class="slide' + (i === 0 ? ' active' : '') + '" id="slide-' + i + '"><div class="slide-bg" id="slide-bg-' + i + '"></div></div>';
       }).join('');
+      // Preload each banner image before committing it as a CSS background — a dead/404
+      // imageUrl (e.g. an admin upload wiped by a backend redeploy) would otherwise render
+      // as an invisible blank background with no fallback. Leaving the inline style unset on
+      // failure lets the .slide-bg CSS default gradient/photo show through instead.
+      banners.forEach(function(b, i) {
+        if (!b.imageUrl) return;
+        var probe = new Image();
+        probe.onload = function() {
+          var el = document.getElementById('slide-bg-' + i);
+          if (el) el.style.cssText = 'background-image:url(' + b.imageUrl + ');background-size:cover;background-position:center';
+        };
+        probe.onerror = function() {
+          console.error('Banner image failed to load (needs re-upload):', b.imageUrl);
+        };
+        probe.src = b.imageUrl;
+      });
     }
     // Rebuild dots
     var dotsContainer = document.querySelector('.dots');

@@ -234,21 +234,18 @@ function loadSales() {
     document.getElementById('kpi-orders').textContent = d.summary.totalOrders;
     document.getElementById('kpi-revenue').textContent = fmtCur(d.summary.totalRevenue);
     document.getElementById('kpi-commission').textContent = fmtCur(d.summary.platformCommission);
-    var total = d.summary.totalOrders;
-    var paidOrders = (d.byStatus || []).find(function(s){ return s.status === 'COMPLETED'; });
-    var avgVal = paidOrders && total ? fmtCur(Number((paidOrders._sum && paidOrders._sum.totalAmount) || 0) / Math.max(paidOrders._count || 1, 1)) : '—';
-    document.getElementById('kpi-avg').textContent = avgVal;
+    document.getElementById('kpi-avg').textContent = fmtCur(d.summary.avgOrderValue);
 
     // Status bars
     var statusItems = (d.byStatus || []).map(function(s) { return { label: s.status, val: s._count }; });
     renderBars('status-bars', statusItems, 'label', 'val', null);
 
     // Service bars (top 10)
-    var svcItems = (d.topServices || []).map(function(s, i) { return { label: 'Service #' + (i+1), val: s._count }; });
+    var svcItems = (d.topServices || []).map(function(s) { return { label: s.name || 'Unknown service', val: s.count }; });
     renderBars('service-bars', svcItems, 'label', 'val', null);
 
     // Product bars
-    var prodItems = (d.topProducts || []).map(function(p, i) { return { label: 'Product #' + (i+1), val: p._count }; });
+    var prodItems = (d.topProducts || []).map(function(p) { return { label: p.name || 'Unknown product', val: p.count }; });
     renderBars('product-bars', prodItems, 'label', 'val', null);
   }).catch(function(e){ toast('Error loading sales: ' + e.message, 'error'); });
 }

@@ -122,11 +122,17 @@ function renderFallback() {
     return;
   }
   var rows = allServices.map(function(s) {
+    // This table has no dedicated pricing-tier backend (see load()'s fallback below) — it
+    // renders the real Service catalog fields instead: originalPrice is the pre-discount
+    // MRP (falls back to basePrice when no MRP is set, i.e. zero discount), basePrice is the
+    // actual current/selling price shown in the "Discounted" column, matching how
+    // services.html already displays the same two fields elsewhere in the admin panel.
+    var mrp = (s.originalPrice != null && s.originalPrice > 0) ? s.originalPrice : (s.basePrice || 0);
     return '<tr><td><strong>' + escape(s.name||'') + '</strong></td>' +
       '<td>' + escape(s.category && s.category.name ? s.category.name : (s.categoryName||'—')) + '</td>' +
-      '<td>' + fmtCur(s.price||s.basePrice||0) + '</td>' +
-      '<td>' + fmtCur(s.discountedPrice||s.salePrice||'—') + '</td>' +
-      '<td>' + (s.duration||'—') + ' min</td>' +
+      '<td>' + fmtCur(mrp) + '</td>' +
+      '<td>' + fmtCur(s.basePrice||0) + '</td>' +
+      '<td>' + (s.durationMinutes != null ? s.durationMinutes : '—') + ' min</td>' +
       '<td>All Cities</td>' +
       '<td><button class="btn btn-xs btn-primary" onclick="openEdit(' + JSON.stringify(s).replace(/"/g, '&quot;') + ')">✏️ Edit</button></td>' +
       '</tr>';
@@ -163,9 +169,9 @@ function openAdd() {
 function openEdit(p) {
   editId = p.id;
   document.getElementById('edit-title').textContent = 'Edit Service Pricing';
-  document.getElementById('f-price').value = p.basePrice || p.price || '';
-  document.getElementById('f-dprice').value = p.discountedPrice || p.salePrice || '';
-  document.getElementById('f-duration').value = p.duration || '';
+  document.getElementById('f-price').value = (p.originalPrice != null && p.originalPrice > 0) ? p.originalPrice : (p.basePrice || p.price || '');
+  document.getElementById('f-dprice').value = p.basePrice || p.discountedPrice || p.salePrice || '';
+  document.getElementById('f-duration').value = p.durationMinutes || p.duration || '';
   if (p.serviceId) document.getElementById('f-service').value = p.serviceId;
   document.getElementById('edit-overlay').style.display = 'flex';
 }
