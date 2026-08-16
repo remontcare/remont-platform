@@ -823,7 +823,8 @@ export class OrdersService {
       note: `Collected ₹${balance.balanceDue} via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
     });
     this.notifyPaymentSuccess(updated).catch(() => {});
-    return updated;
+    const paymentLinkUrl = await this.payments.createPaymentLink(balance.balanceDue, orderId);
+    return { ...updated, paymentLinkUrl };
   }
 
   /**

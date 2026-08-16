@@ -26,6 +26,7 @@ function makeService() {
   prisma.orderOtpLog = { create: jest.fn(), count: jest.fn(async () => 0) };
   const payments: any = {
     initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
+    createPaymentLink: jest.fn(async () => null),
   };
   const dispatch: any = { dispatch: jest.fn(async () => {}) };
   const routing: any = { route: jest.fn(async () => {}) };

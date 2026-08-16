@@ -140,6 +140,37 @@ export class PaymentsService implements OnModuleInit {
     return this.createRazorpayOrder(userId, amount, orderId, amcSubscriptionId);
   }
 
+  /**
+   * Real UPI/QR for in-person cash collection — a Razorpay Payment Link for the exact
+   * amount, whose short_url the partner app renders as a scannable QR so a customer can
+   * actually pay via UPI on the spot instead of the vendor only trusting an unverified
+   * "collected" tap. Returns null (rather than throwing) if Razorpay isn't configured or
+   * link creation fails, so collectBalance()'s existing cash-collection flow is never
+   * blocked by this being unavailable — it's an additive enhancement, not a requirement.
+   */
+  async createPaymentLink(amount: number, orderId: string): Promise<string | null> {
+    if (!this.razorpay) return null;
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { orderNumber: true, customer: { select: { name: true, phone: true } } },
+      });
+      const link = await this.razorpay.paymentLink.create({
+        amount: Math.round(amount * 100),
+        currency: 'INR',
+        accept_partial: false,
+        description: `Remont order #${order?.orderNumber || orderId}`,
+        customer: order?.customer ? { name: order.customer.name, contact: order.customer.phone } : undefined,
+        notify: { sms: false, email: false },
+        notes: { orderId },
+      });
+      return link.short_url as string;
+    } catch (e) {
+      this.logger.warn(`Payment link creation failed for order ${orderId}: ${e.message}`);
+      return null;
+    }
+  }
+
   async verifyAndMarkPaid(gatewayOrderId: string, paymentId: string, signature: string): Promise<boolean> {
     if (!this.razorpayKeySecret) throw new BadRequestException('Razorpay not configured');
     const expected = crypto
