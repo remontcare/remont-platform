@@ -74,8 +74,8 @@ function render() {
     var actions = '<button class="btn btn-xs btn-outline" onclick="regenerate(\'' + orderId + '\')">Regenerate</button> ' +
       '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">PDF</button>';
     if (type === 'PLATFORM_SERVICE') {
-      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Fee Invoice</button>' +
-        ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')">Partner Settlement</button>';
+      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Platform Fee Invoice</button>' +
+        ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')">Partner Service Invoice</button>';
     } else if (type === 'MARKETPLACE_PRODUCT') {
       actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Commission Invoice</button>';
     }

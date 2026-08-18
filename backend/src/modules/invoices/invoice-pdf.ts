@@ -37,6 +37,10 @@ interface LineItemView {
 
 interface InvoiceViewModel {
   isTaxInvoice: boolean; // false => plain "Receipt", no GST claimed
+  // true only for the Type-1 customer booking summary — distinguishes "not a tax
+  // invoice, but shows a real GST figure for transparency" from "not a tax invoice
+  // because nothing is GST-registered here at all" (the vendor no-GSTIN receipt case).
+  isInformationalSummary?: boolean;
   docBadge: string;
   copyTag: string;
   invoiceNumber: string;
@@ -133,11 +137,14 @@ export function buildInvoiceViewModel(
     : null;
 
   if (docKind === 'VENDOR') {
+    // Partner Service Invoice — issued in the partner's own name for the partner's
+    // share only. Never assumed to be a GST tax invoice: an unregistered partner (the
+    // common case) gets a plain receipt, never a fabricated GST breakup.
     const vendorRegistered = !!order.vendor?.gstin;
     return {
       isTaxInvoice: vendorRegistered,
       docBadge: vendorRegistered ? 'TAX INVOICE' : 'RECEIPT — NO GST APPLIES',
-      copyTag: 'PARTNER SETTLEMENT STATEMENT',
+      copyTag: vendorRegistered ? 'PARTNER SERVICE INVOICE' : 'PARTNER SERVICE RECEIPT',
       invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
       placeOfSupply: invoice.placeOfSupply || customerBlock.state || '',
       supplier: { name: order.vendor?.fullName || order.vendor?.businessName || 'Partner', gstin: order.vendor?.gstin || null },
@@ -181,6 +188,7 @@ export function buildInvoiceViewModel(
     : companyBlock;
   return {
     isTaxInvoice: !isSummaryOnly,
+    isInformationalSummary: isSummaryOnly,
     docBadge: isSummaryOnly ? 'BOOKING SUMMARY — NOT A GST INVOICE' : 'TAX INVOICE',
     copyTag: 'ORIGINAL FOR RECIPIENT',
     invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
@@ -295,8 +303,14 @@ export async function renderInvoicePdf(
     } else {
       rightLine('GST', 'Not applicable — unregistered');
     }
+  } else if (vm.cgst > 0 || vm.sgst > 0 || vm.igst > 0) {
+    // Informational summary (e.g. the Type-1 booking summary) showing the real GST
+    // charged on the Remont Platform Fee for transparency — this page is still not
+    // itself the formal tax invoice for that GST (see the note below), so it's labeled
+    // distinctly rather than presented as a CGST/SGST/IGST breakdown belonging to it.
+    rightLine('GST on Remont Platform Fee', rupees(vm.igst > 0 ? vm.igst : vm.cgst + vm.sgst));
   } else {
-    rightLine('GST', 'Not applicable — see Booking Summary');
+    rightLine('GST', 'Not applicable');
   }
   if (vm.roundOff) rightLine('Round Off', rupees(vm.roundOff));
   rightLine('Total Amount', rupees(vm.total), true);
@@ -317,7 +331,11 @@ export async function renderInvoicePdf(
     .text(`Amount in words: ${amountInWords(vm.total)}`, 40, y, { width: pageWidth });
   y += 30;
 
-  if (!vm.isTaxInvoice) {
+  if (vm.isInformationalSummary) {
+    doc.fontSize(7).fillColor('#888')
+      .text('This is a booking summary, not a GST tax invoice. The Partner Service Value is billed separately by the partner (GST as applicable to their own registration status); the GST shown above applies only to the Remont Platform Fee and is formally invoiced separately by Remont India Private Limited.', 40, y, { width: pageWidth });
+    y += 26;
+  } else if (!vm.isTaxInvoice) {
     doc.fontSize(7).fillColor('#888')
       .text('This is a plain receipt — the invoicing entity is not GST-registered and no GST has been charged or claimed on this amount.', 40, y, { width: pageWidth });
     y += 20;

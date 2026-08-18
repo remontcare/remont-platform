@@ -13,6 +13,7 @@ function makePrisma() {
     paymentTransaction: { findMany: jest.fn(async () => []) },
     user: { findMany: jest.fn(async () => []) },
     partnerLedgerEntry: { findMany: jest.fn(async () => []) },
+    siteSetting: { findMany: jest.fn(async () => []) }, // billing company config — falls back to defaults
   };
 }
 
@@ -39,6 +40,15 @@ describe('ReportsService — GST report', () => {
     // PLATFORM_SERVICE customer page is informational-only (no row), so only fee + partner rows
     expect(rows).toHaveLength(2);
     expect(rows.map((r: any) => r.invoiceNo)).toEqual(['INV-1-FEE', 'INV-1-PTR']);
+    // The Remont Platform Fee row must carry Remont's own GSTIN (Remont is the supplier
+    // on this row) — previously left blank.
+    expect(rows[0].gstin).toBe('23AAKCR9036L1ZY');
+    expect(rows[0].transactionType).toContain('Remont Fee');
+    // The partner row carries the partner's own GSTIN, labeled as their own invoice —
+    // never the word "Commission" anywhere in the Type 1 billing model.
+    expect(rows[1].gstin).toBe('06AABCU7755Q1ZK');
+    expect(rows[1].transactionType).toContain('Partner Service Invoice');
+    expect(JSON.stringify(rows)).not.toMatch(/commission/i);
   });
 });
 

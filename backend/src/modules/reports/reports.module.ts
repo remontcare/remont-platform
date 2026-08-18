@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import Excel from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, getBillingCompanyConfig } from '../../common';
 import { UserRole } from '@prisma/client';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -47,6 +47,7 @@ export class ReportsService {
   // informational summary), the Remont page (platform fee / marketplace commission),
   // and the vendor/partner settlement page (only when the partner is GST-registered).
   async gstReportRows(range: DateRange) {
+    const company = await getBillingCompanyConfig(this.prisma);
     const invoices = await this.prisma.invoice.findMany({
       where: { generatedAt: dateFilter(range) },
       include: {
@@ -76,14 +77,14 @@ export class ReportsService {
         rows.push({
           invoiceNo: inv.invoiceNumber + '-FEE', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Remont Fee)`,
           partyName: inv.order?.customer?.name || 'Customer',
-          gstin: '', placeOfSupply: inv.placeOfSupply || '',
+          gstin: company.gstin, placeOfSupply: inv.placeOfSupply || '', // Remont's own GSTIN — Remont is always the supplier on this row
           taxableValue: Number(inv.platformCommission) + Number(inv.bookingFee), cgst: Number(inv.remontCgst), sgst: Number(inv.remontSgst), igst: Number(inv.remontIgst),
           totalValue: Number(inv.remontTotal),
         });
       }
       if (Number(inv.vendorTotal) > 0 && inv.order?.vendor?.gstin) {
         rows.push({
-          invoiceNo: inv.invoiceNumber + '-PTR', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Partner Settlement)`,
+          invoiceNo: inv.invoiceNumber + '-PTR', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Partner Service Invoice)`,
           partyName: inv.order?.vendor?.fullName || inv.order?.vendor?.businessName || 'Partner',
           gstin: inv.order?.vendor?.gstin || '', placeOfSupply: inv.placeOfSupply || '',
           taxableValue: Number(inv.vendorLabor), cgst: Number(inv.vendorCgst), sgst: Number(inv.vendorSgst), igst: 0,
@@ -148,7 +149,7 @@ export class ReportsService {
       { header: 'Discounts', key: 'discount', width: 12 },
       { header: 'Taxable Value', key: 'taxable', width: 14 },
       { header: 'GST Collected', key: 'gst', width: 14 },
-      { header: 'Platform Commission Income', key: 'platformIncome', width: 24 },
+      { header: 'Platform Fee Income', key: 'platformIncome', width: 24 },
       { header: 'Direct Service Income', key: 'directIncome', width: 20 },
       { header: 'Product Sales Income', key: 'productIncome', width: 20 },
       { header: 'Payment Received', key: 'paymentReceived', width: 16 },

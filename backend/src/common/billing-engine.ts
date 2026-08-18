@@ -134,7 +134,12 @@ export function calculateInvoice(input: BillingCalcInput): BillingCalcResult {
   const sgst = round2(lines.reduce((s, l) => s + l.sgst, 0));
   const igst = round2(lines.reduce((s, l) => s + l.igst, 0));
   const preRoundTotal = round2(taxableValue + cgst + sgst + igst);
-  const total = Math.round(preRoundTotal);
+  // Whole-rupee rounding is a GST tax-invoice convention (reconciling odd-paise tax
+  // amounts into a clean payable figure) — it has no business applying to an
+  // UNREGISTERED document, which carries no tax at all. Rounding an unregistered
+  // partner's exact ₹399.20 payout down to ₹399 would silently short them by 20 paise
+  // against what the ledger actually owes them; that amount stays exact instead.
+  const total = supplyType === 'UNREGISTERED' ? preRoundTotal : Math.round(preRoundTotal);
   const roundOff = round2(total - preRoundTotal);
 
   return { lines, supplyType, taxableValue, cgst, sgst, igst, preRoundTotal, roundOff, total };

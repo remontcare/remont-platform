@@ -68,31 +68,50 @@ export class InvoicesService {
         customerLines.push({ description: ew.description, qty: 1, rate: Number(ew.amount), taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) });
       }
     } else if (transactionType === 'PLATFORM_SERVICE') {
-      // Type 1 — a partner fulfils the job. Customer page is an informational summary
-      // (no GST breakup — the legal document is the Remont-fee-only page below), vendor
-      // page is the partner's own settlement (GST only if the partner has a GSTIN on
-      // file), Remont page is Remont's actual tax invoice for its fee alone, taxed under
-      // its own SAC (business auxiliary service), not the underlying service's SAC.
+      // Type 1 — a partner fulfils the job. TWO separate legal billing documents are
+      // always kept apart, never merged into one Remont invoice:
+      //   (1) Partner Service Invoice (vendorLines below) — issued in the partner's own
+      //       name for the partner's share; GST only if the partner is itself
+      //       GST-registered (never assumed/fabricated for an unregistered partner).
+      //   (2) Remont Platform Fee Invoice (remontLines below) — issued by Remont India
+      //       Private Limited for Remont's fee alone, taxed under its own SAC (business
+      //       auxiliary service), never the underlying service's SAC.
+      // The customer page is a third, informational summary only (never itself a formal
+      // tax invoice — no supplierGstin, so it's never mistaken for one) that shows both
+      // amounts PLUS the GST on the platform fee for transparency, reusing the exact
+      // same rate/place-of-supply the formal Remont Platform Fee Invoice uses, so the
+      // numbers always agree — never a second, independently-derived GST figure.
       const svcTax = await buildTaxRateResolver(this.prisma, 'SERVICE');
       const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
       const partnerAmount = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
       const feeAmount = Number(order.remontCommission) + Number(order.platformCharges);
+      const feeRate = feeTax.rateFor(null, null);
+      const feeSetting = await this.prisma.siteSetting.findUnique({ where: { key: 'default_booking_fee' } });
+      bookingFee = feeSetting ? parseFloat(feeSetting.value) || 0 : 49;
+
+      // Customer summary mirrors exactly what the formal Remont Platform Fee Invoice
+      // below will bill (fee + booking fee, both at feeRate) so the GST-on-fee figure
+      // shown here is never a second, independently-derived number — it's the identical
+      // calculateInvoice() math, just also surfaced on this informational page.
       customerLines = [
-        { description: order.service?.name || 'Service Amount (Partner)', qty: 1, rate: partnerAmount, taxRatePercent: 0 },
-        ...(feeAmount > 0 ? [{ description: 'Remont Platform Fee', qty: 1, rate: feeAmount, taxRatePercent: 0 }] : []),
+        { description: order.service?.name || 'Partner Service Value', qty: 1, rate: partnerAmount, taxRatePercent: 0 },
+        ...(feeAmount > 0 ? [{ description: 'Remont Platform Fee', qty: 1, rate: feeAmount, taxRatePercent: feeRate }] : []),
+        ...(bookingFee > 0 ? [{ description: 'Booking Fee', qty: 1, rate: bookingFee, taxRatePercent: feeRate }] : []),
       ];
-      customerSupplierState = null; // informational only — never a fabricated tax breakup
+      // Set so the engine computes the correct GST-on-fee figure for display above — this
+      // does NOT make the summary a tax invoice (invoice-pdf.ts forces the "not a GST
+      // invoice" badge for this page regardless); supplierGstin stays blank so it's never
+      // printed as if it carried Remont's GSTIN as an invoicing entity.
+      customerSupplierState = company.state;
       customerSupplierGstin = null;
 
       vendorLines = partnerAmount > 0
-        ? [{ description: order.service?.name || 'Service Amount', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) }]
+        ? [{ description: order.service?.name || 'Partner Service Value', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) }]
         : [];
 
       if (feeAmount > 0) {
-        remontLines = [{ description: 'Platform / Convenience Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: feeAmount, taxRatePercent: feeTax.rateFor(null, null) }];
+        remontLines = [{ description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: feeAmount, taxRatePercent: feeRate }];
       }
-      const feeSetting = await this.prisma.siteSetting.findUnique({ where: { key: 'default_booking_fee' } });
-      bookingFee = feeSetting ? parseFloat(feeSetting.value) || 0 : 49;
     } else {
       // Type 3 — marketplace product sale. The seller is the invoicing entity for the
       // product line items (per confirmed decision); admin-owned catalog items with no

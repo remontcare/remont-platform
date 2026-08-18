@@ -58,6 +58,32 @@ describe('calculateInvoice', () => {
     expect(r.roundOff).toBe(0);
   });
 
+  // Whole-rupee rounding is a GST tax-invoice convention — it must never touch an
+  // unregistered party's exact payout, or a partner would be silently shorted a few
+  // paise against what's actually owed. Bug found via the ₹399.20 partner-share example
+  // in the Type-1 billing correction: an unregistered partner's ₹399.20 was rounding
+  // down to ₹399 before this fix.
+  it('never whole-rupee-rounds an unregistered party\'s amount — it stays exact to the paisa', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Partner Service Value', qty: 1, rate: 399.20, taxRatePercent: 18 }],
+      supplierState: null,
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.total).toBe(399.20);
+    expect(r.roundOff).toBe(0);
+  });
+
+  it('still whole-rupee-rounds a registered party\'s real tax invoice total', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Remont Platform Fee', qty: 1, rate: 99.80, taxRatePercent: 18 }],
+      supplierState: 'Madhya Pradesh',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.preRoundTotal).toBe(117.76);
+    expect(r.total).toBe(118);
+    expect(r.roundOff).toBe(0.24);
+  });
+
   it('sums multiple line items and applies discount before computing tax', () => {
     const r = calculateInvoice({
       lines: [
