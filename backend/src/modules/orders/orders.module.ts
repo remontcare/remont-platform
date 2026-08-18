@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, computeInvoiceBreakdown, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -19,6 +19,7 @@ import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
+import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -409,6 +410,7 @@ export class OrdersService {
     private payments: PaymentsService,
     private paymentNotify: PaymentNotificationsService,
     private ledger: PartnerLedgerService,
+    private invoices: InvoicesService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -1034,24 +1036,7 @@ export class OrdersService {
   }
 
   private async autoGenerateInvoice(orderId: string) {
-    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
-    if (existing) return;
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { extraWorkItems: { where: { customerApproved: true } } },
-    });
-    if (!order) return;
-    const count = await this.prisma.invoice.count();
-    const b = computeInvoiceBreakdown({
-      orderNumber: order.orderNumber,
-      subtotal: Number(order.subtotal),
-      totalAmount: Number(order.totalAmount),
-      gstAmount: Number(order.gstAmount),
-      serviceAmount: Number(order.serviceAmount),
-      remontCommission: Number(order.remontCommission),
-      approvedExtraWorkAmount: order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0),
-    }, count);
-    await this.prisma.invoice.create({ data: { orderId, ...b } });
+    await this.invoices.generateForOrder(orderId);
     await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.INVOICED } });
   }
 
@@ -1578,7 +1563,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService, DispatchRetryService],
   exports: [OrdersService, DispatchService, RoutingService],

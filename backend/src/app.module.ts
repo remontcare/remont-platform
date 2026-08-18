@@ -40,6 +40,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
 import { EstimatesModule } from './modules/estimates/estimates.module';
 import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { CatalogRelationsModule } from './modules/catalog-relations/catalog-rela
     LocationModule,
     PartnerRegistrationModule,
     SellerRegistrationModule,
+    ReportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

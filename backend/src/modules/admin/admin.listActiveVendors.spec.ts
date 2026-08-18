@@ -21,7 +21,7 @@ function makeService() {
   const cities: any = {};
   const events: any = { emit: jest.fn() };
   const ledger: any = {};
-  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger);
+  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, {} as any);
   return { svc, prisma, events };
 }
 

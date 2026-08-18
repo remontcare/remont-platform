@@ -24,6 +24,12 @@
         <span class="card-title">All Invoices</span>
         <div style="display:flex;gap:8px">
           <input id="filter-q" class="form-control" style="width:200px" placeholder="Invoice number…" oninput="load()">
+          <select id="filter-type" class="form-control" style="width:180px" onchange="render()">
+            <option value="">All transaction types</option>
+            <option value="PLATFORM_SERVICE">Platform Service</option>
+            <option value="DIRECT_PROJECT">Direct Project</option>
+            <option value="MARKETPLACE_PRODUCT">Marketplace Product</option>
+          </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
@@ -37,31 +43,56 @@
 renderSidebar('invoices');
 requireAuth();
 
+var TYPE_LABELS = { PLATFORM_SERVICE: 'Platform Service', DIRECT_PROJECT: 'Direct Project', MARKETPLACE_PRODUCT: 'Marketplace Product' };
+var allInvoices = [];
+
 function load() {
   var q = document.getElementById('filter-q').value;
   document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
   api('GET', '/admin/invoices?limit=100' + (q ? '&q='+encodeURIComponent(q) : '')).then(function(list) {
-    if (!list || !list.length) {
-      document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><h3>No invoices yet</h3><p>Invoices are auto-generated on completed orders.</p></div>'; return;
-    }
-    var rows = list.map(function(inv) {
-      var cust = inv.order && inv.order.customer;
-      return '<tr>' +
-        '<td><strong>' + escape(inv.invoiceNumber || 'INV-' + inv.id.slice(-6)) + '</strong></td>' +
-        '<td>' + escape(inv.order ? inv.order.id.slice(-8).toUpperCase() : '—') + '</td>' +
-        '<td>' + escape((cust && cust.name) || '—') + '<br><small style="color:#9ca3af">' + escape((cust && cust.phone) || '') + '</small></td>' +
-        '<td>' + fmtCur(inv.subtotal || 0) + '</td>' +
-        '<td>' + fmtCur(inv.taxAmount || 0) + ' <small style="color:#6b7280">(GST 18%)</small></td>' +
-        '<td><strong>' + fmtCur(inv.totalAmount || 0) + '</strong></td>' +
-        '<td>' + badge(inv.isPaid ? 'Paid' : 'Unpaid', inv.isPaid ? 'green' : 'yellow') + '</td>' +
-        '<td>' + fmtDateShort(inv.issuedAt) + '</td>' +
-        '<td>' +
-          '<button class="btn btn-xs btn-outline" onclick="regenerate(\'' + (inv.order && inv.order.id) + '\')">Regenerate</button>' +
-        '</td>' +
-      '</tr>';
-    }).join('');
-    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Invoice #</th><th>Order ID</th><th>Customer</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Status</th><th>Issued</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    allInvoices = list || [];
+    render();
   }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function render() {
+  var typeFilter = document.getElementById('filter-type').value;
+  var list = typeFilter ? allInvoices.filter(function(inv) { return inv.transactionType === typeFilter; }) : allInvoices;
+  if (!list.length) {
+    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><h3>No invoices yet</h3><p>Invoices are auto-generated on completed orders.</p></div>'; return;
+  }
+  var rows = list.map(function(inv) {
+    var cust = inv.order && inv.order.customer;
+    var isPaid = inv.order && inv.order.paymentStatus === 'PAID';
+    var gst = Number(inv.customerIgst) > 0
+      ? 'IGST ' + fmtCur(inv.customerIgst)
+      : (Number(inv.customerCgst) + Number(inv.customerSgst)) > 0
+        ? 'CGST+SGST ' + fmtCur(Number(inv.customerCgst) + Number(inv.customerSgst))
+        : '<small style="color:#9ca3af">No GST — informational</small>';
+    var orderId = inv.order && inv.order.id;
+    var type = inv.transactionType;
+    var actions = '<button class="btn btn-xs btn-outline" onclick="regenerate(\'' + orderId + '\')">Regenerate</button> ' +
+      '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">PDF</button>';
+    if (type === 'PLATFORM_SERVICE') {
+      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Fee Invoice</button>' +
+        ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')">Partner Settlement</button>';
+    } else if (type === 'MARKETPLACE_PRODUCT') {
+      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Commission Invoice</button>';
+    }
+    return '<tr>' +
+      '<td><strong>' + escape(inv.invoiceNumber || 'INV-' + inv.id.slice(-6)) + '</strong></td>' +
+      '<td>' + escape(orderId ? orderId.slice(-8).toUpperCase() : '—') + '</td>' +
+      '<td>' + escape((cust && cust.name) || '—') + '<br><small style="color:#9ca3af">' + escape((cust && cust.phone) || '') + '</small></td>' +
+      '<td>' + badge(TYPE_LABELS[type] || type || 'Unclassified', type === 'DIRECT_PROJECT' ? 'blue' : type === 'MARKETPLACE_PRODUCT' ? 'purple' : 'gray') + '</td>' +
+      '<td>' + fmtCur(inv.customerSubtotal || 0) + '</td>' +
+      '<td>' + gst + '</td>' +
+      '<td><strong>' + fmtCur(inv.customerTotal || 0) + '</strong></td>' +
+      '<td>' + badge(isPaid ? 'Paid' : 'Unpaid', isPaid ? 'green' : 'yellow') + '</td>' +
+      '<td>' + fmtDateShort(inv.generatedAt) + '</td>' +
+      '<td>' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Invoice #</th><th>Order ID</th><th>Customer</th><th>Type</th><th>Subtotal</th><th>GST</th><th>Total</th><th>Status</th><th>Issued</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 function regenerate(orderId) {
@@ -69,6 +100,12 @@ function regenerate(orderId) {
   api('POST', '/admin/invoices/' + orderId + '/generate').then(function(inv) {
     toast('Invoice regenerated: ' + inv.invoiceNumber, 'success'); load();
   }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function downloadPdf(orderId, doc) {
+  if (!orderId) { toast('No order linked', 'error'); return; }
+  downloadAuthedFile('/admin/invoices/orders/' + orderId + '/pdf?doc=' + doc, 'invoice-' + orderId + '-' + doc.toLowerCase() + '.pdf')
+    .catch(function(e) { toast(e.message, 'error'); });
 }
 
 load();

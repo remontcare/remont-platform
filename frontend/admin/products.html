@@ -161,6 +161,10 @@
           </select>
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">HSN Code <small style="color:#9ca3af">(for GST invoicing)</small></label><input id="prod-hsn" class="form-control" placeholder="e.g. 8415"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">GST Rate Override (%) <small style="color:#9ca3af">(blank = use Taxes screen)</small></label><input id="prod-gst" class="form-control" type="number" step="0.01" placeholder="e.g. 18"></div>
+      </div>
       <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-active" checked> Active</label>
 
       <div class="form-group" style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">
@@ -387,6 +391,8 @@ function openProdModal(prod) {
   document.getElementById('prod-unit').value = prod ? (prod.unit||'piece') : 'piece';
   document.getElementById('prod-price').value = prod ? prod.price : '';
   document.getElementById('prod-mrp').value = prod ? (prod.mrp||'') : '';
+  document.getElementById('prod-hsn').value = prod ? (prod.hsnSac||'') : '';
+  document.getElementById('prod-gst').value = prod && prod.gstOverridePercent != null ? prod.gstOverridePercent : '';
   document.getElementById('prod-stock').value = prod ? prod.stock : 0;
   document.getElementById('prod-active').checked = prod ? prod.isActive : true;
   document.getElementById('prod-seo-title').value = prod ? (prod.seoTitle||'') : '';
@@ -437,6 +443,8 @@ function saveProduct() {
     price: price,
     mrp: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     stock: parseInt(document.getElementById('prod-stock').value)||0,
+    hsnSac: document.getElementById('prod-hsn').value.trim()||null,
+    gstOverridePercent: (function(){ var v=parseFloat(document.getElementById('prod-gst').value); return isNaN(v)?null:v; })(),
     images: prodImages,
     isActive: document.getElementById('prod-active').checked,
     seoTitle: document.getElementById('prod-seo-title').value.trim()||undefined,

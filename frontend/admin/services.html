@@ -351,6 +351,10 @@
         </div>
       </div>
       <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">SAC Code <small style="color:#9ca3af">(for GST invoicing)</small></label><input id="svc-hsn" class="form-control" placeholder="e.g. 998714"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">GST Rate Override (%) <small style="color:#9ca3af">(blank = use Taxes screen)</small></label><input id="svc-gst" class="form-control" type="number" step="0.01" placeholder="e.g. 18"></div>
+      </div>
+      <div class="form-row">
         <div class="form-group" style="flex:1">
           <label class="form-label">✅ What's Included <small style="color:#9ca3af">(one per line)</small></label>
           <textarea id="svc-inclusions" class="form-control" rows="4" placeholder="Filter cleaning&#10;Gas pressure check&#10;Performance testing&#10;Basic inspection"></textarea>
@@ -773,6 +777,8 @@ function openSvcModal(svc) {
   document.getElementById('svc-mrp').value = svc ? (svc.originalPrice||'') : '';
   document.getElementById('svc-duration').value = svc ? svc.durationMinutes : 60;
   document.getElementById('svc-unit').value = svc ? (svc.unit||'per visit') : 'per visit';
+  document.getElementById('svc-hsn').value = svc ? (svc.hsnSac||'') : '';
+  document.getElementById('svc-gst').value = svc && svc.gstOverridePercent != null ? svc.gstOverridePercent : '';
   document.getElementById('svc-inclusions').value = svc ? (svc.inclusions||[]).join('\n') : '';
   document.getElementById('svc-exclusions').value = svc ? (svc.exclusions||[]).join('\n') : '';
   document.getElementById('svc-img').value = svc ? (svc.imageUrl||'') : '';
@@ -832,6 +838,8 @@ function saveService() {
     basePrice: price,
     originalPrice: isNaN(mrp)||mrp<=0 ? undefined : mrp,
     durationMinutes: parseInt(document.getElementById('svc-duration').value)||60,
+    hsnSac: document.getElementById('svc-hsn').value.trim()||null,
+    gstOverridePercent: (function(){ var v=parseFloat(document.getElementById('svc-gst').value); return isNaN(v)?null:v; })(),
     imageUrl: document.getElementById('svc-img').value.trim()||undefined,
     videoUrl: document.getElementById('svc-video').value.trim()||undefined,
     images: galleryImages,

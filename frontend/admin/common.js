@@ -77,6 +77,24 @@ function api(method, path, body, _isRetry) {
   });
 }
 
+// Downloads a binary response (e.g. an invoice PDF) that requires the admin's auth
+// header — plain <a href> can't carry that, so this fetches as a blob and triggers the
+// save via a temporary object URL, same Authorization pattern as uploadImageToServer().
+function downloadAuthedFile(path, filename) {
+  return fetch(API_BASE + '/api/v1' + path, { headers: { 'Authorization': 'Bearer ' + getToken() } })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error((d && d.message) || ('HTTP ' + r.status)); });
+      return r.blob();
+    })
+    .then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    });
+}
+
 function toast(msg, type) {
   var t = document.createElement('div');
   t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 20px;border-radius:10px;color:#fff;font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.2);transition:opacity .3s;max-width:340px;display:flex;align-items:center;gap:10px';

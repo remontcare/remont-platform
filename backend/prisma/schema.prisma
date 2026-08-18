@@ -123,6 +123,19 @@ enum StaffType {
   PARTNER
 }
 
+// Billing/GST classification (see backend/src/common/billing-engine.ts) — which of the
+// three revenue models a given Order falls under. Named distinctly from the existing
+// `TransactionType` enum (CREDIT/DEBIT, used by wallet ledger entries) to avoid a
+// collision. Snapshotted once onto Order.billingTransactionType at confirmation time
+// (derived from Order.type + the assigned vendor's StaffType) and never re-derived, so a
+// vendor reassignment or later staffType edit can't retroactively change how a past
+// order was invoiced.
+enum BillingTransactionType {
+  PLATFORM_SERVICE // partner-fulfilled service (Ola/Urban Company model) — Remont invoices its own fee only
+  DIRECT_PROJECT // Remont's own in-house team fulfills the service — Remont invoices the full value
+  MARKETPLACE_PRODUCT // product sold via a marketplace seller — seller invoices the customer, Remont invoices its commission to the seller
+}
+
 enum AgencyStatus {
   ACTIVE
   SUSPENDED
@@ -723,6 +736,9 @@ model Service {
   materialCost        Decimal?            @db.Decimal(10, 2)
   perSqftRate         Decimal?            @db.Decimal(10, 2) // used when pricingType = PER_SQFT
   gstOverridePercent  Decimal?            @db.Decimal(5, 2)  // null = resolve from TaxConfig
+  // SAC code for this service's invoice line items — falls back to the matching
+  // TaxConfig row's hsnCode when unset (see resolveHsnSac() in billing-engine.ts).
+  hsnSac              String?
   timelineMinDays     Int?
   timelineMaxDays     Int?
 
@@ -888,6 +904,14 @@ model Product {
   unit            String              @default("piece")
   price           Decimal             @db.Decimal(10, 2)
   mrp             Decimal?            @db.Decimal(10, 2)
+  // HSN code for this product's invoice line items — falls back to the matching
+  // TaxConfig row's hsnCode when unset (see resolveHsnSac() in billing-engine.ts).
+  hsnSac          String?
+  // Per-product GST rate override — mirrors Service.gstOverridePercent. Different
+  // products legitimately carry different GST slabs even within the same catalog
+  // (e.g. 12% vs 18% vs 28%); null means resolve by HSN/SAC match against TaxConfig,
+  // then the scope's blanket default (see buildTaxRateResolver in common/index.ts).
+  gstOverridePercent Decimal? @db.Decimal(5, 2)
   stock           Int                 @default(0)
   images          String[]
   aiEnhancedImgs  String[]
@@ -1021,6 +1045,13 @@ model ServiceVendor {
   // vendor afterward via PATCH /admin/vendors/:id/base-hold.
   baseHoldAmount Decimal @default(0) @db.Decimal(12, 2)
 
+  // GST registration for this partner — most technician/individual partners are below
+  // the GST threshold and have none, so this is optional. Presence of a value IS the
+  // "registered" signal (no separate boolean, so the two can never disagree); the
+  // billing engine only ever produces a GST breakup on a partner's own settlement amount
+  // when this is set, otherwise the amount stays a plain, non-GST pass-through line.
+  gstin String?
+
   // ── Phase 2: Agency Partner Management ──────────────────────────────
   // No separate Agency entity — an agency owner is just a ServiceVendor with
   // isAgencyOwner:true; a team member is a ServiceVendor with agencyOwnerId
@@ -1103,6 +1134,11 @@ model ProductVendor {
   email             String?
   city              String?
   address           String? // registered address
+  // Registered GST state — needed as the place-of-supply when Remont invoices its own
+  // marketplace commission to this seller (recipient of that invoice is the seller, not
+  // the customer, so the customer's delivery state doesn't apply here). Separate from
+  // `city`/`address`, which are free text and not reliably parseable into a state.
+  state             String?
   officeAddress     String?
   warehouseAddress  String?
   pickupAddress     String? // legacy free-text field, predates the PickupLocation model below — kept for the handful of sellers created before it existed, not written to by new code
@@ -1459,6 +1495,12 @@ model Order {
   paymentMethod OrderPaymentMethod?
   paymentId     String?
 
+  // Billing/GST classification — set once at order confirmation (see
+  // resolveBillingTransactionType() in common/index.ts) and frozen, same snapshot
+  // philosophy as commissionRuleId/Label below. Nullable so existing historical orders
+  // are left alone; only orders confirmed after this field's introduction get it set.
+  billingTransactionType BillingTransactionType?
+
   // Pricing breakdown
   serviceAmount       Decimal @default(0) @db.Decimal(10, 2)
   productsAmount      Decimal @default(0) @db.Decimal(10, 2)
@@ -1702,6 +1744,36 @@ model Invoice {
   remontCgst         Decimal @db.Decimal(10, 2)
   remontSgst         Decimal @db.Decimal(10, 2)
   remontTotal        Decimal @db.Decimal(10, 2)
+
+  // ─── Billing engine additions (see backend/src/common/billing-engine.ts) ───────────
+  // Which revenue model this invoice belongs to, and who the actual invoicing entity is
+  // for it — Remont for Type 1/2, or the seller for a Type 3 product invoice. Nullable:
+  // historical Invoice rows created before this field existed are left alone (they were
+  // always Remont-as-supplier, intra-state, under the old hardcoded math) and are never
+  // retroactively rewritten; only invoices generated going forward populate these.
+  transactionType BillingTransactionType?
+  placeOfSupply   String?
+  supplierState   String?
+  supplierGstin   String?
+
+  // IGST variants — the pre-existing Cgst/Sgst fields above only ever covered intra-state.
+  // Exactly one of (customerCgst+customerSgst) or customerIgst is non-zero per invoice,
+  // same for the Remont-page pair; never both, decided by supplierState vs placeOfSupply.
+  customerIgst Decimal @default(0) @db.Decimal(10, 2)
+  remontIgst   Decimal @default(0) @db.Decimal(10, 2)
+
+  // Visible, stored round-off applied to reconcile the summed line/tax amounts to the
+  // displayed total — never silently absorbed into another field.
+  roundOff Decimal @default(0) @db.Decimal(10, 2)
+  discount Decimal @default(0) @db.Decimal(10, 2)
+
+  // Frozen itemized line detail for the PDF table — {description, hsnSac, qty, unit,
+  // rate, discount, taxRate, taxableValue, cgst, sgst, igst, amount}[]. A JSON snapshot
+  // rather than a new relational table: Service/Product names and prices can change
+  // after the fact, but an issued invoice's line items must never silently drift, and
+  // OrderServiceItem/OrderItem/ExtraWorkItem already carry the qty/rate/amount this is
+  // built from at generation time.
+  lineItemsSnapshot Json?
 
   pdfUrlPage1    String?
   pdfUrlPage2    String?

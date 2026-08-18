@@ -1,20 +1,22 @@
 import {
-  Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards,
+  Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, UseGuards,
   NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, computeInvoiceBreakdown, resolveCommission, haversineKm, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
 import { SettlementsService, SettlementsModule } from '../settlements/settlements.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
+import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -43,7 +45,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -605,7 +607,29 @@ export class AdminService {
       },
     });
     if (!order) throw new NotFoundException('Order not found');
-    return order;
+
+    // Billing classification + explicit partner-vs-Remont revenue split, shown as two
+    // visually distinct blocks in the admin order detail screen — the partner's amount
+    // must never be presented as Remont's own revenue (see billing-engine.ts). Reads the
+    // frozen value off the invoice once one exists; otherwise resolves live from the
+    // order's current type/vendor staffing, which is what will actually get frozen once
+    // an invoice is generated.
+    const transactionType = order.invoice?.transactionType || resolveBillingTransactionType(order.type, order.vendor?.staffType);
+    const partnerAmount = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
+    const remontRevenue = transactionType === 'DIRECT_PROJECT'
+      ? Number(order.subtotal)
+      : Number(order.remontCommission) + Number(order.platformCharges);
+    const billing = {
+      transactionType,
+      partnerAmount: transactionType === 'PLATFORM_SERVICE' ? partnerAmount : 0,
+      remontRevenue,
+      note: transactionType === 'PLATFORM_SERVICE'
+        ? 'Partner amount is settled to the partner and is not Remont revenue — only the platform fee is.'
+        : transactionType === 'MARKETPLACE_PRODUCT'
+          ? 'Product sale value belongs to the seller — only Remont\'s marketplace commission (if any) is Remont revenue.'
+          : 'Remont fulfils this order directly — the full value is Remont revenue.',
+    };
+    return { ...order, billing };
   }
 
   async adminCreateOrder(data: {
@@ -705,24 +729,7 @@ export class AdminService {
   }
 
   private async autoGenerateInvoice(orderId: string) {
-    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
-    if (existing) return;
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { extraWorkItems: { where: { customerApproved: true } } },
-    });
-    if (!order) return;
-    const count = await this.prisma.invoice.count();
-    const b = computeInvoiceBreakdown({
-      orderNumber: order.orderNumber,
-      subtotal: Number(order.subtotal),
-      totalAmount: Number(order.totalAmount),
-      gstAmount: Number(order.gstAmount),
-      serviceAmount: Number(order.serviceAmount),
-      remontCommission: Number(order.remontCommission),
-      approvedExtraWorkAmount: order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0),
-    }, count);
-    await this.prisma.invoice.create({ data: { orderId, ...b } });
+    await this.invoices.generateForOrder(orderId);
     await this.prisma.order.update({ where: { id: orderId }, data: { status: 'INVOICED' as any } });
   }
 
@@ -1961,42 +1968,14 @@ Return JSON with:
     });
   }
 
+  // Was previously a third, undocumented copy of the GST math (didn't call
+  // computeInvoiceBreakdown at all) — the one actually wired to the admin "Generate
+  // Invoice" button. Now routes through the same billing engine as every other
+  // invoice-generation path (see InvoicesService.generateForOrder).
   async generateInvoice(orderId: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { extraWorkItems: { where: { customerApproved: true } } },
-    });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
-    const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
-    if (existing) return existing;
-
-    const customerSubtotal = Number(order.subtotal);
-    const customerTotal = Number(order.totalAmount);
-    const customerCgst = Math.round((Number(order.gstAmount) / 2) * 100) / 100;
-    const customerSgst = customerCgst;
-    const vendorLabor = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
-    const vendorMaterial = 0;
-    const vendorPretax = vendorLabor + vendorMaterial;
-    const vendorCgst = Math.round(vendorPretax * 0.09 * 100) / 100;
-    const vendorSgst = vendorCgst;
-    const vendorTotal = vendorPretax + vendorCgst + vendorSgst;
-    const platformCommission = Number(order.remontCommission);
-    const bookingFee = 49;
-    const remontPretax = platformCommission + bookingFee;
-    const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
-    const remontSgst = remontCgst;
-    const remontTotal = remontPretax + remontCgst + remontSgst;
-    const count = await this.prisma.invoice.count();
-    const invoiceNumber = `INV-${order.orderNumber}-${(count + 1).toString().padStart(4, '0')}`;
-
-    return this.prisma.invoice.create({
-      data: {
-        invoiceNumber, orderId,
-        customerSubtotal, customerCgst, customerSgst, customerTotal,
-        vendorLabor, vendorMaterial, vendorCgst, vendorSgst, vendorTotal,
-        platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
-      },
-    });
+    return this.invoices.generateForOrder(orderId);
   }
 
   // ─── Corporate ────────────────────────────────────────────────────────
@@ -2513,7 +2492,7 @@ Return JSON with:
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController {
-  constructor(private admin: AdminService, private masterOrders: MasterOrdersService) {}
+  constructor(private admin: AdminService, private masterOrders: MasterOrdersService, private invoices: InvoicesService) {}
 
   // Dashboard
   @Get('stats') stats() { return this.admin.globalStats(); }
@@ -2830,9 +2809,16 @@ export class AdminController {
   @Get('amc/subscriptions') amcSubs(@Query('status') status?: string) { return this.admin.listAmcSubscriptions(status); }
 
   // Invoices
-  @Get('invoices') invoices(@Query('q') q?: string, @Query('limit') limit?: number) { return this.admin.listInvoices({ q, limit: limit ? +limit : 100 }); }
+  @Get('invoices') invoiceList(@Query('q') q?: string, @Query('limit') limit?: number) { return this.admin.listInvoices({ q, limit: limit ? +limit : 100 }); }
   @Get('invoices/:id') invoice(@Param('id') id: string) { return this.admin.getInvoice(id); }
   @Post('invoices/:orderId/generate') genInvoice(@Param('orderId') id: string) { return this.admin.generateInvoice(id); }
+  @Get('invoices/orders/:orderId/pdf')
+  async invoicePdf(@Param('orderId') id: string, @Query('doc') doc: 'CUSTOMER' | 'VENDOR' | 'REMONT' = 'CUSTOMER', @Res() res: Response) {
+    const buf = await this.invoices.getPdfBufferAdmin(id, doc);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="invoice-${id}-${doc.toLowerCase()}.pdf"`);
+    res.send(buf);
+  }
 
   // Corporate Accounts
   @Get('corporate') corporateList() { return this.admin.listCorporate(); }
@@ -2911,7 +2897,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

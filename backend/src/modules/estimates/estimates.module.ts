@@ -51,13 +51,19 @@ export class EstimatesService {
     }
 
     try {
-      return await generateEstimate(this.prisma, this.cities, {
+      const result = await generateEstimate(this.prisma, this.cities, {
         serviceId: dto.serviceId,
         city: dto.city,
         sqft: dto.sqft,
         modifiers: dto.modifiers,
         leadId,
       });
+      // Terms shown alongside the quote — kept as a thin addition here rather than
+      // touching generateEstimate()'s own pricing math (estimate-engine.ts), same
+      // admin-editable SiteSetting pattern as the invoice terms (billing group).
+      const termsSetting = await this.prisma.siteSetting.findUnique({ where: { key: 'estimate_terms' } });
+      const termsAndConditions = (termsSetting?.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+      return { ...result, termsAndConditions };
     } catch (e) {
       if (e instanceof EstimateEngineError) {
         if (e.code === 'SERVICE_NOT_FOUND') throw new NotFoundException(e.message);

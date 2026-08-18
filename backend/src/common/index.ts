@@ -414,46 +414,210 @@ export function addressSnapshotFields(addr?: {
   };
 }
 
-// Shared GST invoice math — previously copy-pasted verbatim in three places
-// (InvoicesService.generate(), OrdersService.autoGenerateInvoice(), AdminService.autoGenerateInvoice()).
-// Pure function: callers fetch the Order + approved ExtraWorkItems and the current
-// Invoice count (for numbering), everything else is deterministic arithmetic.
-export interface InvoiceBreakdownInput {
+// Shared GST invoice math — see backend/src/common/billing-engine.ts for the actual
+// calculation engine (calculateInvoice, resolveBillingTransactionType, GSTIN helpers).
+// This helper builds the Invoice-row shape (page 1/2/3 fields) that InvoicesService,
+// OrdersService.autoGenerateInvoice(), and AdminService both persist, so the engine call
+// + field mapping stays in one place rather than copy-pasted at each call site (the bug
+// this replaces: three drifting hardcoded-9%+9% copies, one of which — the admin
+// "Generate Invoice" button — didn't even share code with the other two).
+export * from './billing-engine';
+import {
+  calculateInvoice, stateFromGstin,
+  type BillingTransactionTypeValue, type BillingLineInput,
+} from './billing-engine';
+
+export interface InvoiceBuildInput {
   orderNumber: string;
-  subtotal: number;
-  totalAmount: number;
-  gstAmount: number;
-  serviceAmount: number;
-  remontCommission: number;
-  approvedExtraWorkAmount: number;
+  transactionType: BillingTransactionTypeValue;
+  placeOfSupply: string;
+  /** Remont's own registered state — from the `company_state` SiteSetting. */
+  remontState: string;
+  remontGstin: string;
+  bookingFee?: number;
+
+  // Customer-facing line items (Type 2: full project lines; Type 1: informational
+  // partner-amount + fee summary; Type 3: the seller's product lines).
+  customerLines: BillingLineInput[];
+  customerSupplierState?: string | null; // Remont for Type 1/2, seller's state for Type 3
+  customerSupplierGstin?: string | null;
+
+  // Partner/vendor settlement side (Type 1 only) — never a Remont tax invoice.
+  vendorLines?: BillingLineInput[];
+  vendorGstin?: string | null;
+
+  // Remont's own platform-fee / commission invoice (Type 1: fee to customer; Type 3:
+  // commission to seller — different recipient, so a distinct placeOfSupply).
+  remontLines?: BillingLineInput[];
+  remontPlaceOfSupply?: string;
 }
 
-export function computeInvoiceBreakdown(input: InvoiceBreakdownInput, invoiceSeq: number, bookingFee = 49) {
-  const customerSubtotal = input.subtotal;
-  const customerTotal = input.totalAmount;
-  const customerCgst = Math.round((input.gstAmount / 2) * 100) / 100;
-  const customerSgst = customerCgst;
-
-  const vendorLabor = input.serviceAmount + input.approvedExtraWorkAmount;
-  const vendorMaterial = 0;
-  const vendorPretax = vendorLabor + vendorMaterial;
-  const vendorCgst = Math.round(vendorPretax * 0.09 * 100) / 100;
-  const vendorSgst = vendorCgst;
-  const vendorTotal = vendorPretax + vendorCgst + vendorSgst;
-
-  const platformCommission = input.remontCommission;
-  const remontPretax = platformCommission + bookingFee;
-  const remontCgst = Math.round(remontPretax * 0.09 * 100) / 100;
-  const remontSgst = remontCgst;
-  const remontTotal = remontPretax + remontCgst + remontSgst;
-
+export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: number) {
   const invoiceNumber = `INV-${input.orderNumber}-${(invoiceSeq + 1).toString().padStart(4, '0')}`;
+
+  const customer = calculateInvoice({
+    lines: input.customerLines,
+    supplierState: input.customerSupplierState ?? input.remontState,
+    placeOfSupply: input.placeOfSupply,
+  });
+
+  const vendor = input.vendorLines?.length
+    ? calculateInvoice({
+        lines: input.vendorLines,
+        supplierState: stateFromGstin(input.vendorGstin), // null (unregistered) => no GST fabricated
+        placeOfSupply: input.placeOfSupply,
+      })
+    : null;
+
+  const remontLines = input.remontLines || [];
+  const remont = calculateInvoice({
+    lines: input.bookingFee
+      ? [...remontLines, { description: 'Booking Fee', qty: 1, rate: input.bookingFee, taxRatePercent: remontLines[0]?.taxRatePercent ?? 18 }]
+      : remontLines,
+    supplierState: input.remontState,
+    placeOfSupply: input.remontPlaceOfSupply || input.placeOfSupply,
+  });
 
   return {
     invoiceNumber,
-    customerSubtotal, customerCgst, customerSgst, customerTotal,
-    vendorLabor, vendorMaterial, vendorCgst, vendorSgst, vendorTotal,
-    platformCommission, bookingFee, remontCgst, remontSgst, remontTotal,
+    transactionType: input.transactionType,
+    placeOfSupply: input.placeOfSupply,
+    supplierState: input.customerSupplierState ?? input.remontState,
+    supplierGstin: input.customerSupplierGstin ?? input.remontGstin,
+
+    customerSubtotal: customer.taxableValue,
+    customerCgst: customer.cgst,
+    customerSgst: customer.sgst,
+    customerIgst: customer.igst,
+    customerTotal: customer.total,
+
+    vendorLabor: vendor?.taxableValue ?? 0,
+    vendorMaterial: 0,
+    vendorCgst: vendor?.cgst ?? 0,
+    vendorSgst: vendor?.sgst ?? 0,
+    vendorTotal: vendor?.total ?? 0,
+
+    platformCommission: remont.taxableValue,
+    bookingFee: input.bookingFee ?? 0,
+    remontCgst: remont.cgst,
+    remontSgst: remont.sgst,
+    remontIgst: remont.igst,
+    remontTotal: remont.total,
+
+    discount: 0,
+    roundOff: customer.roundOff,
+    // Cast to `any` — Prisma's generated JsonValue input type can't structurally match a
+    // typed interface array even though this is plain, JSON-serializable data.
+    lineItemsSnapshot: { customer: customer.lines, vendor: vendor?.lines ?? [], remont: remont.lines } as any,
+  };
+}
+
+// ── Tax-config resolution — real Indian GST has different rate slabs (0/5/12/18/28%) by
+// HSN/SAC, even within the same "SERVICE" or "PRODUCT" appliesTo scope (an AC repair and
+// a basic cleaning visit legitimately carry different SAC codes and rates). The admin's
+// own Taxes screen already lets multiple TaxConfig rows be entered per scope, each with
+// its own hsnCode — this resolver is what actually differentiates between them by
+// matching each line's own HSN/SAC, rather than blindly using one blanket rate for an
+// entire scope (the previous behavior, and the exact gap the Taxes screen's own warning
+// banner used to flag: "rates defined here are informational... integration with
+// billing must be done in the order creation flow" — this IS that integration).
+//
+// Resolution order per line: (1) an explicit per-item override percent set on the
+// Service/Product row itself wins outright; (2) an exact HSN/SAC match against an active
+// TaxConfig row for this scope; (3) the first active TaxConfig row for this scope, as a
+// blanket fallback (matches the Estimate Engine's existing "override wins, else first
+// active row, else defaultWhenUnconfigured" pattern); (4) defaultWhenUnconfigured — 0 for
+// ordinary services/products (never invent a rate nobody configured), but a real non-zero
+// default is passed in for Remont's own platform fee (see PLATFORM_FEE_DEFAULT_RATE
+// below), since that one has a well-established real-world rate.
+export interface TaxRateResolver {
+  // overridePercent accepts `any` because callers pass a Prisma Decimal directly
+  // (Service/Product.gstOverridePercent) — Number() below handles it regardless.
+  rateFor(hsnSac?: string | null, overridePercent?: any): number;
+  defaultHsn: string | null;
+}
+export async function buildTaxRateResolver(
+  prisma: any,
+  appliesTo: 'SERVICE' | 'PRODUCT' | 'PLATFORM_FEE',
+  defaultWhenUnconfigured = 0,
+): Promise<TaxRateResolver> {
+  const rows = await prisma.taxConfig.findMany({
+    where: { isActive: true, type: 'GST', appliesTo: { has: appliesTo } },
+    orderBy: { createdAt: 'asc' },
+  });
+  const byHsn = new Map<string, number>();
+  for (const r of rows) if (r.hsnCode) byHsn.set(r.hsnCode, Number(r.rate));
+  const defaultRow = rows[0];
+  const blanketRate = defaultRow ? Number(defaultRow.rate) : defaultWhenUnconfigured;
+  return {
+    rateFor(hsnSac, overridePercent) {
+      if (overridePercent !== undefined && overridePercent !== null) {
+        const n = Number(overridePercent);
+        if (!Number.isNaN(n)) return n;
+      }
+      if (hsnSac && byHsn.has(hsnSac)) return byHsn.get(hsnSac)!;
+      return blanketRate;
+    },
+    defaultHsn: defaultRow?.hsnCode || null,
+  };
+}
+
+// SAC 999799 ("Other services n.e.c." / business auxiliary services) is the real-world
+// classification both Ola's convenience fee and Urban Company's platform fee use — both
+// reference invoices in the billing spec show it taxed flat at 18%. Used as the
+// fallback rate for Remont's own platform-fee/marketplace-commission invoices only when
+// no admin-configured PLATFORM_FEE TaxConfig row overrides it — unlike ordinary
+// services/products, 0% would be actively wrong here, not just unconfigured.
+export const PLATFORM_FEE_DEFAULT_RATE = 18;
+export const PLATFORM_FEE_DEFAULT_SAC = '999799';
+
+// Remont's own invoicing-entity details — admin-editable via the existing generic Site
+// Settings screen (group: 'billing'), same DB-overrides-defaults pattern already used for
+// Razorpay keys (payments.module.ts). Defaults to the reference invoice's real details so
+// invoicing works out of the box even before an admin visits the settings screen.
+export interface BillingCompanyConfig {
+  legalName: string; gstin: string; state: string; address: string;
+  mobile: string; email: string; website: string;
+  bankName: string; bankIfsc: string; bankAccountNumber: string;
+  invoiceTerms: string[];
+}
+const BILLING_CONFIG_DEFAULTS: BillingCompanyConfig = {
+  legalName: 'REMONT INDIA PRIVATE LIMITED',
+  gstin: '23AAKCR9036L1ZY',
+  state: 'Madhya Pradesh',
+  address: '5/6 Amer Complex, MP Nagar Zone-2, Bhopal, Bhopal, Madhya Pradesh, 462011',
+  mobile: '9425330195',
+  email: 'contact@remontindia.com',
+  website: 'www.remontindia.com',
+  bankName: 'Karnataka Bank, Bhopal',
+  bankIfsc: 'KARB0000127',
+  bankAccountNumber: '1272000100072001',
+  invoiceTerms: [
+    'This is a computer-generated invoice and is valid without a physical signature.',
+    'Payment is due immediately upon receipt unless otherwise agreed in writing.',
+    'Any dispute regarding this invoice is subject to the jurisdiction of Bhopal courts only.',
+    'GST as applicable has been charged only on Remont India Private Limited’s own taxable supply, as itemized above.',
+  ],
+};
+export async function getBillingCompanyConfig(prisma: any): Promise<BillingCompanyConfig> {
+  const rows = await prisma.siteSetting.findMany({ where: { group: 'billing' } });
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.key] = r.value;
+  const gstin = map.company_gstin || BILLING_CONFIG_DEFAULTS.gstin;
+  return {
+    legalName: map.company_legal_name || BILLING_CONFIG_DEFAULTS.legalName,
+    gstin,
+    // The GSTIN's own state prefix is authoritative once a GSTIN is set — prevents the
+    // registered state silently drifting out of sync with an admin-edited GSTIN.
+    state: stateFromGstin(gstin) || map.company_state || BILLING_CONFIG_DEFAULTS.state,
+    address: map.company_address || BILLING_CONFIG_DEFAULTS.address,
+    mobile: map.company_mobile || BILLING_CONFIG_DEFAULTS.mobile,
+    email: map.company_email || BILLING_CONFIG_DEFAULTS.email,
+    website: map.company_website || BILLING_CONFIG_DEFAULTS.website,
+    bankName: map.company_bank_name || BILLING_CONFIG_DEFAULTS.bankName,
+    bankIfsc: map.company_ifsc || BILLING_CONFIG_DEFAULTS.bankIfsc,
+    bankAccountNumber: map.company_account_number || BILLING_CONFIG_DEFAULTS.bankAccountNumber,
+    invoiceTerms: map.invoice_terms ? map.invoice_terms.split('\n').map((s) => s.trim()).filter(Boolean) : BILLING_CONFIG_DEFAULTS.invoiceTerms,
   };
 }
 

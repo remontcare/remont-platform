@@ -352,6 +352,48 @@ async function main() {
   });
   console.log(`✅ Seeded super admin user (phone: ${adminPhone})`);
 
+  // ─── Billing/GST invoicing entity (see backend/src/common/index.ts getBillingCompanyConfig)
+  // — admin-editable afterward via the existing generic Site Settings screen. Upsert with
+  // update:{} so re-running the seed never clobbers values an admin has since edited.
+  const BILLING_SETTINGS: { key: string; value: string; label: string }[] = [
+    { key: 'company_legal_name', value: 'REMONT INDIA PRIVATE LIMITED', label: 'Legal Entity Name' },
+    { key: 'company_gstin', value: '23AAKCR9036L1ZY', label: 'Company GSTIN' },
+    { key: 'company_state', value: 'Madhya Pradesh', label: 'Registered State' },
+    { key: 'company_address', value: '5/6 Amer Complex, MP Nagar Zone-2, Bhopal, Bhopal, Madhya Pradesh, 462011', label: 'Registered Address' },
+    { key: 'company_mobile', value: '9425330195', label: 'Contact Mobile' },
+    { key: 'company_email', value: 'contact@remontindia.com', label: 'Contact Email' },
+    { key: 'company_website', value: 'www.remontindia.com', label: 'Website' },
+    { key: 'company_bank_name', value: 'Karnataka Bank, Bhopal', label: 'Bank Name' },
+    { key: 'company_ifsc', value: 'KARB0000127', label: 'Bank IFSC' },
+    { key: 'company_account_number', value: '1272000100072001', label: 'Bank Account Number' },
+    { key: 'default_booking_fee', value: '49', label: 'Default Platform Booking Fee (₹)' },
+    {
+      key: 'invoice_terms', label: 'Invoice Terms & Conditions (one per line)',
+      value: [
+        'This is a computer-generated invoice and is valid without a physical signature.',
+        'Payment is due immediately upon receipt unless otherwise agreed in writing.',
+        'Any dispute regarding this invoice is subject to the jurisdiction of Bhopal courts only.',
+        'GST as applicable has been charged only on Remont India Private Limited’s own taxable supply, as itemized above.',
+      ].join('\n'),
+    },
+    {
+      key: 'estimate_terms', label: 'Estimate/Quotation Terms & Conditions (one per line)',
+      value: [
+        'This is an estimate, not a tax invoice — final billing may vary based on actual site conditions and material used.',
+        'Prices are valid for 15 days from the date of this estimate unless otherwise stated.',
+        'GST, where applicable, will be charged additionally as per the prevailing rate at the time of invoicing.',
+      ].join('\n'),
+    },
+  ];
+  for (const s of BILLING_SETTINGS) {
+    await prisma.siteSetting.upsert({
+      where: { key: s.key },
+      update: {},
+      create: { key: s.key, value: s.value, label: s.label, group: 'billing' },
+    });
+  }
+  console.log(`✅ Seeded ${BILLING_SETTINGS.length} billing settings`);
+
   console.log('\n🎉 Seed completed successfully!');
 }
 
