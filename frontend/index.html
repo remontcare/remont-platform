@@ -475,6 +475,44 @@
     outline: none;
   }
   .cm-search input:focus { border-color: var(--sienna); }
+  .pl-field { margin-bottom: 14px; }
+  .pl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pl-field label {
+    display: block;
+    font-size: 12px; font-weight: 600;
+    color: var(--graphite);
+    margin-bottom: 6px;
+  }
+  .pl-field input, .pl-field select {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--cream);
+    border: 1px solid var(--mist);
+    border-radius: 10px;
+    font-family: var(--ff-body);
+    font-size: 13px;
+    color: var(--charcoal);
+    outline: none;
+  }
+  .pl-field input:focus, .pl-field select:focus { border-color: var(--sienna); }
+  .pl-submit {
+    width: 100%;
+    margin-top: 6px;
+    padding: 13px 18px;
+    background: var(--charcoal);
+    color: #fff;
+    border: 0;
+    border-radius: 100px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .pl-submit:hover { background: var(--sienna); }
+  .pl-submit:disabled { opacity: 0.6; cursor: default; }
+  @media (max-width: 520px) {
+    .pl-row { grid-template-columns: 1fr; }
+  }
   .cm-cities {
     padding: 16px 24px;
     overflow-y: auto;
@@ -1385,22 +1423,61 @@
   }
   .premium-card-img {
     width: 100%; height: 220px;
-    background-size: cover; background-position: center;
     position: relative;
+    overflow: hidden;
   }
   .premium-card-img::after {
     content: '';
     position: absolute; inset: 0;
     background: linear-gradient(to top, rgba(26,26,26,0.85) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 1;
   }
-  .premium-card.interior .premium-card-img {
-    background-image: url("https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=800&q=85");
+  /* ── Premium card image carousel — a card with only one photo (today's
+     default) simply hides its arrows/dots via JS and behaves like the old
+     static image; multi-photo cards get full nav once real photos are added. ── */
+  .pci-track {
+    display: flex;
+    width: 100%; height: 100%;
+    transition: transform .4s cubic-bezier(.4,0,.2,1);
+    touch-action: pan-y;
   }
-  .premium-card.renovation .premium-card-img {
-    background-image: url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=85");
+  .pci-slide {
+    flex: 0 0 100%;
+    height: 100%;
+    background-size: cover; background-position: center;
   }
-  .premium-card.construction .premium-card-img {
-    background-image: url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800&q=85");
+  .pci-arrow {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.45);
+    border: 1px solid rgba(255,255,255,0.25);
+    color: #fff;
+    font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 2;
+    opacity: 0; transition: opacity .2s, background .2s;
+  }
+  .premium-card-img:hover .pci-arrow { opacity: 1; }
+  .pci-arrow:hover { background: rgba(0,0,0,0.7); }
+  .pci-arrow.pci-prev { left: 10px; }
+  .pci-arrow.pci-next { right: 10px; }
+  .pci-dots {
+    position: absolute; bottom: 10px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 6px;
+    z-index: 2;
+  }
+  .pci-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,0.4);
+    border: none; padding: 0; cursor: pointer;
+    transition: background .2s, transform .2s;
+  }
+  .pci-dot.active { background: var(--amber); transform: scale(1.2); }
+  @media (max-width: 768px) {
+    .pci-arrow { opacity: 1; } /* no hover state on touch devices */
   }
   .premium-card-tag {
     position: absolute;
@@ -1480,6 +1557,22 @@
     transition: all 0.2s;
   }
   .premium-cta:hover { background: #fff; }
+  .premium-cta-secondary {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 9px 18px;
+    background: transparent;
+    color: rgba(255,255,255,0.75);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .premium-cta-secondary:hover { border-color: var(--amber); color: var(--amber); }
   .premium-card .premium-availability {
     position: absolute;
     top: 16px; right: 16px;
@@ -3858,30 +3951,43 @@
 
     <div class="premium-grid">
       <div class="premium-card interior reveal">
-        <div class="premium-card-img">
+        <div class="premium-card-img" data-carousel>
+          <div class="pci-track">
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=800&q=85')"></div>
+          </div>
           <span class="premium-card-tag" data-en="Interior" data-hi="इंटीरियर">Interior</span>
           <span class="premium-availability">Available in your city</span>
+          <button type="button" class="pci-arrow pci-prev" aria-label="Previous photo">‹</button>
+          <button type="button" class="pci-arrow pci-next" aria-label="Next photo">›</button>
+          <div class="pci-dots"></div>
         </div>
         <div class="premium-card-body">
           <h3 data-en="Interior Design&lt;br&gt;& Makeover" data-hi="इंटीरियर डिज़ाइन&lt;br&gt;और मेकओवर">Interior Design<br>& Makeover</h3>
-          <p data-en="Full-home interior design with 3D visualization, modular furniture, and turnkey execution." data-hi="फुल-होम इंटीरियर डिज़ाइन, 3D विज़ुअलाइज़ेशन, मॉड्यूलर फर्नीचर और टर्नकी एग्ज़ीक्यूशन के साथ।">Full-home interior design with 3D visualization, modular furniture, and turnkey execution.</p>
+          <p data-en="Full-home interior design with 3D visualisation, modular furniture, and turnkey execution — from consultation to handover." data-hi="फुल-होम इंटीरियर डिज़ाइन, 3D विज़ुअलाइज़ेशन, मॉड्यूलर फर्नीचर और टर्नकी एग्ज़ीक्यूशन के साथ — कंसल्टेशन से हैंडओवर तक।">Full-home interior design with 3D visualisation, modular furniture, and turnkey execution — from consultation to handover.</p>
           <ul class="premium-features">
-            <li data-en="Free 3D design consultation" data-hi="फ्री 3D डिज़ाइन कंसल्टेशन">Free 3D design consultation</li>
-            <li data-en="Dedicated interior designer" data-hi="डेडिकेटेड इंटीरियर डिज़ाइनर">Dedicated interior designer</li>
-            <li data-en="Premium materials & finishes" data-hi="प्रीमियम मटीरियल और फिनिश">Premium materials & finishes</li>
-            <li data-en="10-year structural warranty" data-hi="10-साल स्ट्रक्चरल वारंटी">10-year structural warranty</li>
+            <li data-en="3D Design Walkthrough Included" data-hi="3D डिज़ाइन वॉकथ्रू शामिल">3D Design Walkthrough Included</li>
+            <li data-en="Dedicated Interior Designer — Start to Finish" data-hi="डेडिकेटेड इंटीरियर डिज़ाइनर — शुरू से अंत तक">Dedicated Interior Designer — Start to Finish</li>
+            <li data-en="Premium Materials & Curated Finishes" data-hi="प्रीमियम मटीरियल और क्यूरेटेड फिनिश">Premium Materials & Curated Finishes</li>
+            <li data-en="5-Year Workmanship Warranty + 1-Year Complimentary AMC" data-hi="5-साल वर्कमैनशिप वारंटी + 1-साल फ्री AMC">5-Year Workmanship Warranty + 1-Year Complimentary AMC</li>
           </ul>
           <div class="premium-meta">
             <div class="premium-price">₹2L<small data-en=" onwards" data-hi=" से शुरू"> onwards</small></div>
-            <button class="premium-cta" onclick="window.location.href='/interior'" data-en="Book Consultation →" data-hi="कंसल्टेशन बुक करें →">Book Consultation →</button>
+            <button class="premium-cta" onclick="openPremiumLeadModal('Interior Design & Makeover')" data-en="Get My Design Plan →" data-hi="मेरा डिज़ाइन प्लान पाएं →">Get My Design Plan →</button>
           </div>
+          <button type="button" class="premium-cta-secondary" onclick="talkToDesigner()" data-en="Talk to a Designer" data-hi="डिज़ाइनर से बात करें">Talk to a Designer</button>
         </div>
       </div>
 
       <div class="premium-card renovation reveal reveal-d2">
-        <div class="premium-card-img">
+        <div class="premium-card-img" data-carousel>
+          <div class="pci-track">
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=85')"></div>
+          </div>
           <span class="premium-card-tag" data-en="Renovation" data-hi="रेनोवेशन">Renovation</span>
           <span class="premium-availability">Available in your city</span>
+          <button type="button" class="pci-arrow pci-prev" aria-label="Previous photo">‹</button>
+          <button type="button" class="pci-arrow pci-next" aria-label="Next photo">›</button>
+          <div class="pci-dots"></div>
         </div>
         <div class="premium-card-body">
           <h3 data-en="Kitchen & Bath&lt;br&gt;Renovation" data-hi="किचन और बाथ&lt;br&gt;रेनोवेशन">Kitchen & Bath<br>Renovation</h3>
@@ -3900,9 +4006,15 @@
       </div>
 
       <div class="premium-card construction reveal reveal-d3">
-        <div class="premium-card-img">
+        <div class="premium-card-img" data-carousel>
+          <div class="pci-track">
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800&q=85')"></div>
+          </div>
           <span class="premium-card-tag" data-en="Construction" data-hi="कंस्ट्रक्शन">Construction</span>
           <span class="premium-availability">Available in your city</span>
+          <button type="button" class="pci-arrow pci-prev" aria-label="Previous photo">‹</button>
+          <button type="button" class="pci-arrow pci-next" aria-label="Next photo">›</button>
+          <div class="pci-dots"></div>
         </div>
         <div class="premium-card-body">
           <h3 data-en="New Build&lt;br&gt;Construction" data-hi="नया निर्माण&lt;br&gt;कंस्ट्रक्शन">New Build<br>Construction</h3>
@@ -4845,6 +4957,67 @@
   </div>
 </div>
 
+<!-- ═══ PREMIUM INTERIOR LEAD MODAL ═══
+     Dedicated consultation flow so a premium interior enquiry never lands in
+     the generic handyman /booking catalogue — see openPremiumLeadModal(),
+     submitPremiumLead() below. Posts to the same real, already-live public
+     CRM endpoint every other lead source on this site uses. -->
+<div class="city-modal-backdrop" id="premiumLeadBackdrop" onclick="closePremiumLeadModal()"></div>
+<div class="city-modal" id="premiumLeadModal" role="dialog" aria-label="Premium interior consultation">
+  <div class="cm-head">
+    <div>
+      <h3>Get Your Design Plan</h3>
+      <p>Tell us about your project — a design consultant will be in touch.</p>
+    </div>
+    <button class="cm-close" onclick="closePremiumLeadModal()" aria-label="Close">×</button>
+  </div>
+  <div id="premiumLeadFormWrap" style="padding:20px 24px 24px;overflow-y:auto;flex:1">
+    <form id="premiumLeadForm" onsubmit="submitPremiumLead(event)">
+      <div class="pl-field"><label>Name *</label><input type="text" id="plName" required placeholder="Your full name"></div>
+      <div class="pl-field"><label>Mobile Number *</label><input type="tel" id="plPhone" required pattern="[0-9]{10}" maxlength="10" placeholder="10-digit mobile number"></div>
+      <div class="pl-row">
+        <div class="pl-field"><label>City *</label><input type="text" id="plCity" required placeholder="Your city"></div>
+        <div class="pl-field">
+          <label>Property Type *</label>
+          <select id="plPropertyType" required>
+            <option value="">Select</option>
+            <option>1 BHK</option><option>2 BHK</option><option>3 BHK</option>
+            <option>4+ BHK</option><option>Villa / Independent House</option><option>Office / Commercial</option>
+          </select>
+        </div>
+      </div>
+      <div class="pl-row">
+        <div class="pl-field"><label>Property Size</label><input type="text" id="plPropertySize" placeholder="e.g. 1200 sqft"></div>
+        <div class="pl-field">
+          <label>Approximate Budget</label>
+          <select id="plBudget">
+            <option value="">Select</option>
+            <option value="200000">₹2L – 5L</option>
+            <option value="500000">₹5L – 10L</option>
+            <option value="1000000">₹10L – 20L</option>
+            <option value="2000000">₹20L+</option>
+          </select>
+        </div>
+      </div>
+      <div class="pl-field">
+        <label>Preferred Callback Time</label>
+        <select id="plCallbackTime">
+          <option value="">Any time</option>
+          <option>Morning (9 AM – 12 PM)</option>
+          <option>Afternoon (12 PM – 4 PM)</option>
+          <option>Evening (4 PM – 8 PM)</option>
+        </select>
+      </div>
+      <button type="submit" class="pl-submit" id="plSubmitBtn">Get My Design Plan →</button>
+    </form>
+    <div id="premiumLeadSuccess" style="display:none;text-align:center;padding:24px 0">
+      <div style="font-size:40px;margin-bottom:12px">✅</div>
+      <h4 style="color:#fff;margin-bottom:6px">Thank you!</h4>
+      <p style="color:rgba(255,255,255,0.65);font-size:13px">Our design consultant will contact you shortly.</p>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ FLOATING AI + WHATSAPP BUTTONS ═══ -->
 <div class="floating-actions">
   <button class="fab ai-chat" aria-label="AI Chat" onclick="openRemiChat()">
@@ -5587,6 +5760,139 @@
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // PREMIUM SERVICES — image carousel (Interior/Renovation/Construction
+  // cards). Each card carries 1 real photo today; arrows/dots hide
+  // themselves when a card has only one slide, so adding more real photos
+  // later (in the .pci-slide markup) is all that's needed to activate nav.
+  // ═══════════════════════════════════════════════════════════════════
+  function initPremiumCarousels() {
+    document.querySelectorAll('[data-carousel]').forEach(function (container) {
+      const track = container.querySelector('.pci-track');
+      const slides = track.querySelectorAll('.pci-slide');
+      const prevBtn = container.querySelector('.pci-prev');
+      const nextBtn = container.querySelector('.pci-next');
+      const dotsWrap = container.querySelector('.pci-dots');
+      const count = slides.length;
+      let index = 0;
+
+      if (count <= 1) {
+        if (prevBtn) prevBtn.style.display = 'none';
+        if (nextBtn) nextBtn.style.display = 'none';
+        if (dotsWrap) dotsWrap.style.display = 'none';
+        return;
+      }
+
+      for (let i = 0; i < count; i++) {
+        const dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = 'pci-dot' + (i === 0 ? ' active' : '');
+        dot.setAttribute('aria-label', 'Photo ' + (i + 1));
+        dot.addEventListener('click', function (e) { e.stopPropagation(); goTo(i); });
+        dotsWrap.appendChild(dot);
+      }
+      const dots = dotsWrap.querySelectorAll('.pci-dot');
+
+      function goTo(newIndex) {
+        index = (newIndex + count) % count;
+        track.style.transform = 'translateX(-' + (index * 100) + '%)';
+        dots.forEach((d, i) => d.classList.toggle('active', i === index));
+      }
+
+      if (prevBtn) prevBtn.addEventListener('click', function (e) { e.stopPropagation(); goTo(index - 1); });
+      if (nextBtn) nextBtn.addEventListener('click', function (e) { e.stopPropagation(); goTo(index + 1); });
+
+      // Touch swipe — manual nav (arrows/dots) always still works regardless.
+      let startX = null;
+      track.addEventListener('touchstart', function (e) { startX = e.touches[0].clientX; }, { passive: true });
+      track.addEventListener('touchend', function (e) {
+        if (startX === null) return;
+        const delta = e.changedTouches[0].clientX - startX;
+        if (Math.abs(delta) > 40) goTo(delta > 0 ? index - 1 : index + 1);
+        startX = null;
+      });
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PREMIUM INTERIOR CONSULTATION — dedicated lead flow (never the generic
+  // handyman /booking catalogue). Posts to the same real, already-live
+  // public CRM endpoint every other lead source on this site uses
+  // (POST /api/v1/crm/leads/capture — see backend/src/modules/crm).
+  // ═══════════════════════════════════════════════════════════════════
+  let _premiumLeadLabel = 'Premium Interior Consultation';
+  function openPremiumLeadModal(label) {
+    _premiumLeadLabel = label || 'Premium Interior Consultation';
+    document.getElementById('premiumLeadForm').style.display = '';
+    document.getElementById('premiumLeadSuccess').style.display = 'none';
+    const btn = document.getElementById('plSubmitBtn');
+    btn.disabled = false;
+    btn.textContent = 'Get My Design Plan →';
+    const cityEl = document.getElementById('plCity');
+    try {
+      const savedCity = localStorage.getItem('remont_city');
+      if (savedCity && !cityEl.value) cityEl.value = savedCity;
+    } catch (e) { /* private mode — field just stays blank */ }
+    document.getElementById('premiumLeadBackdrop').classList.add('open');
+    document.getElementById('premiumLeadModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closePremiumLeadModal() {
+    document.getElementById('premiumLeadBackdrop').classList.remove('open');
+    document.getElementById('premiumLeadModal').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function talkToDesigner() {
+    const msg = "Hi Remont, I'd like to talk to a designer about a premium interior project.";
+    window.open('https://wa.me/919232071064?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+  }
+  function submitPremiumLead(event) {
+    event.preventDefault();
+    const name = document.getElementById('plName').value.trim();
+    const phone = document.getElementById('plPhone').value.trim();
+    const city = document.getElementById('plCity').value.trim();
+    const propertyType = document.getElementById('plPropertyType').value;
+    const propertySize = document.getElementById('plPropertySize').value.trim();
+    const budgetSelect = document.getElementById('plBudget');
+    const budgetValue = budgetSelect.value;
+    const budgetLabel = budgetSelect.options[budgetSelect.selectedIndex].text;
+    const callbackTime = document.getElementById('plCallbackTime').value;
+    if (!name || !/^[0-9]{10}$/.test(phone) || !city || !propertyType) return; // HTML5 required/pattern already guards this
+
+    const notesParts = ['Property Type: ' + propertyType];
+    if (propertySize) notesParts.push('Property Size: ' + propertySize);
+    if (budgetValue) notesParts.push('Budget: ' + budgetLabel);
+    if (callbackTime) notesParts.push('Preferred Callback: ' + callbackTime);
+
+    const btn = document.getElementById('plSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+
+    fetch('/api/v1/crm/leads/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName: name,
+        customerPhone: phone,
+        cityName: city,
+        source: 'WEBSITE',
+        serviceInterested: _premiumLeadLabel,
+        estimatedValue: budgetValue ? Number(budgetValue) : undefined,
+        notes: notesParts.join(' | '),
+      }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function () {
+      document.getElementById('premiumLeadForm').style.display = 'none';
+      document.getElementById('premiumLeadSuccess').style.display = '';
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Get My Design Plan →';
+      alert('Something went wrong — please try again, or WhatsApp us directly.');
+    });
+  }
+
   /**
    * Apply city-wise service availability:
    *   - Grey-out services not available in current city
@@ -5654,6 +5960,14 @@
   });
   document.getElementById('currentCity').textContent = currentCity;
   applyCityFilter();
+  initPremiumCarousels();
+
+  // /interior's CTAs redirect here with ?openLead=1 instead of the generic
+  // handyman /booking flow (see RemontCTA.book() in shared/service-page.js) —
+  // auto-open the same Premium Interior lead modal used by this page's own CTA.
+  if (new URLSearchParams(window.location.search).get('openLead') === '1') {
+    openPremiumLeadModal('Interior Design & Makeover');
+  }
 
   // ═══════════════════════════════════════════════════════════════════
   // HEADER SEARCH SCOPE TOGGLE: Services ↔ Products

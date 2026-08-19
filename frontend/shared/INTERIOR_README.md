@@ -31,23 +31,32 @@ HTML or JS.
 ## CTA architecture — why nothing here calls WhatsApp for booking
 
 Every primary action (Book Consultation, View a service, Book a package, Book This
-Design) calls `RemontCTA.book({slug, label})` in `service-page.js`. Today that function
-does one thing: redirect to `/booking?service=<slug>&city=<city>&category=interior` —
-**the real, already-live Remont booking page** (`frontend/booking.html`), which fetches
-real services/cities from the backend and pre-selects the slug if it matches a seeded
-`Service` record. If it doesn't match (interior sub-services aren't seeded as individual
-bookable services yet), the user just lands on `/booking` and picks manually — nothing
-breaks.
+Design) calls `RemontCTA.book({slug, label})` in `service-page.js`. For the `interior`
+category specifically, that function redirects to `/?openLead=1#premium` — the
+homepage's Premium Interior lead modal (`index.html`), a dedicated consultation-first
+flow, **never** the generic handyman `/booking` catalogue. Every other category still
+gets the original behavior: redirect to `/booking?service=<slug>&city=<city>&category=<cat>`
+(`frontend/booking.html`), which fetches real services/cities from the backend and
+pre-selects the slug if it matches a seeded `Service` record; if it doesn't match, the
+user just lands on `/booking` and picks manually — nothing breaks.
 
-**To go live with a dedicated interior booking flow later:** edit only the body of
-`RemontCTA.book()` in `service-page.js`. No button, no CTA, no page markup changes —
-they all already call this one function.
+**To change the interior consultation flow later:** edit only the body of
+`RemontCTA.book()` in `service-page.js` (the `category === 'interior'` branch). No
+button, no CTA, no page markup changes needed — they all already call this one function.
 
 WhatsApp is wired up as `RemontCTA.chatWithExpert(message)`, used **only** by the
 small secondary "Chat with Expert" / "Need Help?" links (Hero, sticky bar). It is never
 a primary CTA.
 
-## AI Design Studio — currently 100% mocked
+## AI Design Studio — currently 100% mocked, and hidden from customers
+
+The tab button, panel, and every entry point into it (`interior.html`) are hidden
+(`display:none` / removed buttons) — not deleted — because the flow underneath is fully
+simulated (see below): a customer who completed it would receive a fake, non-personalized
+"AI-generated" result presented as if it were real. Nothing was removed from
+`service-page.js`; re-enabling is a pure markup change (remove the `display:none` on
+`[data-svp-panel="ai-studio"]`, restore the tab button and the "Upload Room Photo" CTAs)
+**once the steps below are actually done** — don't re-enable the UI alone.
 
 The 4-step flow (Upload → Pay → Customize → Result) is fully built and fully clickable,
 but two pieces are stub functions in `service-page.js`, both clearly marked:

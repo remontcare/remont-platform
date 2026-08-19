@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Interior Design Studio — 3D Preview, Packages & Turnkey Execution | Remont India</title>
-<meta name="description" content="Full-home and room interior design with AI-assisted preview, transparent packages, verified designers, and turnkey execution — backed by a 10-year warranty." />
+<meta name="description" content="Full-home and room interior design with 3D visualisation, transparent packages, verified designers, and turnkey execution — backed by a 5-year workmanship warranty and 1 year of complimentary AMC." />
 <link rel="canonical" href="https://www.remontindia.com/interior" />
 <meta name="robots" content="index, follow, max-image-preview:large" />
 <meta property="og:type" content="website" />
@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/shared/service-page.css" />
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Service","@id":"https://www.remontindia.com/interior#service","serviceType":"Interior Design","name":"Interior Design Studio — Remont India","description":"Full-home and room interior design with AI-assisted preview, transparent packages, verified designers, and turnkey execution.","provider":{"@id":"https://www.remontindia.com/#organization"},"offers":{"@type":"Offer","priceCurrency":"INR","availability":"https://schema.org/InStock","url":"https://www.remontindia.com/interior"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.remontindia.com/"},{"@type":"ListItem","position":2,"name":"Interior Design","item":"https://www.remontindia.com/interior"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Service","@id":"https://www.remontindia.com/interior#service","serviceType":"Interior Design","name":"Interior Design Studio — Remont India","description":"Full-home and room interior design with 3D visualisation, transparent packages, verified designers, and turnkey execution.","provider":{"@id":"https://www.remontindia.com/#organization"},"offers":{"@type":"Offer","priceCurrency":"INR","availability":"https://schema.org/InStock","url":"https://www.remontindia.com/interior"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.remontindia.com/"},{"@type":"ListItem","position":2,"name":"Interior Design","item":"https://www.remontindia.com/interior"}]}]}</script>
 <style>
   /* Page-specific overrides only — everything reusable lives in service-page.css */
   body { padding-bottom: 64px; } /* room for the sticky CTA bar */
@@ -125,10 +125,10 @@
     <div>
       <div class="svp-eyebrow">🛋️ Interior Design Studio</div>
       <h1>Your Dream Home — Designed &amp; Delivered</h1>
-      <p class="lede">Full-home and room interior design with AI-assisted preview, transparent packages, dedicated designers, and turnkey execution — from concept to handover.</p>
+      <p class="lede">Full-home and room interior design with 3D visualisation, transparent packages, dedicated designers, and turnkey execution — from concept to handover.</p>
       <div class="svp-cta-row">
         <button class="svp-btn svp-btn-primary" data-svp-book data-slug="consultation" data-label="Free interior design consultation">📅 Book Consultation</button>
-        <button class="svp-btn svp-btn-outline" onclick="SVP.activateTab('ai-studio',{scrollIntoView:true})">📷 Upload Room Photo</button>
+        <!-- AI Design Studio entry point hidden — feature is still fully simulated (fake result), see shared/INTERIOR_README.md "To go live" -->
       </div>
       <div class="svp-cta-row" style="margin-top:2px">
         <button class="svp-btn-secondary" data-svp-chat="Hi Remont, I need help with interior design.">💬 Chat with Expert</button>
@@ -161,7 +161,7 @@
       <div class="svp-journey-choice" data-svp-journey-choice="explore">
         <div class="ic">🎨</div>
         <h3>Just Exploring</h3>
-        <p>Get inspired, try the AI Room Designer, and see a rough budget — no commitment.</p>
+        <p>Get inspired by real styles, and see a rough budget — no commitment.</p>
       </div>
       <div class="svp-journey-choice" data-svp-journey-choice="build">
         <div class="ic">🏗️</div>
@@ -170,20 +170,17 @@
       </div>
     </div>
 
-    <!-- Stage 1 — Self-Planning (AI / Tech) -->
+    <!-- Stage 1 — Self-Planning
+         (AI Room Designer step removed — see shared/INTERIOR_README.md "AI Design
+         Studio" section; steps renumbered 1/2 accordingly) -->
     <div class="svp-journey-path" data-svp-journey-path="explore">
       <div class="svp-journey-step">
-        <div class="svp-journey-step-head"><span class="num">1</span><h4>AI Room Designer</h4></div>
-        <div class="svp-journey-step-sub">Style + layout ideas in seconds</div>
-        <button class="svp-btn svp-btn-dark" onclick="SVP.activateTab('ai-studio',{scrollIntoView:true})">🤖 Try AI Room Designer →</button>
-      </div>
-      <div class="svp-journey-step">
-        <div class="svp-journey-step-head"><span class="num">2</span><h4>Idea &amp; Inspiration Gallery</h4></div>
-        <div class="svp-journey-step-sub">Tap a style to try it in the AI Room Designer</div>
+        <div class="svp-journey-step-head"><span class="num">1</span><h4>Idea &amp; Inspiration Gallery</h4></div>
+        <div class="svp-journey-step-sub">Browse real interior styles for inspiration</div>
         <div class="svp-insp-grid" data-svp-render="inspiration"></div>
       </div>
       <div class="svp-journey-step">
-        <div class="svp-journey-step-head"><span class="num">3</span><h4>Auto Rough Budget Estimate</h4></div>
+        <div class="svp-journey-step-head"><span class="num">2</span><h4>Auto Rough Budget Estimate</h4></div>
         <div class="svp-journey-step-sub">Indicative only — final quote after a free site visit</div>
         <div data-svp-estimator>
           <div class="svp-estimator-row">
@@ -246,7 +243,7 @@
   <div class="svp-subnav-inner">
     <button class="svp-tab-btn" data-svp-tab-btn="services">🏠 Services</button>
     <button class="svp-tab-btn" data-svp-tab-btn="consultancy">📐 Design &amp; Consultancy</button>
-    <button class="svp-tab-btn" data-svp-tab-btn="ai-studio">🤖 AI Design Studio <span class="svp-tab-badge">NEW</span></button>
+    <!-- AI Design Studio tab hidden — feature is still fully simulated (fake result), see shared/INTERIOR_README.md "To go live" -->
     <button class="svp-tab-btn" data-svp-tab-btn="packages">📦 Packages</button>
     <button class="svp-tab-btn" data-svp-tab-btn="portfolio">⭐ Portfolio</button>
   </div>
@@ -301,7 +298,7 @@
      RemontPayment / RemontAI in service-page.js and frontend/shared/INTERIOR_README.md
      for exactly what to change to go live. No UI here needs to change for that.
      ═══════════════════════════════════════════════════════════════════════ -->
-<section class="svp-panel dark" data-svp-panel="ai-studio">
+<section class="svp-panel dark" data-svp-panel="ai-studio" style="display:none" aria-hidden="true">
   <div class="inner">
     <div class="svp-sec-head">
       <h2>See Your Room Transformed by AI <span class="svp-mock-badge">Demo mode</span></h2>
@@ -438,7 +435,7 @@
     <div class="svp-why-grid" style="max-width:900px">
       <div class="svp-why-item"><div class="ic">⭐⭐⭐⭐⭐</div><div class="nm">"On-time and on-budget"</div><div class="sub">"Our modular kitchen was delivered exactly as designed, no surprises." — Anjali, Bhopal</div></div>
       <div class="svp-why-item"><div class="ic">⭐⭐⭐⭐⭐</div><div class="nm">"Designer actually listened"</div><div class="sub">"Two revisions were enough to get our living room exactly right." — Rohit, Indore</div></div>
-      <div class="svp-why-item"><div class="ic">⭐⭐⭐⭐⭐</div><div class="nm">"Warranty gave us confidence"</div><div class="sub">"A fitting issue was fixed free of cost within the 10-year warranty." — Meera, Pune</div></div>
+      <div class="svp-why-item"><div class="ic">⭐⭐⭐⭐⭐</div><div class="nm">"Warranty gave us confidence"</div><div class="sub">"A fitting issue was fixed free of cost within the workmanship warranty." — Meera, Pune</div></div>
     </div>
   </div>
 </section>
@@ -457,7 +454,7 @@
       <div class="svp-why-item"><div class="ic">👤</div><div class="nm">Verified Designers</div><div class="sub">Background-checked &amp; skill-assessed</div></div>
       <div class="svp-why-item"><div class="ic">💯</div><div class="nm">Transparent Pricing</div><div class="sub">Approved by you before work starts</div></div>
       <div class="svp-why-item"><div class="ic">📅</div><div class="nm">On-Time Timeline</div><div class="sub">Dedicated project manager</div></div>
-      <div class="svp-why-item"><div class="ic">🛡️</div><div class="nm">Warranty Support</div><div class="sub">10-year structural warranty</div></div>
+      <div class="svp-why-item"><div class="ic">🛡️</div><div class="nm">Warranty Support</div><div class="sub">5-Year Workmanship Warranty + 1-Year Complimentary AMC</div></div>
     </div>
   </div>
 </section>
@@ -473,19 +470,16 @@
     <div class="svp-faq">
       <div class="svp-faq-item">
         <div class="svp-faq-q"><span>How do I get started?</span><span class="arrow">▼</span></div>
-        <div class="svp-faq-a">Tap "Book Consultation" to schedule a free call through the Remont booking system, or upload a room photo in the AI Studio tab above — a designer follows up either way.</div>
+        <div class="svp-faq-a">Tap "Book Consultation" to schedule a free call with a design consultant, who will follow up to understand your project and take it from there.</div>
       </div>
       <div class="svp-faq-item">
         <div class="svp-faq-q"><span>Will I know the price before work starts?</span><span class="arrow">▼</span></div>
         <div class="svp-faq-a">Yes. Starting prices are shown upfront on this page; your designer confirms the exact, itemised cost after the site visit, and you approve it before any work begins.</div>
       </div>
-      <div class="svp-faq-item">
-        <div class="svp-faq-q"><span>Is the AI Design Studio free?</span><span class="arrow">▼</span></div>
-        <div class="svp-faq-a">It's a small design fee (<span data-svp-price="ai-amount">₹19</span> per design, or <span data-svp-price="ai-pack">₹49 for 3 designs</span>) — this page is currently running in demo mode while the real payment and AI integration are being connected.</div>
-      </div>
+      <!-- AI Design Studio FAQ hidden along with the AI Studio section itself (see below) — re-enable together when real payment/AI are wired up, per shared/INTERIOR_README.md -->
       <div class="svp-faq-item">
         <div class="svp-faq-q"><span>What does the warranty cover?</span><span class="arrow">▼</span></div>
-        <div class="svp-faq-a">Every Complete Interior project carries a 10-year structural warranty. If a covered issue recurs within that period, it's fixed free of charge.</div>
+        <div class="svp-faq-a">Every Complete Interior project carries a 5-Year Workmanship Warranty, plus 1 year of complimentary AMC. If a covered issue recurs within that period, it's fixed free of charge.</div>
       </div>
       <div class="svp-faq-item">
         <div class="svp-faq-q"><span>How long does a full home interior take?</span><span class="arrow">▼</span></div>
@@ -565,7 +559,7 @@
      ═══════════════════════════════════════════════════════════════════════ -->
 <div class="svp-sticky-bar" id="svpStickyBar">
   <button class="svp-btn svp-btn-primary" data-svp-book data-slug="consultation" data-label="Free interior design consultation">📅 Book Free Consultation</button>
-  <button class="svp-btn svp-btn-outline" style="color:#fff;border-color:rgba(255,255,255,.4)" onclick="SVP.activateTab('ai-studio',{scrollIntoView:true})">📷 Upload Room Photo</button>
+  <!-- AI Design Studio entry point hidden — feature is still fully simulated (fake result), see shared/INTERIOR_README.md "To go live" -->
   <button class="svp-btn-secondary" style="color:rgba(255,255,255,.75)" data-svp-chat="Hi Remont, I need help with interior design.">Need Help?</button>
 </div>
 

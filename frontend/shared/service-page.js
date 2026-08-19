@@ -37,19 +37,26 @@
   /* ══════════════════════════════════════════════════════════════════════
      BOOKING / CONTACT ARCHITECTURE
      Every primary CTA on the page calls RemontCTA.book() — never WhatsApp
-     directly. Today that means a plain redirect to the real, already-live
+     directly. For the 'interior' category (premium, consultation-first —
+     never the generic handyman catalogue), this redirects to the homepage's
+     Premium Interior lead modal (index.html, ?openLead=1#premium) instead of
+     /booking. Every other category still goes to the real, already-live
      Remont booking flow (frontend/booking.html), which already reads
      ?service=<slug> and ?city=<name> and pre-selects them against the real
-     backend catalog. If a slug doesn't match a seeded Service yet, booking.html
+     backend catalog; if a slug doesn't match a seeded Service yet, booking.html
      degrades gracefully to manual selection — nothing breaks either way.
-     When a dedicated interior-booking workflow exists later, only this one
-     function needs to change; no CTA, button, or page markup does.
+     No CTA, button, or page markup needed to change for the interior redirect
+     — only this one function did.
      WhatsApp is wired up ONLY as RemontCTA.chatWithExpert(), used exclusively
      by the secondary "Chat with Expert" buttons.
      ══════════════════════════════════════════════════════════════════════ */
   var RemontCTA = {
     book: function (ctx) {
       ctx = ctx || {};
+      if (cfg().category === 'interior') {
+        window.location.href = '/?openLead=1#premium';
+        return;
+      }
       var bookingCfg = (cfg().integrations && cfg().integrations.booking) || { baseUrl: '/booking' };
       var params = new URLSearchParams();
       if (ctx.slug) params.set('service', ctx.slug);
@@ -206,7 +213,13 @@
     var firstBtn = document.querySelector('[data-svp-tab-btn]');
     if (!firstBtn) return;
     var hash = (location.hash || '').replace('#', '');
-    var hashIsValidTab = hash && document.querySelector('[data-svp-panel="' + hash + '"]');
+    // A tab is only a valid deep-link target if its own nav button is actually
+    // present in the DOM — the AI Studio panel is still there (hidden) but its
+    // button was removed, so a manually-typed #ai-studio URL correctly falls
+    // back to the default tab instead of activating a panel with no visible
+    // tab selected (which would otherwise blank the whole content area, since
+    // activateTab() deactivates every other panel too).
+    var hashIsValidTab = hash && document.querySelector('[data-svp-tab-btn="' + hash + '"]');
     var initial = hashIsValidTab ? hash : firstBtn.getAttribute('data-svp-tab-btn');
     activateTab(initial, { skipScroll: true, skipHash: true });
   }
@@ -553,9 +566,13 @@
     });
   }
 
-  // Stage 1 — Idea & Inspiration Gallery. Clicking a style jumps into the
-  // already-built AI Studio tab and pre-highlights that style chip there
-  // (purely visual — the chip is still disabled until payment, same as always).
+  // Stage 1 — Idea & Inspiration Gallery. Previously, clicking a style jumped
+  // into the AI Studio tab and pre-highlighted that style chip there — removed
+  // along with the AI Studio section itself (still fully simulated/mocked, not
+  // customer-ready; see shared/INTERIOR_README.md). The gallery still renders
+  // as visual inspiration; re-add the click-through once AI Studio is live
+  // (must not call SVP.activateTab('ai-studio', …) while the panel is hidden —
+  // that deactivates every other tab too and leaves the whole content area blank).
   function renderInspirationGallery() {
     var c = window.INTERIOR_CONFIG;
     var grid = document.querySelector('[data-svp-render="inspiration"]');
@@ -565,15 +582,6 @@
         '<img src="' + item.img + '" alt="' + item.style + ' interior style inspiration" loading="lazy" />' +
         '<span class="tag">' + item.style + '</span></div>';
     }).join('');
-    grid.addEventListener('click', function (e) {
-      var card = e.target.closest('[data-svp-insp-style]');
-      if (!card) return;
-      var style = card.getAttribute('data-svp-insp-style');
-      SVP.activateTab('ai-studio', { scrollIntoView: true });
-      document.querySelectorAll('[data-svp-render="ai-styles"] .svp-chip').forEach(function (chip) {
-        chip.classList.toggle('selected', chip.textContent.trim() === style);
-      });
-    });
   }
 
   // Stage 1 — Rough Budget Estimator. Pure client-side arithmetic off the

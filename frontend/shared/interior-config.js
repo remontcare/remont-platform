@@ -70,7 +70,7 @@ window.INTERIOR_CONFIG = {
     { id: 'premium', name: 'Premium', priceLabel: '₹29,999', featured: false, serviceType: 'digital',
       bullets: ['Everything in Standard', '3D walkthrough video', 'Detailed BOQ', 'Unlimited revisions'] },
     { id: 'complete-interior', name: 'Complete Interior', priceLabel: '₹2,00,000', featured: false, serviceType: 'onsite', categoryKey: 'interior',
-      bullets: ['Full design + execution', 'Dedicated project manager', 'Turnkey delivery', '10-year structural warranty'] },
+      bullets: ['Full design + execution', 'Dedicated project manager', 'Turnkey delivery', '5-Year Workmanship Warranty + 1-Year Complimentary AMC'] },
   ],
 
   // AI Design Studio is entirely digital (PAN-India/worldwide) — no city check
