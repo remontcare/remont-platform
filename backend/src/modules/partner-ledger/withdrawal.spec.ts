@@ -18,7 +18,7 @@ function makeService() {
     withdrawalRequest: prisma.withdrawalRequest,
   }));
   const ledger = new PartnerLedgerService(prisma);
-  const svc = new WithdrawalService(prisma, ledger);
+  const svc = new WithdrawalService(prisma, ledger, {} as any);
   return { svc, prisma, ledger };
 }
 

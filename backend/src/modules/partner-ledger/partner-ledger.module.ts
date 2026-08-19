@@ -4,9 +4,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { OnEvent } from '@nestjs/event-emitter';
 import { LedgerEntryType, WithdrawalStatus, UserRole, PartnerHoldType, PartnerHoldStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER } from '../../common';
+import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 
 // Vendor Wallet config — all admin-tunable via the existing SiteSetting key/value screen
 // (frontend/admin/settings.html), group 'wallet'. Values below are the fallback defaults
@@ -313,12 +315,75 @@ export class WarrantyHoldSweepService {
 
 @Injectable()
 export class WithdrawalService {
-  constructor(private prisma: PrismaService, private ledger: PartnerLedgerService) {}
+  constructor(private prisma: PrismaService, private ledger: PartnerLedgerService, private payments: PaymentsService) {}
 
   private async resolveVendor(userId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!v) throw new NotFoundException('Partner profile not found');
     return v;
+  }
+
+  // ── Vendor Wallet: Add Money ────────────────────────────────────────────────────────
+  // Mirrors WalletService.initiateTopup()/confirmTopup() (wallet.module.ts) exactly — the
+  // customer wallet flow is already the proven-safe pattern in this codebase (real
+  // Razorpay order, credit only after re-verifying the HMAC signature server-side,
+  // idempotent on the PAID check below). The one prior generic "add money" endpoint
+  // (WalletService itself) credits User.walletBalance, a completely different balance
+  // than the one this portal's Earnings view or the withdrawal system reads
+  // (PartnerLedgerEntry/ServiceVendor.pendingPayout) — using it as-is would silently
+  // create an orphaned balance a partner would never see. This posts through the real
+  // ledger instead, via postEntry(), keeping PartnerLedgerEntry the single source of truth.
+  async initiateTopup(userId: string, amount: number, frontendUrl: string) {
+    if (!amount || amount <= 0) throw new BadRequestException('Enter a valid amount');
+    await this.resolveVendor(userId); // 404s early if this account has no vendor profile
+    const payOrder: any = await this.payments.initiatePayment(userId, amount, VENDOR_WALLET_TOPUP_MARKER, frontendUrl);
+    // Rename keyId -> razorpayKeyId to match the field name every other frontend Razorpay
+    // call site in this codebase already expects (see orders.module.ts's collectBalance()).
+    return { ...payOrder, razorpayKeyId: payOrder.keyId };
+  }
+
+  // Credits exactly once no matter which caller gets here first — this method itself
+  // (the customer's browser calling back after Razorpay's checkout closes) or
+  // PaymentsService.handleWebhook's onVendorWalletTopupCaptured listener below (Razorpay's
+  // server-to-server webhook, which can legitimately arrive before, after, or concurrently
+  // with the browser callback). `status==='PAID'` is NOT used as the "already credited"
+  // signal — see the creditedAt field comment in schema.prisma for why that was the bug.
+  async confirmTopup(userId: string, paymentId: string, gatewayOrderId: string, signature: string) {
+    const vendor = await this.resolveVendor(userId);
+    const tx = await this.prisma.paymentTransaction.findFirst({
+      where: { gatewayOrderId, userId, orderId: VENDOR_WALLET_TOPUP_MARKER },
+    });
+    if (!tx) throw new BadRequestException('Top-up payment not found for this account');
+
+    const ok = await this.payments.verifyAndMarkPaid(gatewayOrderId, paymentId, signature);
+    if (!ok) throw new BadRequestException('Invalid payment signature');
+
+    await this.claimAndCredit(tx.id, vendor.id, Number(tx.amount));
+    return { balance: await this.ledger.availableBalance(vendor.id) };
+  }
+
+  /** Atomic claim: only the caller whose updateMany actually flips creditedAt from null
+   * wins the right to credit the ledger — the loser (whichever of confirmTopup/the webhook
+   * listener arrives second) is a safe no-op. */
+  private async claimAndCredit(paymentTransactionId: string, vendorId: string, amount: number) {
+    const claimed = await this.prisma.paymentTransaction.updateMany({
+      where: { id: paymentTransactionId, creditedAt: null },
+      data: { creditedAt: new Date() },
+    });
+    if (claimed.count !== 1) return;
+    await this.prisma.$transaction((txClient) =>
+      this.ledger.postEntry(txClient, vendorId, 'TOP_UP', amount, { notes: 'Wallet top-up via Razorpay' }),
+    );
+  }
+
+  // Safety net for the case where Razorpay's webhook confirms payment before the partner's
+  // own browser ever calls confirmTopup() back (tab closed, flaky network, etc.) — without
+  // this, that money would be captured by Razorpay but never reach the vendor's ledger.
+  @OnEvent('payment.vendorWalletTopup.captured')
+  async onVendorWalletTopupCaptured(p: { paymentTransactionId: string; userId: string; amount: number }) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId: p.userId } });
+    if (!vendor) return;
+    await this.claimAndCredit(p.paymentTransactionId, vendor.id, p.amount);
   }
 
   async request(userId: string, amount: number) {
@@ -390,6 +455,19 @@ export class PartnerLedgerController {
   }
 
   @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)
+  @Post('wallet/topup')
+  walletTopup(@CurrentUser() u: JwtPayload, @Body() b: { amount: number }) {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    return this.withdrawals.initiateTopup(u.sub, b.amount, frontendUrl);
+  }
+
+  @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)
+  @Post('wallet/topup/confirm')
+  confirmWalletTopup(@CurrentUser() u: JwtPayload, @Body() b: { gatewayOrderId: string; paymentId: string; signature: string }) {
+    return this.withdrawals.confirmTopup(u.sub, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)
   @Get('withdrawals/me')
   myWithdrawals(@CurrentUser() u: JwtPayload) {
     return this.withdrawals.myHistory(u.sub);
@@ -409,6 +487,7 @@ export class PartnerLedgerController {
 }
 
 @Module({
+  imports: [PaymentsModule],
   controllers: [PartnerLedgerController],
   providers: [PartnerLedgerService, WithdrawalService, WarrantyHoldSweepService],
   exports: [PartnerLedgerService, WithdrawalService],

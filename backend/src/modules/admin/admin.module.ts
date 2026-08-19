@@ -317,6 +317,86 @@ export class AdminService {
     return this.prisma.serviceVendor.update({ where: { id: vendorId }, data: { staffType } });
   }
 
+  // Full profile view for an already-approved vendor — previously the only detail view in
+  // admin was PartnerRegistration's pre-approval record; once a vendor became active there
+  // was no way to see their photo/documents/address/earnings/withdrawal history from admin
+  // at all. Reuses existing data/services throughout — no new tracking, just a single read.
+  async getVendorDetail(vendorId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({
+      where: { id: vendorId },
+      include: {
+        user: { select: { name: true, phone: true, email: true } },
+        documents: true,
+        cityUpdateRequests: { orderBy: { createdAt: 'desc' }, take: 10 },
+        bankUpdateRequests: { orderBy: { createdAt: 'desc' }, take: 5 },
+      },
+    });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    const [ledger, availableBalance, withdrawals] = await Promise.all([
+      this.ledger.ledgerForVendor(vendorId, 20),
+      this.ledger.availableBalance(vendorId),
+      this.prisma.withdrawalRequest.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: 20 }),
+    ]);
+    return { ...vendor, ledger, availableBalance, withdrawals };
+  }
+
+  // ─── Vendor documents — verify/reject (nothing existed here before; a partner could
+  // upload/reupload a document but no admin surface could ever act on it, so it sat at
+  // verified:false forever) ────────────────────────────────────────────────────────────
+  async verifyVendorDocument(docId: string) {
+    const doc = await this.prisma.vendorDocument.findUnique({ where: { id: docId } });
+    if (!doc) throw new NotFoundException('Document not found');
+    const updated = await this.prisma.vendorDocument.update({ where: { id: docId }, data: { verified: true } });
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: doc.vendorId }, select: { userId: true } });
+    if (vendor) this.events.emit('vendor.document.verified', { userId: vendor.userId, docType: doc.type });
+    return updated;
+  }
+
+  async rejectVendorDocument(docId: string) {
+    const doc = await this.prisma.vendorDocument.findUnique({ where: { id: docId } });
+    if (!doc) throw new NotFoundException('Document not found');
+    const updated = await this.prisma.vendorDocument.update({ where: { id: docId }, data: { verified: false } });
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: doc.vendorId }, select: { userId: true } });
+    if (vendor) this.events.emit('vendor.document.rejected', { userId: vendor.userId, docType: doc.type });
+    return updated;
+  }
+
+  // ─── Vendor city/address correction requests ───────────────────────────────────────
+  async listCityUpdateRequests(status?: string) {
+    return this.prisma.vendorCityUpdateRequest.findMany({
+      where: status ? { status } : {},
+      include: { vendor: { select: { fullName: true, baseCity: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async approveCityUpdate(id: string, adminId: string) {
+    const req = await this.prisma.vendorCityUpdateRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    // Only on approval does the requested city actually reach ServiceVendor.baseCity — a
+    // rejected or still-pending request never touches the live profile.
+    await this.prisma.$transaction([
+      this.prisma.serviceVendor.update({ where: { id: req.vendorId }, data: { baseCity: req.requestedCity } }),
+      this.prisma.vendorCityUpdateRequest.update({ where: { id }, data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() } }),
+    ]);
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'VENDOR_CITY_UPDATE_APPROVED', targetType: 'VendorCityUpdateRequest', targetId: id, metadata: { city: req.requestedCity } });
+    const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
+    if (vendorForNotify) this.events.emit('vendor.cityUpdate.approved', { userId: vendorForNotify.userId, city: req.requestedCity });
+    return this.prisma.vendorCityUpdateRequest.findUnique({ where: { id } });
+  }
+
+  async rejectCityUpdate(id: string, adminId: string) {
+    const req = await this.prisma.vendorCityUpdateRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    const updated = await this.prisma.vendorCityUpdateRequest.update({ where: { id }, data: { status: 'REJECTED', reviewedBy: adminId, reviewedAt: new Date() } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'VENDOR_CITY_UPDATE_REJECTED', targetType: 'VendorCityUpdateRequest', targetId: id });
+    const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
+    if (vendorForNotify) this.events.emit('vendor.cityUpdate.rejected', { userId: vendorForNotify.userId, city: req.requestedCity });
+    return updated;
+  }
+
   // ─── Vendor Wallet: Base Hold + admin hold/release ─────────────────────
   // Base Hold is a pure withdrawal-floor threshold (see PartnerLedgerService.availableBalance)
   // — no ledger entry, just the stored field an admin can adjust per vendor.
@@ -2076,8 +2156,11 @@ Return JSON with:
   // ─── Servicemen Enquiries ─────────────────────────────────────────────
 
   async listServicemenEnquiries() {
+    // Was filtering on 'PENDING'/'UNDER_REVIEW' — neither is a valid VendorStatus value
+    // (the enum is PENDING_VERIFICATION/ACTIVE/SUSPENDED/REJECTED), so this always
+    // silently returned zero rows regardless of how many vendors were actually pending.
     return this.prisma.serviceVendor.findMany({
-      where: { status: { in: ['PENDING', 'UNDER_REVIEW'] as any } },
+      where: { status: VendorStatus.PENDING_VERIFICATION },
       include: {
         user: { select: { name: true, phone: true, email: true, createdAt: true } },
         documents: true,
@@ -2559,6 +2642,19 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   @Delete('vendors/:id') deleteVendorDirect(@Param('id') id: string) { return this.admin.deleteServiceVendorDirect(id); }
 
+  // ─── Vendor documents — verify/reject/download (download is just the existing url) ───
+  @Patch('vendors/documents/:docId/verify') verifyDoc(@Param('docId') id: string) { return this.admin.verifyVendorDocument(id); }
+  @Patch('vendors/documents/:docId/reject') rejectDoc(@Param('docId') id: string) { return this.admin.rejectVendorDocument(id); }
+
+  // ─── Vendor address/city correction requests ───────────────────────────────────────
+  @Get('vendors/city-update-requests') cityUpdateRequests(@Query('status') status?: string) { return this.admin.listCityUpdateRequests(status); }
+  @Patch('vendors/city-update-requests/:id/approve') approveCityUpdate(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.admin.approveCityUpdate(id, u.sub);
+  }
+  @Patch('vendors/city-update-requests/:id/reject') rejectCityUpdate(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.admin.rejectCityUpdate(id, u.sub);
+  }
+
   // ─── Phase 2: Agency Partner Management ────────────────────────────
   @Patch('agencies/:id/approve') approveAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.approveAgency(id, u.sub); }
   @Patch('agencies/:id/suspend') suspendAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.suspendAgency(id, u.sub); }
@@ -2570,6 +2666,12 @@ export class AdminController {
   @Get('vendors/attendance') vendorAttendance(@Query('date') date?: string, @Query('agencyOwnerId') agencyOwnerId?: string) {
     return this.admin.vendorAttendance(date, agencyOwnerId);
   }
+  // Declared last among GET vendors/* routes deliberately — Nest/Express matches routes
+  // in declaration order, so a `:id` wildcard placed before a static path like
+  // vendors/city-update-requests would swallow it (id="city-update-requests") instead of
+  // ever reaching that handler. Every more-specific GET vendors/... route above this one
+  // must stay above it; any new static GET route must also be added above, not below.
+  @Get('vendors/:id') vendorDetail(@Param('id') id: string) { return this.admin.getVendorDetail(id); }
   @Patch('withdrawals/:id/approve') approveWithdrawal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note?: string }) {
     return this.admin.approveWithdrawal(id, u.sub, b?.note);
   }

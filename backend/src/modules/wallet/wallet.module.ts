@@ -2,6 +2,7 @@ import {
   Module, Injectable, Controller, Get, Post, Body, Param, UseGuards, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { OnEvent } from '@nestjs/event-emitter';
 import { CouponType, TransactionReason, TransactionType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload } from '../../common';
@@ -29,18 +30,42 @@ export class WalletService {
   }
 
   // Mirrors MasterOrdersService.confirmPayment()'s pattern: re-verify the HMAC ourselves
-  // (via the existing gateway-secret-aware PaymentsService.verifyAndMarkPaid, which also
-  // handles idempotent status updates), then credit the wallet once, not per retry.
+  // (via the existing gateway-secret-aware PaymentsService.verifyAndMarkPaid), then credit
+  // the wallet exactly once no matter which caller gets here first — this method itself
+  // (the browser calling back after Razorpay's checkout closes) or
+  // PaymentsService.handleWebhook's onCustomerWalletTopupCaptured listener below (Razorpay's
+  // server-to-server webhook, which can legitimately race ahead of the browser callback).
+  // `status==='PAID'` is deliberately NOT used as the "already credited" signal — see the
+  // creditedAt field comment in schema.prisma for why that combination under-credits.
   async confirmTopup(userId: string, paymentId: string, gatewayOrderId: string, signature: string) {
     const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, userId, isWalletTopup: true } });
     if (!tx) throw new BadRequestException('Top-up payment not found for this account');
-    if (tx.status === 'PAID') return { walletBalance: await this.balance(userId) }; // idempotent
 
     const ok = await this.payments.verifyAndMarkPaid(gatewayOrderId, paymentId, signature);
     if (!ok) throw new BadRequestException('Invalid payment signature');
 
-    await this.credit(userId, Number(tx.amount), TransactionReason.WALLET_TOPUP, undefined, 'Wallet top-up via Razorpay');
+    await this.claimAndCredit(tx.id, userId, Number(tx.amount));
     return { walletBalance: await this.balance(userId) };
+  }
+
+  /** Atomic claim: only the caller whose updateMany actually flips creditedAt from null
+   * wins the right to credit the wallet — the loser (whichever of confirmTopup/the webhook
+   * listener arrives second) is a safe no-op. */
+  private async claimAndCredit(paymentTransactionId: string, userId: string, amount: number) {
+    const claimed = await this.prisma.paymentTransaction.updateMany({
+      where: { id: paymentTransactionId, creditedAt: null },
+      data: { creditedAt: new Date() },
+    });
+    if (claimed.count !== 1) return;
+    await this.credit(userId, amount, TransactionReason.WALLET_TOPUP, undefined, 'Wallet top-up via Razorpay');
+  }
+
+  // Safety net for the case where Razorpay's webhook confirms payment before the customer's
+  // own browser ever calls confirmTopup() back (tab closed, flaky network, etc.) — without
+  // this, that money would be captured by Razorpay but never reach the customer's wallet.
+  @OnEvent('payment.customerWalletTopup.captured')
+  async onCustomerWalletTopupCaptured(p: { paymentTransactionId: string; userId: string; amount: number }) {
+    await this.claimAndCredit(p.paymentTransactionId, p.userId, p.amount);
   }
   async transactions(userId: string, limit = 30) {
     return this.prisma.walletTransaction.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: limit });

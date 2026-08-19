@@ -62,4 +62,24 @@ export class AgencyNotificationsService {
   onWithdrawalRejected(p: { userId: string; amount: number; withdrawalId: string; note?: string }) {
     return this.notify(p.userId, 'Withdrawal Rejected', `Your withdrawal request for ₹${p.amount} was rejected.${p.note ? ' Reason: ' + p.note : ''}`, 'WITHDRAWAL_REJECTED', { withdrawalId: p.withdrawalId });
   }
+
+  @OnEvent('vendor.document.verified')
+  onDocumentVerified(p: { userId: string; docType: string }) {
+    return this.notify(p.userId, 'Document Verified', `Your ${p.docType} has been verified by admin.`, 'DOCUMENT_VERIFIED', { docType: p.docType });
+  }
+
+  @OnEvent('vendor.document.rejected')
+  onDocumentRejected(p: { userId: string; docType: string }) {
+    return this.notify(p.userId, 'Document Needs Attention', `Your ${p.docType} was not approved — please re-upload a clear copy.`, 'DOCUMENT_REJECTED', { docType: p.docType });
+  }
+
+  @OnEvent('vendor.cityUpdate.approved')
+  onCityUpdateApproved(p: { userId: string; city: string }) {
+    return this.notify(p.userId, 'City Change Approved', `Your service city has been updated to ${p.city}.`, 'CITY_UPDATE_APPROVED', { city: p.city });
+  }
+
+  @OnEvent('vendor.cityUpdate.rejected')
+  onCityUpdateRejected(p: { userId: string; city: string }) {
+    return this.notify(p.userId, 'City Change Rejected', `Your request to change your service city to ${p.city} was rejected by admin.`, 'CITY_UPDATE_REJECTED', { city: p.city });
+  }
 }

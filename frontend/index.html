@@ -8391,6 +8391,13 @@
       paymentMethod: window._bmPayMethod || 'COD'
     };
     if (pincode) payload.pincode = pincode;
+    // Thread through the already-captured GPS fix (used just above for the proximity
+    // sanity check) so dispatch can match on real distance instead of falling back to the
+    // city centroid — same LocationService.isValidCoords guard the proximity check uses.
+    if (savedAddr && LocationService.isValidCoords(savedAddr.latitude, savedAddr.longitude)) {
+      payload.latitude = savedAddr.latitude;
+      payload.longitude = savedAddr.longitude;
+    }
     if (email) payload.email = email;
     if (notes) payload.notes = notes;
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
@@ -11418,7 +11425,7 @@ var _ppJobTab = 'new';
 window.openPartnerFlow = function() {
   var token = localStorage.getItem('pr_token');
   if (token) {
-    fetch(API_BASE + '/api/v1/vendors/profile', { headers: { 'Authorization': 'Bearer ' + token } })
+    fetch(API_BASE + '/api/v1/vendors/service/me', { headers: { 'Authorization': 'Bearer ' + token } })
       .then(function(r) { return r.json(); })
       .then(function(res) {
         var p = (res && res.data) ? res.data : res;
@@ -11627,18 +11634,15 @@ function _ppLoadEarnings() {
   var token = localStorage.getItem('pr_token');
   if (!token) return;
   var headers = { 'Authorization': 'Bearer ' + token };
-  fetch(API_BASE + '/api/v1/wallet/balance', { headers: headers })
-    .then(function(r) { return r.json(); })
-    .then(function(res) {
-      var d = (res && res.data) ? res.data : res;
-      var bal = Number(d && (d.balance !== undefined ? d.balance : d) || 0);
-      document.getElementById('pp-wbal').textContent = '₹' + bal.toLocaleString('en-IN');
-    }).catch(function() {});
+  // Wallet Balance shown here must be the partner's own ledger balance (same source
+  // vendor.html's wallet-banner uses), not /wallet/balance — that's the unrelated
+  // customer wallet and was showing partners the wrong number entirely.
   fetch(API_BASE + '/api/v1/vendors/service/me/earnings', { headers: headers })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var d = (res && res.data) ? res.data : res;
       if (d) {
+        document.getElementById('pp-wbal').textContent = '₹' + Number((d.lifetime && d.lifetime.pending) || 0).toLocaleString('en-IN');
         document.getElementById('pp-earn-month').textContent = '₹' + Number((d.thisMonth && d.thisMonth.earnings) || 0).toLocaleString('en-IN');
         document.getElementById('pp-earn-pending').textContent = '₹' + Number((d.lifetime && d.lifetime.pending) || 0).toLocaleString('en-IN');
       }
@@ -11664,11 +11668,12 @@ function _renderJobCards(jobs, container, preview, isAvailablePool) {
     var date = job.scheduledDate ? new Date(job.scheduledDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
     var price = job.totalAmount ? '₹' + Number(job.totalAmount).toLocaleString('en-IN') : '';
     var id = job.id;
+    var phone = (job.customer && job.customer.phone) || '';
 
     var acts = '';
     if (!preview) {
       if (cls === 'jnew') acts = '<button class="pp-jbtn accept" onclick="ppAcceptJob(\''+id+'\')">✓ Accept</button><button class="pp-jbtn decline" onclick="ppDeclineJob(\''+id+'\')">✗ Decline</button>';
-      else if (cls === 'jacc') acts = '<button class="pp-jbtn nav" onclick="ppNavigate(\''+id+'\')">🗺 Navigate</button><button class="pp-jbtn call" onclick="ppCall(\''+id+'\')">📞 Call</button><button class="pp-jbtn start" onclick="ppStartJob(\''+id+'\')">▶ Start</button>';
+      else if (cls === 'jacc') acts = '<button class="pp-jbtn nav" onclick="ppNavigate(\''+id+'\')">🗺 Navigate</button><button class="pp-jbtn call" onclick="ppCall(\''+id+'\',\''+phone+'\')">📞 Call</button><button class="pp-jbtn start" onclick="ppStartJob(\''+id+'\')">▶ Start</button>';
       else if (cls === 'jong') acts = '<button class="pp-jbtn done" onclick="ppCompleteJob(\''+id+'\')">✓ Mark Complete</button><button class="pp-jbtn nav" onclick="ppNavigate(\''+id+'\')">🗺 Navigate</button>';
       else acts = '<button class="pp-jbtn view" onclick="showToast(\'Job completed!\',\'success\')">View Details</button>';
     }
@@ -11708,23 +11713,21 @@ window.ppDeclineJob = function(id) {
   _ppLoadJobs('new');
 };
 
+// Starting/completing a job requires the customer's start/completion OTP (see
+// orders.module.ts's verify-otp/complete — a job can never be marked started or done
+// without the customer actually present) — a flow this compact widget doesn't implement.
+// Rather than call an endpoint that will always fail here, hand off to the full Partner
+// App (vendor.html) which already has the real OTP + before/after photo + payment flow.
 window.ppStartJob = function(id) {
-  var token = localStorage.getItem('pr_token');
-  fetch(API_BASE + '/api/v1/orders/' + id + '/en-route', {
-    method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token }
-  }).then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
-    .then(function() { showToast('On your way! ✓', 'success'); _ppLoadJobs('accepted'); })
-    .catch(function() { showToast('Error updating job', 'error'); });
+  if (confirm('Starting a job requires the customer\'s OTP. Continue in the full Partner App?')) {
+    window.location.href = '/vendor.html';
+  }
 };
 
 window.ppCompleteJob = function(id) {
-  var token = localStorage.getItem('pr_token');
-  fetch(API_BASE + '/api/v1/orders/' + id + '/complete', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ photosAfter: [] })
-  }).then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
-    .then(function() { showToast('Job completed! Great work! 🎉', 'success'); _ppLoadJobs('ongoing'); _ppLoadDashboard(); })
-    .catch(function() { showToast('Error completing job', 'error'); });
+  if (confirm('Completing a job requires the customer\'s completion OTP. Continue in the full Partner App?')) {
+    window.location.href = '/vendor.html';
+  }
 };
 
 window.ppNavigate = function(id) {
@@ -11735,7 +11738,24 @@ window.ppNavigate = function(id) {
   } else { window.open('https://www.google.com/maps', '_blank'); }
 };
 
-window.ppCall = function(id) { showToast('Customer contact visible after job acceptance', 'warning'); };
+window.ppCall = function(id, phone) {
+  if (phone) { window.location.href = 'tel:' + phone; }
+  else { showToast('Customer contact not available for this job', 'warning'); }
+};
+
+window.ppRequestWithdrawal = function() {
+  var token = localStorage.getItem('pr_token');
+  var amountStr = prompt('Amount to withdraw (₹):');
+  if (!amountStr) return;
+  var amount = Number(amountStr);
+  if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+  fetch(API_BASE + '/api/v1/vendors/withdrawals', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ amount: amount })
+  }).then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error((d && d.message) || 'Request failed'); return d; }); })
+    .then(function() { showToast('Withdrawal request submitted for admin approval', 'success'); })
+    .catch(function(e) { showToast(e.message || 'Could not submit withdrawal request', 'error'); });
+};
 
 window.ppLogout = function() {
   if (!confirm('Logout from partner portal?')) return;
@@ -12060,7 +12080,7 @@ window.closeCustPartner = function() {
           <div><div class="pp-wstat-lbl">This Month Earned</div><div class="pp-wstat-val" id="pp-earn-month">₹0</div></div>
           <div><div class="pp-wstat-lbl">Pending Payout</div><div class="pp-wstat-val" id="pp-earn-pending">₹0</div></div>
         </div>
-        <button class="pp-withdraw-btn" onclick="showToast('Bank withdrawal coming soon!','warning')">Withdraw to Bank →</button>
+        <button class="pp-withdraw-btn" onclick="ppRequestWithdrawal()">Withdraw to Bank →</button>
       </div>
       <div class="pp-sec-hd"><span>Transactions</span></div>
       <div class="pp-txn-list" id="pp-txn-list">

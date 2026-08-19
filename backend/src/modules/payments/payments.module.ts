@@ -4,9 +4,10 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER } from '../../common';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 interface PhonePeConfig {
@@ -33,7 +34,7 @@ export class PaymentsService implements OnModuleInit {
   // Which gateway is the active one
   private activeGateway: 'RAZORPAY' | 'PHONEPE' | '' = '';
 
-  constructor(private prisma: PrismaService, private paymentNotify: PaymentNotificationsService) {
+  constructor(private prisma: PrismaService, private paymentNotify: PaymentNotificationsService, private events: EventEmitter2) {
     // Bootstrap from env vars — will be overridden by DB in onModuleInit
     this.razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
     this.razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
@@ -376,6 +377,24 @@ export class PaymentsService implements OnModuleInit {
               data: { paymentId: payment.id, status: 'ACTIVE', servicesRemaining: sub.plan.freeServicesCount },
             });
           }
+        }
+        // Wallet top-ups (customer or vendor) are credited by the explicit confirm-payment
+        // call re-verifying the HMAC signature — but that call depends on the customer's own
+        // browser round-tripping back to this server, which doesn't always happen (closed
+        // tab, flaky network, killed app). This webhook is Razorpay's guaranteed-delivery
+        // channel, so it must be able to trigger the same credit independently. Both listeners
+        // (WalletService.onCustomerWalletTopupCaptured / WithdrawalService.
+        // onVendorWalletTopupCaptured) guard the actual credit with an atomic claim on
+        // PaymentTransaction.creditedAt, so emitting here even when the explicit confirm call
+        // already credited is always a safe no-op, never a double-credit.
+        if (tx.isWalletTopup) {
+          this.events.emit('payment.customerWalletTopup.captured', {
+            paymentTransactionId: tx.id, userId: tx.userId, amount: Number(tx.amount),
+          });
+        } else if (tx.orderId === VENDOR_WALLET_TOPUP_MARKER) {
+          this.events.emit('payment.vendorWalletTopup.captured', {
+            paymentTransactionId: tx.id, userId: tx.userId, amount: Number(tx.amount),
+          });
         }
       }
     }

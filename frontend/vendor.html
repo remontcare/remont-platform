@@ -383,6 +383,11 @@ a{color:inherit;text-decoration:none}
           <div class="wb-label" data-en="Total Wallet Balance" data-hi="कुल वॉलेट बैलेंस">Total Wallet Balance</div>
           <div class="wb-val" id="earn-wallet-val">₹0</div>
           <div class="wb-row"><div style="font-size:11px;opacity:.85" id="earn-pending-label" data-en="Pending payout" data-hi="लंबित भुगतान">Pending payout</div><button class="wb-btn" onclick="togglePayoutHistory()" data-en="Payout History" data-hi="भुगतान इतिहास">Payout History</button></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <input type="number" id="topup-amount" placeholder="Amount" style="flex:1;padding:10px 12px;border:1.5px solid rgba(255,255,255,.4);border-radius:8px;font-size:13px;background:rgba(255,255,255,.15);color:#fff">
+            <button class="wb-btn" onclick="addMoney()" data-en="Add Money" data-hi="पैसे जोड़ें">Add Money</button>
+          </div>
+          <div class="auth-error" id="topup-err" style="color:#fff"></div>
         </div>
         <div id="payout-history-panel" style="display:none;background:#fff;border:1px solid var(--mist);border-radius:12px;padding:12px 14px;margin-bottom:14px">
           <div style="font-size:12px;color:#6b7280;margin-bottom:8px">Remont settles partner payouts periodically via bank transfer/UPI/cash. This shows what's already been paid out to you.</div>
@@ -440,10 +445,37 @@ a{color:inherit;text-decoration:none}
       <!-- PROFILE VIEW -->
       <div class="view" id="view-profile">
         <div class="profile-head">
-          <div class="profile-avatar">👤</div>
-          <div class="profile-name" id="prof-name">Ramesh Kumar</div>
+          <div class="profile-avatar" id="profile-avatar-wrap">
+            <img id="profile-avatar-img" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:50%" alt="">
+            <span id="profile-avatar-emoji">👤</span>
+          </div>
+          <input type="file" id="profile-photo-input" accept="image/*" style="display:none" onchange="updateProfilePhoto(this)">
+          <div><button class="btn-outline" style="padding:4px 12px;font-size:11px;margin-top:8px" onclick="document.getElementById('profile-photo-input').click()">📷 <span id="profile-photo-btn-label" data-en="Add Photo" data-hi="फोटो जोड़ें">Add Photo</span></button></div>
+          <div class="profile-name" id="prof-name" style="margin-top:8px">Ramesh Kumar</div>
           <div class="profile-phone" id="prof-phone">+91 98765 43210</div>
+          <div style="margin-top:6px" id="profile-status-badge"></div>
         </div>
+
+        <div class="section-title" data-en="Partner Details" data-hi="पार्टनर विवरण">Partner Details</div>
+        <div class="profile-row" style="cursor:default"><div class="pr-left"><span class="pr-icon">🆔</span><span data-en="Partner ID" data-hi="पार्टनर आईडी">Partner ID</span></div><div class="pr-right" id="prof-id" style="font-size:11px">—</div></div>
+        <div class="profile-row" style="cursor:default"><div class="pr-left"><span class="pr-icon">📍</span><span data-en="City" data-hi="शहर">City</span></div><div class="pr-right" id="prof-city">—</div></div>
+        <div class="profile-row" style="cursor:default"><div class="pr-left"><span class="pr-icon">🛠️</span><span data-en="Skills" data-hi="कौशल">Skills</span></div><div class="pr-right" id="prof-skills">—</div></div>
+        <div class="profile-row" style="cursor:default"><div class="pr-left"><span class="pr-icon">📆</span><span data-en="Experience" data-hi="अनुभव">Experience</span></div><div class="pr-right" id="prof-experience">—</div></div>
+        <div class="profile-row" style="cursor:default"><div class="pr-left"><span class="pr-icon">⭐</span><span data-en="Rating" data-hi="रेटिंग">Rating</span></div><div class="pr-right" id="prof-rating">—</div></div>
+        <div class="profile-row" onclick="toggleCityChangeForm()"><div class="pr-left"><span class="pr-icon">✏️</span><span data-en="Request City Change" data-hi="शहर परिवर्तन का अनुरोध करें">Request City Change</span></div><div class="pr-right">→</div></div>
+        <div id="city-change-form" style="display:none;background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:8px;box-shadow:var(--shadow)">
+          <div class="field"><label data-en="New City" data-hi="नया शहर">New City</label><input id="city-change-input" placeholder="e.g. Indore"></div>
+          <div class="field"><label data-en="Reason (optional)" data-hi="कारण (वैकल्पिक)">Reason (optional)</label><input id="city-change-reason" placeholder="Why are you relocating?"></div>
+          <button class="btn-primary" onclick="submitCityChange()" data-en="Submit for Admin Approval" data-hi="व्यवस्थापक अनुमोदन हेतु सबमिट करें">Submit for Admin Approval</button>
+          <div class="auth-error" id="city-change-err"></div>
+          <div id="city-change-pending-note" style="font-size:11px;color:#9ca3af;margin-top:8px"></div>
+        </div>
+
+        <div class="section-title" data-en="Documents" data-hi="दस्तावेज़">Documents</div>
+        <div id="documents-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">Loading…</div></div></div>
+
+        <div class="section-title" data-en="Customer Reviews" data-hi="ग्राहक समीक्षा">Customer Reviews</div>
+        <div id="reviews-list"><div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No reviews yet</div></div></div>
 
         <div class="section-title" data-en="Attendance" data-hi="उपस्थिति">Attendance</div>
         <div class="profile-row" style="cursor:default">
@@ -470,7 +502,6 @@ a{color:inherit;text-decoration:none}
         <div class="section-title" data-en="Settings" data-hi="सेटिंग्स">Settings</div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">🌐</span><span data-en="Language" data-hi="भाषा">Language</span></div><div class="pr-right" id="prof-lang">English</div></div>
         <div class="profile-row" onclick="goView('support')"><div class="pr-left"><span class="pr-icon">🆘</span><span data-en="Help & Support" data-hi="सहायता">Help & Support</span></div><div class="pr-right">→</div></div>
-        <div class="profile-row"><div class="pr-left"><span class="pr-icon">📄</span><span data-en="Documents" data-hi="दस्तावेज़">Documents</span></div><div class="pr-right">✅</div></div>
         <div class="profile-row" onclick="doLogout()"><div class="pr-left"><span class="pr-icon">🚪</span><span data-en="Logout" data-hi="लॉगआउट">Logout</span></div><div class="pr-right"></div></div>
       </div>
 
@@ -510,6 +541,7 @@ a{color:inherit;text-decoration:none}
   <div class="jf-header">
     <div class="jf-close" onclick="exitJobFlow()">✕</div>
     <div class="jf-progress" id="jf-progress"></div>
+    <a class="jf-close" id="jf-call-btn" href="#" style="display:none;text-decoration:none;font-size:16px" title="Call customer">📞</a>
   </div>
   <div class="jf-body" id="jf-body"></div>
   <div class="jf-footer" id="jf-footer"></div>
@@ -691,11 +723,165 @@ function enterDashboard(){
   document.getElementById('team-ledger-block').style.display = vendorProfile.isAgencyOwner ? 'block':'none';
   document.getElementById('team-attendance-block').style.display = vendorProfile.isAgencyOwner ? 'block':'none';
   showScreen('screen-app');
+  renderProfileDetails();
   loadEarnings();
   loadJobs();
   if (vendorProfile.isAgencyOwner) { loadTeamMembers(); loadTeamLedger(); loadTeamAttendance(); }
   loadMyLedger();
   loadWithdrawals();
+}
+
+/* ── PROFILE DETAILS (photo, city, skills, documents, reviews, city-change) ── */
+function updateProfilePhoto(input){
+  if(!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    apiFetch('/vendors/service/me/photo', {method:'PATCH', body: JSON.stringify({photoBase64: e.target.result})})
+      .then(function(v){ vendorProfile = v; renderProfileDetails(); })
+      .catch(function(err){ alert('Could not update photo: ' + err.message); });
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+var VENDOR_STATUS_LABELS = {PENDING_VERIFICATION:['Pending Verification','pending'], ACTIVE:['Verified Partner','done'], SUSPENDED:['Suspended','pending'], REJECTED:['Rejected','pending']};
+function renderProfileDetails(){
+  if(!vendorProfile) return;
+  var img = document.getElementById('profile-avatar-img');
+  var emoji = document.getElementById('profile-avatar-emoji');
+  if (vendorProfile.photoUrl) { img.src = vendorProfile.photoUrl; img.style.display='block'; emoji.style.display='none'; }
+  else { img.style.display='none'; emoji.style.display='block'; }
+  document.getElementById('profile-photo-btn-label').textContent = vendorProfile.photoUrl ? 'Change Photo' : 'Add Photo';
+  document.getElementById('prof-id').textContent = vendorProfile.id || '—';
+  document.getElementById('prof-city').textContent = vendorProfile.baseCity || '—';
+  document.getElementById('prof-skills').textContent = (vendorProfile.skills && vendorProfile.skills.length) ? vendorProfile.skills.join(', ') : '—';
+  document.getElementById('prof-experience').textContent = vendorProfile.experienceYears ? (vendorProfile.experienceYears + ' yrs') : '—';
+  document.getElementById('prof-rating').textContent = '⭐ ' + Number(vendorProfile.rating||0).toFixed(1) + ' (' + (vendorProfile.completedJobs||0) + ' jobs)';
+  var st = VENDOR_STATUS_LABELS[vendorProfile.status] || [vendorProfile.status, 'pending'];
+  document.getElementById('profile-status-badge').innerHTML = '<span class="badge ' + st[1] + '">' + escapeHtml(st[0]) + '</span>';
+  renderDocuments();
+  renderReviews();
+  loadCityChangeStatus();
+}
+var DOC_TYPE_LABELS = {
+  AADHAAR_FRONT:'Aadhaar (Front)', AADHAAR_BACK:'Aadhaar (Back)',
+  DL_FRONT:'Driving License (Front)', DL_BACK:'Driving License (Back)',
+  PASSPORT_FRONT:'Passport (Front)', PASSPORT_BACK:'Passport (Back)',
+  VOTER_ID_FRONT:'Voter ID (Front)', VOTER_ID_BACK:'Voter ID (Back)',
+  ID_FRONT:'ID Proof (Front)', ID_BACK:'ID Proof (Back)',
+  PAN:'PAN Card', PHOTO:'Photo ID', POLICE_CERT:'Police Verification', CHEQUE:'Cancelled Cheque',
+};
+function renderDocuments(){
+  var el = document.getElementById('documents-list');
+  if(!el) return;
+  var docs = (vendorProfile && vendorProfile.documents) || [];
+  var rows = docs.map(function(d){
+    var label = DOC_TYPE_LABELS[d.type] || d.type;
+    return '<div class="profile-row" style="cursor:default;flex-wrap:wrap;row-gap:8px"><div class="pr-left" style="min-width:0"><span class="pr-icon">📄</span><span>'+escapeHtml(label)+'</span></div>'+
+      '<div class="pr-right" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+      '<span class="badge '+(d.verified?'done':'pending')+'">'+(d.verified?'Verified':'Pending')+'</span>'+
+      '<label class="btn-outline" style="padding:4px 10px;font-size:11px;cursor:pointer">Re-upload<input type="file" accept="image/*,application/pdf" style="display:none" data-doc-type="'+escapeHtml(d.type)+'" onchange="reuploadDocument(this)"></label>'+
+      '</div></div>';
+  }).join('');
+  el.innerHTML = (rows || '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No documents uploaded yet</div></div>') +
+    '<button class="add-member-btn" onclick="addNewDocument()">+ Add Document</button>';
+}
+function uploadDocumentImage(type, file){
+  var reader = new FileReader();
+  reader.onload = function(e){
+    apiFetch('/vendors/service/me/documents', {method:'POST', body: JSON.stringify({type:type, imageBase64:e.target.result})})
+      .then(function(){ return loadVendorProfile(); })
+      .then(function(){ renderProfileDetails(); })
+      .catch(function(err){ alert('Could not upload document: ' + err.message); });
+  };
+  reader.readAsDataURL(file);
+}
+function reuploadDocument(input){
+  if(!input.files || !input.files[0]) return;
+  uploadDocumentImage(input.getAttribute('data-doc-type'), input.files[0]);
+}
+function addNewDocument(){
+  var type = prompt('Document type (e.g. AADHAAR_FRONT, AADHAAR_BACK, PAN, POLICE_CERT):');
+  if(!type) return;
+  type = type.trim().toUpperCase().replace(/\s+/g,'_');
+  if(!type) return;
+  var input = document.createElement('input');
+  input.type='file'; input.accept='image/*,application/pdf';
+  input.onchange = function(){ if(input.files && input.files[0]) uploadDocumentImage(type, input.files[0]); };
+  input.click();
+}
+function renderReviews(){
+  var el = document.getElementById('reviews-list');
+  if(!el) return;
+  var reviews = (vendorProfile && vendorProfile.reviews) || [];
+  if(!reviews.length){ el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No reviews yet</div></div>'; return; }
+  el.innerHTML = reviews.map(function(r){
+    var date = new Date(r.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    var name = (r.user && r.user.name) || 'Customer';
+    return '<div class="customer-card" style="margin-bottom:10px"><div class="cc-detail-row" style="border-top:none;padding-top:0"><span class="cdl">'+escapeHtml(name)+'</span><span class="cdr">⭐ '+Number(r.rating||0).toFixed(1)+'</span></div>'+
+      (r.comment ? '<div style="font-size:13px;color:#374151;margin-top:6px">'+escapeHtml(r.comment)+'</div>' : '')+
+      '<div style="font-size:11px;color:#9ca3af;margin-top:6px">'+escapeHtml(date)+'</div></div>';
+  }).join('');
+}
+function toggleCityChangeForm(){
+  var el = document.getElementById('city-change-form');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function loadCityChangeStatus(){
+  apiFetch('/vendors/service/me/city-update-requests').then(function(list){
+    var note = document.getElementById('city-change-pending-note');
+    if (!note) return;
+    var pending = (list||[]).find(function(r){ return r.status === 'PENDING'; });
+    note.textContent = pending ? ('Pending request: ' + pending.requestedCity + ' (awaiting admin approval)') : '';
+  }).catch(function(){});
+}
+function submitCityChange(){
+  var city = document.getElementById('city-change-input').value.trim();
+  var reason = document.getElementById('city-change-reason').value.trim();
+  var err = document.getElementById('city-change-err'); err.textContent='';
+  if(!city){ err.textContent = 'Enter the new city'; return; }
+  apiFetch('/vendors/service/me/city-update-request', {method:'POST', body: JSON.stringify({requestedCity:city, reason: reason||undefined})})
+    .then(function(){
+      document.getElementById('city-change-input').value='';
+      document.getElementById('city-change-reason').value='';
+      alert('City change request submitted. Your profile city will update once admin approves.');
+      loadCityChangeStatus();
+    })
+    .catch(function(e){ err.textContent = e.message; });
+}
+
+/* ── WALLET ADD MONEY ── */
+function addMoney(){
+  var input = document.getElementById('topup-amount');
+  var amount = Number(input.value);
+  var err = document.getElementById('topup-err');
+  err.textContent = '';
+  if (!amount || amount <= 0) { err.textContent = 'Enter a valid amount'; return; }
+  apiFetch('/vendors/wallet/topup', { method:'POST', body: JSON.stringify({ amount: amount }) })
+    .then(function(res){
+      if (!window.Razorpay || !res.razorpayKeyId) { err.textContent = 'Payment gateway not available on this device.'; return; }
+      var rzp = new window.Razorpay({
+        key: res.razorpayKeyId,
+        amount: Math.round(amount * 100),
+        currency: 'INR',
+        name: 'Remont India',
+        description: 'Wallet top-up',
+        order_id: res.gatewayOrderId,
+        handler: function(response){
+          apiFetch('/vendors/wallet/topup/confirm', {method:'POST', body: JSON.stringify({
+            paymentId: response.razorpay_payment_id,
+            gatewayOrderId: response.razorpay_order_id,
+            signature: response.razorpay_signature,
+          })}).then(function(){
+            input.value='';
+            loadEarnings(); loadMyLedger(); loadWithdrawals();
+            alert('Money added to your wallet successfully.');
+          }).catch(function(e){ err.textContent = e.message; });
+        },
+        theme: { color: '#c4601a' },
+      });
+      rzp.on('payment.failed', function(resp){ err.textContent = 'Payment failed: ' + ((resp.error && resp.error.description) || 'Unknown error'); });
+      rzp.open();
+    })
+    .catch(function(e){ err.textContent = e.message; });
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
 function doLogout(){
@@ -956,7 +1142,7 @@ function jfGoto(n){ jfState.step=n; updateDots(); renderJfStep(); }
 
 function jfDisplay(){
   if(jfState.mock){
-    return {customer:'Suresh Patel (Demo)', service:'Electrician — Fan Repair', area:'Kolar Road', amount:450, address:'12 Kolar Road, Bhopal'};
+    return {customer:'Suresh Patel (Demo)', service:'Electrician — Fan Repair', area:'Kolar Road', amount:450, address:'12 Kolar Road, Bhopal', phone:'+919999999999'};
   }
   var o=jfState.order||{};
   return {
@@ -965,7 +1151,8 @@ function jfDisplay(){
     area:(o.address&&o.address.city)||'',
     amount:Number(o.totalAmount||o.serviceAmount||0),
     address:(o.address&&o.address.fullAddress)||'',
-    lat:o.address&&o.address.latitude, lng:o.address&&o.address.longitude
+    lat:o.address&&o.address.latitude, lng:o.address&&o.address.longitude,
+    phone:(o.customer&&o.customer.phone)||''
   };
 }
 
@@ -979,6 +1166,10 @@ function renderJfStep(){
   var areaText=escapeHtml(d.area);
   var addressText=escapeHtml(d.address);
 
+  var callBtn=document.getElementById('jf-call-btn');
+  if (s>=2 && d.phone) { callBtn.href='tel:'+d.phone; callBtn.style.display='flex'; }
+  else { callBtn.style.display='none'; }
+
   if(s===1){
     html = `<div class="jf-step-tag">Step 1 of 9 — Accepted</div><div class="jf-title">Job Accepted!</div>
       <div class="jf-sub">Here are the partial job details. Full address unlocks once you start.</div>
@@ -991,9 +1182,18 @@ function renderJfStep(){
   }
   else if(s===2){
     var mapHref = jfState.mock ? mapsNavigationHref() : mapsNavigationHref(d.lat, d.lng);
+    var mapEmbed = '';
+    var latN = Number(d.lat), lngN = Number(d.lng);
+    if (!jfState.mock && Number.isFinite(latN) && Number.isFinite(lngN)) {
+      var delta = 0.005;
+      var osmSrc = 'https://www.openstreetmap.org/export/embed.html?bbox=' + (lngN-delta)+','+(latN-delta)+','+(lngN+delta)+','+(latN+delta) + '&layer=mapnik&marker=' + latN + ',' + lngN;
+      mapEmbed = `<div style="border-radius:12px;overflow:hidden;border:1px solid var(--mist);margin-bottom:12px"><iframe src="${osmSrc}" width="100%" height="160" frameborder="0" loading="lazy" style="display:block"></iframe></div>`;
+    }
     html = `<div class="jf-step-tag">Step 2 of 9 — En Route</div><div class="jf-title">Head to Customer</div>
       <div class="jf-sub">Navigate to the customer location using Google Maps.</div>
-      <div class="customer-card"><div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${addressText||'Unlocked after accept'}</span></div></div>`;
+      <div class="customer-card"><div class="cc-top"><div class="cc-avatar">🧑</div><div><div class="cc-name">${customerText}</div><div class="cc-phone">${d.phone?escapeHtml(d.phone):'Not available'}</div></div></div>
+      <div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${addressText||'Unlocked after accept'}</span></div></div>
+      ${mapEmbed}`;
     foot = `<a class="map-nav-btn" href="${escapeHtml(mapHref)}" target="_blank" rel="noopener noreferrer">🗺️ Start Navigation</a>
       <button class="btn-primary" onclick="jfGoto(3)">I've Arrived →</button>`;
   }

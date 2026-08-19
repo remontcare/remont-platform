@@ -8,7 +8,7 @@ import { AgencyStatus, Language, OrderStatus, UserRole, VendorStatus } from '@pr
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -86,7 +86,6 @@ export class ServiceVendorsService {
     if (!skills.length) throw new BadRequestException('At least one valid skill is required');
     const safeData = {
       fullName: data.fullName.trim(),
-      baseCity: data.baseCity.trim(),
       skills,
       ...(data.businessName !== undefined ? { businessName: data.businessName.trim() } : {}),
       ...(data.isAgencyOwner !== undefined ? { isAgencyOwner: data.isAgencyOwner } : {}),
@@ -96,17 +95,54 @@ export class ServiceVendorsService {
     // Base Hold starts at the platform default on first registration only — never
     // overwritten on a later profile-edit upsert, so an admin's per-vendor adjustment sticks.
     const baseHoldAmount = await this.ledger.getBaseHoldDefault();
+    const existing = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    // baseCity is only ever written directly here for a brand-new registration or while
+    // still pending approval. Once a vendor is ACTIVE, this upsert must never silently
+    // change it — a city change directly affects job-assignment eligibility, so it must
+    // go through requestCityUpdate() (VendorCityUpdateRequest) + admin approval instead.
+    const cityWrite = !existing || existing.status !== 'ACTIVE' ? { baseCity: data.baseCity.trim() } : {};
     return this.prisma.serviceVendor.upsert({
       where: { userId },
-      create: { userId, baseHoldAmount, ...safeData },
-      update: safeData,
+      create: { userId, baseHoldAmount, baseCity: data.baseCity.trim(), ...safeData },
+      update: { ...safeData, ...cityWrite },
+    });
+  }
+
+  async requestCityUpdate(userId: string, data: { requestedCity: string; reason?: string }) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    if (!data.requestedCity?.trim()) throw new BadRequestException('requestedCity is required');
+    const request = await this.prisma.vendorCityUpdateRequest.create({
+      data: {
+        vendorId: vendor.id,
+        requestedCity: data.requestedCity.trim(),
+        reason: data.reason?.trim() || undefined,
+      },
+    });
+    return { status: request.status, createdAt: request.createdAt };
+  }
+
+  async myCityUpdateRequests(userId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+    if (!vendor) throw new NotFoundException('Vendor profile not found');
+    return this.prisma.vendorCityUpdateRequest.findMany({
+      where: { vendorId: vendor.id },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
     });
   }
 
   async profile(userId: string) {
     const v = await this.prisma.serviceVendor.findUnique({
       where: { userId },
-      include: { documents: true, issuedInventory: { include: { product: true } } },
+      include: {
+        documents: true,
+        issuedInventory: { include: { product: true } },
+        // Recent customer reviews — the `reviews` relation already existed on
+        // ServiceVendor but wasn't included here, so a partner's own profile call never
+        // surfaced them even though ReviewsService already computes `rating` from them.
+        reviews: { take: 10, orderBy: { createdAt: 'desc' }, include: { user: { select: { name: true } } } },
+      },
     });
     if (!v) throw new NotFoundException('Vendor profile not found');
     return v;
@@ -191,8 +227,19 @@ export class ServiceVendorsService {
     const skill = order.service?.category?.key;
     if (!skill || !vendor.skills.includes(skill)) return false;
     const address = order.address;
-    if (vendor.currentLatitude != null && vendor.currentLongitude != null) {
-      if (address?.latitude == null || address?.longitude == null) return true;
+    // GPS distance matching only applies when BOTH sides have a real fix. Address.latitude/
+    // longitude default to 0 (not null) in the schema, so a null-check alone never actually
+    // caught a missing/never-captured order location — every such order was silently run
+    // through haversineKm against (0,0), which excludes every real vendor. Falling back to
+    // city-text matching here mirrors exactly what DispatchService.dispatch() now does for
+    // the same no-coords case, so "available jobs" is never a stricter (or looser) set than
+    // what a vendor would have been automatically offered.
+    const vendorHasFreshLocation = vendor.currentLatitude != null && vendor.currentLongitude != null &&
+      vendor.lastLocationUpdate && (Date.now() - new Date(vendor.lastLocationUpdate).getTime()) < LOCATION_STALE_AFTER_MS;
+    if (vendorHasFreshLocation) {
+      if (!isValidIndiaCoords(address?.latitude, address?.longitude)) {
+        return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
+      }
       return haversineKm(vendor.currentLatitude, vendor.currentLongitude, address.latitude, address.longitude) <= vendor.serviceRadius;
     }
     return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
@@ -442,6 +489,8 @@ export class ServiceVendorsController {
   @Patch('me/photo') photo(@CurrentUser() u: JwtPayload, @Body() b: { photoBase64: string }) { return this.vs.updatePhoto(u.sub, b.photoBase64); }
   @Post('me/documents') doc(@CurrentUser() u: JwtPayload, @Body() b: { type: string; imageBase64: string }) { return this.vs.upsertDocument(u.sub, b.type, b.imageBase64); }
   @Post('me/bank-update-request') bankReq(@CurrentUser() u: JwtPayload, @Body() b: { accountName: string; accountNumber: string; ifsc: string }) { return this.vs.requestBankUpdate(u.sub, b); }
+  @Post('me/city-update-request') cityReq(@CurrentUser() u: JwtPayload, @Body() b: { requestedCity: string; reason?: string }) { return this.vs.requestCityUpdate(u.sub, b); }
+  @Get('me/city-update-requests') cityReqs(@CurrentUser() u: JwtPayload) { return this.vs.myCityUpdateRequests(u.sub); }
   @Patch('me/location') loc(@CurrentUser() u: JwtPayload, @Body() b: VendorLocationDto) { return this.vs.updateLocation(u.sub, b.lat, b.lng); }
   @Patch('me/status') status(@CurrentUser() u: JwtPayload, @Body() b: VendorOnlineStatusDto) { return this.vs.setOnlineStatus(u.sub, b.isOnline); }
   @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }

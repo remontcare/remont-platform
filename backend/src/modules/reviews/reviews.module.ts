@@ -31,37 +31,48 @@ export class ReviewsService {
       throw new BadRequestException('Can only review completed orders');
     }
 
-    const existing = await this.prisma.review.findFirst({ where: { orderId: dto.orderId, userId } });
-    if (existing) throw new BadRequestException('You have already reviewed this order');
+    // Race condition fix: the "already reviewed?" check and the create() below used to be
+    // two separate statements — two near-simultaneous submits (a double-tap, or a retried
+    // request) could both pass the check before either commits, producing two reviews for
+    // the same order and skewing the vendor's average. Locking the Order row first (same
+    // idiom as PartnerLedgerService.postEntry()'s vendor-row lock) serializes concurrent
+    // attempts for the same order — the second one's check always sees the first's
+    // now-committed review. This also makes the rating recompute below atomic with the
+    // review insert, so a crash in between can no longer leave the average one review stale.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${dto.orderId} FOR UPDATE`;
+      const existing = await tx.review.findFirst({ where: { orderId: dto.orderId, userId } });
+      if (existing) throw new BadRequestException('You have already reviewed this order');
 
-    const review = await this.prisma.review.create({
-      data: {
-        orderId: dto.orderId,
-        userId,
-        vendorId: order.vendorId || undefined,
-        serviceId: order.serviceId || undefined,
-        rating: dto.rating,
-        comment: dto.comment || null,
-        photos: dto.photos || [],
-      },
-    });
-
-    // Update vendor rating
-    if (order.vendorId) {
-      const agg = await this.prisma.review.aggregate({
-        where: { vendorId: order.vendorId },
-        _avg: { rating: true },
-        _count: { id: true },
-      });
-      await this.prisma.serviceVendor.update({
-        where: { id: order.vendorId },
+      const review = await tx.review.create({
         data: {
-          rating: Math.round((agg._avg.rating || 0) * 10) / 10,
+          orderId: dto.orderId,
+          userId,
+          vendorId: order.vendorId || undefined,
+          serviceId: order.serviceId || undefined,
+          rating: dto.rating,
+          comment: dto.comment || null,
+          photos: dto.photos || [],
         },
       });
-    }
 
-    return review;
+      // Update vendor rating
+      if (order.vendorId) {
+        const agg = await tx.review.aggregate({
+          where: { vendorId: order.vendorId },
+          _avg: { rating: true },
+          _count: { id: true },
+        });
+        await tx.serviceVendor.update({
+          where: { id: order.vendorId },
+          data: {
+            rating: Math.round((agg._avg.rating || 0) * 10) / 10,
+          },
+        });
+      }
+
+      return review;
+    });
   }
 
   async listForService(serviceId: string, limit = 20) {

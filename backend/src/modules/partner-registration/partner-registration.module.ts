@@ -389,6 +389,11 @@ export class PartnerRegistrationService {
           currentLatitude:  reg.latitude  || null,
           currentLongitude: reg.longitude || null,
           status:           'ACTIVE',
+          // Was captured during onboarding but never copied onto the live ServiceVendor
+          // profile — photoUrl stayed null (only saved as a VendorDocument below) and
+          // experienceYears was unreachable outside the pre-approval registration record.
+          photoUrl:         reg.profilePhotoUrl || null,
+          experienceYears:  reg.experienceYears || null,
           ...agencyFields,
         },
         update: {
@@ -398,6 +403,8 @@ export class PartnerRegistrationService {
           status:   'ACTIVE',
           ...(reg.latitude  ? { currentLatitude:  reg.latitude  } : {}),
           ...(reg.longitude ? { currentLongitude: reg.longitude } : {}),
+          ...(reg.profilePhotoUrl ? { photoUrl: reg.profilePhotoUrl } : {}),
+          ...(reg.experienceYears ? { experienceYears: reg.experienceYears } : {}),
           ...agencyFields,
         },
       });

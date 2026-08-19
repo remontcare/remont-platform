@@ -322,6 +322,34 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// A missing/never-captured GPS fix is stored as (0,0) throughout this codebase (Prisma's
+// Address/ServiceVendor location columns default to 0, not null) — so "(0,0)" is this
+// codebase's actual null-island sentinel, not a real location anyone is ever standing at.
+// Treating it as real data breaks distance math (haversineKm(0,0, realLat, realLng) computes
+// thousands of km, silently excluding every vendor from dispatch/eligibility). Centralized
+// here so every write path (order creation) and every read path (dispatch matching) agrees
+// on the exact same bounding box, instead of re-deriving/duplicating these bounds per call site.
+export function isValidIndiaCoords(lat: number | null | undefined, lng: number | null | undefined): boolean {
+  return lat != null && lng != null && lat !== 0 && lng !== 0 &&
+    lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
+}
+
+// A vendor's currentLatitude/Longitude come from their last location ping — without a
+// staleness cutoff, a vendor who went offline hours/days ago but never got flipped
+// isOnline:false would still count as "at" their last-known GPS fix. Shared so every GPS-
+// distance eligibility check (DispatchService.dispatch's automatic offer wave,
+// ServiceVendorsService.isEligibleForOrder's manual accept/available-jobs re-validation)
+// agrees on the same cutoff instead of one enforcing it and the other silently not.
+export const LOCATION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// PaymentTransaction.orderId marker for a vendor wallet top-up (WithdrawalService.
+// initiateTopup/confirmTopup in partner-ledger.module.ts) — mirrors the customer wallet's
+// own historical 'WALLET_TOPUP' marker (now superseded there by the real isWalletTopup
+// boolean; kept as a marker here since a vendor topup has no equivalent boolean column).
+// Exported so PaymentsService.handleWebhook can recognize it without importing
+// PartnerLedgerModule (which already imports PaymentsModule — importing back would cycle).
+export const VENDOR_WALLET_TOPUP_MARKER = 'VENDOR_WALLET_TOPUP';
+
 export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }

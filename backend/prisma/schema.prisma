@@ -162,6 +162,7 @@ enum LedgerEntryType {
   LEAD_COST // Vendor Wallet: debited on job accept, credited back on refund — see PartnerLedgerService
   HOLD // Vendor Wallet: debit posted when money moves into ANY PartnerHold (warranty/admin-manual)
   HOLD_RELEASE // Vendor Wallet: credit posted when a PartnerHold is released (auto or admin)
+  TOP_UP // Vendor Wallet: partner-initiated Razorpay top-up, credited only after server-side payment verification — see WithdrawalService.confirmVendorTopup()
 }
 
 enum WithdrawalStatus {
@@ -1038,6 +1039,11 @@ model ServiceVendor {
   pendingPayout      Decimal      @default(0) @db.Decimal(12, 2)
   rejectionReason    String?
   createdAt          DateTime     @default(now())
+  // Carried over from PartnerRegistration.experienceYears at approval time — was captured
+  // during onboarding but never copied onto the live vendor profile, so it was unusable
+  // from anywhere except the pre-approval registration record. Free text (e.g. "5 years"),
+  // matching the source field's own type.
+  experienceYears    String?
 
   // Vendor Wallet — a withdrawal floor, not a separate pool of money: availableBalance()
   // subtracts this from the vendor's ledger balance before anything is withdrawable. Set
@@ -1084,6 +1090,7 @@ model ServiceVendor {
   attendance         VendorAttendance[]
   holds              PartnerHold[]
   bankUpdateRequests VendorBankUpdateRequest[]
+  cityUpdateRequests VendorCityUpdateRequest[]
 
   @@index([status, isOnline])
   @@index([baseCity])
@@ -1103,6 +1110,27 @@ model VendorBankUpdateRequest {
 
   vendor ServiceVendor @relation(fields: [vendorId], references: [id])
   @@index([vendorId])
+}
+
+// Same request/approve shape as VendorBankUpdateRequest, applied to baseCity — a vendor's
+// approved city must never change unmoderated (it directly drives job-assignment
+// eligibility), so a change goes through this queue instead of being written straight to
+// ServiceVendor.baseCity. Only ServiceVendorsService.register()'s initial CREATE still
+// sets baseCity directly (first-time registration, nothing to "correct" yet); its UPDATE
+// path no longer touches baseCity at all once a vendor is ACTIVE.
+model VendorCityUpdateRequest {
+  id            String    @id @default(cuid())
+  vendorId      String
+  requestedCity String
+  reason        String?
+  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt     DateTime  @default(now())
+  reviewedAt    DateTime?
+  reviewedBy    String?
+
+  vendor ServiceVendor @relation(fields: [vendorId], references: [id])
+  @@index([vendorId])
+  @@index([status])
 }
 
 model VendorDocument {
@@ -1813,6 +1841,17 @@ model PaymentTransaction {
   collectedBy       String?
   collectedLocation String?
   createdAt         DateTime               @default(now())
+  // Distinct from `status` on purpose: `status` only reflects the gateway's own payment
+  // state and gets written by BOTH the explicit confirm-payment call AND the async webhook —
+  // whichever lands first. Using `status==='PAID'` as the "have we already credited the
+  // wallet/ledger" signal let a webhook that races ahead of the explicit confirm call mark
+  // this PAID without ever crediting anything, and the explicit confirm call would then see
+  // PAID and skip crediting too — money captured by Razorpay, never credited to anyone.
+  // `creditedAt` is set exactly once, by whichever caller wins the atomic claim
+  // (`updateMany` guarded on `creditedAt: null`) right before performing the actual wallet/
+  // ledger credit — see WalletService.confirmTopup / WithdrawalService.confirmTopup /
+  // PaymentsService.handleWebhook.
+  creditedAt        DateTime?
 
   @@index([userId])
   @@index([orderId])

@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -55,6 +55,8 @@ class GuestBookingDto {
   @IsString() cityId: string;
   @IsString() fullAddress: string;
   @IsOptional() @IsString() pincode?: string;
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
   @IsDateString() slotDate: string;
   @IsString() slotTime: string; // e.g. "10:00", "14:00", "18:00"
   @IsOptional() @IsString() notes?: string;
@@ -76,6 +78,8 @@ class InlineAddressDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() state?: string;
   @IsOptional() @IsString() pincode?: string;
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
 }
 
 class CreateOrderDto {
@@ -113,26 +117,53 @@ export class DispatchService {
 
     const { latitude: lat, longitude: lng } = order.address;
     const skill = order.service.category.key;
+    const hasOrderCoords = isValidIndiaCoords(lat, lng);
 
-    const vendors = await this.prisma.serviceVendor.findMany({
-      where: {
-        isOnline: true, status: 'ACTIVE',
-        skills: { has: skill },
-        currentLatitude: { not: null }, currentLongitude: { not: null },
-        ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
-      },
-      include: { user: true },
-      take: 50,
-    });
-
-    const candidates = vendors
-      .map((v) => {
-        const d = haversineKm(lat, lng, v.currentLatitude!, v.currentLongitude!);
-        if (d > v.serviceRadius) return null;
-        const score = (v.rating / 5) * 50 + Math.max(0, 50 - d * 5) + (v.isVipPro ? 10 : 0);
-        return { vendorId: v.id, userId: v.userId, distance: d, rating: v.rating, score };
-      })
-      .filter(Boolean) as any[];
+    let candidates: any[];
+    if (hasOrderCoords) {
+      const vendors = await this.prisma.serviceVendor.findMany({
+        where: {
+          isOnline: true, status: 'ACTIVE',
+          skills: { has: skill },
+          currentLatitude: { not: null }, currentLongitude: { not: null },
+          lastLocationUpdate: { gte: new Date(Date.now() - LOCATION_STALE_AFTER_MS) },
+          ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
+        },
+        include: { user: true },
+        take: 50,
+      });
+      candidates = vendors
+        .map((v) => {
+          const d = haversineKm(lat, lng, v.currentLatitude!, v.currentLongitude!);
+          if (d > v.serviceRadius) return null;
+          const score = (v.rating / 5) * 50 + Math.max(0, 50 - d * 5) + (v.isVipPro ? 10 : 0);
+          return { vendorId: v.id, userId: v.userId, distance: d, rating: v.rating, score };
+        })
+        .filter(Boolean) as any[];
+    } else if (order.address.city) {
+      // No usable GPS fix for this order (never captured, or (0,0)/out-of-bounds — see
+      // isValidIndiaCoords) — GPS-radius matching can't run at all. Fall back to the same
+      // city-text matching RoutingService's in-house auto-assign already uses, rather than
+      // silently producing zero candidates forever (the previous behavior: haversineKm
+      // against (0,0) excludes every real vendor, and DispatchRetryService's hourly sweep
+      // would just keep repeating the same empty result).
+      const vendors = await this.prisma.serviceVendor.findMany({
+        where: {
+          isOnline: true, status: 'ACTIVE',
+          skills: { has: skill },
+          baseCity: { equals: order.address.city, mode: 'insensitive' },
+          ...NOT_FROZEN_MEMBER_FILTER,
+        },
+        include: { user: true },
+        take: 50,
+      });
+      candidates = vendors.map((v) => ({
+        vendorId: v.id, userId: v.userId, distance: null, rating: v.rating,
+        score: (v.rating / 5) * 50 + (v.isVipPro ? 10 : 0),
+      }));
+    } else {
+      candidates = [];
+    }
 
     candidates.sort((a, b) => b.score - a.score);
     const top = candidates.slice(0, 5);
@@ -246,7 +277,11 @@ export class RoutingService {
     const requiredSkills: string[] = order.service.requiredSkills || [];
     const candidates = cityName ? await this.prisma.serviceVendor.findMany({
       where: {
-        isOnline: true, status: 'ACTIVE', baseCity: cityName,
+        isOnline: true, status: 'ACTIVE',
+        // case-insensitive — matches the same city comparison ServiceVendorsService's
+        // isEligibleForOrder() fallback already uses (.toLowerCase() on both sides), so a
+        // vendor isn't skipped here just because "Bhopal" vs "bhopal" don't match exactly
+        baseCity: { equals: cityName, mode: 'insensitive' },
         ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
         ...(requiredSkills.length ? { skills: { hasSome: requiredSkills } } : {}),
       },
@@ -461,6 +496,14 @@ export class OrdersService {
     let resolvedAddressId = dto.addressId;
     let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
     if (!resolvedAddressId && dto.inlineAddress) {
+      // Previously hardcoded latitude/longitude to 0 regardless of what the client had —
+      // the DTO didn't even declare the fields, so Nest's global whitelist silently stripped
+      // any coords a client sent. Every order created this way landed at "Null Island",
+      // which DispatchService.dispatch() then treats as a real GPS fix thousands of km from
+      // every vendor, excluding all of them and leaving the order permanently undispatched.
+      const lat = dto.inlineAddress.latitude;
+      const lng = dto.inlineAddress.longitude;
+      const hasValidCoords = isValidIndiaCoords(lat, lng);
       resolvedAddress = await this.prisma.address.create({
         data: {
           userId: customerId,
@@ -469,8 +512,8 @@ export class OrdersService {
           city: dto.inlineAddress.city || '',
           state: dto.inlineAddress.state || '',
           pincode: dto.inlineAddress.pincode || '',
-          latitude: 0,
-          longitude: 0,
+          latitude: hasValidCoords ? lat! : 0,
+          longitude: hasValidCoords ? lng! : 0,
         },
       });
       resolvedAddressId = resolvedAddress.id;
@@ -862,13 +905,17 @@ export class OrdersService {
   async markEnRoute(vendorUserId: string, orderId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
+    // Guarded on the FROM status — previously this had no status check at all, so calling
+    // this endpoint on an already-STARTED/COMPLETED/CANCELLED order would silently revert
+    // its status back to VENDOR_EN_ROUTE, corrupting the timeline and re-opening a closed
+    // job. Allowing VENDOR_EN_ROUTE itself in the guard keeps a retried/duplicate call a
+    // safe no-op instead of an error.
     const result = await this.prisma.order.updateMany({
-      where: { id: orderId, vendorId: v.id },
+      where: { id: orderId, vendorId: v.id, status: { in: [OrderStatus.VENDOR_ASSIGNED, OrderStatus.VENDOR_EN_ROUTE] } },
       data: { status: OrderStatus.VENDOR_EN_ROUTE },
     });
-    if (result.count > 0) {
-      await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_EN_ROUTE, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
-    }
+    if (result.count === 0) throw new BadRequestException('Order cannot be marked en-route at this stage');
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_EN_ROUTE, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     return result;
   }
 
@@ -1198,7 +1245,12 @@ export class GuestBookingService {
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Create address inline (full address as free text)
+    // Create address inline (full address as free text). Prefers the customer's actual
+    // GPS fix (already captured client-side for the saved-address GPS-proximity sanity
+    // check, just not previously threaded through here) over the city centroid — a
+    // city-wide fallback is far less precise for nearest-partner dispatch than a real
+    // location, and this is the highest-traffic guest booking path on the site.
+    const hasRealCoords = isValidIndiaCoords(dto.latitude, dto.longitude);
     const address = await this.prisma.address.create({
       data: {
         userId: user.id,
@@ -1207,8 +1259,8 @@ export class GuestBookingService {
         city: city.name,
         state: city.state,
         pincode: dto.pincode || '000000',
-        latitude: city.latitude,
-        longitude: city.longitude,
+        latitude: hasRealCoords ? dto.latitude! : city.latitude,
+        longitude: hasRealCoords ? dto.longitude! : city.longitude,
         isDefault: false,
       },
     });
@@ -1339,7 +1391,7 @@ export class GuestBookingService {
 
     const lat = dto.latitude || 0;
     const lng = dto.longitude || 0;
-    const validCoords = lat !== 0 && lng !== 0 && lat >= 6.5 && lat <= 37.6 && lng >= 68.1 && lng <= 97.4;
+    const validCoords = isValidIndiaCoords(lat, lng);
     const address = await this.prisma.address.create({
       data: {
         userId: user.id, label: 'Delivery Address',

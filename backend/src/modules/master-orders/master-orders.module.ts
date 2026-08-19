@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, isValidIndiaCoords } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -332,6 +332,11 @@ export class MasterOrdersService {
     let resolvedAddressId = dto.addressId;
     let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
     if (!resolvedAddressId && dto.inlineAddress) {
+      // Bounds-check client-supplied coords before trusting them for dispatch distance math
+      // — same guard publicProductCheckout() already applies; a garbage/out-of-range value
+      // (or one of Null Island's (0,0)) is stored as "no coords" rather than corrupting
+      // nearest-vendor matching for this order.
+      const hasValidCoords = isValidIndiaCoords(dto.inlineAddress.latitude, dto.inlineAddress.longitude);
       resolvedAddress = await this.prisma.address.create({
         data: {
           userId: customerId,
@@ -340,8 +345,8 @@ export class MasterOrdersService {
           city: dto.inlineAddress.city || '',
           state: dto.inlineAddress.state || '',
           pincode: dto.inlineAddress.pincode || '',
-          latitude: dto.inlineAddress.latitude || 0,
-          longitude: dto.inlineAddress.longitude || 0,
+          latitude: hasValidCoords ? dto.inlineAddress.latitude! : 0,
+          longitude: hasValidCoords ? dto.inlineAddress.longitude! : 0,
         },
       });
       resolvedAddressId = resolvedAddress.id;
