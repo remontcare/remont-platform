@@ -17,6 +17,7 @@ import { SettlementsService, SettlementsModule } from '../settlements/settlement
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
+import { CrmService, CrmModule } from '../crm/crm.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -45,7 +46,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -635,7 +636,7 @@ export class AdminService {
   async adminCreateOrder(data: {
     serviceId: string; cityId: string; slotDate: string; slotTime: string;
     guestName: string; guestPhone: string; guestEmail?: string;
-    fullAddress: string; notes?: string; channel?: string;
+    fullAddress: string; notes?: string; channel?: string; leadId?: string;
   }) {
     const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId } });
     if (!svc) throw new NotFoundException('Service not found');
@@ -666,7 +667,7 @@ export class AdminService {
 
     const count = await this.prisma.order.count();
     const orderNumber = (await import('../../common')).generateOrderNumber('REM', count);
-    return this.prisma.order.create({
+    const order = await this.prisma.order.create({
       data: {
         orderNumber, customerId: user.id, serviceId: data.serviceId, addressId: address.id,
         type: 'SERVICE', channel: (data.channel as any) || 'CRM_AGENT',
@@ -681,9 +682,15 @@ export class AdminService {
         vendorPayout: serviceAmount - commissionResult.commissionAmount,
         commissionRuleId: commissionResult.ruleId,
         commissionRuleLabel: commissionResult.ruleLabel,
+        leadId: data.leadId || undefined,
       },
       include: { service: true, address: true, customer: { select: { name: true, phone: true } } },
     });
+    // Convert-to-Order (admin Leads console) — link back and flip the lead's funnel
+    // status, closing the gap where Lead.convertedAt/convertedOrderId were permanently
+    // unused columns (nothing ever called CrmService.markConverted() before this).
+    if (data.leadId) await this.crm.markConverted(data.leadId, order.id);
+    return order;
   }
 
   async forceAssignVendor(orderId: string, vendorId: string, actorId?: string, actorRole?: UserRole) {
@@ -2897,7 +2904,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

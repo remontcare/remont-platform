@@ -176,7 +176,7 @@ var STATUS_COLORS = {
   ACTIVE:'green', SUSPENDED:'red', REJECTED:'red', PENDING_VERIFICATION:'yellow',
   PAID:'green', UNPAID:'yellow', FAILED:'red', PARTIAL:'orange',
   NEW:'blue', CONTACTED:'purple', QUALIFIED:'green', CONVERTED:'green',
-  LOST:'red', ON_HOLD:'yellow',
+  LOST:'red', ON_HOLD:'yellow', PROPOSAL_SENT:'orange', NEGOTIATION:'purple',
 };
 function statusBadge(s) { return badge(s, STATUS_COLORS[s] || 'gray'); }
 
@@ -218,6 +218,9 @@ var SIDEBAR_NAV = [
   { section: '🚚 SUPPLIERS', items: [
     { key:'suppliers', label:'Suppliers', icon:'🏭', href:'/admin/suppliers.html' },
     { key:'purchase-orders', label:'Purchase Orders', icon:'📄', href:'/admin/purchase-orders.html' },
+  ]},
+  { section: '🎯 LEADS', items: [
+    { key:'leads', label:'Lead Pipeline', icon:'🎯', href:'/admin/leads.html' },
   ]},
   { section: '👥 CUSTOMERS', items: [
     { key:'customers', label:'Customers', icon:'👥', href:'/admin/customers.html' },

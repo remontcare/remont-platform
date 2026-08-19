@@ -2193,6 +2193,11 @@ model Lead {
   status            LeadStatus @default(NEW)
   serviceInterested String?
   estimatedValue    Decimal?   @db.Decimal(10, 2)
+  // Customer-attached reference photo (e.g. current room/site condition for a
+  // renovation/construction quotation request) — optional, set via the public
+  // lead-photo upload endpoint. A real field rather than burying the URL in
+  // `notes` so the admin console can render it as an actual thumbnail.
+  photoUrl          String?
 
   // Tracking
   assignedAgentId  String?

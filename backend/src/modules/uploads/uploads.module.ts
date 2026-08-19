@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { JwtAuthGuard, RolesGuard, Roles } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, Public } from '../../common';
 import { UserRole } from '@prisma/client';
 
 // Task 3 — one-click image upload: converts to WebP and generates thumbnail/card/full
@@ -71,11 +71,16 @@ export class UploadsService {
 @ApiTags('Uploads')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('uploads')
 export class UploadsController {
   constructor(private uploads: UploadsService) {}
 
+  // @Roles is per-route here (not controller-level) specifically so the public
+  // lead-photo route below can have no role requirement at all — RolesGuard reads
+  // @Roles via getAllAndOverride(handler, then class), so a controller-level @Roles
+  // would still apply to every route including ones marked @Public(), and then throw
+  // ("User not authenticated") since @Public() only skips JwtAuthGuard, never RolesGuard.
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post('image')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
@@ -85,6 +90,7 @@ export class UploadsController {
     return this.uploads.processAndStore(file);
   }
 
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post('video')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
@@ -92,6 +98,24 @@ export class UploadsController {
   }))
   uploadVideo(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.storeVideo(file);
+  }
+
+  // Public — the only unauthenticated route on this controller (@Public() overrides the
+  // controller-level admin guard for this one route, same pattern already used for
+  // POST /crm/leads/capture). Lets a customer attach a reference photo to a quotation
+  // request (Renovation/Construction premium lead forms) without an account. Reuses the
+  // exact same processAndStore() pipeline as the admin image upload — same WebP/size
+  // limits, same ephemeral-disk caveat — just reachable without a JWT. A smaller size cap
+  // than the admin route (5MB, matching the client-side check the lead forms already do)
+  // plus the app-wide rate limiter (ThrottlerModule, 200 req/min) are the abuse guards.
+  @Public()
+  @Post('lead-photo')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+  }))
+  uploadLeadPhoto(@UploadedFile() file: Express.Multer.File) {
+    return this.uploads.processAndStore(file);
   }
 }
 

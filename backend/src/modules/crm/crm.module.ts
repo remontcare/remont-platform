@@ -26,6 +26,7 @@ export class CrmService {
     serviceInterested?: string;
     estimatedValue?: number;
     notes?: string;
+    photoUrl?: string;
     aiSessionId?: string;
     utmSource?: string;
     utmCampaign?: string;

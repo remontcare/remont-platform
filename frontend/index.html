@@ -4000,7 +4000,7 @@
           </ul>
           <div class="premium-meta">
             <div class="premium-price">₹1.2L<small data-en=" onwards" data-hi=" से शुरू"> onwards</small></div>
-            <button class="premium-cta" data-en="Get Free Quote →" data-hi="फ्री कोटेशन पाएं →">Get Free Quote →</button>
+            <button class="premium-cta" onclick="openQuotationModal('renovation')" data-en="Get Free Quote →" data-hi="फ्री कोटेशन पाएं →">Get Free Quote →</button>
           </div>
         </div>
       </div>
@@ -4027,7 +4027,7 @@
           </ul>
           <div class="premium-meta">
             <div class="premium-price">₹1500<small data-en="/sqft onwards" data-hi="/sqft से शुरू">/sqft onwards</small></div>
-            <button class="premium-cta" data-en="Schedule Site Visit →" data-hi="साइट विज़िट शेड्यूल करें →">Schedule Site Visit →</button>
+            <button class="premium-cta" onclick="openQuotationModal('construction')" data-en="Schedule Site Visit →" data-hi="साइट विज़िट शेड्यूल करें →">Schedule Site Visit →</button>
           </div>
         </div>
       </div>
@@ -5012,8 +5012,84 @@
     </form>
     <div id="premiumLeadSuccess" style="display:none;text-align:center;padding:24px 0">
       <div style="font-size:40px;margin-bottom:12px">✅</div>
-      <h4 style="color:#fff;margin-bottom:6px">Thank you!</h4>
-      <p style="color:rgba(255,255,255,0.65);font-size:13px">Our design consultant will contact you shortly.</p>
+      <h4 style="color:var(--charcoal);margin-bottom:6px">Thank you!</h4>
+      <p style="color:var(--txt-muted);font-size:13px">Our design consultant will contact you shortly.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RENOVATION / CONSTRUCTION QUOTATION MODAL ═══
+     One modal, two modes (renovation | construction) — see openQuotationModal().
+     Same backdrop/panel pattern as the City Selector and Premium Interior modals.
+     Posts to the same real, already-live public CRM lead-capture endpoint; an
+     optional reference photo goes through the new public lead-photo upload route
+     first (backend/src/modules/uploads/uploads.module.ts: POST /uploads/lead-photo). -->
+<div class="city-modal-backdrop" id="quoteBackdrop" onclick="closeQuotationModal()"></div>
+<div class="city-modal" id="quoteModal" role="dialog" aria-label="Get a quotation">
+  <div class="cm-head">
+    <div>
+      <h3 id="quoteModalTitle">Get a Free Quote</h3>
+      <p id="quoteModalSub">Tell us about your project — our team will follow up with pricing.</p>
+    </div>
+    <button class="cm-close" onclick="closeQuotationModal()" aria-label="Close">×</button>
+  </div>
+  <div id="quoteFormWrap" style="padding:20px 24px 24px;overflow-y:auto;flex:1">
+    <form id="quoteForm" onsubmit="submitQuotation(event)">
+      <div class="pl-field"><label>Name *</label><input type="text" id="qName" required placeholder="Your full name"></div>
+      <div class="pl-row">
+        <div class="pl-field"><label>Mobile Number *</label><input type="tel" id="qPhone" required pattern="[0-9]{10}" maxlength="10" placeholder="10-digit mobile number"></div>
+        <div class="pl-field"><label>City *</label><input type="text" id="qCity" required placeholder="Your city"></div>
+      </div>
+
+      <!-- Renovation-mode fields -->
+      <div id="qRenovationFields" style="display:none">
+        <div class="pl-field">
+          <label>What do you need a quotation for? *</label>
+          <select id="qQuoteFor">
+            <option value="">Select</option>
+            <option>Bathroom</option><option>Kitchen</option><option>Full Home</option>
+            <option>Single Room</option><option>Other</option>
+          </select>
+        </div>
+        <div class="pl-row">
+          <div class="pl-field">
+            <label>New or Renovation? *</label>
+            <select id="qProjectType">
+              <option value="">Select</option>
+              <option>New</option><option>Renovation</option>
+            </select>
+          </div>
+          <div class="pl-field"><label>Size <small style="color:#9ca3af">(optional)</small></label><input type="text" id="qSize" placeholder="e.g. 150 sqft"></div>
+        </div>
+      </div>
+
+      <!-- Construction-mode fields -->
+      <div id="qConstructionFields" style="display:none">
+        <div class="pl-field">
+          <label>Project Type *</label>
+          <select id="qConstructionType">
+            <option value="">Select</option>
+            <option>New Construction</option><option>Extension</option><option>Renovation</option>
+          </select>
+        </div>
+        <div class="pl-field"><label>Plot / Built-up Size <small style="color:#9ca3af">(optional)</small></label><input type="text" id="qPlotSize" placeholder="e.g. 1200 sqft, G+2"></div>
+      </div>
+
+      <div class="pl-field">
+        <label>Current Photo <small style="color:#9ca3af">(optional)</small></label>
+        <input type="file" id="qPhotoInput" accept="image/jpeg,image/png,image/webp" onchange="previewQuotePhoto(this)">
+        <div id="qPhotoPreviewWrap" style="display:none;margin-top:8px">
+          <img id="qPhotoPreview" style="max-width:120px;border-radius:8px;border:1px solid var(--mist)">
+          <button type="button" onclick="clearQuotePhoto()" style="margin-left:8px;font-size:12px;color:var(--sienna);background:none;border:none;cursor:pointer">Remove</button>
+        </div>
+      </div>
+
+      <button type="submit" class="pl-submit" id="qSubmitBtn">Get My Quote →</button>
+    </form>
+    <div id="quoteSuccess" style="display:none;text-align:center;padding:24px 0">
+      <div style="font-size:40px;margin-bottom:12px">✅</div>
+      <h4 style="color:var(--charcoal);margin-bottom:6px">Thank you!</h4>
+      <p style="color:var(--txt-muted);font-size:13px" id="quoteSuccessMsg">Our team will contact you shortly with your quote.</p>
     </div>
   </div>
 </div>
@@ -5889,6 +5965,140 @@
     }).catch(function () {
       btn.disabled = false;
       btn.textContent = 'Get My Design Plan →';
+      alert('Something went wrong — please try again, or WhatsApp us directly.');
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // RENOVATION / CONSTRUCTION QUOTATION — one modal, two field sets. Same
+  // real, already-live public CRM endpoint as the Premium Interior modal
+  // above; the optional photo goes through the new public lead-photo
+  // upload route first (backend/src/modules/uploads: POST
+  // /api/v1/uploads/lead-photo — @Public(), separate from the admin-only
+  // image/video upload routes on the same controller).
+  // ═══════════════════════════════════════════════════════════════════
+  let _quoteMode = 'renovation';
+  let _quotePhotoFile = null;
+
+  function openQuotationModal(mode) {
+    _quoteMode = mode;
+    _quotePhotoFile = null;
+    document.getElementById('quoteForm').reset();
+    document.getElementById('qPhotoPreviewWrap').style.display = 'none';
+    document.getElementById('quoteForm').style.display = '';
+    document.getElementById('quoteSuccess').style.display = 'none';
+    const btn = document.getElementById('qSubmitBtn');
+    btn.disabled = false;
+    btn.textContent = 'Get My Quote →';
+
+    const isRenovation = mode === 'renovation';
+    document.getElementById('qRenovationFields').style.display = isRenovation ? '' : 'none';
+    document.getElementById('qConstructionFields').style.display = isRenovation ? 'none' : '';
+    document.getElementById('qQuoteFor').required = isRenovation;
+    document.getElementById('qProjectType').required = isRenovation;
+    document.getElementById('qConstructionType').required = !isRenovation;
+    document.getElementById('quoteModalTitle').textContent = isRenovation ? 'Get a Free Renovation Quote' : 'Schedule Your Site Visit';
+    document.getElementById('quoteModalSub').textContent = isRenovation
+      ? 'Tell us what you\'re renovating — our team will follow up with pricing.'
+      : 'Tell us about your construction project — our team will follow up to schedule a site visit.';
+
+    const cityEl = document.getElementById('qCity');
+    try {
+      const savedCity = localStorage.getItem('remont_city');
+      if (savedCity) cityEl.value = savedCity;
+    } catch (e) { /* private mode — field just stays blank */ }
+
+    document.getElementById('quoteBackdrop').classList.add('open');
+    document.getElementById('quoteModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeQuotationModal() {
+    document.getElementById('quoteBackdrop').classList.remove('open');
+    document.getElementById('quoteModal').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function previewQuotePhoto(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Photo must be under 5MB'); input.value = ''; return; }
+    _quotePhotoFile = file;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      document.getElementById('qPhotoPreview').src = e.target.result;
+      document.getElementById('qPhotoPreviewWrap').style.display = '';
+    };
+    reader.readAsDataURL(file);
+  }
+  function clearQuotePhoto() {
+    _quotePhotoFile = null;
+    document.getElementById('qPhotoInput').value = '';
+    document.getElementById('qPhotoPreviewWrap').style.display = 'none';
+  }
+
+  function submitQuotation(event) {
+    event.preventDefault();
+    const name = document.getElementById('qName').value.trim();
+    const phone = document.getElementById('qPhone').value.trim();
+    const city = document.getElementById('qCity').value.trim();
+    if (!name || !/^[0-9]{10}$/.test(phone) || !city) return; // HTML5 required/pattern already guards this
+
+    let serviceInterested, notesParts;
+    if (_quoteMode === 'renovation') {
+      const quoteFor = document.getElementById('qQuoteFor').value;
+      const projectType = document.getElementById('qProjectType').value;
+      const size = document.getElementById('qSize').value.trim();
+      if (!quoteFor || !projectType) return;
+      serviceInterested = 'Kitchen & Bath Renovation Quotation';
+      notesParts = ['Quotation For: ' + quoteFor, 'Project Type: ' + projectType];
+      if (size) notesParts.push('Size: ' + size);
+    } else {
+      const constructionType = document.getElementById('qConstructionType').value;
+      const plotSize = document.getElementById('qPlotSize').value.trim();
+      if (!constructionType) return;
+      serviceInterested = 'New Build Construction Quotation';
+      notesParts = ['Project Type: ' + constructionType];
+      if (plotSize) notesParts.push('Plot/Built-up Size: ' + plotSize);
+    }
+
+    const btn = document.getElementById('qSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+
+    const capture = function (photoUrl) {
+      return fetch('/api/v1/crm/leads/capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: name,
+          customerPhone: phone,
+          cityName: city,
+          source: 'WEBSITE',
+          serviceInterested: serviceInterested,
+          notes: notesParts.join(' | '),
+          photoUrl: photoUrl || undefined,
+        }),
+      });
+    };
+
+    const uploadThenCapture = _quotePhotoFile
+      ? (function () {
+          const fd = new FormData();
+          fd.append('file', _quotePhotoFile);
+          return fetch('/api/v1/uploads/lead-photo', { method: 'POST', body: fd })
+            .then(function (res) { if (!res.ok) throw new Error('Photo upload failed'); return res.json(); })
+            .then(function (d) { return capture((d && d.data ? d.data.url : d.url)); });
+        })()
+      : capture();
+
+    uploadThenCapture.then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function () {
+      document.getElementById('quoteForm').style.display = 'none';
+      document.getElementById('quoteSuccess').style.display = '';
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Get My Quote →';
       alert('Something went wrong — please try again, or WhatsApp us directly.');
     });
   }

@@ -3,50 +3,43 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Remont Admin — CRM Leads</title>
+<title>Remont Admin — Leads</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
-<style>
-.pipeline{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;margin-bottom:20px}
-.pipeline-col{min-width:180px;flex:1;background:#f9fafb;border-radius:10px;padding:12px}
-.pipeline-header{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
-.pipeline-count{background:#e5e7eb;border-radius:10px;padding:1px 7px;font-size:11px}
-</style>
 </head>
 <body>
 <div id="sidebar-mount"></div>
 <div class="main">
   <div class="topbar">
-    <div class="topbar-left"><h1>CRM — Leads</h1><p>Pipeline, funnel and conversion tracking</p></div>
+    <div class="topbar-left"><h1>Leads</h1><p>Quotation requests &amp; enquiries — full pipeline, from first contact to converted order</p></div>
     <div class="topbar-right">
-      <button class="btn btn-outline btn-sm" onclick="exportLeads()">⬇ Export CSV</button>
       <span class="admin-chip">👤 <span id="admin-name"></span></span>
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
   </div>
   <div class="content">
 
-    <!-- Funnel stats -->
-    <div id="funnel-row" class="pipeline">
-      <div style="color:#9ca3af;font-size:13px;padding:20px">Loading funnel…</div>
-    </div>
+    <div class="stats-grid" id="funnel-stats"></div>
 
-    <!-- Leads table -->
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:8px">
         <span class="card-title">All Leads</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="filter-q" class="form-control" style="width:180px" placeholder="Name, phone, email…" oninput="load()">
+        <div class="filter-bar" style="margin:0">
+          <input id="filter-q" class="form-control" style="width:180px" placeholder="Search name/phone…" oninput="render()">
           <select id="filter-status" class="form-control" style="width:160px" onchange="load()">
-            <option value="">All Statuses</option>
-            <option>NEW</option><option>CONTACTED</option><option>SITE_VISIT</option><option>QUOTATION_SENT</option>
-            <option>NEGOTIATION</option><option>WON</option><option>LOST</option>
+            <option value="">All statuses</option>
+            <option>NEW</option><option>CONTACTED</option><option>QUALIFIED</option>
+            <option>PROPOSAL_SENT</option><option>NEGOTIATION</option><option>CONVERTED</option>
+            <option>LOST</option><option>ON_HOLD</option>
           </select>
-          <select id="filter-source" class="form-control" style="width:140px" onchange="load()">
-            <option value="">All Sources</option>
-            <option>WEBSITE</option><option>JUSTDIAL</option><option>GOOGLE</option><option>WHATSAPP</option>
-            <option>REFERRAL</option><option>SULEKHA</option><option>MANUAL</option>
+          <select id="filter-source" class="form-control" style="width:150px" onchange="load()">
+            <option value="">All sources</option>
+            <option>WEBSITE</option><option>AI_CHAT</option><option>WHATSAPP</option><option>PHONE_CALL</option>
+            <option>REFERRAL</option><option>ADS</option><option>ORGANIC</option><option>CRM_OUTBOUND</option><option>ESTIMATE_ENGINE</option>
+          </select>
+          <select id="filter-agent" class="form-control" style="width:160px" onchange="load()">
+            <option value="">All agents</option>
           </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
@@ -56,24 +49,81 @@
   </div>
 </div>
 
-<div id="status-overlay" class="overlay" style="display:none">
-  <div class="modal" style="max-width:440px">
+<!-- ═══ LEAD DETAIL MODAL ═══ -->
+<div id="detail-overlay" class="overlay" style="display:none">
+  <div class="modal modal-lg">
     <div class="modal-header">
-      <span class="modal-title">Update Lead Status</span>
-      <button class="modal-close" onclick="closeModal('status-overlay')">×</button>
+      <span class="modal-title" id="detail-title">Lead</span>
+      <button class="modal-close" onclick="closeModal('detail-overlay')">×</button>
     </div>
-    <input type="hidden" id="lead-id-input">
-    <div class="form-group"><label class="form-label">Status</label>
-      <select id="new-status" class="form-control">
-        <option>NEW</option><option>CONTACTED</option><option>SITE_VISIT</option><option>QUOTATION_SENT</option>
-        <option>NEGOTIATION</option><option>WON</option><option>LOST</option>
-      </select>
+    <div class="tab-bar" style="margin:0 20px">
+      <div class="tab-btn active" data-tab="overview" onclick="switchDetailTab('overview')">Overview</div>
+      <div class="tab-btn" data-tab="timeline" onclick="switchDetailTab('timeline')">Timeline</div>
+      <div class="tab-btn" data-tab="actions" onclick="switchDetailTab('actions')">Actions</div>
     </div>
-    <div class="form-group"><label class="form-label">Notes</label><textarea id="status-notes" class="form-control" rows="3"></textarea></div>
-    <div id="lost-reason-row" class="form-group" style="display:none"><label class="form-label">Lost Reason</label><input id="lost-reason" class="form-control"></div>
+    <div class="card-body" id="detail-body" style="max-height:60vh;overflow-y:auto"></div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('status-overlay')">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmStatus()">Update</button>
+      <button class="btn btn-outline" onclick="closeModal('detail-overlay')">Close</button>
+      <button class="btn btn-primary" id="detail-convert-btn" onclick="openConvertModal()">Convert to Order →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LOG ACTIVITY MODAL (Site Visit / Estimate / Follow-up / Call) ═══ -->
+<div id="activity-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="activity-title">Log Activity</span>
+      <button class="modal-close" onclick="closeModal('activity-overlay')">×</button>
+    </div>
+    <div class="card-body">
+      <input type="hidden" id="act-type">
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Date &amp; Time <small style="color:#9ca3af">(when scheduled / when it happened)</small></label><input id="act-scheduled" class="form-control" type="datetime-local"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea id="act-notes" class="form-control" rows="3" placeholder="Details…"></textarea></div>
+      <div class="form-group"><label class="form-label">Outcome <small style="color:#9ca3af">(optional)</small></label><input id="act-outcome" class="form-control" placeholder="e.g. Interested, needs follow-up"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('activity-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitActivity()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CONVERT TO ORDER MODAL ═══ -->
+<div id="convert-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Convert to Order</span>
+      <button class="modal-close" onclick="closeModal('convert-overlay')">×</button>
+    </div>
+    <div class="card-body">
+      <p style="font-size:12px;color:#6b7280;margin-bottom:14px">Creates a real order for this lead and links them — the lead is automatically marked <strong>Converted</strong>.</p>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Customer Name</label><input id="cv-name" class="form-control"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Phone</label><input id="cv-phone" class="form-control"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Service *</label>
+          <select id="cv-service" class="form-control"><option value="">Select service…</option></select>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label class="form-label">City *</label>
+          <select id="cv-city" class="form-control"><option value="">Select city…</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Date *</label><input id="cv-date" class="form-control" type="date"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Time *</label><input id="cv-time" class="form-control" type="time" value="10:00"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Address *</label><input id="cv-address" class="form-control" placeholder="Full service address"></div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea id="cv-notes" class="form-control" rows="2"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('convert-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitConvertOrder()">Create Order &amp; Convert</button>
     </div>
   </div>
 </div>
@@ -83,97 +133,231 @@
 renderSidebar('leads');
 requireAuth();
 
-var COLORS = { NEW:'blue', CONTACTED:'purple', SITE_VISIT:'yellow', QUOTATION_SENT:'yellow', NEGOTIATION:'yellow', WON:'green', LOST:'red' };
-var _leadsCache = [];
-
-function loadFunnel() {
-  api('GET', '/admin/crm/funnel').then(function(data) {
-    var order = ['NEW','CONTACTED','SITE_VISIT','QUOTATION_SENT','NEGOTIATION','WON','LOST'];
-    var html = order.map(function(s) {
-      var n = data[s] || 0;
-      return '<div class="pipeline-col"><div class="pipeline-header">' + s.replace('_',' ') + '<span class="pipeline-count">' + n + '</span></div><div style="font-size:28px;font-weight:700;color:#111827">' + n + '</div></div>';
-    }).join('');
-    document.getElementById('funnel-row').innerHTML = html;
-  }).catch(function() {});
-}
+var STATUS_OPTS = ['NEW','CONTACTED','QUALIFIED','PROPOSAL_SENT','NEGOTIATION','CONVERTED','LOST','ON_HOLD'];
+var allLeads = [];
+var currentLead = null;
+var allServices = [];
+var allCities = [];
 
 function load() {
-  var q = document.getElementById('filter-q').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
   var status = document.getElementById('filter-status').value;
   var source = document.getElementById('filter-source').value;
-  var params = 'limit=200';
-  if (q) params += '&q=' + encodeURIComponent(q);
-  if (status) params += '&status=' + status;
-  if (source) params += '&source=' + source;
-  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
-  api('GET', '/admin/leads?' + params).then(function(list) {
-    _leadsCache = list || [];
-    if (!list || !list.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><h3>No leads found</h3></div>'; return; }
-    var rows = list.map(function(l) {
-      var lastAct = l.activities && l.activities[0];
-      return '<tr>' +
-        '<td><strong>' + escape(l.name) + '</strong><br><small style="color:#6b7280">' + escape(l.phone || '') + '</small></td>' +
-        '<td>' + escape(l.email || '—') + '</td>' +
-        '<td>' + badge(l.source || 'MANUAL', 'blue') + '</td>' +
-        '<td>' + escape(l.service || '—') + '</td>' +
-        '<td>' + escape(l.city || '—') + '</td>' +
-        '<td>' + badge(l.status, COLORS[l.status] || 'gray') + '</td>' +
-        '<td>' + escape((l.assignedAgent && l.assignedAgent.name) || 'Unassigned') + '</td>' +
-        '<td>' + (lastAct ? '<span style="font-size:11px;color:#6b7280">' + escape(lastAct.notes || '') + '</span>' : '—') + '</td>' +
-        '<td>' + fmtDateShort(l.createdAt) + '</td>' +
-        '<td><div style="display:flex;gap:4px">' +
-          '<button class="btn btn-xs btn-outline" onclick="openStatus(\'' + l.id + '\',\'' + l.status + '\')">Status</button>' +
-          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + l.id + '\')">Del</button>' +
-        '</div></td>' +
-      '</tr>';
-    }).join('');
-    document.getElementById('tbl').innerHTML = '<table style="min-width:900px"><thead><tr><th>Name / Phone</th><th>Email</th><th>Source</th><th>Service</th><th>City</th><th>Status</th><th>Agent</th><th>Last Note</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  var agentId = document.getElementById('filter-agent').value;
+  var qs = [];
+  if (status) qs.push('status=' + encodeURIComponent(status));
+  if (source) qs.push('source=' + encodeURIComponent(source));
+  if (agentId) qs.push('agentId=' + encodeURIComponent(agentId));
+  qs.push('limit=200');
+  api('GET', '/crm/leads?' + qs.join('&')).then(function(list) {
+    allLeads = list || [];
+    render();
   }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
-function openStatus(id, currentStatus) {
-  document.getElementById('lead-id-input').value = id;
-  document.getElementById('new-status').value = currentStatus;
-  document.getElementById('status-notes').value = '';
-  document.getElementById('lost-reason').value = '';
-  document.getElementById('lost-reason-row').style.display = currentStatus === 'LOST' ? '' : 'none';
-  document.getElementById('new-status').onchange = function() {
-    document.getElementById('lost-reason-row').style.display = this.value === 'LOST' ? '' : 'none';
-  };
-  document.getElementById('status-overlay').style.display = 'flex';
+function render() {
+  var q = document.getElementById('filter-q').value.toLowerCase().trim();
+  var list = q ? allLeads.filter(function(l) {
+    return (l.customerName || '').toLowerCase().indexOf(q) !== -1 || (l.customerPhone || '').indexOf(q) !== -1;
+  }) : allLeads;
+
+  if (!list.length) {
+    document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><h3>No leads yet</h3><p>Quotation requests from the website, AI chat, and WhatsApp will appear here.</p></div>';
+    return;
+  }
+  var rows = list.map(function(l) {
+    var lastActivity = (l.activities && l.activities[0]) || null;
+    return '<tr style="cursor:pointer" onclick="openDetail(\'' + l.id + '\')">' +
+      '<td>' + (l.photoUrl ? '<img src="' + l.photoUrl.replace('-full.webp','-thumb.webp') + '" style="width:32px;height:32px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle">' : '') +
+        '<strong>' + escape(l.customerName) + '</strong><br><small style="color:#9ca3af">' + escape(l.customerPhone) + '</small></td>' +
+      '<td>' + escape(l.serviceInterested || '—') + '</td>' +
+      '<td>' + badge(l.source, 'gray') + '</td>' +
+      '<td>' + escape(l.cityName || '—') + '</td>' +
+      '<td>' + fmtCur(l.estimatedValue || 0) + '</td>' +
+      '<td>' + statusBadge(l.status) + '</td>' +
+      '<td>' + escape((l.agent && l.agent.name) || '—') + '</td>' +
+      '<td>' + (l.nextFollowUpAt ? fmtDateShort(l.nextFollowUpAt) : '—') + '</td>' +
+      '<td>' + fmtDateShort(l.createdAt) + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Customer</th><th>Interested In</th><th>Source</th><th>City</th><th>Budget</th><th>Status</th><th>Agent</th><th>Next Follow-up</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
-function confirmStatus() {
-  var id = document.getElementById('lead-id-input').value;
-  var status = document.getElementById('new-status').value;
-  var notes = document.getElementById('status-notes').value.trim();
-  var lostReason = document.getElementById('lost-reason').value.trim();
-  api('PATCH', '/admin/leads/' + id + '/status', { status, notes, lostReason: lostReason || undefined }).then(function() {
-    toast('Status updated to ' + status, 'success'); closeModal('status-overlay'); load(); loadFunnel();
+function loadFunnel() {
+  api('GET', '/crm/analytics/funnel').then(function(f) {
+    var byStatus = f.byStatus || {};
+    var cards = [
+      { label: 'Total Leads', value: f.total, icon: '🎯', color: 'blue' },
+      { label: 'New', value: byStatus.NEW || 0, icon: '🆕', color: 'orange' },
+      { label: 'In Progress', value: (byStatus.CONTACTED||0)+(byStatus.QUALIFIED||0)+(byStatus.PROPOSAL_SENT||0)+(byStatus.NEGOTIATION||0), icon: '⏳', color: 'purple' },
+      { label: 'Converted', value: byStatus.CONVERTED || 0, icon: '✅', color: 'green' },
+      { label: 'Conversion Rate', value: f.conversionRate, icon: '📈', color: 'teal' },
+      { label: 'Est. Pipeline Value', value: fmtCur(f.totalEstimatedValue), icon: '💰', color: 'green' },
+    ];
+    document.getElementById('funnel-stats').innerHTML = cards.map(function(c) {
+      return '<div class="stat-card"><div class="sc-icon-wrap ' + c.color + '">' + c.icon + '</div><div class="sc-body"><div class="sc-label">' + c.label + '</div><div class="sc-value">' + c.value + '</div></div></div>';
+    }).join('');
+  }).catch(function() {});
+}
+
+function loadAgents() {
+  api('GET', '/admin/users?role=CRM_AGENT&limit=200').then(function(list) {
+    var opts = (list || []).map(function(a) { return '<option value="' + a.id + '">' + escape(a.name) + '</option>'; }).join('');
+    document.getElementById('filter-agent').innerHTML = '<option value="">All agents</option>' + opts;
+    window._agentOptions = opts;
+  }).catch(function() {});
+}
+
+// ── DETAIL MODAL ──────────────────────────────────────────────────────
+
+function openDetail(id) {
+  api('GET', '/crm/leads/' + id).then(function(lead) {
+    currentLead = lead;
+    document.getElementById('detail-title').textContent = lead.customerName + ' — ' + (lead.serviceInterested || 'Lead');
+    document.getElementById('detail-convert-btn').style.display = lead.status === 'CONVERTED' ? 'none' : '';
+    switchDetailTab('overview');
+    document.getElementById('detail-overlay').style.display = 'flex';
   }).catch(function(e) { toast(e.message, 'error'); });
 }
 
-function del(id) {
-  if (!confirm('Delete this lead permanently?')) return;
-  api('DELETE', '/admin/leads/' + id).then(function() { toast('Lead deleted', 'warning'); load(); loadFunnel(); }).catch(function(e) { toast(e.message, 'error'); });
+function switchDetailTab(tab) {
+  document.querySelectorAll('#detail-overlay .tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === tab); });
+  var body = document.getElementById('detail-body');
+  var l = currentLead;
+  if (!l) return;
+
+  if (tab === 'overview') {
+    body.innerHTML =
+      '<div class="two-cols" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+        detailBox('Phone', l.customerPhone) + detailBox('Email', l.customerEmail || '—') +
+        detailBox('City', l.cityName || '—') + detailBox('Source', l.source) +
+        detailBox('Interested In', l.serviceInterested || '—') + detailBox('Est. Budget', fmtCur(l.estimatedValue || 0)) +
+        detailBox('Status', l.status) + detailBox('Assigned Agent', (l.agent && l.agent.name) || 'Unassigned') +
+      '</div>' +
+      (l.photoUrl ? '<div style="margin-top:14px"><label class="form-label">Reference Photo</label><br><img src="' + l.photoUrl + '" style="max-width:280px;border-radius:8px;border:1px solid #e8edf2"></div>' : '') +
+      '<div style="margin-top:14px"><label class="form-label">Notes</label><div class="detail-box" style="white-space:pre-wrap">' + escape(l.notes || '—') + '</div></div>' +
+      (l.orders && l.orders.length ? '<div style="margin-top:14px"><label class="form-label">Linked Orders</label>' +
+        l.orders.map(function(o) { return '<div class="detail-box" style="margin-top:6px">' + escape(o.orderNumber) + ' — ' + statusBadge(o.status) + '</div>'; }).join('') + '</div>' : '');
+  } else if (tab === 'timeline') {
+    if (!l.activities || !l.activities.length) {
+      body.innerHTML = '<div class="empty-state"><div class="empty-icon">🕓</div><h3>No activity logged yet</h3></div>';
+    } else {
+      body.innerHTML = l.activities.map(function(a) {
+        return '<div class="list-row"><div class="lr-left"><div class="lr-title">' + badge(a.type, activityColor(a.type)) + ' ' + escape(a.notes || '') + '</div>' +
+          '<div class="lr-sub">' + (a.agent ? escape(a.agent.name) + ' · ' : '') + fmtDateShort(a.createdAt) + (a.scheduledAt ? ' · scheduled ' + fmtDateShort(a.scheduledAt) : '') + (a.outcome ? ' · ' + escape(a.outcome) : '') + '</div></div></div>';
+      }).join('');
+    }
+  } else if (tab === 'actions') {
+    body.innerHTML =
+      '<div class="form-group"><label class="form-label">Assign Agent</label><div style="display:flex;gap:8px">' +
+        '<select id="assign-agent-select" class="form-control">' + '<option value="">Select agent…</option>' + (window._agentOptions || '') + '</select>' +
+        '<button class="btn btn-primary btn-sm" onclick="assignLead()">Assign</button></div></div>' +
+      '<div class="form-group"><label class="form-label">Change Status</label><div style="display:flex;gap:8px">' +
+        '<select id="status-select" class="form-control">' + STATUS_OPTS.map(function(s) { return '<option' + (s === l.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select>' +
+        '<button class="btn btn-primary btn-sm" onclick="changeStatus()">Update</button></div></div>' +
+      '<div class="divider"></div>' +
+      '<div class="form-group"><label class="form-label">Quick Actions</label><div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn btn-outline btn-sm" onclick="openActivityModal(\'SITE_VISIT\',\'Schedule Site Visit\')">📍 Schedule Site Visit</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="openActivityModal(\'ESTIMATE_SENT\',\'Log Estimate\')">📄 Log Estimate</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="openActivityModal(\'FOLLOW_UP\',\'Schedule Follow-up\')">🔁 Schedule Follow-up</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="openActivityModal(\'CALL\',\'Log a Call\')">📞 Log a Call</button>' +
+      '</div></div>';
+    if (document.getElementById('assign-agent-select') && l.assignedAgentId) document.getElementById('assign-agent-select').value = l.assignedAgentId;
+  }
+}
+function detailBox(label, val) { return '<div class="detail-box"><label>' + label + '</label><div class="val">' + escape(String(val)) + '</div></div>'; }
+function activityColor(type) { return { SITE_VISIT: 'purple', ESTIMATE_SENT: 'green', FOLLOW_UP: 'orange', CALL: 'blue' }[type] || 'gray'; }
+
+function assignLead() {
+  var agentId = document.getElementById('assign-agent-select').value;
+  if (!agentId) { toast('Select an agent', 'error'); return; }
+  api('PATCH', '/crm/leads/' + currentLead.id + '/assign', { agentId: agentId }).then(function() {
+    toast('Agent assigned', 'success'); openDetail(currentLead.id); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
-function exportLeads() {
-  downloadCsv(_leadsCache, [
-    { label: 'Name', key: 'name' },
-    { label: 'Phone', key: 'phone' },
-    { label: 'Email', key: 'email' },
-    { label: 'Source', key: 'source' },
-    { label: 'Service', key: 'service' },
-    { label: 'City', key: 'city' },
-    { label: 'Status', key: 'status' },
-    { label: 'Assigned Agent', key: 'assignedAgent.name' },
-    { label: 'Notes', key: 'notes' },
-    { label: 'Created', key: 'createdAt' },
-  ], 'leads-' + new Date().toISOString().slice(0,10) + '.csv');
+function changeStatus() {
+  var status = document.getElementById('status-select').value;
+  var lostReason;
+  if (status === 'LOST') { lostReason = prompt('Reason (optional):') || undefined; }
+  api('PATCH', '/crm/leads/' + currentLead.id + '/status', { status: status, lostReason: lostReason }).then(function() {
+    toast('Status updated', 'success'); openDetail(currentLead.id); load(); loadFunnel();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── ACTIVITY (Site Visit / Estimate / Follow-up / Call) ────────────────
+
+function openActivityModal(type, title) {
+  document.getElementById('act-type').value = type;
+  document.getElementById('activity-title').textContent = title;
+  document.getElementById('act-scheduled').value = '';
+  document.getElementById('act-notes').value = '';
+  document.getElementById('act-outcome').value = '';
+  document.getElementById('activity-overlay').style.display = 'flex';
+}
+
+function submitActivity() {
+  var type = document.getElementById('act-type').value;
+  var scheduled = document.getElementById('act-scheduled').value;
+  var notes = document.getElementById('act-notes').value.trim();
+  if (!notes) { toast('Enter notes', 'error'); return; }
+  api('POST', '/crm/leads/' + currentLead.id + '/activity', {
+    type: type,
+    notes: notes,
+    outcome: document.getElementById('act-outcome').value.trim() || undefined,
+    scheduledAt: scheduled ? new Date(scheduled).toISOString() : undefined,
+  }).then(function() {
+    toast('Logged', 'success'); closeModal('activity-overlay'); openDetail(currentLead.id); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── CONVERT TO ORDER ────────────────────────────────────────────────────
+
+function openConvertModal() {
+  document.getElementById('cv-name').value = currentLead.customerName || '';
+  document.getElementById('cv-phone').value = currentLead.customerPhone || '';
+  document.getElementById('cv-address').value = '';
+  document.getElementById('cv-notes').value = 'Converted from lead — ' + (currentLead.serviceInterested || '');
+  document.getElementById('cv-date').value = new Date().toISOString().slice(0, 10);
+  Promise.all([
+    api('GET', '/admin/services?limit=500&isActive=true'),
+    api('GET', '/admin/cities'),
+  ]).then(function(results) {
+    allServices = results[0] || [];
+    allCities = (results[1] || []).filter(function(c) { return c.isActive; });
+    document.getElementById('cv-service').innerHTML = '<option value="">Select service…</option>' +
+      allServices.map(function(s) { return '<option value="' + s.id + '">' + escape(s.name) + ' (' + fmtCur(s.basePrice) + ')</option>'; }).join('');
+    document.getElementById('cv-city').innerHTML = '<option value="">Select city…</option>' +
+      allCities.map(function(c) { return '<option value="' + c.id + '"' + (c.name === currentLead.cityName ? ' selected' : '') + '>' + escape(c.name) + '</option>'; }).join('');
+    document.getElementById('convert-overlay').style.display = 'flex';
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function submitConvertOrder() {
+  var data = {
+    guestName: document.getElementById('cv-name').value.trim(),
+    guestPhone: document.getElementById('cv-phone').value.trim(),
+    serviceId: document.getElementById('cv-service').value,
+    cityId: document.getElementById('cv-city').value,
+    slotDate: document.getElementById('cv-date').value,
+    slotTime: document.getElementById('cv-time').value,
+    fullAddress: document.getElementById('cv-address').value.trim(),
+    notes: document.getElementById('cv-notes').value.trim() || undefined,
+    channel: 'CRM_AGENT',
+    leadId: currentLead.id,
+  };
+  if (!data.guestName || !data.guestPhone) { toast('Name and phone required', 'error'); return; }
+  if (!data.serviceId) { toast('Select a service', 'error'); return; }
+  if (!data.cityId) { toast('Select a city', 'error'); return; }
+  if (!data.fullAddress) { toast('Enter address', 'error'); return; }
+  api('POST', '/admin/orders', data).then(function(order) {
+    toast('Order ' + order.orderNumber + ' created — lead converted!', 'success');
+    closeModal('convert-overlay'); closeModal('detail-overlay'); load(); loadFunnel();
+  }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 loadFunnel();
+loadAgents();
 load();
 </script>
 </body>
