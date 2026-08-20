@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -116,7 +116,14 @@ export class DispatchService {
     if (!order?.address || !order.service) return [];
 
     const { latitude: lat, longitude: lng } = order.address;
-    const skill = order.service.category.key;
+    // ServiceCategory.key is stored however an admin typed it when the category was
+    // created (e.g. "plumbing", lowercase, per the seed data) — every vendor's own
+    // skills array is normalized to normalizeSkillKey() form (e.g. "PLUMBING") at
+    // registration time. Without normalizing here too, `skills: { has: skill }` below
+    // is a case-sensitive array match that NEVER matches any vendor, for any category,
+    // in any city — the root cause of automatic dispatch silently finding zero
+    // candidates even when a perfectly eligible vendor is online right next door.
+    const skill = normalizeSkillKey(order.service.category.key);
     const hasOrderCoords = isValidIndiaCoords(lat, lng);
 
     let candidates: any[];
@@ -274,7 +281,10 @@ export class RoutingService {
     }
 
     const cityName = order.address?.city || (order as any).snapshotCity || null;
-    const requiredSkills: string[] = order.service.requiredSkills || [];
+    // Same normalization gap as DispatchService.dispatch()'s `skill` — Service.requiredSkills
+    // is stored however an admin typed/selected it, while every vendor's skills array is
+    // always normalizeSkillKey()-normalized at registration.
+    const requiredSkills: string[] = (order.service.requiredSkills || []).map(normalizeSkillKey);
     const candidates = cityName ? await this.prisma.serviceVendor.findMany({
       where: {
         isOnline: true, status: 'ACTIVE',
@@ -764,16 +774,29 @@ export class OrdersService {
       throw new ForbiddenException();
     }
 
-    await this.prisma.paymentTransaction.create({
-      data: {
-        orderId, userId: order.customerId, amount: order.totalAmount, status: 'PAID',
-        gateway: 'CASH_COLLECTION', collectionMode: mode,
-        collectedBy: actorUserId, collectedLocation,
-      },
-    });
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { paymentStatus: 'PAID', paymentMethod: 'COD' },
+    const collectedAmount = Number(order.totalAmount);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.paymentTransaction.create({
+        data: {
+          orderId, userId: order.customerId, amount: collectedAmount, status: 'PAID',
+          gateway: 'CASH_COLLECTION', collectionMode: mode,
+          collectedBy: actorUserId, collectedLocation,
+        },
+      });
+      // Accounting fix: this cash/UPI/card amount is now physically with the vendor, on
+      // Remont's behalf — it is NOT new money Remont is releasing to them, so it must not
+      // also inflate pendingPayout the way a completed job's own JOB_EARNING credit does.
+      // See the COD_COLLECTION enum comment in schema.prisma for the full accounting model.
+      if (order.vendorId) {
+        await this.ledger.postEntry(tx, order.vendorId, 'COD_COLLECTION', -collectedAmount, {
+          orderId, notes: `Cash/UPI/card collected from customer (${mode})`, createdBy: actorUserId,
+        });
+        await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { decrement: collectedAmount } } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { paymentStatus: 'PAID', paymentMethod: 'COD' },
+      });
     });
     await writeOrderTimeline(this.prisma, {
       orderId, status: 'COD_PAYMENT_COLLECTED', actorId: actorUserId, actorRole,
@@ -856,13 +879,24 @@ export class OrdersService {
       };
     }
 
-    await this.prisma.paymentTransaction.create({
-      data: {
-        orderId, userId: order.customerId, amount: balance.balanceDue, status: 'PAID',
-        gateway: 'CASH_COLLECTION', collectionMode: mode, collectedBy: actorUserId, collectedLocation,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.paymentTransaction.create({
+        data: {
+          orderId, userId: order.customerId, amount: balance.balanceDue, status: 'PAID',
+          gateway: 'CASH_COLLECTION', collectionMode: mode, collectedBy: actorUserId, collectedLocation,
+        },
+      });
+      // Accounting fix: same as collectCod() — this cash/UPI/card amount is now physically
+      // with the vendor on Remont's behalf, not new money Remont is releasing, so it must
+      // not also inflate pendingPayout the way the job's own JOB_EARNING credit does.
+      if (order.vendorId) {
+        await this.ledger.postEntry(tx, order.vendorId, 'COD_COLLECTION', -balance.balanceDue, {
+          orderId, notes: `Cash/UPI/card collected from customer (${mode})`, createdBy: actorUserId,
+        });
+        await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { decrement: balance.balanceDue } } });
+      }
+      return tx.order.update({ where: { id: orderId }, data: { paymentStatus: 'PAID' } });
     });
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: 'PAID' } });
     await writeOrderTimeline(this.prisma, {
       orderId, status: 'BALANCE_COLLECTED', actorId: actorUserId, actorRole,
       note: `Collected ₹${balance.balanceDue} via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
@@ -1093,7 +1127,7 @@ export class OrdersService {
       include: {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { select: { photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: { id: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, delivery: true,
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
@@ -1108,7 +1142,7 @@ export class OrdersService {
         customer: { select: { name: true, phone: true, email: true } },
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { select: { userId: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: { id: true, userId: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, invoice: true, delivery: true,
         timeline: { orderBy: { createdAt: 'asc' } },
       },
@@ -1474,7 +1508,7 @@ export class GuestBookingService {
       where: { orderNumber },
       include: {
         service: { select: { name: true, imageUrl: true } },
-        vendor: { select: { fullName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: { id: true, fullName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: { select: { city: true, fullAddress: true } },
         extraWorkItems: { where: { customerApproved: false } },
         customer: { select: { phone: true } },

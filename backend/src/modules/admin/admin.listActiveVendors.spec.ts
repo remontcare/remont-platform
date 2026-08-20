@@ -62,7 +62,7 @@ describe('AdminService.listActiveVendors', () => {
     expect(result).toEqual([]);
   });
 
-  it('still returns the vendor list for a real service order', async () => {
+  it('still returns the vendor list for a real service order with no resolvable category/address', async () => {
     const { svc, prisma } = makeService();
     prisma.serviceVendor.findMany.mockResolvedValue([{ id: 'vendor-1', memberStatus: null, isOnline: true, status: 'ACTIVE' }]);
     prisma.order.findUnique.mockResolvedValue({ serviceId: 'svc-1', address: null });
@@ -70,6 +70,84 @@ describe('AdminService.listActiveVendors', () => {
     const result = await svc.listActiveVendors(undefined, 'service-order-1');
 
     expect(result).toHaveLength(1);
+  });
+
+  // Production incident: a Vadodara Plumbing job's manual-assign list showed vendors from
+  // every city and category — this endpoint never filtered on category (only sorted by
+  // distance if an explicit `skill` param happened to be passed, which the admin frontend
+  // never did) and never filtered on city/GPS eligibility at all, only display-sorted.
+  describe('Vadodara Plumbing eligibility filtering', () => {
+    function vadodaraPlumbingOrder(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'order-1', serviceId: 'svc-plumbing',
+        service: { category: { key: 'plumbing' } }, // stored lowercase, as an admin actually typed it
+        address: { city: 'Vadodara', latitude: 22.3072, longitude: 73.1812 },
+        ...overrides,
+      };
+    }
+
+    it('derives the required skill from the order category and normalizes case before querying', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+
+      await svc.listActiveVendors(undefined, 'order-1');
+
+      expect(prisma.serviceVendor.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ skills: { has: 'PLUMBING' } }),
+      }));
+    });
+
+    it('includes a verified, live, correct-category, same-city Vadodara plumber', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+      prisma.serviceVendor.findMany.mockResolvedValue([
+        { id: 'vendor-vadodara-plumber', memberStatus: null, isOnline: true, status: 'ACTIVE', rating: 4.5, skills: ['PLUMBING'], baseCity: 'Vadodara', currentLatitude: null, currentLongitude: null, lastLocationUpdate: null },
+      ]);
+
+      const result = await svc.listActiveVendors(undefined, 'order-1');
+
+      expect(result.map((v: any) => v.id)).toEqual(['vendor-vadodara-plumber']);
+    });
+
+    it('excludes a live, correct-category vendor from a different city (Bhopal) with no GPS overlap', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+      prisma.serviceVendor.findMany.mockResolvedValue([
+        { id: 'vendor-bhopal-plumber', memberStatus: null, isOnline: true, status: 'ACTIVE', rating: 4.9, skills: ['PLUMBING'], baseCity: 'Bhopal', currentLatitude: null, currentLongitude: null, lastLocationUpdate: null },
+      ]);
+
+      const result = await svc.listActiveVendors(undefined, 'order-1');
+
+      expect(result).toEqual([]);
+    });
+
+    it('excludes a same-city vendor whose skills do not include the order category (Electrical for a Plumbing job)', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+      // The DB query itself filters on skills:{has:'PLUMBING'} — an electrician never comes
+      // back from serviceVendor.findMany in the first place for this order.
+      prisma.serviceVendor.findMany.mockResolvedValue([]);
+
+      const result = await svc.listActiveVendors(undefined, 'order-1');
+
+      expect(result).toEqual([]);
+      expect(prisma.serviceVendor.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ skills: { has: 'PLUMBING' } }),
+      }));
+    });
+
+    it('sorts eligible candidates nearest-first when the order has real GPS coordinates', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+      prisma.serviceVendor.findMany.mockResolvedValue([
+        { id: 'far', memberStatus: null, isOnline: true, status: 'ACTIVE', rating: 4.0, skills: ['PLUMBING'], baseCity: 'Vadodara', serviceRadius: 50, currentLatitude: 22.40, currentLongitude: 73.25, lastLocationUpdate: new Date() },
+        { id: 'near', memberStatus: null, isOnline: true, status: 'ACTIVE', rating: 4.0, skills: ['PLUMBING'], baseCity: 'Vadodara', serviceRadius: 50, currentLatitude: 22.31, currentLongitude: 73.18, lastLocationUpdate: new Date() },
+      ]);
+
+      const result = await svc.listActiveVendors(undefined, 'order-1');
+
+      expect(result.map((v: any) => v.id)).toEqual(['near', 'far']);
+    });
   });
 });
 

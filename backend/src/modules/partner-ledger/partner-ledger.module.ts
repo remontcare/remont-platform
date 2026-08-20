@@ -364,16 +364,26 @@ export class WithdrawalService {
 
   /** Atomic claim: only the caller whose updateMany actually flips creditedAt from null
    * wins the right to credit the ledger — the loser (whichever of confirmTopup/the webhook
-   * listener arrives second) is a safe no-op. */
+   * listener arrives second) is a safe no-op.
+   *
+   * Root cause of "I added money but the Partner Portal wallet balance never updated":
+   * ServiceVendor.pendingPayout is the field every partner-facing balance display actually
+   * reads (ServiceVendorsService.earnings()'s `lifetime.pending`, shown as the wallet-banner
+   * total on both Home and Earnings) — it is a SEPARATE running total from
+   * PartnerLedgerEntry.balanceAfter, kept in sync by every other credit/debit path in this
+   * codebase (job completion, warranty hold release, withdrawal, lead-cost refund) but this
+   * one didn't update it, so a top-up posted to the ledger's balance while pendingPayout —
+   * what the screen actually shows — silently stayed unchanged. */
   private async claimAndCredit(paymentTransactionId: string, vendorId: string, amount: number) {
     const claimed = await this.prisma.paymentTransaction.updateMany({
       where: { id: paymentTransactionId, creditedAt: null },
       data: { creditedAt: new Date() },
     });
     if (claimed.count !== 1) return;
-    await this.prisma.$transaction((txClient) =>
-      this.ledger.postEntry(txClient, vendorId, 'TOP_UP', amount, { notes: 'Wallet top-up via Razorpay' }),
-    );
+    await this.prisma.$transaction(async (txClient) => {
+      await this.ledger.postEntry(txClient, vendorId, 'TOP_UP', amount, { notes: 'Wallet top-up via Razorpay' });
+      await txClient.serviceVendor.update({ where: { id: vendorId }, data: { pendingPayout: { increment: amount } } });
+    });
   }
 
   // Safety net for the case where Razorpay's webhook confirms payment before the partner's

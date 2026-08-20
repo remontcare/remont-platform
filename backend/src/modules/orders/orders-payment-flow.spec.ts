@@ -7,7 +7,7 @@ function makeService() {
       findUnique: jest.fn(),
       update: jest.fn(async (args: any) => ({ id: 'o1', ...args.data })),
     },
-    serviceVendor: { findUnique: jest.fn() },
+    serviceVendor: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })) },
     paymentTransaction: {
       create: jest.fn(async (args: any) => ({ id: 'tx-1', ...args.data })),
       findFirst: jest.fn(),
@@ -24,6 +24,8 @@ function makeService() {
   // writeOrderTimeline/writeOtpLog (imported from ../../common) hit these — stub them too.
   prisma.orderTimeline = { create: jest.fn() };
   prisma.orderOtpLog = { create: jest.fn(), count: jest.fn(async () => 0) };
+  // collectCod()/collectBalance() wrap the COD_COLLECTION ledger debit in a transaction.
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
   const payments: any = {
     initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
     createPaymentLink: jest.fn(async () => null),
@@ -193,6 +195,23 @@ describe('OrdersService.collectCod — closing the "COD paymentStatus stuck PEND
     }));
     expect(result.paymentStatus).toBe('PAID');
   });
+
+  // Accounting fix: collecting COD cash must NOT be treated as new Remont-owed earning —
+  // the vendor already physically holds this money, so it has to net OUT of pendingPayout,
+  // not just leave the job's own JOB_EARNING credit standing on its own.
+  it('posts a COD_COLLECTION debit and decrements pendingPayout by the full collected amount', async () => {
+    const { svc, prisma, ledger } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', paymentMethod: 'COD', paymentStatus: 'PENDING', status: 'COMPLETED',
+      vendorId: 'vendor-a', customerId: 'cust-1', totalAmount: 800, orderNumber: 'REM-1',
+    });
+    prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-a' });
+
+    await svc.collectCod('vendor-user-1', 'SERVICE_VENDOR' as any, 'o1', 'CASH' as any);
+
+    expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-a', 'COD_COLLECTION', -800, expect.objectContaining({ orderId: 'o1' }));
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith({ where: { id: 'vendor-a' }, data: { pendingPayout: { decrement: 800 } } });
+  });
 });
 
 describe('OrdersService.getBalance — recalculates automatically as extra work / partial payments change the total', () => {
@@ -291,7 +310,8 @@ describe('OrdersService.collectBalance — Section 6/7 "Collect Payment" at comp
   it('records a cash collection for exactly the outstanding balance and marks the order PAID', async () => {
     const { svc, prisma } = makeService();
     prisma.order.findUnique.mockResolvedValue({
-      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 800, walletUsed: 0, vendor: { userId: 'vendor-user-a' },
+      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 800, walletUsed: 0,
+      vendorId: 'vendor-a', vendor: { userId: 'vendor-user-a' },
     });
     prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 500 } });
     const result: any = await svc.collectBalance('vendor-user-a', 'SERVICE_VENDOR' as any, 'o1', 'UPI' as any, 'Site visit');
@@ -299,6 +319,23 @@ describe('OrdersService.collectBalance — Section 6/7 "Collect Payment" at comp
       data: expect.objectContaining({ amount: 300, collectionMode: 'UPI', collectedLocation: 'Site visit' }),
     }));
     expect(result.paymentStatus).toBe('PAID');
+  });
+
+  // Accounting fix: only the outstanding balance actually collected in person (300, not the
+  // full 800) is COD liability — the earlier 500 was already paid another way (e.g. online
+  // in advance), so it must not be double-counted as cash the vendor is now holding.
+  it('posts a COD_COLLECTION debit for exactly the balance collected, not the full order total', async () => {
+    const { svc, prisma, ledger } = makeService();
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o1', orderNumber: 'REM-1', status: 'COMPLETED', customerId: 'cust-1', totalAmount: 800, walletUsed: 0,
+      vendorId: 'vendor-a', vendor: { userId: 'vendor-user-a' },
+    });
+    prisma.paymentTransaction.aggregate.mockResolvedValue({ _sum: { amount: 500 } });
+
+    await svc.collectBalance('vendor-user-a', 'SERVICE_VENDOR' as any, 'o1', 'UPI' as any, 'Site visit');
+
+    expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-a', 'COD_COLLECTION', -300, expect.objectContaining({ orderId: 'o1' }));
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith({ where: { id: 'vendor-a' }, data: { pendingPayout: { decrement: 300 } } });
   });
 });
 

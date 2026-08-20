@@ -11866,6 +11866,9 @@ window.showAssignedPartner = function(vendorData) {
   setTxt('cpa-exp-val', (exp || '3') + '+ Years');
   setTxt('cpa-jobs-val', (jobs || '50') + '+');
   setTxt('cpa-about-txt', about);
+  // Real Partner ID from the backend record — never fabricated. p.id is the actual
+  // ServiceVendor.id, now selected by the order APIs that feed this modal.
+  setTxt('cpa-id', p.id ? ('Partner ID: ' + p.id) : '');
 
   // Stars
   var starsEl = document.getElementById('cpa-rating-val');
@@ -11879,8 +11882,10 @@ window.showAssignedPartner = function(vendorData) {
   // Photo
   var photoEl = document.getElementById('cpa-photo');
   if (photoEl) {
-    if (p.profilePhoto || p.avatar) {
-      photoEl.innerHTML = '<img src="' + (p.profilePhoto || p.avatar) + '" alt="photo">';
+    // ServiceVendor's real field is photoUrl — profilePhoto/avatar never existed on this
+    // model, so the photo never rendered even when one had been uploaded.
+    if (p.photoUrl || p.profilePhoto || p.avatar) {
+      photoEl.innerHTML = '<img src="' + (p.photoUrl || p.profilePhoto || p.avatar) + '" alt="photo">';
     } else {
       photoEl.textContent = name.charAt(0).toUpperCase();
     }
@@ -11921,6 +11926,7 @@ window.closeCustPartner = function() {
       <div class="cpa-name" id="cpa-name">Partner Name</div>
       <div class="cpa-role" id="cpa-role">Service Expert</div>
       <div class="cpa-badge">✓ Remont Partner</div>
+      <div class="cpa-role" id="cpa-id" style="margin-top:2px;font-family:monospace;font-size:11px"></div>
     </div>
     <!-- Details body -->
     <div class="cpa-body">

@@ -985,11 +985,30 @@ function renderVendorDetail(v) {
 
   // Wallet / earnings / withdrawals
   html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
     '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">💰 Wallet</strong>' +
+    '<button class="btn btn-xs btn-outline" onclick="downloadVendorLedger(\'' + v.id + '\',\'' + escapeJsAttr(v.fullName||'partner') + '\')">⬇ Download Ledger (CSV)</button>' +
+    '</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">' +
     dItem('Available Balance', '₹' + Number(v.availableBalance||0).toLocaleString('en-IN')) +
     dItem('Pending Payout', '₹' + Number(v.pendingPayout||0).toLocaleString('en-IN')) +
     '</div></div>';
+
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📒 Recent Ledger (last 20 — download for full history)</strong>';
+  var ledgerEntries = v.ledger || [];
+  if (!ledgerEntries.length) { html += '<div style="font-size:13px;color:#9ca3af;margin-top:8px">No ledger entries yet</div>'; }
+  else {
+    html += '<div style="overflow-x:auto"><table style="margin-top:8px;min-width:600px"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Balance After</th></tr></thead><tbody>' +
+      ledgerEntries.map(function(e){
+        var amt = Number(e.amount);
+        var amtColor = amt >= 0 ? '#166534' : '#991b1b';
+        return '<tr><td>' + fmtDateShort(e.createdAt) + '</td><td>' + badge(e.type, amt>=0?'green':'red') + '</td>' +
+          '<td style="font-size:12px;color:#6b7280">' + escape(e.notes||'—') + '</td>' +
+          '<td style="color:' + amtColor + ';font-weight:600">' + (amt>=0?'+':'') + '₹' + Math.abs(amt).toLocaleString('en-IN') + '</td>' +
+          '<td>₹' + Number(e.balanceAfter).toLocaleString('en-IN') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  html += '</div>';
 
   html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🏦 Withdrawal History</strong>';
   var withdrawals = v.withdrawals || [];
@@ -1003,6 +1022,36 @@ function renderVendorDetail(v) {
   html += '</div>';
 
   document.getElementById('vendor-detail-body').innerHTML = html;
+}
+
+// Full, business-usable financial ledger export — every entry enriched with the related
+// order's payment mode / Remont commission / partner earning where applicable, so this is
+// actually reconcilable for accounting/dispute work, not just a raw transaction dump.
+var LEDGER_EXPORT_COLUMNS = [
+  { key: 'transactionId', label: 'Transaction ID' },
+  { key: 'date', label: 'Date' },
+  { key: 'partnerId', label: 'Partner ID' },
+  { key: 'partnerName', label: 'Partner Name' },
+  { key: 'partnerPhone', label: 'Partner Phone' },
+  { key: 'orderId', label: 'Order ID' },
+  { key: 'orderNumber', label: 'Order Number' },
+  { key: 'type', label: 'Transaction Type' },
+  { key: 'paymentMode', label: 'Payment Mode' },
+  { key: 'description', label: 'Description' },
+  { key: 'credit', label: 'Credit' },
+  { key: 'debit', label: 'Debit' },
+  { key: 'balanceAfter', label: 'Balance After' },
+  { key: 'remontAmount', label: 'Remont Amount' },
+  { key: 'partnerEarning', label: 'Partner Earning' },
+  { key: 'codCollection', label: 'COD Collection' },
+  { key: 'settlementRef', label: 'Settlement Reference' },
+];
+function downloadVendorLedger(vendorId, vendorName) {
+  api('GET', '/admin/vendors/' + vendorId + '/ledger/export').then(function(res) {
+    var rows = res.rows || [];
+    var filename = 'partner-ledger-' + vendorName.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+    downloadCsv(rows, LEDGER_EXPORT_COLUMNS, filename);
+  }).catch(function(e){ toast(e.message, 'error'); });
 }
 
 function verifyVendorDoc(docId) {

@@ -9,7 +9,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, isVendorLocationEligible, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -338,6 +338,54 @@ export class AdminService {
       this.prisma.withdrawalRequest.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: 20 }),
     ]);
     return { ...vendor, ledger, availableBalance, withdrawals };
+  }
+
+  // Full, downloadable financial history for one partner — getVendorDetail()'s own `ledger`
+  // is capped at 20 rows for a fast detail-modal load; this is the uncapped version enriched
+  // with each entry's related order so an accounting/finance download can actually reconcile
+  // (payment mode, Remont's commission share, and the partner's own earning per job) instead
+  // of just listing raw ledger amounts with no business context.
+  async vendorLedgerForExport(vendorId: string) {
+    const vendor = await this.prisma.serviceVendor.findUnique({
+      where: { id: vendorId },
+      select: { id: true, fullName: true, user: { select: { phone: true } } },
+    });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+
+    const entries = await this.ledger.ledgerForVendor(vendorId, 5000);
+    const orderIds = Array.from(new Set(entries.map((e) => e.orderId).filter(Boolean))) as string[];
+    const orders = orderIds.length
+      ? await this.prisma.order.findMany({
+          where: { id: { in: orderIds } },
+          select: { id: true, orderNumber: true, paymentMethod: true, totalAmount: true, remontCommission: true, vendorPayout: true },
+        })
+      : [];
+    const orderById = new Map(orders.map((o) => [o.id, o]));
+
+    const rows = entries.map((e) => {
+      const order = e.orderId ? orderById.get(e.orderId) : undefined;
+      const amount = Number(e.amount);
+      return {
+        transactionId: e.id,
+        date: e.createdAt,
+        partnerId: vendor.id,
+        partnerName: vendor.fullName,
+        partnerPhone: vendor.user?.phone || '',
+        orderId: e.orderId || '',
+        orderNumber: order?.orderNumber || '',
+        type: e.type,
+        paymentMode: order?.paymentMethod || '',
+        description: e.notes || '',
+        credit: amount > 0 ? amount : '',
+        debit: amount < 0 ? Math.abs(amount) : '',
+        balanceAfter: Number(e.balanceAfter),
+        remontAmount: order?.remontCommission != null ? Number(order.remontCommission) : '',
+        partnerEarning: order?.vendorPayout != null ? Number(order.vendorPayout) : '',
+        codCollection: order?.totalAmount != null && e.type === 'COD_COLLECTION' ? Number(order.totalAmount) : '',
+        settlementRef: e.withdrawalRequestId || '',
+      };
+    });
+    return { vendor: { id: vendor.id, name: vendor.fullName, phone: vendor.user?.phone || '' }, rows };
   }
 
   // ─── Vendor documents — verify/reject (nothing existed here before; a partner could
@@ -829,29 +877,65 @@ export class AdminService {
   // never a superset of who auto-dispatch would actually ring. Passing orderId sorts by
   // distance to that order's address (nearest first, like DispatchService's scoring) so
   // the admin can just call down the list; without it, falls back to rating-desc.
+  //
+  // Production incident: a Vadodara Plumbing job's manual-assign list showed vendors from
+  // every city and every category — this method only ever filtered on status/online/skill
+  // (and only IF a `skill` param happened to be passed, which the admin frontend never
+  // did), then just SORTED the unfiltered result by distance with no cutoff. Now the
+  // order's own category is read directly (never left to an optional query param) and
+  // normalized the same way DispatchService.dispatch() normalizes it, and every candidate
+  // is run through the SAME isVendorLocationEligible() rule dispatch/isEligibleForOrder use
+  // — so this list is never a superset of who the system would actually offer the job to.
   async listActiveVendors(skill?: string, orderId?: string) {
-    const vendors = await this.prisma.serviceVendor.findMany({
-      where: {
-        status: 'ACTIVE',
-        isOnline: true,
-        ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
-        ...(skill ? { skills: { has: skill } } : {}),
-      },
-      include: { user: { select: { name: true, phone: true } } },
-      orderBy: { rating: 'desc' },
-      take: 100,
-    });
+    const normalizedSkillParam = skill ? normalizeSkillKey(skill) : undefined;
 
-    if (!orderId) return vendors;
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { address: true } });
+    if (!orderId) {
+      return this.prisma.serviceVendor.findMany({
+        where: {
+          status: 'ACTIVE',
+          isOnline: true,
+          ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
+          ...(normalizedSkillParam ? { skills: { has: normalizedSkillParam } } : {}),
+        },
+        include: { user: { select: { name: true, phone: true } } },
+        orderBy: { rating: 'desc' },
+        take: 100,
+      });
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { address: true, service: { include: { category: { select: { key: true } } } } },
+    });
     // A product-only order has no Service Partner to assign at all — same rule
     // forceAssignVendor() enforces, applied here too so the admin UI never even offers a
     // vendor list for one.
     if (!order?.serviceId) return [];
-    const lat = order?.address?.latitude, lng = order?.address?.longitude;
-    if (lat == null || lng == null) return vendors;
 
-    return vendors
+    // The order's own category is the authoritative required skill — an explicit `skill`
+    // param is only a fallback for the rare case the category can't be resolved, never
+    // allowed to override/broaden what this specific job actually needs.
+    const requiredSkill = order.service?.category?.key
+      ? normalizeSkillKey(order.service.category.key)
+      : normalizedSkillParam;
+
+    const vendors = await this.prisma.serviceVendor.findMany({
+      where: {
+        status: 'ACTIVE',
+        isOnline: true,
+        ...NOT_FROZEN_MEMBER_FILTER,
+        ...(requiredSkill ? { skills: { has: requiredSkill } } : {}),
+      },
+      include: { user: { select: { name: true, phone: true } } },
+      take: 100,
+    });
+
+    const eligible = vendors.filter((v) => isVendorLocationEligible(v, order));
+
+    const lat = order.address?.latitude, lng = order.address?.longitude;
+    if (lat == null || lng == null) return eligible.sort((a, b) => b.rating - a.rating);
+
+    return eligible
       .map((v) => ({
         ...v,
         distanceKm: v.currentLatitude != null && v.currentLongitude != null
@@ -2672,6 +2756,9 @@ export class AdminController {
   // ever reaching that handler. Every more-specific GET vendors/... route above this one
   // must stay above it; any new static GET route must also be added above, not below.
   @Get('vendors/:id') vendorDetail(@Param('id') id: string) { return this.admin.getVendorDetail(id); }
+  // 3+ segments — never shadowed by the vendors/:id wildcard above (Nest/Express route
+  // matching is also segment-count-sensitive), safe to declare in either order.
+  @Get('vendors/:id/ledger/export') vendorLedgerExport(@Param('id') id: string) { return this.admin.vendorLedgerForExport(id); }
   @Patch('withdrawals/:id/approve') approveWithdrawal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note?: string }) {
     return this.admin.approveWithdrawal(id, u.sub, b?.note);
   }

@@ -9,7 +9,7 @@ import { WithdrawalService, PartnerLedgerService } from './partner-ledger.module
  */
 function makeService() {
   const prisma: any = {
-    serviceVendor: { findUnique: jest.fn() },
+    serviceVendor: { findUnique: jest.fn(), update: jest.fn() },
     paymentTransaction: { findFirst: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     partnerLedgerEntry: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(async (args: any) => args.data) },
     withdrawalRequest: { aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }) },
@@ -82,6 +82,12 @@ describe('WithdrawalService.confirmTopup', () => {
       data: { creditedAt: expect.any(Date) },
     });
     expect(postSpy).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'TOP_UP', 500, expect.objectContaining({ notes: expect.any(String) }));
+    // Root cause of "wallet not updating on Partner Portal screen": pendingPayout is the
+    // field ServiceVendorsService.earnings() actually reads for the displayed balance —
+    // it must be kept in sync with the ledger credit, not just the ledger's own running total.
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith({
+      where: { id: 'vendor-1' }, data: { pendingPayout: { increment: 500 } },
+    });
   });
 
   it('is idempotent — a second confirm call that loses the creditedAt claim does not double-credit', async () => {
@@ -96,6 +102,7 @@ describe('WithdrawalService.confirmTopup', () => {
     await svc.confirmTopup('user-1', 'pay_1', 'order_abc', 'sig');
 
     expect(postSpy).not.toHaveBeenCalled();
+    expect(prisma.serviceVendor.update).not.toHaveBeenCalled();
   });
 });
 
@@ -112,6 +119,9 @@ describe('WithdrawalService.onVendorWalletTopupCaptured (webhook safety net)', (
       data: { creditedAt: expect.any(Date) },
     });
     expect(postSpy).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'TOP_UP', 500, expect.objectContaining({ notes: expect.any(String) }));
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith({
+      where: { id: 'vendor-1' }, data: { pendingPayout: { increment: 500 } },
+    });
   });
 
   it('does not double-credit when the explicit confirmTopup call already claimed it', async () => {
@@ -123,6 +133,7 @@ describe('WithdrawalService.onVendorWalletTopupCaptured (webhook safety net)', (
     await svc.onVendorWalletTopupCaptured({ paymentTransactionId: 'tx-1', userId: 'user-1', amount: 500 });
 
     expect(postSpy).not.toHaveBeenCalled();
+    expect(prisma.serviceVendor.update).not.toHaveBeenCalled();
   });
 
   it('silently no-ops if the userId does not resolve to a vendor profile', async () => {

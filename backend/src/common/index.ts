@@ -342,6 +342,29 @@ export function isValidIndiaCoords(lat: number | null | undefined, lng: number |
 // agrees on the same cutoff instead of one enforcing it and the other silently not.
 export const LOCATION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+// The ONE authoritative location-eligibility rule, shared by every path that decides whether
+// a given vendor may be matched to a given order: DispatchService.dispatch's no-GPS fallback,
+// ServiceVendorsService.isEligibleForOrder (partner's own available-jobs/accept re-check), and
+// AdminService.listActiveVendors (manual assignment candidate list). Before this was shared,
+// isEligibleForOrder and listActiveVendors had genuinely different rules — manual assignment
+// had no city/GPS filter at all, only a display-only distance sort — so an admin manually
+// assigning a job could see (and pick) a vendor from an entirely different city.
+// Prefers GPS-radius matching when the vendor has a fresh (not stale) location fix AND the
+// order has a real captured GPS fix; otherwise falls back to exact (case-insensitive)
+// city-text matching, which is also what happens when neither side has usable coordinates.
+export function isVendorLocationEligible(
+  vendor: { currentLatitude: number | null; currentLongitude: number | null; lastLocationUpdate: Date | string | null; serviceRadius: number; baseCity: string },
+  order: { address?: { latitude?: number | null; longitude?: number | null; city?: string | null } | null },
+): boolean {
+  const address = order.address;
+  const vendorHasFreshLocation = vendor.currentLatitude != null && vendor.currentLongitude != null &&
+    vendor.lastLocationUpdate != null && (Date.now() - new Date(vendor.lastLocationUpdate).getTime()) < LOCATION_STALE_AFTER_MS;
+  if (vendorHasFreshLocation && isValidIndiaCoords(address?.latitude, address?.longitude)) {
+    return haversineKm(vendor.currentLatitude!, vendor.currentLongitude!, address!.latitude!, address!.longitude!) <= vendor.serviceRadius;
+  }
+  return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
+}
+
 // PaymentTransaction.orderId marker for a vendor wallet top-up (WithdrawalService.
 // initiateTopup/confirmTopup in partner-ledger.module.ts) — mirrors the customer wallet's
 // own historical 'WALLET_TOPUP' marker (now superseded there by the real isWalletTopup

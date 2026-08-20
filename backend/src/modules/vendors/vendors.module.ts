@@ -8,7 +8,7 @@ import { AgencyStatus, Language, OrderStatus, UserRole, VendorStatus } from '@pr
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -224,25 +224,17 @@ export class ServiceVendorsService {
   }
 
   private isEligibleForOrder(vendor: any, order: any) {
-    const skill = order.service?.category?.key;
+    const rawSkill = order.service?.category?.key;
+    // Same normalization DispatchService.dispatch() applies — ServiceCategory.key is stored
+    // in whatever case an admin typed it, while vendor.skills is always normalizeSkillKey()-
+    // normalized. Comparing them raw meant a vendor could never actually be eligible for
+    // any order by category, regardless of city/GPS.
+    const skill = rawSkill ? normalizeSkillKey(rawSkill) : null;
     if (!skill || !vendor.skills.includes(skill)) return false;
-    const address = order.address;
-    // GPS distance matching only applies when BOTH sides have a real fix. Address.latitude/
-    // longitude default to 0 (not null) in the schema, so a null-check alone never actually
-    // caught a missing/never-captured order location — every such order was silently run
-    // through haversineKm against (0,0), which excludes every real vendor. Falling back to
-    // city-text matching here mirrors exactly what DispatchService.dispatch() now does for
-    // the same no-coords case, so "available jobs" is never a stricter (or looser) set than
-    // what a vendor would have been automatically offered.
-    const vendorHasFreshLocation = vendor.currentLatitude != null && vendor.currentLongitude != null &&
-      vendor.lastLocationUpdate && (Date.now() - new Date(vendor.lastLocationUpdate).getTime()) < LOCATION_STALE_AFTER_MS;
-    if (vendorHasFreshLocation) {
-      if (!isValidIndiaCoords(address?.latitude, address?.longitude)) {
-        return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
-      }
-      return haversineKm(vendor.currentLatitude, vendor.currentLongitude, address.latitude, address.longitude) <= vendor.serviceRadius;
-    }
-    return !address?.city || address.city.toLowerCase() === vendor.baseCity.toLowerCase();
+    // Shared with DispatchService's own fallback and AdminService.listActiveVendors (manual
+    // assignment) — see isVendorLocationEligible's own comment for why this must be one
+    // function instead of three independently-drifting copies.
+    return isVendorLocationEligible(vendor, order);
   }
 
   // Phase 2 — minimal daily attendance. `date` is always normalized to midnight so the

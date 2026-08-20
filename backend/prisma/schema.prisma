@@ -163,6 +163,7 @@ enum LedgerEntryType {
   HOLD // Vendor Wallet: debit posted when money moves into ANY PartnerHold (warranty/admin-manual)
   HOLD_RELEASE // Vendor Wallet: credit posted when a PartnerHold is released (auto or admin)
   TOP_UP // Vendor Wallet: partner-initiated Razorpay top-up, credited only after server-side payment verification — see WithdrawalService.confirmVendorTopup()
+  COD_COLLECTION // Vendor Wallet: debit posted when a vendor collects cash/UPI/card directly from a customer on Remont's behalf — see OrdersService.collectBalance()/collectCod(). The job's own JOB_EARNING credit already reflects the vendor's rightful payout; this debit nets out the cash they're physically holding so pendingPayout never double-counts money the vendor already has in hand.
 }
 
 enum WithdrawalStatus {
