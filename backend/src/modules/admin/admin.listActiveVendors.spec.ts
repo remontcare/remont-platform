@@ -86,6 +86,33 @@ describe('AdminService.listActiveVendors', () => {
       };
     }
 
+    // Scale fix: same gap DispatchService.dispatch() had — this query previously pulled up
+    // to 100 skill-matching online vendors NATIONWIDE with no geographic filter, then
+    // filtered/sorted in-app. At real scale (thousands of vendors) the actual eligible
+    // nearby vendor could simply never be among the rows fetched.
+    it('scopes the DB query to a lat/lng bounding box when the order has real GPS coordinates', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());
+
+      await svc.listActiveVendors(undefined, 'order-1');
+
+      const where = prisma.serviceVendor.findMany.mock.calls[0][0].where;
+      expect(where.currentLatitude.gte).toBeLessThan(22.3072);
+      expect(where.currentLatitude.lte).toBeGreaterThan(22.3072);
+      expect(where.baseCity).toBeUndefined();
+    });
+
+    it('falls back to a baseCity DB filter when the order has no valid GPS', async () => {
+      const { svc, prisma } = makeService();
+      prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder({ address: { city: 'Vadodara', latitude: 0, longitude: 0 } }));
+
+      await svc.listActiveVendors(undefined, 'order-1');
+
+      const where = prisma.serviceVendor.findMany.mock.calls[0][0].where;
+      expect(where.baseCity).toEqual({ equals: 'Vadodara', mode: 'insensitive' });
+      expect(where.currentLatitude).toBeUndefined();
+    });
+
     it('derives the required skill from the order category and normalizes case before querying', async () => {
       const { svc, prisma } = makeService();
       prisma.order.findUnique.mockResolvedValue(vadodaraPlumbingOrder());

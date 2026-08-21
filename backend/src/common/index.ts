@@ -322,6 +322,33 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// No vendor can configure a serviceRadius above this (ServiceVendorRegistrationDto's
+// @Max(100) in vendors.module.ts) — the true upper bound on "could this vendor possibly be
+// eligible", used only to size the DB-level geographic prefilter below. Raising the per-
+// vendor max later must raise this too, or the prefilter could start excluding a real
+// long-radius vendor before the exact haversineKm+serviceRadius check ever sees them.
+export const MAX_DISPATCH_RADIUS_KM = 100;
+
+// Scale fix: DispatchService.dispatch()'s GPS candidate query previously pulled the first
+// N online+matching-skill vendors NATIONWIDE with no geographic filter at all, then computed
+// exact distance in-app — once the online vendor count nationwide exceeds N, the real
+// nearest vendor for a given order might simply never be among the rows fetched. This
+// computes a generous (never-too-small) lat/lng bounding box around a point so the DB query
+// itself can use the new ServiceVendor(currentLatitude, currentLongitude) index to narrow to
+// a geographically plausible candidate set before the exact-distance check runs in-app —
+// same "cheap bounding box, then exact math" pattern spatial queries always use when a
+// database has no native geo index type available (this one doesn't use PostGIS).
+export function boundingBoxForRadius(lat: number, lng: number, radiusKm: number) {
+  const latDeltaDeg = radiusKm / 111.32; // ~km per degree of latitude, everywhere
+  // km per degree of longitude shrinks toward the poles by cos(latitude); India's latitude
+  // range (isValidIndiaCoords: 6.5°-37.6°) never gets close enough to 90° for this to blow up.
+  const lngDeltaDeg = radiusKm / (111.32 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+  return {
+    minLat: lat - latDeltaDeg, maxLat: lat + latDeltaDeg,
+    minLng: lng - lngDeltaDeg, maxLng: lng + lngDeltaDeg,
+  };
+}
+
 // A missing/never-captured GPS fix is stored as (0,0) throughout this codebase (Prisma's
 // Address/ServiceVendor location columns default to 0, not null) — so "(0,0)" is this
 // codebase's actual null-island sentinel, not a real location anyone is ever standing at.

@@ -46,7 +46,13 @@ describe('DispatchService.dispatch — no valid order GPS falls back to city mat
     await service.dispatch('order-1');
 
     const where = prisma.serviceVendor.findMany.mock.calls[0][0].where;
-    expect(where.currentLatitude).toEqual({ not: null });
+    // Scale fix: a bounding box (gte/lte), not a bare not-null check — narrows to a
+    // geographically plausible candidate set at the DB level instead of pulling every
+    // online+matching-skill vendor nationwide. NULL currentLatitude/Longitude are still
+    // excluded implicitly (NULL >= x is never true in SQL), so this remains a strict subset
+    // of the old { not: null } behavior, just DB-filtered instead of only in-app-filtered.
+    expect(where.currentLatitude.gte).toBeLessThan(23.25);
+    expect(where.currentLatitude.lte).toBeGreaterThan(23.25);
     expect(where.baseCity).toBeUndefined();
   });
 

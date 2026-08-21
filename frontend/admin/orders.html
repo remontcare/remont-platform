@@ -104,6 +104,7 @@
             <option value="IN_HOUSE">In-House</option>
             <option value="PARTNER">Partner</option>
           </select>
+          <button class="btn btn-outline btn-sm" id="filter-invoice-failed-btn" onclick="toggleInvoiceFailedFilter()" title="Completed orders whose auto-invoice generation failed and needs a retry">⚠️ Invoice Failed</button>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
       </div>
@@ -165,6 +166,13 @@
     <div id="extra-work-section" style="display:none;margin-bottom:16px">
       <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">EXTRA WORK PENDING APPROVAL</div>
       <div id="extra-work-list"></div>
+    </div>
+
+    <!-- Invoice generation failure — hidden unless Order.invoiceGenerationFailed is true -->
+    <div id="invoice-failed-banner" style="display:none;margin-bottom:16px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:8px;padding:12px 14px">
+      <div style="font-size:12px;font-weight:700;color:#991b1b">⚠️ Automatic invoice generation failed for this order</div>
+      <div id="invoice-failed-reason" style="font-size:12px;color:#7f1d1d;margin-top:4px;font-family:monospace"></div>
+      <div style="font-size:11px;color:#991b1b;margin-top:6px">Click "Generate Invoice" below to retry — safe to retry any number of times, it will never create a duplicate.</div>
     </div>
 
     <div class="modal-footer">
@@ -285,6 +293,13 @@ function setStatusFilter(status) {
 
 // ── ORDERS LIST ───────────────────────────────────────────────────────
 
+var invoiceFailedFilter = false;
+function toggleInvoiceFailedFilter() {
+  invoiceFailedFilter = !invoiceFailedFilter;
+  document.getElementById('filter-invoice-failed-btn').classList.toggle('btn-warning', invoiceFailedFilter);
+  load();
+}
+
 function load() {
   var q = document.getElementById('filter-q').value;
   var ch = document.getElementById('filter-channel').value;
@@ -295,6 +310,7 @@ function load() {
   if (currentStatus) params += '&status='+currentStatus;
   if (q) params += '&q='+encodeURIComponent(q);
   if (ch) params += '&channel='+ch;
+  if (invoiceFailedFilter) params += '&invoiceFailed=true';
   document.getElementById('tbl').innerHTML='<div class="loading">Loading…</div>';
   api('GET','/admin/orders?'+params).then(function(orders) {
     orders = orders || [];
@@ -321,7 +337,9 @@ function load() {
       var chColor = CHANNEL_COLORS[o.channel]||'#6b7280';
       var chLabel = (o.channel||'').replace('_',' ');
       return '<tr style="cursor:pointer" onclick="openDetail(\''+o.id+'\')">' +
-        '<td style="font-family:monospace;font-size:11px;white-space:nowrap"><strong>'+escape(o.orderNumber)+'</strong></td>'+
+        '<td style="font-family:monospace;font-size:11px;white-space:nowrap"><strong>'+escape(o.orderNumber)+'</strong>'+
+        (o.invoiceGenerationFailed ? ' <span title="Invoice generation failed — open to retry" style="color:#ef4444">⚠️</span>' : '')+
+        '</td>'+
         '<td>'+escape(cname)+'<br><small style="color:#9ca3af">'+escape(cphone)+'</small></td>'+
         '<td>'+escape(svc)+'</td>'+
         '<td>'+escape(city)+'</td>'+
@@ -361,6 +379,9 @@ function openDetail(orderId) {
     document.getElementById('detail-status-badge').innerHTML = statusBadge(o.status);
     var chColor = CHANNEL_COLORS[o.channel]||'#6b7280';
     document.getElementById('detail-channel-badge').innerHTML = '<span class="channel-badge" style="background:'+chColor+'22;color:'+chColor+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">'+(o.channel||'').replace('_',' ')+'</span>';
+
+    document.getElementById('invoice-failed-banner').style.display = o.invoiceGenerationFailed ? '' : 'none';
+    document.getElementById('invoice-failed-reason').textContent = o.invoiceGenerationError || '';
 
     // Customer
     var cname = o.guestName||(o.customer&&o.customer.name)||'—';
@@ -518,7 +539,10 @@ function generateInvoice() {
   if (!currentOrder) return;
   api('POST','/admin/invoices/'+currentOrder.id+'/generate').then(function(inv){
     toast('Invoice '+inv.invoiceNumber+' generated','success');
-  }).catch(function(e){ toast(e.message,'error'); });
+    // Retry succeeded — clear the failure banner without a full modal reload.
+    document.getElementById('invoice-failed-banner').style.display = 'none';
+    load();
+  }).catch(function(e){ toast('Invoice generation failed: '+e.message,'error'); openDetail(currentOrder.id); });
 }
 
 function saveNote() {

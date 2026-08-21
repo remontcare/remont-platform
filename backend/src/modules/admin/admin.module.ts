@@ -9,7 +9,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, isVendorLocationEligible, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -685,13 +685,17 @@ export class AdminService {
     return { total, new: newOrders, active, completed, cancelled, revenue: Number(revenue._sum.totalAmount || 0), stuck };
   }
 
-  async listOrders(opts: { status?: string; city?: string; q?: string; channel?: string; limit?: number; offset?: number; stuck?: boolean }) {
+  async listOrders(opts: { status?: string; city?: string; q?: string; channel?: string; limit?: number; offset?: number; stuck?: boolean; invoiceFailed?: boolean }) {
     const where: any = {
       // "Stuck" = confirmed, unassigned, and at least one auto-dispatch wave already
       // went out with nobody accepting — the admin queue this powers is exactly the
       // "orders vendors keep declining/ignoring" list, so an admin can call someone
       // directly and force-assign via listActiveVendors()/forceAssignVendor().
       ...(opts.stuck ? { status: OrderStatus.CONFIRMED, vendorId: null, dispatchAttempts: { gte: 1 } } : {}),
+      // Completed orders whose auto-invoice generation threw and was never retried
+      // successfully — see invoiceGenerationFailed on Order and generateInvoice() above,
+      // which is the idempotent retry action for this exact queue.
+      ...(opts.invoiceFailed ? { invoiceGenerationFailed: true } : {}),
       ...(opts.status ? { status: opts.status as OrderStatus } : {}),
       ...(opts.channel ? { channel: opts.channel as any } : {}),
       ...(opts.city ? { address: { city: { contains: opts.city, mode: 'insensitive' } } } : {}),
@@ -919,27 +923,45 @@ export class AdminService {
       ? normalizeSkillKey(order.service.category.key)
       : normalizedSkillParam;
 
+    // Scale fix: same gap DispatchService.dispatch() had — this previously fetched up to
+    // 100 skill-matching online vendors NATIONWIDE with no geographic filter at all, then
+    // filtered/sorted in-app. Once the nationwide pool for a given skill exceeds 100, the
+    // real eligible nearby vendor for this order could simply never be among the rows
+    // fetched. Prefilter at the DB level the same way dispatch does: a generous lat/lng
+    // bounding box when the order has real GPS, else the vendor's own city, before the
+    // in-app isVendorLocationEligible() exact check runs on a now-bounded candidate set.
+    const lat = order.address?.latitude, lng = order.address?.longitude;
+    const hasOrderCoords = isValidIndiaCoords(lat, lng);
+    const geoWhere = hasOrderCoords
+      ? (() => {
+          const box = boundingBoxForRadius(lat!, lng!, MAX_DISPATCH_RADIUS_KM);
+          return { currentLatitude: { gte: box.minLat, lte: box.maxLat }, currentLongitude: { gte: box.minLng, lte: box.maxLng } };
+        })()
+      : order.address?.city
+        ? { baseCity: { equals: order.address.city, mode: 'insensitive' as const } }
+        : {};
+
     const vendors = await this.prisma.serviceVendor.findMany({
       where: {
         status: 'ACTIVE',
         isOnline: true,
         ...NOT_FROZEN_MEMBER_FILTER,
         ...(requiredSkill ? { skills: { has: requiredSkill } } : {}),
+        ...geoWhere,
       },
       include: { user: { select: { name: true, phone: true } } },
-      take: 100,
+      take: 200,
     });
 
     const eligible = vendors.filter((v) => isVendorLocationEligible(v, order));
 
-    const lat = order.address?.latitude, lng = order.address?.longitude;
-    if (lat == null || lng == null) return eligible.sort((a, b) => b.rating - a.rating);
+    if (!hasOrderCoords) return eligible.sort((a, b) => b.rating - a.rating);
 
     return eligible
       .map((v) => ({
         ...v,
         distanceKm: v.currentLatitude != null && v.currentLongitude != null
-          ? Math.round(haversineKm(lat, lng, v.currentLatitude, v.currentLongitude) * 10) / 10
+          ? Math.round(haversineKm(lat!, lng!, v.currentLatitude, v.currentLongitude) * 10) / 10
           : null,
       }))
       .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
@@ -2143,10 +2165,28 @@ Return JSON with:
   // computeInvoiceBreakdown at all) — the one actually wired to the admin "Generate
   // Invoice" button. Now routes through the same billing engine as every other
   // invoice-generation path (see InvoicesService.generateForOrder).
+  //
+  // Also the manual retry path for OrdersService.autoGenerateInvoice()'s own fire-and-forget
+  // failures (invoiceGenerationFailed/invoiceGenerationError on Order) — generateForOrder()
+  // is idempotent (returns the existing Invoice if one already exists), so re-running this
+  // after a fix (e.g. missing SiteSetting/GST config) can never create a duplicate invoice.
   async generateInvoice(orderId: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
-    return this.invoices.generateForOrder(orderId);
+    try {
+      const invoice = await this.invoices.generateForOrder(orderId);
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { invoiceGenerationFailed: false, invoiceGenerationError: null },
+      });
+      return invoice;
+    } catch (e) {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { invoiceGenerationFailed: true, invoiceGenerationError: String(e.message || e).slice(0, 1000) },
+      }).catch(() => {});
+      throw e;
+    }
   }
 
   // ─── Corporate ────────────────────────────────────────────────────────
@@ -2806,8 +2846,8 @@ export class AdminController {
   @Get('orders') listOrders(
     @Query('status') status?: string, @Query('city') city?: string, @Query('q') q?: string,
     @Query('channel') channel?: string, @Query('limit') limit?: number, @Query('offset') offset?: number,
-    @Query('stuck') stuck?: string,
-  ) { return this.admin.listOrders({ status, city, q, channel, limit, offset, stuck: stuck === 'true' }); }
+    @Query('stuck') stuck?: string, @Query('invoiceFailed') invoiceFailed?: string,
+  ) { return this.admin.listOrders({ status, city, q, channel, limit, offset, stuck: stuck === 'true', invoiceFailed: invoiceFailed === 'true' }); }
   @Post('orders') adminCreateOrder(@Body() b: any) { return this.admin.adminCreateOrder(b); }
   @Get('orders/:id') adminGetOrder(@Param('id') id: string) { return this.admin.adminGetOrder(id); }
   @Patch('orders/:id/status') updateOrderStatus(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { status: string; note?: string }) { return this.admin.adminUpdateStatus(id, b.status, b.note, u.sub, u.role); }

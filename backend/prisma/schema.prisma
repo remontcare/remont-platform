@@ -1096,6 +1096,19 @@ model ServiceVendor {
   @@index([status, isOnline])
   @@index([baseCity])
   @@index([agencyOwnerId])
+  // Scale fix: DispatchService.dispatch()'s GPS-radius candidate query previously had no
+  // geographic filter at the DB level at all — it pulled up to 50 online+matching-skill
+  // vendors NATIONWIDE with no ordering, then filtered by distance in-app. Once the online
+  // vendor pool across all cities exceeds 50, the actual nearest vendor for a given order
+  // could simply never be among the 50 rows fetched. This composite index makes the new
+  // bounding-box prefilter (see MAX_DISPATCH_RADIUS_KM in common/index.ts) an index range
+  // scan instead of a sequential scan as the vendor table grows into the thousands.
+  @@index([currentLatitude, currentLongitude])
+  // Every dispatch/routing/eligibility check filters ServiceVendor.skills with `has`/
+  // `hasSome` — a GIN index is what actually lets Postgres use an index for Postgres array
+  // containment operators (a plain B-tree index cannot); without it, this check degrades to
+  // a sequential scan of every ACTIVE+isOnline vendor as the table grows.
+  @@index([skills], type: Gin)
 }
 
 model VendorBankUpdateRequest {
@@ -1591,6 +1604,16 @@ model Order {
   completedAt        DateTime?
   cancelledAt        DateTime?
   cancelReason       String?
+
+  // Set when OrdersService.autoGenerateInvoice() (fire-and-forget on job completion) throws —
+  // previously that failure was only ever logged, leaving the order stuck COMPLETED with no
+  // invoice forever and nothing admin-visible. InvoicesService.generateForOrder() is already
+  // idempotent (returns the existing Invoice if one exists), so admin re-triggering it via
+  // the existing POST /admin/invoices/:orderId/generate can never create a duplicate — these
+  // two fields just make the failure findable instead of silent, and get cleared the moment
+  // generation succeeds (auto-retry or manual).
+  invoiceGenerationFailed Boolean @default(false)
+  invoiceGenerationError  String?
 
   // Proof artifacts
   photosBefore String[]

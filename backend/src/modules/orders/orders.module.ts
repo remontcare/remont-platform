@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -126,52 +126,79 @@ export class DispatchService {
     const skill = normalizeSkillKey(order.service.category.key);
     const hasOrderCoords = isValidIndiaCoords(lat, lng);
 
-    let candidates: any[];
+    // Production incident: a verified, ACTIVE, online, correct-skill, same-city vendor
+    // (Mayank, Bhopal, WATERPROOFING) never received an order with valid GPS coordinates,
+    // because he has never sent a single location ping (currentLatitude is null — the app
+    // never called PATCH .../me/location for him). The old code picked EITHER the GPS-radius
+    // branch OR the city-text-fallback branch based only on whether the ORDER had valid
+    // coordinates — an order with valid GPS always took the GPS-only branch, which
+    // structurally excludes every vendor with no location fix, even ones in the exact right
+    // city. Fixed by treating the two pools as ADDITIVE, not either/or: real GPS-radius
+    // matches (scored by actual distance) plus same-city vendors who simply have no usable
+    // GPS fix yet (scored by the same city-fallback formula) — matching the priority-tier
+    // business rule (nearest verified partner first, same-city-no-GPS next, never silently
+    // dropped just because a phone never granted location permission).
+    const candidatesByVendorId = new Map<string, any>();
+
     if (hasOrderCoords) {
+      // Scale fix: narrow to a geographically plausible candidate set at the DB level
+      // FIRST (a generous bounding box no real eligible vendor can fall outside of, since
+      // no vendor can configure a serviceRadius above MAX_DISPATCH_RADIUS_KM) before pulling
+      // rows into the app for the exact haversineKm+per-vendor-radius check below. Without
+      // this, "take: 50, no geographic filter" meant the real nearest vendor could simply
+      // never be among the 50 rows fetched once the nationwide online-vendor count grew
+      // past that — see ServiceVendor(currentLatitude, currentLongitude) index.
+      const box = boundingBoxForRadius(lat, lng, MAX_DISPATCH_RADIUS_KM);
       const vendors = await this.prisma.serviceVendor.findMany({
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
-          currentLatitude: { not: null }, currentLongitude: { not: null },
+          currentLatitude: { gte: box.minLat, lte: box.maxLat },
+          currentLongitude: { gte: box.minLng, lte: box.maxLng },
           lastLocationUpdate: { gte: new Date(Date.now() - LOCATION_STALE_AFTER_MS) },
           ...NOT_FROZEN_MEMBER_FILTER, // excludes a frozen agency member; null (non-agency) vendors stay eligible
         },
         include: { user: true },
-        take: 50,
+        take: 200,
       });
-      candidates = vendors
-        .map((v) => {
-          const d = haversineKm(lat, lng, v.currentLatitude!, v.currentLongitude!);
-          if (d > v.serviceRadius) return null;
-          const score = (v.rating / 5) * 50 + Math.max(0, 50 - d * 5) + (v.isVipPro ? 10 : 0);
-          return { vendorId: v.id, userId: v.userId, distance: d, rating: v.rating, score };
-        })
-        .filter(Boolean) as any[];
-    } else if (order.address.city) {
-      // No usable GPS fix for this order (never captured, or (0,0)/out-of-bounds — see
-      // isValidIndiaCoords) — GPS-radius matching can't run at all. Fall back to the same
-      // city-text matching RoutingService's in-house auto-assign already uses, rather than
-      // silently producing zero candidates forever (the previous behavior: haversineKm
-      // against (0,0) excludes every real vendor, and DispatchRetryService's hourly sweep
-      // would just keep repeating the same empty result).
+      for (const v of vendors) {
+        const d = haversineKm(lat, lng, v.currentLatitude!, v.currentLongitude!);
+        if (d > v.serviceRadius) continue;
+        const score = (v.rating / 5) * 50 + Math.max(0, 50 - d * 5) + (v.isVipPro ? 10 : 0);
+        candidatesByVendorId.set(v.id, { vendorId: v.id, userId: v.userId, distance: d, rating: v.rating, score });
+      }
+    }
+
+    if (order.address.city) {
+      // Same-city fallback pool — additive to the GPS pool above, not a replacement for it.
+      // Deliberately excludes any vendor with a fresh, valid GPS fix: that vendor's real
+      // distance (checked above) is more precise than a same-city guess, so if they weren't
+      // already added above it's because they're genuinely too far right now, not because
+      // this branch never ran.
       const vendors = await this.prisma.serviceVendor.findMany({
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
           baseCity: { equals: order.address.city, mode: 'insensitive' },
           ...NOT_FROZEN_MEMBER_FILTER,
+          OR: [
+            { currentLatitude: null }, { currentLongitude: null },
+            { lastLocationUpdate: null }, { lastLocationUpdate: { lt: new Date(Date.now() - LOCATION_STALE_AFTER_MS) } },
+          ],
         },
         include: { user: true },
         take: 50,
       });
-      candidates = vendors.map((v) => ({
-        vendorId: v.id, userId: v.userId, distance: null, rating: v.rating,
-        score: (v.rating / 5) * 50 + (v.isVipPro ? 10 : 0),
-      }));
-    } else {
-      candidates = [];
+      for (const v of vendors) {
+        if (candidatesByVendorId.has(v.id)) continue;
+        candidatesByVendorId.set(v.id, {
+          vendorId: v.id, userId: v.userId, distance: null, rating: v.rating,
+          score: (v.rating / 5) * 50 + (v.isVipPro ? 10 : 0),
+        });
+      }
     }
 
+    const candidates = Array.from(candidatesByVendorId.values());
     candidates.sort((a, b) => b.score - a.score);
     const top = candidates.slice(0, 5);
     for (const c of top) {
@@ -1116,9 +1143,27 @@ export class OrdersService {
     return { orderId, otpType: type, sentAt: now };
   }
 
+  // Fire-and-forget from complete() — a throw here must never crash job completion. Previously
+  // a failure was only logged, leaving the order stuck COMPLETED with no invoice and no admin
+  // visibility forever. Now the failure (and its clearing on a later successful retry) is
+  // recorded on the order itself — see invoiceGenerationFailed/invoiceGenerationError in
+  // schema.prisma. generateForOrder() is already idempotent (returns the existing Invoice if
+  // one exists), so this can be safely re-run by AdminService.generateInvoice() any number of
+  // times without ever creating a duplicate.
   private async autoGenerateInvoice(orderId: string) {
-    await this.invoices.generateForOrder(orderId);
-    await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.INVOICED } });
+    try {
+      await this.invoices.generateForOrder(orderId);
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.INVOICED, invoiceGenerationFailed: false, invoiceGenerationError: null },
+      });
+    } catch (e) {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { invoiceGenerationFailed: true, invoiceGenerationError: String(e.message || e).slice(0, 1000) },
+      }).catch(() => {}); // never let the failure-tracking write itself throw past this method
+      throw e;
+    }
   }
 
   async myOrders(customerId: string, status?: OrderStatus) {
