@@ -350,6 +350,15 @@ export class ServiceVendorsService {
     //    type, so dispatchAttempts alone would already exclude them; this is
     //    belt-and-suspenders against a future routing/dispatch change leaking one through,
     //    and stays safe-by-default if a new in-house-only fulfillment type is added later.
+    // Bug found via a live production test: this DB-level `category: { key: { in: v.skills } } }`
+    // filter compared ServiceCategory.key RAW (however an admin typed it, e.g. lowercase
+    // "waterproofing") against v.skills (always normalizeSkillKey()-normalized, e.g.
+    // "WATERPROOFING") — a case-sensitive match that could never succeed, silently hiding
+    // every available job from every vendor regardless of city/GPS. isEligibleForOrder()
+    // below already does this same skill check correctly (normalized on both sides) — the
+    // DB query now only applies the cheap, unambiguous filters and leaves category+location
+    // eligibility entirely to that one authoritative function, so this can never drift out
+    // of sync with it again.
     const orders = await this.prisma.order.findMany({
       where: {
         vendorId: null,
@@ -357,16 +366,19 @@ export class ServiceVendorsService {
         // eligible, because their lifecycle status is CONFIRMED.
         status: OrderStatus.CONFIRMED,
         dispatchAttempts: { gte: 1 },
-        service: { category: { key: { in: v.skills } }, fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
+        service: { fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
       },
       include: {
-        service: { select: { name: true, categoryId: true } },
+        service: { select: { name: true, categoryId: true, category: { select: { key: true } } } },
         // Use coordinates only for eligibility; do not reveal an unassigned customer's
         // full address, pincode or precise location.
         address: { select: { city: true, latitude: true, longitude: true } },
       },
       orderBy: { createdAt: 'asc' },
-      take: 50,
+      // Raised from 50 now that category is no longer filtered at the DB level — without
+      // headroom here, a busy multi-category order queue could push this vendor's own
+      // matching order out of the fetched page before the in-app skill check ever sees it.
+      take: 200,
     });
 
     return orders

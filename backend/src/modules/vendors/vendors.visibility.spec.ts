@@ -56,24 +56,29 @@ function releasedOrder(overrides: Record<string, unknown> = {}) {
 
 describe('Vendor dispatch visibility boundary', () => {
   describe('availableJobs — DB-level query gate', () => {
-    it('scopes the query to unassigned, confirmed, released, vendor-dispatchable, skill-matching orders', async () => {
+    it('scopes the query to unassigned, confirmed, released, vendor-dispatchable orders — category/skill matching is NOT done at the DB level', async () => {
       const { service, prisma } = makeService();
       prisma.serviceVendor.findUnique.mockResolvedValue(activeVendor());
       prisma.order.findMany.mockResolvedValue([]);
 
       await service.availableJobs('vendor-user-1');
 
-      expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: expect.objectContaining({
-          vendorId: null,
-          status: 'CONFIRMED',
-          dispatchAttempts: { gte: 1 },
-          service: expect.objectContaining({
-            category: { key: { in: ['PLUMBING'] } },
-            fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES },
-          }),
-        }),
+      const call = prisma.order.findMany.mock.calls[0][0];
+      expect(call.where).toEqual(expect.objectContaining({
+        vendorId: null,
+        status: 'CONFIRMED',
+        dispatchAttempts: { gte: 1 },
+        service: { fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
       }));
+      // Production bug found via a live test: a DB-level `category: { key: { in: v.skills } } }`
+      // filter compared ServiceCategory.key RAW against v.skills (always normalized), a
+      // case-sensitive match that could never succeed — silently hiding every available job
+      // from every vendor. Category/skill matching must live ONLY in isEligibleForOrder()
+      // (asserted below), never duplicated here where it can drift out of sync again.
+      expect(call.where.service.category).toBeUndefined();
+      // ...and the category key must actually be fetched so isEligibleForOrder() has
+      // something to normalize and compare in-app.
+      expect(call.include.service.select.category).toEqual({ select: { key: true } });
     });
 
     it('returns a released, dispatchable, skill-matching order the query hands back', async () => {
@@ -85,6 +90,23 @@ describe('Vendor dispatch visibility boundary', () => {
 
       expect(jobs).toHaveLength(1);
       expect(jobs[0].id).toBe('order-1');
+    });
+
+    // The exact bug: a category created with a lowercase key (e.g. seeded/typed as
+    // "waterproofing") must still be found for a vendor whose skills are always normalized
+    // uppercase ("WATERPROOFING") — this only works because the skill check now happens
+    // in-app via isEligibleForOrder(), not as a case-sensitive DB array filter.
+    it('matches a lowercase-keyed category against the vendor\'s normalized uppercase skill', async () => {
+      const { service, prisma } = makeService();
+      prisma.serviceVendor.findUnique.mockResolvedValue(activeVendor({ skills: ['WATERPROOFING'], baseCity: 'Bhopal' }));
+      prisma.order.findMany.mockResolvedValue([releasedOrder({
+        service: { category: { key: 'waterproofing' }, fulfillmentType: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES[0] },
+        address: { city: 'Bhopal', latitude: null, longitude: null },
+      })]);
+
+      const jobs = await service.availableJobs('vendor-user-1');
+
+      expect(jobs).toHaveLength(1);
     });
   });
 
