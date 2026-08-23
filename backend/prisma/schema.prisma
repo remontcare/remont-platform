@@ -1942,6 +1942,138 @@ model RefundRequestLog {
   @@index([refundRequestId])
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ORDER HELP & SUPPORT — a structured "select item → select issue → check
+// status → check policy → resolve" layer on top of the existing RefundRequest
+// pipeline. This module NEVER moves money itself: a resolution that implies a
+// refund creates a RefundRequest (refundRequestId below) and drives it through
+// RefundsService.raise()/.decide() exactly as a customer-raised refund would —
+// see backend/src/modules/support/support.module.ts.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum SupportItemType {
+  PRODUCT
+  SERVICE
+}
+
+enum SupportIssueType {
+  // product
+  NOT_DELIVERED
+  DELIVERED_LATE
+  WRONG_PRODUCT
+  DAMAGED_PRODUCT
+  MISSING_ITEM
+  CANCEL_PRODUCT
+  RETURN_PRODUCT
+  // service
+  PARTNER_NOT_ASSIGNED
+  PARTNER_ON_THE_WAY
+  PARTNER_ARRIVED
+  PARTNER_DID_NOT_ARRIVE
+  SERVICE_STARTED_ISSUE
+  SERVICE_COMPLETED_ISSUE_NOT_FIXED
+  // shared
+  OTHER_ISSUE
+}
+
+enum SupportCaseStatus {
+  OPEN
+  IN_REVIEW
+  WAITING_CUSTOMER
+  WAITING_PARTNER
+  DISPUTE
+  ADMIN_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum SupportResolutionType {
+  FULL_REFUND
+  PARTIAL_REFUND
+  REFUND_MINUS_VISIT
+  REFUND_MINUS_DIAGNOSIS
+  NO_REFUND
+  FREE_REVISIT
+  FREE_REWORK
+  REASSIGN_PARTNER
+  NEW_SERVICE_REQUIRED
+  CUSTOMER_PAYABLE
+  PARTNER_LIABILITY
+  SPLIT_LIABILITY
+}
+
+// Item-scoped by design — orderId is always ONE Order (one child order for a service, one
+// product order for a product), never a whole MasterOrder. orderItemId narrows further to a
+// single line item inside a multi-item product Order (see the "item-level scoping" note in
+// the implementation plan for why a multi-item product issue is resolved as a partial refund
+// against the same Order rather than a status change on OrderItem, which has none today).
+model SupportCase {
+  id         String @id @default(cuid())
+  caseNumber String @unique // customer-facing, e.g. SUP-000123
+
+  orderId     String
+  orderItemId String?
+  customerId  String
+  partnerId   String? // ServiceVendor.id snapshotted at case-open time
+
+  itemType    SupportItemType
+  issueType   SupportIssueType
+  description String?
+  evidenceUrls String[]
+
+  // Order.status frozen at the moment the case was opened — the live order can keep
+  // moving forward (e.g. a partner who "did not arrive" might complete the job an hour
+  // later); the case record should always reflect what was true when it was raised.
+  statusSnapshot String
+  status         SupportCaseStatus @default(OPEN)
+  // Which branch of the master flow this case took — AUTO_RESOLUTION | SUPPORT_CASE | DISPUTE
+  routeType      String
+
+  partnerResponse    String?
+  partnerRespondedAt DateTime?
+
+  // System recommendation (section 16) — always computed, never skipped, so admin always
+  // has a starting point even when they ultimately override it.
+  recommendedResolution SupportResolutionType?
+  recommendedAmount     Decimal?               @db.Decimal(10, 2)
+  recommendationReason  String?
+  policyApplied         String?
+
+  // Final decision — decidedBy is null for a true system auto-resolution.
+  resolutionType   SupportResolutionType?
+  resolutionAmount Decimal?               @db.Decimal(10, 2)
+  resolutionReason String?
+  decidedBy        String?
+  decidedAt        DateTime?
+  refundRequestId  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  logs SupportCaseLog[]
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([partnerId])
+  @@index([status])
+}
+
+// Append-only audit trail — same shape/purpose as RefundRequestLog above.
+model SupportCaseLog {
+  id            String    @id @default(cuid())
+  supportCaseId String
+  actorId       String?
+  actorRole     UserRole?
+  action        String
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  case SupportCase @relation(fields: [supportCaseId], references: [id], onDelete: Cascade)
+
+  @@index([supportCaseId])
+}
+
 // Manual record-keeping of partner payouts — no payout gateway is configured, so this
 // documents that admin already paid the partner outside the platform (bank transfer,
 // UPI, cash, cheque) and reduces ServiceVendor.pendingPayout. Replaces the currently

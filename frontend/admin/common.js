@@ -230,6 +230,7 @@ var SIDEBAR_NAV = [
   { section: '💰 FINANCE', items: [
     { key:'payments', label:'Payments', icon:'💳', href:'/admin/payments.html' },
     { key:'refunds', label:'Refund Requests', icon:'↩️', href:'/admin/refunds.html' },
+    { key:'support-cases', label:'Help & Support', icon:'🎧', href:'/admin/support-cases.html' },
     { key:'wallet', label:'Wallet', icon:'👛', href:'/admin/wallet.html' },
     { key:'invoices', label:'Invoices', icon:'🧾', href:'/admin/invoices.html' },
     { key:'coupons', label:'Coupons', icon:'🏷', href:'/admin/coupons.html' },

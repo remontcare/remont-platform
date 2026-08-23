@@ -90,6 +90,18 @@ export class PaymentNotificationsService {
     ]);
   }
 
+  /** Help & Support case resolved/updated — WhatsApp leg intentionally skipped (no approved
+   * template exists for this yet); the in-app Notification plus the case detail screen itself
+   * (which shows the full amount/policy/reason breakdown) is the source of truth for now. */
+  async supportCaseUpdate(userId: string, phone: string, orderNumber: string, caseNumber: string, decision: string, reason?: string, orderId?: string) {
+    await this.notifications.create(userId, {
+      title: 'Support Case Update',
+      body: `Case ${caseNumber} on order #${orderNumber}: ${decision}${reason ? ` — ${reason}` : ''}`,
+      channels: [NotificationChannel.IN_APP],
+      orderId,
+    }).catch(() => {});
+  }
+
   /** A partner tapped "Request OTP Again" — the previous code for this specific
    * service order is now invalid; the customer needs the fresh one. */
   async otpResent(userId: string, phone: string, orderNumber: string, otpType: 'START' | 'END', otp: string, orderId?: string) {

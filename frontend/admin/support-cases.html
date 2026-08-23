@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Help & Support Cases</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+.sc-evidence-thumb{display:inline-block;font-size:11px;color:#2563eb;text-decoration:underline;margin-right:8px}
+.sc-log-row{padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
+.sc-log-action{font-weight:700;color:#374151}
+.sc-log-notes{color:#6b7280;margin-top:2px}
+.sc-decision-fields{display:none}
+.sc-decision-fields.active{display:block}
+.sc-recommend{background:#fef9f5;border:1.5px solid #f3d9c4;border-radius:8px;padding:12px;font-size:13px;margin-bottom:14px;white-space:pre-line}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Help & Support Cases</h1><p>Item-scoped customer issues — admin has final decision authority on every case</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">NEEDS ATTENTION</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="s-active">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">DISPUTES</div><div style="font-size:22px;font-weight:800;color:#ef4444" id="s-dispute">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">RESOLVED</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="s-resolved">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">AUTO-RESOLVED TODAY</div><div style="font-size:22px;font-weight:800;color:#6366f1" id="s-auto">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Support Cases</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-status" class="form-control" style="width:190px" onchange="load()">
+            <option value="">All Statuses</option>
+            <option value="OPEN">Open</option>
+            <option value="IN_REVIEW">In Review</option>
+            <option value="WAITING_CUSTOMER">Waiting Customer</option>
+            <option value="WAITING_PARTNER">Waiting Partner</option>
+            <option value="DISPUTE">Dispute</option>
+            <option value="ADMIN_REVIEW">Admin Review</option>
+            <option value="RESOLVED">Resolved</option>
+            <option value="CLOSED">Closed</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail / Decision Modal -->
+<div id="sc-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title">Support Case</span>
+      <button class="modal-close" onclick="closeModal('sc-overlay')">×</button>
+    </div>
+    <div id="sc-detail-body"></div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('support-cases');
+requireAuth();
+var allCases = [];
+var currentCase = null;
+
+var ISSUE_LABELS = {
+  NOT_DELIVERED: 'Not Delivered', DELIVERED_LATE: 'Delivered Late', WRONG_PRODUCT: 'Wrong Product',
+  DAMAGED_PRODUCT: 'Damaged Product', MISSING_ITEM: 'Missing Item', CANCEL_PRODUCT: 'Cancel Product',
+  RETURN_PRODUCT: 'Return Product', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
+  PARTNER_ON_THE_WAY: 'Partner On The Way (cancel)', PARTNER_ARRIVED: 'Partner Arrived (cancel)',
+  PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
+  SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
+};
+var STATUS_COLOR = {
+  OPEN: 'yellow', IN_REVIEW: 'blue', WAITING_CUSTOMER: 'blue', WAITING_PARTNER: 'blue',
+  DISPUTE: 'red', ADMIN_REVIEW: 'red', RESOLVED: 'green', CLOSED: 'gray',
+};
+var REFUND_MODES = ['FULL_REFUND', 'PARTIAL_REFUND', 'REFUND_MINUS_VISIT', 'REFUND_MINUS_DIAGNOSIS'];
+
+function load() {
+  var status = document.getElementById('filter-status').value;
+  document.getElementById('tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/support/cases' + (status ? '?status=' + status : '')).then(function(list) {
+    allCases = list || [];
+    renderStats();
+    renderTable();
+  }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderStats() {
+  var active = allCases.filter(function(c) { return ['OPEN', 'IN_REVIEW', 'WAITING_CUSTOMER', 'WAITING_PARTNER', 'ADMIN_REVIEW'].indexOf(c.status) !== -1; }).length;
+  var dispute = allCases.filter(function(c) { return c.status === 'DISPUTE'; }).length;
+  var resolved = allCases.filter(function(c) { return c.status === 'RESOLVED' || c.status === 'CLOSED'; }).length;
+  var today = new Date().toDateString();
+  var auto = allCases.filter(function(c) { return c.routeType === 'AUTO_RESOLUTION' && c.decidedAt && new Date(c.decidedAt).toDateString() === today; }).length;
+  document.getElementById('s-active').textContent = active;
+  document.getElementById('s-dispute').textContent = dispute;
+  document.getElementById('s-resolved').textContent = resolved;
+  document.getElementById('s-auto').textContent = auto;
+}
+
+function renderTable() {
+  if (!allCases.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No support cases found.</div>'; return; }
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Case</th><th>Customer</th><th>Order</th><th>Issue</th><th>Route</th><th>Status</th><th>Opened</th><th>Action</th></tr></thead><tbody>' +
+    allCases.map(function(c) {
+      return '<tr>' +
+        '<td><strong>' + escape(c.caseNumber) + '</strong></td>' +
+        '<td>' + escape(c.customerName || c.customerId) + '<br><small style="color:#6b7280">' + escape(c.customerPhone || '') + '</small></td>' +
+        '<td>' + escape(c.orderNumber || '—') + '</td>' +
+        '<td>' + escape(ISSUE_LABELS[c.issueType] || c.issueType) + '</td>' +
+        '<td><small style="color:#6b7280">' + escape(c.routeType || '—') + '</small></td>' +
+        '<td>' + badge(c.status.replace(/_/g, ' '), STATUS_COLOR[c.status] || 'gray') + '</td>' +
+        '<td style="color:#9ca3af;font-size:12px">' + fmtDateShort(c.createdAt) + '</td>' +
+        '<td><button class="btn btn-xs btn-primary" onclick="openDetail(\'' + c.id + '\')">Review</button></td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function openDetail(id) {
+  api('GET', '/support/cases/' + id).then(function(c) {
+    currentCase = c;
+    renderDetail(c);
+    document.getElementById('sc-overlay').style.display = 'flex';
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function renderDetail(c) {
+  var isActive = ['RESOLVED', 'CLOSED'].indexOf(c.status) === -1;
+  var evidenceHtml = (c.evidenceUrls || []).length
+    ? c.evidenceUrls.map(function(u, i) { return '<a class="sc-evidence-thumb" href="' + escape(u) + '" target="_blank">Evidence ' + (i + 1) + ' ↗</a>'; }).join('')
+    : '<span style="color:#9ca3af;font-size:12px">No evidence attached</span>';
+  var logsHtml = (c.logs || []).map(function(l) {
+    return '<div class="sc-log-row"><span class="sc-log-action">' + escape(l.action) + '</span> · ' + escape(l.actorRole || 'SYSTEM') + ' · ' + fmtDate(l.createdAt) +
+      (l.notes ? '<div class="sc-log-notes">' + escape(l.notes) + '</div>' : '') + '</div>';
+  }).join('') || '<div style="color:#9ca3af;font-size:12px">No activity yet</div>';
+
+  var html =
+    '<div style="padding:16px 20px">' +
+    '<div style="margin-bottom:12px">' + badge(c.status.replace(/_/g, ' '), STATUS_COLOR[c.status] || 'gray') +
+      ' <small style="color:#6b7280">' + escape(c.routeType || '') + ' · was ' + escape((c.statusSnapshot || '').replace(/_/g, ' ')) + ' when opened</small></div>' +
+    '<div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">' +
+      '<div><strong>Order:</strong> ' + escape(c.orderNumber || '—') + (c.orderItemId ? ' <small style="color:#6b7280">(one item of this order)</small>' : '') + '</div>' +
+      '<div><strong>Customer:</strong> ' + escape(c.customerName || c.customerId) + (c.customerPhone ? ' · ' + escape(c.customerPhone) : '') + '</div>' +
+      (c.partnerName ? '<div><strong>Partner:</strong> ' + escape(c.partnerName) + '</div>' : '') +
+      '<div style="margin-top:8px"><strong>Issue:</strong> ' + escape(ISSUE_LABELS[c.issueType] || c.issueType) + '</div>' +
+      (c.description ? '<div style="margin-top:4px"><strong>Customer notes:</strong> ' + escape(c.description) + '</div>' : '') +
+      '<div style="margin-top:6px">' + evidenceHtml + '</div>' +
+      (c.partnerResponse ? '<div style="margin-top:8px"><strong>Partner Response:</strong> ' + escape(c.partnerResponse) + '</div>' : '') +
+    '</div>';
+
+  if (c.recommendedResolution || c.recommendationReason) {
+    html += '<div class="sc-recommend"><strong>System Recommendation: ' + escape((c.recommendedResolution || 'Review').replace(/_/g, ' ')) +
+      (c.recommendedAmount != null ? ' — ' + fmtCur(c.recommendedAmount) : '') + '</strong>\n' +
+      escape(c.recommendationReason || '') + (c.policyApplied ? '\nPolicy: ' + escape(c.policyApplied) : '') + '</div>';
+  }
+
+  html += '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase">Activity Log</div>' +
+    '<div style="max-height:140px;overflow:auto;margin-bottom:16px">' + logsHtml + '</div>';
+
+  if (isActive) {
+    html +=
+      '<div class="form-group">' +
+        '<label class="form-label">Decision (only Admin/Super Admin can decide)</label>' +
+        '<select id="sc-resolution" class="form-control" onchange="scResolutionChanged()">' +
+          '<option value="FULL_REFUND">Full Refund</option>' +
+          '<option value="PARTIAL_REFUND">Partial Refund</option>' +
+          '<option value="REFUND_MINUS_VISIT">Refund - Visit Charge</option>' +
+          '<option value="REFUND_MINUS_DIAGNOSIS">Refund - Diagnosis Charge</option>' +
+          '<option value="NO_REFUND">No Refund</option>' +
+          '<option value="FREE_REVISIT">Free Revisit</option>' +
+          '<option value="FREE_REWORK">Free Rework</option>' +
+          '<option value="REASSIGN_PARTNER">Reassign Partner</option>' +
+          '<option value="NEW_SERVICE_REQUIRED">New Service Required</option>' +
+          '<option value="CUSTOMER_PAYABLE">Customer Payable</option>' +
+          '<option value="PARTNER_LIABILITY">Partner Liability</option>' +
+          '<option value="SPLIT_LIABILITY">Split Liability</option>' +
+        '</select>' +
+      '</div>' +
+      '<div id="sc-field-amount" class="form-group sc-decision-fields active">' +
+        '<label class="form-label">Amount (₹)</label>' +
+        '<input id="sc-amount" type="number" class="form-control" placeholder="' + (c.recommendedAmount != null ? c.recommendedAmount : '0') + '">' +
+      '</div>' +
+      '<div id="sc-field-vendor" class="form-group sc-decision-fields">' +
+        '<label class="form-label">New Partner (ServiceVendor ID)</label>' +
+        '<input id="sc-new-vendor" class="form-control" placeholder="Vendor ID to reassign to">' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">Reason (required, shown to the customer)</label>' +
+        '<textarea id="sc-reason" class="form-control" rows="3" placeholder="' + escape(c.recommendationReason || '') + '"></textarea></div>' +
+      '<div class="modal-footer">' +
+        '<button class="btn btn-outline" onclick="closeModal(\'sc-overlay\')">Cancel</button>' +
+        '<button class="btn btn-primary" onclick="scDecide()">Submit Decision</button>' +
+      '</div>';
+  } else {
+    html += '<div style="background:#f0fdf4;border-radius:8px;padding:12px;font-size:13px">' +
+      '<strong>Decision:</strong> ' + escape((c.resolutionType || '—').replace(/_/g, ' ')) +
+      (c.resolutionAmount != null ? ' · ' + fmtCur(c.resolutionAmount) : '') +
+      (c.resolutionReason ? '<br><strong>Reason:</strong> ' + escape(c.resolutionReason) : '') +
+      (c.decidedBy ? '<br><small style="color:#6b7280">Decided by admin</small>' : '<br><small style="color:#6b7280">Auto-resolved by policy — no admin involved</small>') +
+      '</div>';
+  }
+  html += '</div>';
+  document.getElementById('sc-detail-body').innerHTML = html;
+  if (isActive) scResolutionChanged();
+}
+
+function scResolutionChanged() {
+  var mode = document.getElementById('sc-resolution').value;
+  document.getElementById('sc-field-amount').classList.toggle('active', REFUND_MODES.indexOf(mode) !== -1);
+  document.getElementById('sc-field-vendor').classList.toggle('active', mode === 'REASSIGN_PARTNER');
+}
+
+function scDecide() {
+  var mode = document.getElementById('sc-resolution').value;
+  var reason = document.getElementById('sc-reason').value.trim();
+  if (!reason) { toast('A reason is required for every decision', 'error'); return; }
+  var body = { resolutionType: mode, reason: reason };
+  if (REFUND_MODES.indexOf(mode) !== -1) {
+    var amt = document.getElementById('sc-amount').value;
+    body.amount = amt ? Number(amt) : (currentCase.recommendedAmount != null ? Number(currentCase.recommendedAmount) : undefined);
+  } else if (mode === 'REASSIGN_PARTNER') {
+    body.newVendorId = document.getElementById('sc-new-vendor').value.trim();
+    if (!body.newVendorId) { toast('Enter the new partner\'s ServiceVendor ID', 'error'); return; }
+  }
+  if (!confirm('Confirm this decision? This cannot be undone.')) return;
+  api('POST', '/support/cases/' + currentCase.id + '/decide', body).then(function() {
+    toast('Decision recorded', 'success');
+    closeModal('sc-overlay'); load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

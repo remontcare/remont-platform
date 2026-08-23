@@ -29,7 +29,7 @@ renderSidebar('settings');
 requireAuth();
 
 var settingsData = {};
-var groups = { general: '🏢 Brand & General', contact: '📞 Contact Info', stats: '📊 Homepage Stats', social: '🔗 Social Links', operations: '⚙️ Operations', wallet: '💰 Vendor Wallet', billing: '🧾 Billing & GST Invoicing Entity' };
+var groups = { general: '🏢 Brand & General', contact: '📞 Contact Info', stats: '📊 Homepage Stats', social: '🔗 Social Links', operations: '⚙️ Operations', wallet: '💰 Vendor Wallet', billing: '🧾 Billing & GST Invoicing Entity', support: '🎧 Help & Support Policy' };
 
 function load() {
   api('GET','/admin/settings').then(function(settings) {
@@ -81,7 +81,7 @@ function load() {
       '<div class="form-group" style="flex:1"><label class="form-label">Key</label><input id="new-key" class="form-control" placeholder="my_setting_key"></div>'+
       '<div class="form-group" style="flex:1"><label class="form-label">Value</label><input id="new-value" class="form-control" placeholder="value"></div>'+
       '<div class="form-group" style="flex:1"><label class="form-label">Label</label><input id="new-label" class="form-control" placeholder="Human-readable label"></div>'+
-      '<div class="form-group" style="flex:1"><label class="form-label">Group</label><select id="new-group" class="form-control"><option>general</option><option>contact</option><option>stats</option><option>social</option><option>operations</option><option>wallet</option><option>billing</option></select></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Group</label><select id="new-group" class="form-control"><option>general</option><option>contact</option><option>stats</option><option>social</option><option>operations</option><option>wallet</option><option>billing</option><option>support</option></select></div>'+
       '</div>'+
       '<button class="btn btn-primary btn-sm" onclick="addSetting()">+ Add Setting</button>'+
     '</div></div>';

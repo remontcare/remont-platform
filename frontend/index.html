@@ -9421,6 +9421,19 @@ function cartCheckout() {
   </div>
 </div>
 
+<!-- ═══ HELP & SUPPORT MODAL (item-scoped: select issue -> status/policy preview -> submit) ═══ -->
+<div id="support-case-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10251;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:0;width:480px;max-width:96vw;max-height:90vh;overflow:auto;position:relative">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="font-size:18px;font-weight:700;color:#111">🎧 Help &amp; Support</h3>
+      <button class="tap-target-fix" onclick="closeSupportModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280">✕</button>
+    </div>
+    <div id="sup-body" style="padding:20px 24px;min-height:150px">
+      <p style="color:#6b7280;text-align:center;padding:30px 0">Loading…</p>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ CITY-UNAVAILABLE POPUP (Task 1) ═══ -->
 <div id="city-unavail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10260;align-items:center;justify-content:center;padding:16px">
   <div style="background:#fff;border-radius:16px;padding:28px 24px;width:400px;max-width:96vw;text-align:center">
@@ -11212,6 +11225,22 @@ function _renderOrderDetails(o) {
 
   var paymentColor = o.paymentStatus === 'PAID' ? '#16a34a' : (o.paymentStatus === 'FAILED' ? '#ef4444' : '#f59e0b');
 
+  // Help & Support is always scoped to ONE item — for a multi-item product order that's a
+  // single OrderItem (its own "Get Help" button), never the whole order; for a service order
+  // (or a single-item product order) the order itself already IS the item.
+  var helpHtml;
+  if (o.items && o.items.length > 1) {
+    helpHtml = o.items.map(function(it) {
+      var label = (it.product && it.product.name) || 'Item';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">' +
+        '<span style="font-size:13px;color:#374151">' + escHtml(label) + '</span>' +
+        '<button onclick="openSupportModal(\'' + o.id + '\',\'' + it.id + '\',' + escHtml(JSON.stringify(label)) + ')" style="padding:5px 12px;background:#fff;border:1.5px solid #c4601a;color:#c4601a;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🎧 Get Help</button>' +
+      '</div>';
+    }).join('');
+  } else {
+    helpHtml = '<button onclick="openSupportModal(\'' + o.id + '\',null,' + escHtml(JSON.stringify(serviceName)) + ')" style="padding:8px 16px;background:#fff;border:1.5px solid #c4601a;color:#c4601a;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">🎧 Help &amp; Support</button>';
+  }
+
   var timelineHtml = (o.timeline && o.timeline.length)
     ? o.timeline.map(function(t) {
         var d = new Date(t.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
@@ -11239,9 +11268,143 @@ function _renderOrderDetails(o) {
       '<button onclick="openPaymentDetailModal(\'' + o.id + '\')" style="background:none;border:none;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline">View Payment Details →</button>' +
     '</div>') +
     _odTrackingSection(o) +
-    _odSection('Order Timeline', timelineHtml);
+    _odSection('Order Timeline', timelineHtml) +
+    _odSection('Help &amp; Support', helpHtml + '<div id="od-support-cases-' + o.id + '"></div>');
 
   document.getElementById('od-body').innerHTML = html;
+  _loadSupportCasesForOrder(o.id);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HELP & SUPPORT — item-scoped support cases (POST /support/cases/*)
+// ══════════════════════════════════════════════════════════════════
+var SUPPORT_ISSUE_LABELS = {
+  NOT_DELIVERED: 'Not Delivered', DELIVERED_LATE: 'Delivered Late', WRONG_PRODUCT: 'Wrong Product',
+  DAMAGED_PRODUCT: 'Damaged Product', MISSING_ITEM: 'Missing Item', CANCEL_PRODUCT: 'Cancel Product',
+  RETURN_PRODUCT: 'Return Product', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
+  PARTNER_ON_THE_WAY: 'Partner On The Way — I want to cancel', PARTNER_ARRIVED: 'Partner Arrived — I want to cancel',
+  PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
+  SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
+};
+var _supCtx = { orderId: null, orderItemId: null, itemLabel: null };
+
+function _loadSupportCasesForOrder(orderId) {
+  var el = document.getElementById('od-support-cases-' + orderId);
+  if (!el) return;
+  apiGet('/api/v1/support/cases/mine').then(function(res) {
+    var cases = (res && res.data) ? res.data : res;
+    var mine = (cases || []).filter(function(c) { return c.orderId === orderId; });
+    if (!mine.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px">' +
+      mine.map(function(c) {
+        var color = c.status === 'RESOLVED' ? '#16a34a' : (c.status === 'DISPUTE' || c.status === 'WAITING_PARTNER' ? '#f59e0b' : '#6b7280');
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;cursor:pointer" onclick="viewSupportCase(\'' + c.id + '\')">' +
+          '<span style="font-size:12px;color:#374151">' + escHtml(c.caseNumber) + ' — ' + escHtml(SUPPORT_ISSUE_LABELS[c.issueType] || c.issueType) + '</span>' +
+          '<span style="font-size:11px;font-weight:600;color:' + color + '">' + escHtml(c.status) + '</span>' +
+        '</div>';
+      }).join('') + '</div>';
+  }).catch(function() { el.innerHTML = ''; });
+}
+
+function openSupportModal(orderId, orderItemId, itemLabel) {
+  _supCtx = { orderId: orderId, orderItemId: orderItemId, itemLabel: itemLabel };
+  document.getElementById('support-case-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('sup-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:30px 0">Loading…</p>';
+  apiPost('/api/v1/support/cases/context', { orderId: orderId, orderItemId: orderItemId || undefined }).then(function(res) {
+    var ctx = (res && res.data) ? res.data : res;
+    _renderSupportIssuePicker(ctx);
+  }).catch(function() {
+    document.getElementById('sup-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px 0">Could not load support options. Please try again.</p>';
+  });
+}
+
+function closeSupportModal() {
+  document.getElementById('support-case-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function _renderSupportIssuePicker(ctx) {
+  var options = (ctx.issueOptions || []).map(function(issue) {
+    return '<button onclick="_previewSupportIssue(' + escHtml(JSON.stringify(issue)) + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;background:#fff;border:1.5px solid #e5e7eb;border-radius:10px;font-size:13px;font-weight:600;color:#111;cursor:pointer">' +
+      escHtml(SUPPORT_ISSUE_LABELS[issue] || issue) + '</button>';
+  }).join('');
+  document.getElementById('sup-body').innerHTML =
+    '<div style="font-size:13px;color:#6b7280;margin-bottom:12px">' + escHtml(_supCtx.itemLabel || '') + ' — what\'s the issue?</div>' +
+    '<div id="sup-issue-list">' + options + '</div>' +
+    '<div id="sup-preview"></div>';
+}
+
+function _previewSupportIssue(issueType) {
+  document.getElementById('sup-preview').innerHTML = '<p style="color:#6b7280;text-align:center;padding:16px 0">Checking policy…</p>';
+  apiPost('/api/v1/support/cases/context', {
+    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType,
+  }).then(function(res) {
+    var ctx = (res && res.data) ? res.data : res;
+    var rec = ctx.recommendation || {};
+    var box = '<div style="margin-top:14px;padding:14px;background:#fef9f5;border:1.5px solid #f3d9c4;border-radius:10px">' +
+      (rec.reasonForCustomer ? '<div style="font-size:13px;color:#374151;white-space:pre-line;margin-bottom:10px">' + escHtml(rec.reasonForCustomer) + '</div>' : '') +
+      (rec.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">Policy: ' + escHtml(rec.policyApplied) + '</div>' : '') +
+      '<textarea id="sup-description" placeholder="Add any extra details (optional)" style="width:100%;min-height:60px;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px"></textarea>' +
+      '<button onclick="_submitSupportCase(' + escHtml(JSON.stringify(issueType)) + ')" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Submit</button>' +
+    '</div>';
+    document.getElementById('sup-preview').innerHTML = box;
+  }).catch(function() {
+    document.getElementById('sup-preview').innerHTML = '<p style="color:#ef4444;text-align:center;padding:12px 0">Could not check policy. Please try again.</p>';
+  });
+}
+
+function _submitSupportCase(issueType) {
+  var description = (document.getElementById('sup-description') || {}).value || undefined;
+  document.getElementById('sup-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:30px 0">Submitting…</p>';
+  apiPost('/api/v1/support/cases', {
+    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType, description: description,
+  }).then(function(res) {
+    var kase = (res && res.data) ? res.data : res;
+    _renderSupportResult(kase);
+    _loadSupportCasesForOrder(_supCtx.orderId);
+  }).catch(function() {
+    document.getElementById('sup-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px 0">Could not submit your request. Please try again.</p>';
+  });
+}
+
+// Section 12's exact transparency contract: WHAT happened, WHY, WHICH policy, HOW much, WHAT next.
+function _renderSupportResult(kase) {
+  var resolved = kase.status === 'RESOLVED';
+  var decisionLabel = kase.resolutionType ? kase.resolutionType.replace(/_/g, ' ') : (resolved ? 'Reviewed' : 'Under Review');
+  var amountBlock = (kase.resolutionAmount != null)
+    ? '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:700;color:#111"><span>Refund</span><span>₹' + Number(kase.resolutionAmount).toLocaleString('en-IN') + '</span></div>'
+    : '';
+  var nextStep = resolved
+    ? (kase.resolutionAmount ? 'Your refund will reflect in your wallet shortly.' : 'No further action needed — see the reason above.')
+    : 'Our support team will review this case and update you here.';
+
+  document.getElementById('sup-body').innerHTML =
+    '<div style="text-align:center;margin-bottom:14px">' +
+      '<div style="font-size:32px;margin-bottom:6px">' + (resolved ? '✅' : '🕐') + '</div>' +
+      '<div style="font-size:16px;font-weight:700;color:#111">' + escHtml(decisionLabel) + '</div>' +
+    '</div>' +
+    amountBlock +
+    '<div style="margin:12px 0;padding:12px;background:#f9fafb;border-radius:10px">' +
+      '<div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Why?</div>' +
+      '<div style="font-size:13px;color:#374151;white-space:pre-line">' + escHtml(kase.resolutionReason || kase.recommendationReason || '') + '</div>' +
+    '</div>' +
+    (kase.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:10px">Policy: ' + escHtml(kase.policyApplied) + '</div>' : '') +
+    '<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Case ID: <b>' + escHtml(kase.caseNumber) + '</b></div>' +
+    '<div style="font-size:12px;color:#374151;padding:10px;background:#eff6ff;border-radius:8px">Next step: ' + escHtml(nextStep) + '</div>' +
+    '<button onclick="closeSupportModal()" style="width:100%;margin-top:14px;padding:11px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Done</button>';
+}
+
+function viewSupportCase(caseId) {
+  document.getElementById('support-case-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('sup-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:30px 0">Loading…</p>';
+  apiGet('/api/v1/support/cases/' + caseId).then(function(res) {
+    var kase = (res && res.data) ? res.data : res;
+    _renderSupportResult(kase);
+  }).catch(function() {
+    document.getElementById('sup-body').innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px 0">Could not load this case.</p>';
+  });
 }
 
 // Live tracking section — only rendered for the active statuses in
@@ -11295,6 +11458,9 @@ function _odTrackingSection(o) {
 // Close on backdrop click + stop polling on Escape-equivalent (matches the other modals' pattern).
 document.getElementById('order-details-modal').addEventListener('click', function(e) {
   if (e.target === this) closeOrderDetailsModal();
+});
+document.getElementById('support-case-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSupportModal();
 });
 
 // ══════════════════════════════════════════════════════════════════

@@ -41,6 +41,7 @@ import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.mod
 import { EstimatesModule } from './modules/estimates/estimates.module';
 import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SupportModule } from './modules/support/support.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     SettlementsModule,
     PartnerLedgerModule,
     RefundsModule,
+    SupportModule,
     UploadsModule,
 
     // B2B
