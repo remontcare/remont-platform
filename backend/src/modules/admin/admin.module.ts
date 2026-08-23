@@ -474,6 +474,26 @@ export class AdminService {
     return this.prisma.partnerHold.update({ where: { id: holdId }, data: { releaseDueAt: date } });
   }
 
+  // Closes a real gap: LedgerEntryType.ADJUSTMENT has existed in the schema since Phase 2 but
+  // had no write path anywhere — a manual correction (a support goodwill credit, correcting a
+  // data-entry mistake, clawing back an accidental overpayment) had no way to be recorded at
+  // all. Mirrors createAdminHold's exact pattern: validate, post through the ledger inside one
+  // transaction, keep pendingPayout in sync (increment works for both a positive credit and a
+  // negative debit — Prisma's increment with a negative delta is a decrement).
+  async postLedgerAdjustment(vendorId: string, amount: number, reason: string, adminId: string) {
+    if (!Number.isFinite(amount) || amount === 0) throw new BadRequestException('Enter a non-zero adjustment amount (positive to credit, negative to debit)');
+    if (!reason?.trim()) throw new BadRequestException('A reason is required for a manual ledger adjustment');
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const posted = await this.ledger.postEntry(tx, vendorId, 'ADJUSTMENT', amount, { createdBy: adminId, notes: reason });
+      await tx.serviceVendor.update({ where: { id: vendorId }, data: { pendingPayout: { increment: amount } } });
+      return posted;
+    });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'VENDOR_LEDGER_ADJUSTMENT', targetType: 'ServiceVendor', targetId: vendorId, metadata: { amount, reason } });
+    return entry;
+  }
+
   async vendorHolds(vendorId: string) {
     return this.prisma.partnerHold.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: 200 });
   }
@@ -561,12 +581,12 @@ export class AdminService {
     if (!req) throw new NotFoundException('Withdrawal request not found');
     if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
     // Hands off to the existing, unchanged settlement-recording flow instead of
-    // re-implementing "pay a vendor" — record() already decrements pendingPayout atomically.
-    const settlement = await this.settlements.record(req.vendorId, Number(req.amount), SettlementMode.BANK_TRANSFER, adminId, undefined, note);
-    await this.prisma.$transaction(async (tx) => {
-      await this.ledger.postEntry(tx, req.vendorId, 'WITHDRAWAL', -Number(req.amount), { withdrawalRequestId: id, createdBy: adminId });
-      await tx.withdrawalRequest.update({ where: { id }, data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date(), settlementId: settlement.id } });
-    });
+    // re-implementing "pay a vendor" — record() already atomically decrements pendingPayout
+    // AND posts the matching WITHDRAWAL ledger entry (tagged with this withdrawalRequestId),
+    // so there's no separate follow-up ledger post here anymore (that used to happen as a
+    // second, non-atomic transaction after this one).
+    const settlement = await this.settlements.record(req.vendorId, Number(req.amount), SettlementMode.BANK_TRANSFER, adminId, undefined, note, id);
+    await this.prisma.withdrawalRequest.update({ where: { id }, data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date(), settlementId: settlement.id } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_APPROVED', targetType: 'WithdrawalRequest', targetId: id, metadata: { amount: req.amount } });
     const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
     if (vendorForNotify) this.events.emit('withdrawal.approved', { userId: vendorForNotify.userId, amount: Number(req.amount), withdrawalId: id });
@@ -2759,6 +2779,9 @@ export class AdminController {
   @Get('vendors/:id/holds') vendorHolds(@Param('id') id: string) { return this.admin.vendorHolds(id); }
   @Post('vendors/:id/hold') createHold(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { amount: number; notes?: string }) {
     return this.admin.createAdminHold(id, b.amount, u.sub, b.notes);
+  }
+  @Post('vendors/:id/ledger-adjustment') postLedgerAdjustment(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { amount: number; reason: string }) {
+    return this.admin.postLedgerAdjustment(id, b.amount, b.reason, u.sub);
   }
   @Post('holds/:id/release') releaseHold(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.releaseHold(id, u.sub); }
   @Post('holds/:id/forfeit') forfeitHold(@Param('id') id: string, @Body() b: { reason?: string }) { return this.admin.forfeitHold(id, b.reason); }

@@ -6,6 +6,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { SettlementMode, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
+import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // Manual partner-payout record-keeping (no payout gateway is configured — see
 // PartnerSettlement in schema.prisma). Recording a settlement here does not move
@@ -13,7 +14,7 @@ import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../
 // platform and reduces ServiceVendor.pendingPayout so the dashboards stay accurate.
 @Injectable()
 export class SettlementsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private ledger: PartnerLedgerService) {}
 
   async record(
     vendorId: string,
@@ -22,6 +23,7 @@ export class SettlementsService {
     paidBy: string,
     referenceNumber?: string,
     notes?: string,
+    withdrawalRequestId?: string,
   ) {
     if (!amount || amount <= 0) throw new BadRequestException('Enter a valid settlement amount');
     const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
@@ -32,6 +34,17 @@ export class SettlementsService {
       );
     }
 
+    // Accounting fix: this is the ONE place a vendor payout actually gets recorded — both
+    // the formal withdrawal-approval flow (AdminService.approveWithdrawal) and the direct
+    // "Record Payout" admin action (AdminService.vendorPayout, wired to
+    // frontend/admin/partner-earnings.html) call this same method. It previously decremented
+    // pendingPayout with NO corresponding PartnerLedgerEntry — the vendor's ledger (and its
+    // CSV export) would show no trace of why their balance dropped, breaking the invariant
+    // that pendingPayout always reconciles with the ledger's own running balance. Posting the
+    // WITHDRAWAL debit in the SAME transaction as the PartnerSettlement row and the
+    // pendingPayout decrement also closes a smaller atomicity gap that existed in
+    // approveWithdrawal() before (it called this method, then posted its ledger entry as a
+    // separate, later transaction).
     return this.prisma.$transaction(async (tx) => {
       const settlement = await tx.partnerSettlement.create({
         data: { vendorId, amount, mode, referenceNumber, notes, paidBy },
@@ -39,6 +52,10 @@ export class SettlementsService {
       await tx.serviceVendor.update({
         where: { id: vendorId },
         data: { pendingPayout: { decrement: amount } },
+      });
+      await this.ledger.postEntry(tx, vendorId, 'WITHDRAWAL', -amount, {
+        withdrawalRequestId, createdBy: paidBy,
+        notes: notes || `Payout via ${mode}${referenceNumber ? ` (ref: ${referenceNumber})` : ''}`,
       });
       return settlement;
     });
@@ -135,6 +152,7 @@ export class SettlementsController {
 }
 
 @Module({
+  imports: [PartnerLedgerModule],
   controllers: [SettlementsController],
   providers: [SettlementsService],
   exports: [SettlementsService],
