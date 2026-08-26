@@ -49,6 +49,17 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
+  // Every /api/v1/* response is dynamic, admin-editable data (prices, categories,
+  // services, site settings/logo, etc). Express auto-generates an ETag for JSON
+  // responses but sends no Cache-Control, so without this, HTTP caches fall back to
+  // heuristic freshness — mobile/standalone-PWA HTTP caches are far more aggressive
+  // about reusing a stale GET response this way than a desktop browser tab, which is
+  // why admin edits used to lag on the installed mobile PWA while desktop looked fine.
+  app.use('/api/v1', (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

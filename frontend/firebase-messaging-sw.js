@@ -10,6 +10,12 @@
 importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js');
 
+// Activate a new deployment of this file immediately instead of sitting in "waiting"
+// until every open tab/installed-PWA instance of the old version closes — otherwise a
+// returning PWA session can stay stuck on a stale service worker indefinitely.
+self.addEventListener('install', function (event) { self.skipWaiting(); });
+self.addEventListener('activate', function (event) { event.waitUntil(self.clients.claim()); });
+
 var API_BASE = self.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 
 var readyPromise = fetch((API_BASE || '') + '/api/v1/notifications/push-config')

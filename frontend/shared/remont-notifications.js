@@ -73,7 +73,10 @@
         if (!pushConfig || !pushConfig.configured) return null; // Firebase not set up yet — safe no-op
         return loadScript('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js')
           .then(function () { return loadScript('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js'); })
-          .then(function () { return navigator.serviceWorker.register('/firebase-messaging-sw.js'); })
+          // updateViaCache:'none' stops the browser from ever serving a cached copy of the
+          // SW script itself when checking for updates, so a new deployment of it is
+          // detected reliably instead of possibly getting stuck behind an HTTP cache hit.
+          .then(function () { return navigator.serviceWorker.register('/firebase-messaging-sw.js', { updateViaCache: 'none' }); })
           .then(function (registration) {
             if (!global.firebase.apps.length) {
               global.firebase.initializeApp({
