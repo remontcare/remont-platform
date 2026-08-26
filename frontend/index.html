@@ -5719,6 +5719,17 @@
     container.innerHTML = plans.map(function(p, i) {
       var isFeatured = p.type === 'HOME_COMPLETE' || (plans.length > 1 && i === Math.floor(plans.length / 2));
       var features = Array.isArray(p.includedServices) ? p.includedServices : [];
+      // Corporate/custom-priced plans have no fixed yearly price to charge — show a quote
+      // CTA (WhatsApp lead) instead of a Razorpay "Subscribe Now".
+      var isQuoteOnly = p.type === 'CORPORATE' || p.type === 'CUSTOM' || Number(p.priceYearly || 0) <= 0;
+      var priceHtml = isQuoteOnly
+        ? '<span class="amc-price-now">Custom</span><small>quote</small>'
+        : '<span class="amc-price-now">₹' + Number(p.priceYearly || 0).toLocaleString('en-IN') + '</span>' +
+          (p.originalPrice ? '<span class="amc-price-old">₹' + Number(p.originalPrice).toLocaleString('en-IN') + '</span>' : '') +
+          '<small>/year</small>';
+      var btnHtml = isQuoteOnly
+        ? '<button class="amc-btn" onclick="talkToSalesAmc(\'' + escJs(p.name || 'AMC') + '\')">Talk to Sales</button>'
+        : '<button class="amc-btn" onclick="subscribeAmc(\'' + p.id + '\',this)">Subscribe Now</button>';
       return '<div class="amc-card' + (isFeatured ? ' featured' : '') + ' reveal">' +
         (isFeatured ? '<span class="featured-tag">Most Popular</span>' : '') +
         '<div class="amc-icon">' + (icons[p.type] || '🏡') + '</div>' +
@@ -5726,12 +5737,63 @@
         '<div class="amc-period">Annual Plan</div>' +
         '<div class="amc-desc">' + (p.description || '') + '</div>' +
         '<ul class="amc-features">' + features.slice(0,6).map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
-        '<div class="amc-price"><span class="amc-price-now">₹' + Number(p.priceYearly || 0).toLocaleString('en-IN') + '</span>' +
-        (p.originalPrice ? '<span class="amc-price-old">₹' + Number(p.originalPrice).toLocaleString('en-IN') + '</span>' : '') +
-        '<small>/year</small></div>' +
-        '<button class="amc-btn">Subscribe Now</button>' +
+        '<div class="amc-price">' + priceHtml + '</div>' +
+        btnHtml +
         '</div>';
     }).join('');
+  }
+
+  // Subscribe flow: create a PENDING_PAYMENT AmcSubscription + Razorpay order
+  // (POST /api/v1/amc/subscribe), open Razorpay checkout, then confirm the signature
+  // (POST /api/v1/amc/:id/confirm-payment) — same create-order-then-confirm pattern used
+  // for regular checkout (launchRazorpay), just against the AMC endpoints. Requires login
+  // since /amc/subscribe is JWT-guarded; openAuthModal() handles that with a resume callback.
+  function subscribeAmc(planId, btn) {
+    var token = localStorage.getItem('remont_token');
+    if (!token) { openAuthModal(function () { subscribeAmc(planId, btn); }); return; }
+    var origText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Processing…';
+    apiPost('/api/v1/amc/subscribe', { planId: planId }).then(function (res) {
+      var d = (res && res.data) ? res.data : res;
+      var sub = d.subscription, payment = d.payment;
+      if (!window.Razorpay || !payment || !payment.keyId) {
+        showToast('Payment gateway not available right now. Please try again later.', 'error');
+        btn.disabled = false; btn.textContent = origText;
+        return;
+      }
+      new Razorpay({
+        key: payment.keyId,
+        amount: Math.round(Number(sub.amountPaid) * 100),
+        currency: 'INR',
+        name: 'Remont India',
+        description: (sub.plan && sub.plan.name) ? sub.plan.name + ' — AMC Plan' : 'AMC Plan',
+        order_id: payment.gatewayOrderId,
+        handler: function (response) {
+          btn.textContent = 'Confirming…';
+          apiPost('/api/v1/amc/' + sub.id + '/confirm-payment', {
+            paymentId: response.razorpay_payment_id,
+            gatewayOrderId: response.razorpay_order_id,
+            signature: response.razorpay_signature,
+          }).then(function () {
+            showToast('AMC plan activated! View it under My Orders.', 'success');
+            btn.textContent = 'Subscribed ✓';
+          }).catch(function () {
+            showToast('Payment received but confirmation failed. Contact support with payment ID: ' + response.razorpay_payment_id, 'warning');
+            btn.disabled = false; btn.textContent = origText;
+          });
+        },
+        theme: { color: '#c4601a' },
+        modal: { ondismiss: function () { btn.disabled = false; btn.textContent = origText; } },
+      }).open();
+    }).catch(function () {
+      showToast('Could not start subscription. Please try again.', 'error');
+      btn.disabled = false; btn.textContent = origText;
+    });
+  }
+
+  function talkToSalesAmc(planName) {
+    var msg = "Hi Remont, I'm interested in the " + planName + " AMC plan for my business. Please share more details.";
+    window.open('https://wa.me/919232071064?text=' + encodeURIComponent(msg), '_blank', 'noopener');
   }
 
   window.addEventListener('scroll', () => {
