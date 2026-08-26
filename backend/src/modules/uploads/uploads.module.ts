@@ -1,70 +1,86 @@
-import { Module, Injectable, Controller, Post, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Module, Injectable, Controller, Post, UseGuards, UseInterceptors, UploadedFile, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import sharp from 'sharp';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { JwtAuthGuard, RolesGuard, Roles, Public } from '../../common';
 import { UserRole } from '@prisma/client';
 
-// Task 3 — one-click image upload: converts to WebP and generates thumbnail/card/full
-// responsive sizes server-side (sharp), so the admin never has to think about format or
-// size, and the front-end can pick the right size per breakpoint with real lazy-loading
-// instead of one giant inline base64 blob (the previous client-side-only compressImage()
-// pipeline in admin/common.js, which is left untouched — this is an additive alternative,
-// not a replacement, so nothing that already relies on it breaks).
+// Task 3 — one-click image/video upload, stored on Cloudinary (not local disk). Category,
+// sub-category, service and product images/videos all flow through this one module, so this
+// is the single choke point that needed fixing: local disk on Railway is ephemeral and gets
+// wiped on every redeploy, which is why previously-uploaded category logos kept turning into
+// broken images. Cloudinary URLs are permanent, so nothing here needs the /api/uploads
+// static-file route or Vercel rewrite trick anymore (main.ts's express.static for
+// /api/uploads is left in place only so any already-issued old /api/uploads/* links keep
+// resolving locally until they naturally get replaced).
 //
-// Files are written to a local `uploads/` directory and served back at /api/uploads/<name>
-// — that path is deliberately under /api/ so it rides the *existing* Vercel rewrite
-// (frontend/vercel.json proxies /api/:path* to the Railway backend) with zero new frontend
-// routing/CDN config. NOTE: this is local disk storage — Railway's filesystem is ephemeral
-// across redeploys, so uploaded images will not survive a deploy. Fine to ship today; swap
-// for persistent storage (Railway Volume or S3/Cloudinary) before relying on this long-term.
-const SIZES: { name: 'thumb' | 'card' | 'full'; width: number }[] = [
-  { name: 'thumb', width: 200 },
-  { name: 'card', width: 600 },
-  { name: 'full', width: 1200 },
-];
+// Accepts either a single CLOUDINARY_URL (cloudinary://key:secret@cloud-name — what's
+// actually set on Railway) or the three separate CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY
+// / CLOUDINARY_API_SECRET vars (see .env.example). The Cloudinary SDK auto-parses
+// CLOUDINARY_URL the first time cloudinary.config() is touched (by any call, including the
+// one inside uploader.upload_stream) — so the three-var form is only explicitly applied here
+// when actually present. IMPORTANT: never call cloudinary.config({cloud_name: undefined, ...})
+// unconditionally — lodash's extend() (which the SDK uses internally) overwrites
+// already-set values with `undefined`, which would silently wipe out a working CLOUDINARY_URL
+// config. The secret never leaves the backend: it's only used here, server-side, to sign the
+// upload request.
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+}
+
+function assertCloudinaryConfigured(): void {
+  const cfg = cloudinary.config();
+  if (!cfg.cloud_name || !cfg.api_key || !cfg.api_secret) {
+    throw new InternalServerErrorException('Image/video upload is not configured (set CLOUDINARY_URL, or CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET)');
+  }
+}
+
+function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video'): Promise<UploadApiResponse> {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'remont', resource_type: resourceType },
+      (err, result) => (err || !result) ? reject(err || new Error('Cloudinary upload failed')) : resolve(result),
+    );
+    stream.end(buffer);
+  });
+}
+
+// Cloudinary serves resized/re-encoded variants on the fly by inserting a transformation
+// segment into the delivery URL — no need to pre-generate and store separate files per size.
+function cloudinaryResize(secureUrl: string, width: number): string {
+  return secureUrl.replace('/upload/', `/upload/w_${width},c_limit,f_webp,q_auto:good/`);
+}
 
 @Injectable()
 export class UploadsService {
-  private readonly uploadDir = path.join(process.cwd(), 'uploads');
-
-  async processAndStore(file: Express.Multer.File): Promise<{ thumb: string; card: string; full: string; url: string }> {
+  async processAndStore(file: Express.Multer.File): Promise<{ thumb: string; card: string; full: string; url: string; publicId: string }> {
     if (!file) throw new BadRequestException('No file uploaded');
     if (!file.mimetype?.startsWith('image/')) throw new BadRequestException('File must be an image');
+    assertCloudinaryConfigured();
 
-    await fs.mkdir(this.uploadDir, { recursive: true });
-    const id = crypto.randomBytes(8).toString('hex');
-    const urls: Record<string, string> = {};
-
-    for (const s of SIZES) {
-      const filename = `${id}-${s.name}.webp`;
-      await sharp(file.buffer)
-        .resize({ width: s.width, withoutEnlargement: true })
-        .webp({ quality: 82 })
-        .toFile(path.join(this.uploadDir, filename));
-      urls[s.name] = `/api/uploads/${filename}`;
-    }
-
-    return { thumb: urls.thumb, card: urls.card, full: urls.full, url: urls.full };
+    const result = await uploadBuffer(file.buffer, 'image');
+    return {
+      thumb: cloudinaryResize(result.secure_url, 200),
+      card: cloudinaryResize(result.secure_url, 600),
+      full: cloudinaryResize(result.secure_url, 1200),
+      url: cloudinaryResize(result.secure_url, 1200),
+      publicId: result.public_id,
+    };
   }
 
-  // Task 8 — promo video upload for categories/sub-categories/services. Sharp's resize
-  // pipeline only makes sense for images, so video just gets written to disk as-is
-  // (same ephemeral-storage caveat as processAndStore above).
-  async storeVideo(file: Express.Multer.File): Promise<{ url: string }> {
+  // Task 8 — promo video upload for categories/sub-categories/services.
+  async storeVideo(file: Express.Multer.File): Promise<{ url: string; publicId: string }> {
     if (!file) throw new BadRequestException('No file uploaded');
     if (!file.mimetype?.startsWith('video/')) throw new BadRequestException('File must be a video');
+    assertCloudinaryConfigured();
 
-    await fs.mkdir(this.uploadDir, { recursive: true });
-    const id = crypto.randomBytes(8).toString('hex');
-    const ext = path.extname(file.originalname) || '.mp4';
-    const filename = `${id}-video${ext}`;
-    await fs.writeFile(path.join(this.uploadDir, filename), file.buffer);
-    return { url: `/api/uploads/${filename}` };
+    const result = await uploadBuffer(file.buffer, 'video');
+    return { url: result.secure_url, publicId: result.public_id };
   }
 }
 
@@ -105,7 +121,7 @@ export class UploadsController {
   // POST /crm/leads/capture). Lets a customer attach a reference photo to a quotation
   // request (Renovation/Construction premium lead forms) without an account. Reuses the
   // exact same processAndStore() pipeline as the admin image upload — same WebP/size
-  // limits, same ephemeral-disk caveat — just reachable without a JWT. A smaller size cap
+  // limits, same Cloudinary storage — just reachable without a JWT. A smaller size cap
   // than the admin route (5MB, matching the client-side check the lead forms already do)
   // plus the app-wide rate limiter (ThrottlerModule, 200 req/min) are the abuse guards.
   @Public()

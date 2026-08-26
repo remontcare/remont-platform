@@ -7581,8 +7581,13 @@
 
   // Renders a category's logo image when set, falling back to the emoji icon —
   // a category with a blank/missing emoji otherwise shows nothing at all.
+  // The onerror handler also covers uploads wiped by a backend redeploy (see
+  // uploads.module.ts) — without it a dead logoUrl shows a broken image icon.
   function catIconHtml(cat) {
-    return cat.logoUrl ? '<img src="'+cat.logoUrl+'" alt="">' : '<span>'+(cat.icon||'🔧')+'</span>';
+    if (!cat.logoUrl) return '<span>'+(cat.icon||'🔧')+'</span>';
+    var url = String(cat.logoUrl).replace(/"/g,'&quot;');
+    return '<img src="'+url+'" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\';">'+
+      '<span style="display:none">'+(cat.icon||'🔧')+'</span>';
   }
 
   // ── Service categories — load from API ────────────────────────────

@@ -384,7 +384,10 @@ function attachImageUpload(inputId, opts) {
   };
 
   input.addEventListener('input', function() {
-    if (input.value && input.value.indexOf('data:') !== 0 && input.value.indexOf('/api/uploads/') === -1) {
+    // '/api/uploads/' covers old pre-Cloudinary uploads still saved in the DB;
+    // 'res.cloudinary.com' covers current ones — either means "already uploaded".
+    var v = input.value;
+    if (v && v.indexOf('data:') !== 0 && v.indexOf('/api/uploads/') === -1 && v.indexOf('res.cloudinary.com') === -1) {
       thumb.style.display = 'none'; info.style.display = 'none';
       btn.innerHTML = '📷 Upload Image';
     }
