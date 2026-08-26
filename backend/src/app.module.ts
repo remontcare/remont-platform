@@ -42,6 +42,7 @@ import { EstimatesModule } from './modules/estimates/estimates.module';
 import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SupportModule } from './modules/support/support.module';
+import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { SupportModule } from './modules/support/support.module';
     RefundsModule,
     SupportModule,
     UploadsModule,
+    AiEnrichmentModule,
 
     // B2B
     CorporateModule,

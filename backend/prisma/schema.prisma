@@ -245,6 +245,7 @@ enum TransactionReason {
   REFERRAL_BONUS
   WALLET_TOPUP
   WITHDRAWAL
+  AI_FEATURE_CHARGE
 }
 
 enum WhatsappMessageType {
@@ -926,6 +927,17 @@ model Product {
   rating          Float               @default(0)
   reviewCount     Int                 @default(0)
   coverageType    ProductCoverageType @default(PAN_INDIA)
+  // Compliance/spec fields — fillable manually or via the paid "Live Web Search" AI
+  // enrichment (see AiFeatureUsage / ai-enrichment.module.ts). All optional so basic
+  // product creation never requires them.
+  manufacturer    String?
+  modelNumber     String?
+  warranty        String?
+  countryOfOrigin String?
+  weightKg        Decimal?            @db.Decimal(8, 3)
+  lengthCm        Decimal?            @db.Decimal(8, 2)
+  widthCm         Decimal?            @db.Decimal(8, 2)
+  heightCm        Decimal?            @db.Decimal(8, 2)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
@@ -937,11 +949,49 @@ model Product {
   inventory         IssuedInventory[]
   zones             ProductZone[]
   locationInventory LocationInventory[]
+  aiFeatureUsages   AiFeatureUsage[]
 
   @@index([vendorId])
   @@index([categoryId])
   @@index([isActive])
   @@index([coverageType])
+}
+
+enum AiFeatureType {
+  WEB_SEARCH
+  IMAGE_SEARCH
+  IMAGE_GENERATION
+}
+
+enum AiFeatureStatus {
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+// Audit trail for paid, wallet-gated seller AI operations on a product (live web search
+// enrichment, real-photo image search, AI image generation). One row per feature per
+// execute() call — see ai-enrichment.module.ts. Charging happens via the existing generic
+// WalletService.debit()/credit() (reason AI_FEATURE_CHARGE / REFUND) against the seller's
+// own User.walletBalance; this table is the feature-specific record layered on top of that
+// generic wallet ledger (walletTransactionId links the two).
+model AiFeatureUsage {
+  id                  String          @id @default(cuid())
+  sellerId            String
+  productId           String?
+  feature             AiFeatureType
+  costCharged         Decimal         @db.Decimal(10, 2)
+  walletTransactionId String?
+  status              AiFeatureStatus
+  resultJson          Json?
+  errorMessage        String?
+  createdAt           DateTime        @default(now())
+
+  seller  ProductVendor @relation(fields: [sellerId], references: [id])
+  product Product?      @relation(fields: [productId], references: [id])
+
+  @@index([sellerId])
+  @@index([productId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1199,6 +1249,7 @@ model ProductVendor {
   products        Product[]
   documents       SellerDocument[]
   pickupLocations PickupLocation[]
+  aiFeatureUsages AiFeatureUsage[]
 
   @@index([city])
 }

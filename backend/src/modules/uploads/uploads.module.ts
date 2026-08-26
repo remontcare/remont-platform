@@ -33,14 +33,17 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   });
 }
 
-function assertCloudinaryConfigured(): void {
+export function assertCloudinaryConfigured(): void {
   const cfg = cloudinary.config();
   if (!cfg.cloud_name || !cfg.api_key || !cfg.api_secret) {
     throw new InternalServerErrorException('Image/video upload is not configured (set CLOUDINARY_URL, or CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET)');
   }
 }
 
-function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video'): Promise<UploadApiResponse> {
+// Exported so other modules (e.g. ai-enrichment.module.ts, which fetches AI-found/generated
+// images as raw bytes, not multipart form uploads) can reuse the same Cloudinary pipeline
+// instead of duplicating it.
+export function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video'): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       { folder: 'remont', resource_type: resourceType },
@@ -96,7 +99,10 @@ export class UploadsController {
   // @Roles via getAllAndOverride(handler, then class), so a controller-level @Roles
   // would still apply to every route including ones marked @Public(), and then throw
   // ("User not authenticated") since @Public() only skips JwtAuthGuard, never RolesGuard.
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  // PRODUCT_VENDOR included so sellers can upload real product images (incl. ones
+  // found/generated via the paid ai-enrichment flow) as hosted Cloudinary URLs instead of
+  // only the pre-existing client-side base64 fallback in seller.html.
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.PRODUCT_VENDOR)
   @Post('image')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),

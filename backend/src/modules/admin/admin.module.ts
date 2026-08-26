@@ -1885,6 +1885,9 @@ Return JSON with:
       { key: 'total_reviews', value: '50000', label: 'Total Reviews (shown on homepage)', group: 'stats' },
       { key: 'total_vendors', value: '5000', label: 'Total Vendors (shown on homepage)', group: 'stats' },
       { key: 'otp_regen_max_attempts', value: '0', label: 'Max "Request OTP Again" attempts per service (0 = unlimited)', group: 'operations' },
+      { key: 'ai_web_search_cost', value: '15', label: 'Live Web Search — cost per product (₹)', group: 'ai' },
+      { key: 'ai_image_search_cost', value: '10', label: 'Actual Image Search — cost per product (₹)', group: 'ai' },
+      { key: 'ai_image_generation_cost', value: '20', label: 'AI Image Generation — cost per product (₹)', group: 'ai' },
     ];
     for (const s of settings) {
       await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: {} });
