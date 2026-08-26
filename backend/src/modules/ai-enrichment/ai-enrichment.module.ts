@@ -114,14 +114,18 @@ export class AiEnrichmentService {
     if (unavailable.length) throw new BadRequestException(`Feature not available yet: ${unavailable.join(', ')}`);
 
     const { items, total } = await this.costFor(features);
-    const debitTx = await this.wallet.debit(userId, total, TransactionReason.AI_FEATURE_CHARGE);
+    // total<=0 (admin has priced every selected feature at ₹0 — e.g. a promotional period,
+    // or a not-yet-configured SiteSetting row) means there's nothing to charge. WalletService
+    // .debit() rejects a zero/negative amount outright, so skip it rather than crash — the
+    // feature still runs, it's just free, with no wallet transaction to point at.
+    const debitTx = total > 0 ? await this.wallet.debit(userId, total, TransactionReason.AI_FEATURE_CHARGE) : null;
 
     const result: any = { refunded: [] as AiFeatureType[] };
     for (const { feature, cost } of items) {
       const usage = await this.prisma.aiFeatureUsage.create({
         data: {
           sellerId, productId: body.productId || null, feature,
-          costCharged: cost, walletTransactionId: debitTx.id, status: AiFeatureStatus.SUCCESS,
+          costCharged: cost, walletTransactionId: debitTx ? debitTx.id : null, status: AiFeatureStatus.SUCCESS,
         },
       });
       try {
@@ -134,7 +138,7 @@ export class AiEnrichmentService {
         result[feature] = resultJson;
       } catch (e) {
         this.logger.warn(`AI feature ${feature} failed for seller ${sellerId}: ${e.message}`);
-        await this.wallet.credit(userId, cost, TransactionReason.REFUND, undefined, `AI feature ${feature} failed — auto-refund`);
+        if (cost > 0) await this.wallet.credit(userId, cost, TransactionReason.REFUND, undefined, `AI feature ${feature} failed — auto-refund`);
         await this.prisma.aiFeatureUsage.update({
           where: { id: usage.id },
           data: { status: AiFeatureStatus.REFUNDED, errorMessage: String(e.message || e) },
