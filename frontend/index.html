@@ -7997,20 +7997,14 @@
   // initDynamicContent() only ever runs once, at initial page load — an installed mobile
   // PWA is typically never fully closed, just backgrounded, so without this it can sit for
   // hours/days showing whatever categories/prices/logo were fetched at the last real page
-  // load, even though the API itself is always fresh (no-store). Re-fetch once the app has
-  // been in the background for a couple of minutes and comes back to the foreground, so
-  // admin changes show up without the user having to force-quit and reopen.
-  (function () {
-    var hiddenAt = null;
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden') {
-        hiddenAt = Date.now();
-      } else if (document.visibilityState === 'visible' && hiddenAt && (Date.now() - hiddenAt) > 2 * 60 * 1000) {
-        hiddenAt = null;
-        initDynamicContent();
-      }
-    });
-  })();
+  // load, even though the API itself is always fresh (no-store). Re-fetch every time the app
+  // comes back to the foreground from being backgrounded/switched-away, so admin changes
+  // (category logos included) show up without the user having to force-quit and reopen.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      initDynamicContent();
+    }
+  });
 
   // ── Newsletter ─────────────────────────────────────────────────────────────
   function subscribeNewsletter() {
