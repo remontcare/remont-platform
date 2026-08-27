@@ -221,6 +221,16 @@ enum DeliveryStatus {
   FAILED
 }
 
+// Output of the delivery-eligibility engine (backend/src/modules/logistics) — deliberately
+// separate from DeliveryStatus (rider fulfillment lifecycle) and independent of any
+// membership concept.
+enum DeliveryTier {
+  INSTANT
+  SAME_DAY
+  NEXT_DAY
+  STANDARD
+}
+
 enum MembershipTier {
   SILVER
   GOLD
@@ -1245,6 +1255,16 @@ model ProductVendor {
   rating            Float        @default(0)
   createdAt         DateTime     @default(now())
 
+  // Delivery-eligibility engine inputs (backend/src/modules/logistics) — membership-
+  // independent, see plan doc "Phase 2 — Delivery Eligibility Engine". Sellers self-manage
+  // these via PATCH /vendors/product/me/delivery-settings (frontend/seller.html).
+  isOpen                Boolean @default(true)  // manual toggle, mirrors ServiceVendor.isOnline
+  operatingHoursOpen    String? // "09:00"; null = no time-of-day restriction
+  operatingHoursClose   String? // "21:00"
+  offersInstantDelivery Boolean @default(false) // opt-in — no fast-delivery promise by default
+  offersSameDayDelivery Boolean @default(false)
+  processingTimeMinutes Int     @default(30)    // pack/handover time, factored into cutoff math
+
   user            User             @relation(fields: [userId], references: [id])
   products        Product[]
   documents       SellerDocument[]
@@ -1569,6 +1589,11 @@ model Order {
   addressId         String?
   deliveryId        String?
   amcSubscriptionId String?
+  // Scaffolding for the delivery-eligibility engine (backend/src/modules/logistics) — set by
+  // nothing yet; checkout pricing/creation does not read or require these in this phase.
+  // Intentionally membership-independent: no membership discount is ever applied here.
+  deliveryTier      DeliveryTier?
+  deliveryCharge    Decimal?      @db.Decimal(10, 2)
 
   // Address snapshot at the moment of booking — see the matching fields on
   // MasterOrder for why: addressId is a live FK, these are copied once and frozen.

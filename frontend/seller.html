@@ -286,6 +286,30 @@ a{color:inherit;text-decoration:none}
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">📍</span><span>City</span></div><div class="pr-right" id="prof-city">—</div></div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">🧾</span><span>GST Number</span></div><div class="pr-right" id="prof-gst">—</div></div>
         <div class="profile-row"><div class="pr-left"><span class="pr-icon">⭐</span><span>Rating</span></div><div class="pr-right" id="prof-rating">—</div></div>
+
+        <div class="field" style="border-top:1px solid var(--mist);padding-top:14px;margin-top:14px">
+          <label>🚚 Delivery Settings</label>
+          <div class="toggle-row" style="margin-top:8px">
+            <label>Shop Open (accepting fast delivery)</label>
+            <div class="switch"><input type="checkbox" id="ds-open" checked><span class="switch-thumb" onclick="document.getElementById('ds-open').checked=!document.getElementById('ds-open').checked"></span></div>
+          </div>
+          <div class="row-2" style="margin-top:8px">
+            <div class="field"><label>Opens At</label><input type="time" id="ds-hours-open"></div>
+            <div class="field"><label>Closes At</label><input type="time" id="ds-hours-close"></div>
+          </div>
+          <div class="toggle-row">
+            <label>Offer Instant Delivery</label>
+            <div class="switch"><input type="checkbox" id="ds-instant"><span class="switch-thumb" onclick="document.getElementById('ds-instant').checked=!document.getElementById('ds-instant').checked"></span></div>
+          </div>
+          <div class="toggle-row">
+            <label>Offer Same-Day Delivery</label>
+            <div class="switch"><input type="checkbox" id="ds-sameday"><span class="switch-thumb" onclick="document.getElementById('ds-sameday').checked=!document.getElementById('ds-sameday').checked"></span></div>
+          </div>
+          <div class="field"><label>Processing Time (minutes, before handover to rider)</label><input type="number" id="ds-processing" placeholder="30"></div>
+          <div class="auth-error" id="ds-err"></div>
+          <button class="btn-primary" id="ds-save-btn" onclick="saveDeliverySettings()">Save Delivery Settings</button>
+        </div>
+
         <div class="profile-row" onclick="doLogout()"><div class="pr-left"><span class="pr-icon">🚪</span><span>Logout</span></div><div class="pr-right"></div></div>
       </div>
 
@@ -547,6 +571,12 @@ function enterDashboard(){
   document.getElementById('prof-city').textContent = sellerProfile.city || '—';
   document.getElementById('prof-gst').textContent = sellerProfile.gstNumber || '—';
   document.getElementById('prof-rating').textContent = '⭐ ' + Number(sellerProfile.rating||0).toFixed(1);
+  document.getElementById('ds-open').checked = sellerProfile.isOpen !== false;
+  document.getElementById('ds-hours-open').value = sellerProfile.operatingHoursOpen || '';
+  document.getElementById('ds-hours-close').value = sellerProfile.operatingHoursClose || '';
+  document.getElementById('ds-instant').checked = !!sellerProfile.offersInstantDelivery;
+  document.getElementById('ds-sameday').checked = !!sellerProfile.offersSameDayDelivery;
+  document.getElementById('ds-processing').value = sellerProfile.processingTimeMinutes || 30;
   var pill = document.getElementById('status-pill');
   var active = sellerProfile.status === 'ACTIVE';
   pill.textContent = sellerProfile.status || 'ACTIVE';
@@ -955,6 +985,31 @@ function confirmAiEnrichment(){
     updateAiEstimate();
   }).catch(function(e){ document.getElementById('ai-est-err').textContent = e.message; })
     .then(function(){ btn.disabled = false; btn.textContent = 'Confirm & Continue'; });
+}
+
+/* ── DELIVERY SETTINGS (Phase 2 eligibility engine — see backend logistics.module.ts) ──
+   Reuses the existing POST /vendors/product/register endpoint, which is really a generic
+   "update my own ProductVendor row" call (see ProductVendorsService.register — despite the
+   name, it only ever updates an already-approved seller, never creates one) — no new
+   backend endpoint needed. */
+function saveDeliverySettings(){
+  var err = document.getElementById('ds-err'); err.textContent = '';
+  var btn = document.getElementById('ds-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  var processing = parseInt(document.getElementById('ds-processing').value, 10);
+  apiFetch('/vendors/product/register', { method: 'POST', body: JSON.stringify({
+    isOpen: document.getElementById('ds-open').checked,
+    operatingHoursOpen: document.getElementById('ds-hours-open').value || null,
+    operatingHoursClose: document.getElementById('ds-hours-close').value || null,
+    offersInstantDelivery: document.getElementById('ds-instant').checked,
+    offersSameDayDelivery: document.getElementById('ds-sameday').checked,
+    processingTimeMinutes: isNaN(processing) ? 30 : processing,
+  })}).then(function(v){
+    sellerProfile = v;
+    btn.textContent = '✓ Saved';
+    setTimeout(function(){ btn.textContent = 'Save Delivery Settings'; }, 1500);
+  }).catch(function(e){ err.textContent = e.message; btn.textContent = 'Save Delivery Settings'; })
+    .then(function(){ btn.disabled = false; });
 }
 
 /* ── ORDERS ── */

@@ -1888,6 +1888,16 @@ Return JSON with:
       { key: 'ai_web_search_cost', value: '15', label: 'Live Web Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_search_cost', value: '10', label: 'Actual Image Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_generation_cost', value: '20', label: 'AI Image Generation — cost per product (₹)', group: 'ai' },
+      { key: 'delivery_local_radius_km', value: '50', label: 'Local delivery radius (km) — beyond this, standard/national delivery applies', group: 'delivery' },
+      { key: 'delivery_instant_radius_km', value: '5', label: 'Instant delivery max radius (km)', group: 'delivery' },
+      { key: 'delivery_sameday_radius_km', value: '15', label: 'Same-Day delivery max radius (km)', group: 'delivery' },
+      { key: 'delivery_instant_cutoff_hour', value: '20', label: 'Instant delivery cutoff hour (24h, e.g. 20 = 8 PM)', group: 'delivery' },
+      { key: 'delivery_sameday_cutoff_hour', value: '16', label: 'Same-Day delivery cutoff hour (24h, e.g. 16 = 4 PM)', group: 'delivery' },
+      { key: 'delivery_max_weight_kg_fast', value: '10', label: 'Max product weight (kg) eligible for Instant/Same-Day', group: 'delivery' },
+      { key: 'delivery_charge_instant', value: '79', label: 'Instant delivery charge (₹)', group: 'delivery' },
+      { key: 'delivery_charge_sameday', value: '39', label: 'Same-Day delivery charge (₹)', group: 'delivery' },
+      { key: 'delivery_charge_nextday', value: '19', label: 'Next-Day delivery charge (₹)', group: 'delivery' },
+      { key: 'delivery_charge_standard', value: '0', label: 'Standard delivery charge (₹)', group: 'delivery' },
     ];
     for (const s of settings) {
       await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: {} });

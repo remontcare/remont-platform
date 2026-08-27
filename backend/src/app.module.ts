@@ -43,6 +43,7 @@ import { CatalogRelationsModule } from './modules/catalog-relations/catalog-rela
 import { ReportsModule } from './modules/reports/reports.module';
 import { SupportModule } from './modules/support/support.module';
 import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module';
+import { LogisticsModule } from './modules/logistics/logistics.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module
     SupportModule,
     UploadsModule,
     AiEnrichmentModule,
+    LogisticsModule,
 
     // B2B
     CorporateModule,
