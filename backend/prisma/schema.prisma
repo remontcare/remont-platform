@@ -1255,9 +1255,9 @@ model ProductVendor {
   rating            Float        @default(0)
   createdAt         DateTime     @default(now())
 
-  // Delivery-eligibility engine inputs (backend/src/modules/logistics) — membership-
-  // independent, see plan doc "Phase 2 — Delivery Eligibility Engine". Sellers self-manage
-  // these via PATCH /vendors/product/me/delivery-settings (frontend/seller.html).
+  // Delivery-eligibility engine inputs (backend/src/modules/logistics) — see plan doc
+  // "Phase 2 — Delivery Eligibility Engine". Sellers self-manage these via the existing
+  // POST /vendors/product/register self-update endpoint (frontend/seller.html).
   isOpen                Boolean @default(true)  // manual toggle, mirrors ServiceVendor.isOnline
   operatingHoursOpen    String? // "09:00"; null = no time-of-day restriction
   operatingHoursClose   String? // "21:00"
@@ -1591,7 +1591,6 @@ model Order {
   amcSubscriptionId String?
   // Scaffolding for the delivery-eligibility engine (backend/src/modules/logistics) — set by
   // nothing yet; checkout pricing/creation does not read or require these in this phase.
-  // Intentionally membership-independent: no membership discount is ever applied here.
   deliveryTier      DeliveryTier?
   deliveryCharge    Decimal?      @db.Decimal(10, 2)
 

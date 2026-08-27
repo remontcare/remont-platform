@@ -5,14 +5,11 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { Public, haversineKm, isValidIndiaCoords } from '../../common';
 
 // Phase 2 — delivery-speed ELIGIBILITY DECISION ENGINE for product orders. See the plan doc
-// "Phase 2 — Delivery Eligibility Engine" for the full design. Deliberately separate from:
-//   - DeliveryModule (delivery.module.ts) — the existing in-house rider-dispatch/fulfillment
-//     system. This module only decides which tier an order *should* get; it never assigns a
-//     rider or touches a Delivery row.
-//   - Any membership/AMC concept — this file never imports MembershipsModule/AmcModule and
-//     never reads MembershipPlan.freeDelivery. A member and a non-member with the same
-//     product+address always get the identical result. Order.deliveryTier/deliveryCharge are
-//     schema scaffolding only in this phase — nothing in checkout reads or requires them yet.
+// "Phase 2 — Delivery Eligibility Engine" for the full design. Deliberately separate from
+// DeliveryModule (delivery.module.ts) — the existing in-house rider-dispatch/fulfillment
+// system. This module only decides which tier an order *should* get; it never assigns a
+// rider or touches a Delivery row. Order.deliveryTier/deliveryCharge are schema scaffolding
+// only in this phase — nothing in checkout reads or requires them yet.
 const DELIVERY_SETTING_DEFAULTS: Record<string, number> = {
   delivery_local_radius_km: 50,
   delivery_instant_radius_km: 5,
