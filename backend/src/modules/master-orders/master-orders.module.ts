@@ -17,6 +17,7 @@ import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { DispatchService, RoutingService, OrdersModule } from '../orders/orders.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
+import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -210,6 +211,7 @@ export class MasterOrdersService {
     private dispatch: DispatchService,
     private routing: RoutingService,
     private paymentNotify: PaymentNotificationsService,
+    private shipments: ShipmentService,
   ) {}
 
   private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
@@ -530,6 +532,10 @@ export class MasterOrdersService {
     if (confirmUpfront) {
       for (const child of childOrders) {
         if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+        // Best-effort demo shipment for product orders — see plan doc "Phase 3 — Shipment
+        // Lifecycle". Never allowed to fail or delay the checkout response; totalAmount/the
+        // response below are computed before this and are never touched by it.
+        if (child.type === OrderType.PRODUCT) this.shipments.createShipmentForOrder(child.id).catch((e) => this.logger.error(`Shipment creation failed: ${e.message}`));
       }
       return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
@@ -591,6 +597,7 @@ export class MasterOrdersService {
 
     for (const child of existing.childOrders) {
       if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+      if (child.type === OrderType.PRODUCT) this.shipments.createShipmentForOrder(child.id).catch((e) => this.logger.error(`Shipment creation failed: ${e.message}`));
     }
 
     this.notifyPaymentSuccess(existing).catch(() => {});
@@ -844,7 +851,7 @@ export class PublicMasterOrderController {
 
 // ─── Module ───
 @Module({
-  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule],
+  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule, LogisticsModule],
   // PublicMasterOrderController MUST be registered before MasterOrdersController —
   // Express/Nest matches routes in registration order, and MasterOrdersController's
   // POST /master-orders/:id/confirm-payment (a wildcard :id) would otherwise swallow

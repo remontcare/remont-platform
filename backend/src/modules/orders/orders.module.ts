@@ -1174,6 +1174,11 @@ export class OrdersService {
         serviceItems: { include: { service: true } },
         vendor: { select: { id: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: true, extraWorkItems: true, delivery: true,
+        // Phase 3 — demo/mock shipment tracking (backend/src/modules/logistics). Shows the
+        // last-persisted status immediately; the frontend separately calls
+        // GET /logistics/shipments/:id to refresh it live (that's where status actually
+        // gets recomputed/updated — this include is read-only, adds no new query cost logic).
+        shipment: true,
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
       orderBy: { createdAt: 'desc' },

@@ -102,9 +102,10 @@ function makeService() {
   const dispatch: any = { dispatch: jest.fn(async () => []) };
   const routing: any = { route: jest.fn(async () => {}) };
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };
+  const shipments: any = { createShipmentForOrder: jest.fn(async () => {}) };
 
-  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify);
-  return { svc, prisma, createdOrders, createdMasterOrders, payments, routing, dispatch };
+  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments);
+  return { svc, prisma, createdOrders, createdMasterOrders, payments, routing, dispatch, shipments };
 }
 
 function itemsOf(order: any) {

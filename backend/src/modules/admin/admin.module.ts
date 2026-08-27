@@ -1898,6 +1898,9 @@ Return JSON with:
       { key: 'delivery_charge_sameday', value: '39', label: 'Same-Day delivery charge (₹)', group: 'delivery' },
       { key: 'delivery_charge_nextday', value: '19', label: 'Next-Day delivery charge (₹)', group: 'delivery' },
       { key: 'delivery_charge_standard', value: '0', label: 'Standard delivery charge (₹)', group: 'delivery' },
+      { key: 'delivery_demo_pickup_minutes', value: '2', label: 'DEMO courier — minutes until Picked Up (simulated)', group: 'delivery' },
+      { key: 'delivery_demo_transit_minutes', value: '5', label: 'DEMO courier — minutes until In Transit (simulated)', group: 'delivery' },
+      { key: 'delivery_demo_delivered_minutes', value: '10', label: 'DEMO courier — minutes until Delivered (simulated)', group: 'delivery' },
     ];
     for (const s of settings) {
       await this.prisma.siteSetting.upsert({ where: { key: s.key }, create: s, update: {} });

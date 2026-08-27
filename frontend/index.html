@@ -10789,6 +10789,35 @@ function payOnlineForCOD(orderId, orderNumber, totalAmount, btn) {
   });
 }
 
+// Phase 3 — demo/mock delivery-shipment badge (backend/src/modules/logistics). Always says
+// "Simulated"/"Demo" in the visible label itself, never presented as a real courier — the
+// backend's isDemo flag is only ever true today (no real provider exists yet), but this UI
+// checks it explicitly anyway rather than assuming.
+var SHIP_STATUS_LABELS = { CREATED: 'Order Received', PICKED_UP: 'Picked Up', IN_TRANSIT: 'In Transit', DELIVERED: 'Delivered', FAILED: 'Delivery Failed', CANCELLED: 'Cancelled' };
+function _shipmentBanner(o) {
+  if (!o.shipment) return '';
+  var label = SHIP_STATUS_LABELS[o.shipment.status] || o.shipment.status;
+  var eta = o.shipment.estimatedDelivery ? new Date(o.shipment.estimatedDelivery).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
+  return '<div id="ship-badge-' + o.id + '" style="font-size:11.5px;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:6px 10px;margin-bottom:8px">' +
+    '🚚 Demo Delivery Tracking (Simulated) — ' + escHtml(label) + (eta ? ' · ETA ' + eta : '') +
+  '</div>';
+}
+
+function _refreshShipmentBadges(orders) {
+  orders.forEach(function(o) {
+    if (!o.shipment) return;
+    apiGet('/api/v1/logistics/shipments/' + o.id).then(function(res) {
+      var s = (res && res.data) ? res.data : res;
+      if (!s || !s.hasShipment) return;
+      var el = document.getElementById('ship-badge-' + o.id);
+      if (!el) return;
+      var label = SHIP_STATUS_LABELS[s.status] || s.status;
+      var eta = s.estimatedDelivery ? new Date(s.estimatedDelivery).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
+      el.textContent = '🚚 Demo Delivery Tracking (Simulated) — ' + label + (eta ? ' · ETA ' + eta : '');
+    }).catch(function(){});
+  });
+}
+
 function _renderOrderCard(o) {
   var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
   var statusColor = STATUS_COLORS_MO[o.status] || '#6b7280';
@@ -10816,6 +10845,7 @@ function _renderOrderCard(o) {
     '</div>' +
     _otpBanner(o) +
     _codBanner(o) +
+    _shipmentBanner(o) +
     '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<span style="font-size:14px;font-weight:700;color:#c4601a">' + total + '</span>' +
       (o.status === 'PENDING_PAYMENT' ? '<button onclick="retryPayment(\'' + payRetryId + '\',' + payRetryAmount + ',\'' + payRetryNumber + '\',this,' + payRetryIsMaster + ')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Pay Now</button>' :
@@ -10911,6 +10941,7 @@ function loadMyOrders() {
       }
     });
     if (html !== _lastOrdersHtml) { body.innerHTML = html; _lastOrdersHtml = html; }
+    _refreshShipmentBadges(orders);
   }).catch(function(e) {
     body.innerHTML = '<p style="color:#ef4444;text-align:center;padding:40px 0">Failed to load orders. ' +
       (e && e.message === '401' ? 'Please <button onclick="closeMyOrdersModal();openAuthModal(function(){setTimeout(openMyOrdersModal,300)})" style="background:none;border:none;color:#c4601a;font-weight:600;cursor:pointer;text-decoration:underline">login again</button>.' : 'Try again.') +

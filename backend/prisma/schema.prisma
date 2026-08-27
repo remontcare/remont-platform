@@ -231,6 +231,24 @@ enum DeliveryTier {
   STANDARD
 }
 
+// Phase 3 — provider-agnostic shipment tracking (backend/src/modules/logistics). Distinct
+// from Delivery/DeliveryPartner above (our own riders/technicians) — a Shipment may instead
+// be fulfilled by an external provider via a ShipmentProviderAdapter. Only MOCK_DEMO exists
+// today (no real courier account yet); a real provider is a new adapter implementation, not
+// a schema/architecture change.
+enum ShipmentProvider {
+  MOCK_DEMO
+}
+
+enum ShipmentStatus {
+  CREATED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
 enum MembershipTier {
   SILVER
   GOLD
@@ -1589,8 +1607,10 @@ model Order {
   addressId         String?
   deliveryId        String?
   amcSubscriptionId String?
-  // Scaffolding for the delivery-eligibility engine (backend/src/modules/logistics) — set by
-  // nothing yet; checkout pricing/creation does not read or require these in this phase.
+  // Set by ShipmentService.createShipmentForOrder() (backend/src/modules/logistics) right
+  // after checkout — informational only in this phase: deliveryCharge is recorded, never
+  // added to MasterOrder.totalAmount/the Razorpay amount (same restraint as the existing,
+  // still-unbilled platformCharges field below).
   deliveryTier      DeliveryTier?
   deliveryCharge    Decimal?      @db.Decimal(10, 2)
 
@@ -1718,6 +1738,7 @@ model Order {
   address         Address?         @relation(fields: [addressId], references: [id])
   delivery        Delivery?        @relation(fields: [deliveryId], references: [id])
   amcSubscription AmcSubscription? @relation(fields: [amcSubscriptionId], references: [id])
+  shipment        Shipment?
   items           OrderItem[]
   serviceItems    OrderServiceItem[]
   extraWorkItems  ExtraWorkItem[]
@@ -1734,6 +1755,25 @@ model Order {
   @@index([status])
   @@index([type])
   @@index([createdAt])
+}
+
+// Phase 3 — provider-agnostic shipment record, created post-checkout by
+// ShipmentService.createShipmentForOrder() (backend/src/modules/logistics). Separate from
+// Delivery (own-rider fulfillment, required non-null partnerId) — see plan doc "Phase 3 —
+// Shipment Lifecycle" for why reusing Delivery wasn't appropriate here.
+model Shipment {
+  id                String           @id @default(cuid())
+  orderId           String           @unique
+  provider          ShipmentProvider
+  providerRef       String // e.g. "DEMO-8f2a1c" now; a real AWB/tracking# once a real provider adapter exists
+  tier              DeliveryTier
+  status            ShipmentStatus   @default(CREATED)
+  isDemo            Boolean          @default(true) // unmissable "not a real courier" flag — schema, API, and UI all surface this
+  estimatedDelivery DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
 }
 
 model OrderItem {

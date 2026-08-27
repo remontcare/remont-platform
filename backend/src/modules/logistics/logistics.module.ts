@@ -1,8 +1,10 @@
-import { Module, Injectable, Controller, Get, Query, BadRequestException } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Module, Injectable, Controller, Get, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DeliveryTier } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { Public, haversineKm, isValidIndiaCoords } from '../../common';
+import { Public, JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords } from '../../common';
+import { MockDeliveryProvider } from './providers/mock-provider';
+import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
 
 // Phase 2 — delivery-speed ELIGIBILITY DECISION ENGINE for product orders. See the plan doc
 // "Phase 2 — Delivery Eligibility Engine" for the full design. Deliberately separate from
@@ -197,9 +199,94 @@ export class LogisticsController {
   }
 }
 
+// Phase 3 — provider-agnostic shipment lifecycle. Only MOCK_DEMO is registered today (no
+// real hyperlocal/courier account exists) — adding a real provider later means writing one
+// new ShipmentProviderAdapter implementation and adding it here; nothing about Order,
+// checkout, or this service's own logic needs to change.
+@Injectable()
+export class ShipmentService {
+  private readonly logger = new Logger(ShipmentService.name);
+  private readonly providers: Record<string, ShipmentProviderAdapter>;
+
+  constructor(private prisma: PrismaService, private logistics: LogisticsService, mockProvider: MockDeliveryProvider) {
+    this.providers = { MOCK_DEMO: mockProvider };
+  }
+
+  private getProvider(): ShipmentProviderAdapter {
+    return this.providers.MOCK_DEMO;
+  }
+
+  // Called as a best-effort side effect right after checkout has already succeeded — never
+  // allowed to fail or delay the checkout response itself (see call site in
+  // master-orders.module.ts). Deliberately creates a demo shipment for EVERY product order
+  // with a resolvable address, regardless of eligibility tier (including STANDARD and
+  // no-vendor products) — there's no real national-courier integration either yet, so this
+  // is what makes the "whole lifecycle testable end-to-end" today.
+  async createShipmentForOrder(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: { include: { product: { include: { vendor: { include: { pickupLocations: { where: { isActive: true } } } } } } }, take: 1 }, address: true },
+    });
+    if (!order || !order.items.length || !order.addressId) return; // service-only or address-less orders: nothing to ship
+    const firstProduct = order.items[0].product;
+    if (!firstProduct) return;
+
+    const eligibility = await this.logistics.checkEligibility({ productId: firstProduct.id, addressId: order.addressId });
+    await this.prisma.order.update({ where: { id: orderId }, data: { deliveryTier: eligibility.tier, deliveryCharge: eligibility.charge } });
+
+    const pickup = firstProduct.vendor?.pickupLocations[0];
+    const provider = this.getProvider();
+    const { providerRef, estimatedDelivery } = await provider.createShipment({
+      orderId,
+      tier: eligibility.tier,
+      pickupLat: pickup?.latitude ?? null,
+      pickupLng: pickup?.longitude ?? null,
+      dropLat: order.address?.latitude ?? null,
+      dropLng: order.address?.longitude ?? null,
+    });
+
+    await this.prisma.shipment.create({
+      data: { orderId, provider: provider.name, providerRef, tier: eligibility.tier, estimatedDelivery, isDemo: true },
+    });
+  }
+
+  async getShipmentStatus(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { shipment: true, vendor: { select: { userId: true } } } });
+    if (!order) throw new NotFoundException();
+    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
+    if (!order.shipment) return { hasShipment: false };
+
+    const live = await this.getProvider().getStatus(order.shipment.providerRef, order.shipment.createdAt);
+    if (live.status !== order.shipment.status) {
+      await this.prisma.shipment.update({ where: { id: order.shipment.id }, data: { status: live.status } });
+    }
+    return {
+      hasShipment: true,
+      tier: order.shipment.tier,
+      status: live.status,
+      estimatedDelivery: order.shipment.estimatedDelivery,
+      isDemo: live.isDemo,
+      providerLabel: live.providerLabel,
+    };
+  }
+}
+
+@ApiTags('Logistics')
+@ApiBearerAuth()
+@Controller('logistics')
+export class ShipmentController {
+  constructor(private shipments: ShipmentService) {}
+
+  @UseGuards(JwtAuthGuard)
+  @Get('shipments/:orderId')
+  status(@CurrentUser() u: JwtPayload, @Param('orderId') orderId: string) {
+    return this.shipments.getShipmentStatus(orderId, u.sub);
+  }
+}
+
 @Module({
-  controllers: [LogisticsController],
-  providers: [LogisticsService],
-  exports: [LogisticsService],
+  controllers: [LogisticsController, ShipmentController],
+  providers: [LogisticsService, ShipmentService, MockDeliveryProvider],
+  exports: [LogisticsService, ShipmentService],
 })
 export class LogisticsModule {}
