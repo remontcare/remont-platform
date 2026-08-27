@@ -49,9 +49,20 @@ export class LogisticsService {
     return h * 60 + (m || 0);
   }
 
+  // Railway's container runs with no TZ set (confirmed: Dockerfile/env has none), which
+  // means Date.getHours() reads UTC, not IST — a "20:00 cutoff" admins configure meaning
+  // 8 PM India time would otherwise actually fire at 1:30 AM IST. India has a single,
+  // DST-free +5:30 offset, so shifting the UTC epoch and reading UTC components back off
+  // the shifted timestamp gives the correct IST wall-clock reading regardless of the
+  // server process's own timezone.
+  private istMinutesOfDay(date: Date): number {
+    const ist = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  }
+
   private isWithinOperatingHours(open: string | null, close: string | null, now: Date): boolean {
     if (!open || !close) return true; // no restriction configured
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const nowMinutes = this.istMinutesOfDay(now);
     const openMinutes = this.parseHourMinute(open);
     const closeMinutes = this.parseHourMinute(close);
     if (closeMinutes <= openMinutes) return true; // malformed config — don't block on it
@@ -132,8 +143,9 @@ export class LogisticsService {
     const sameDayRadiusKm = await this.getSettingNumber('delivery_sameday_radius_km');
 
     const effectiveNow = new Date(now.getTime() + vendor.processingTimeMinutes * 60000);
-    const withinInstantTime = effectiveNow.getHours() < instantCutoffHour;
-    const withinSameDayTime = effectiveNow.getHours() < sameDayCutoffHour;
+    const effectiveIstHour = Math.floor(this.istMinutesOfDay(effectiveNow) / 60);
+    const withinInstantTime = effectiveIstHour < instantCutoffHour;
+    const withinSameDayTime = effectiveIstHour < sameDayCutoffHour;
     const withinInstantRadius = distanceKm == null || distanceKm <= instantRadiusKm;
     const withinSameDayRadius = distanceKm == null || distanceKm <= sameDayRadiusKm;
 
