@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DeliveryTier } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -173,6 +173,35 @@ export class LogisticsService {
     }
     return { tier: DeliveryTier.NEXT_DAY, etaLabel: 'Tomorrow', charge: await this.getSettingNumber('delivery_charge_nextday'), distanceKm: null, reasons };
   }
+
+  // Phase 4 — checkout-preview aggregate for the frontend cart summary (not the source of
+  // truth for billing; MasterOrdersService.checkout() computes its own authoritative charge
+  // per group independently). Groups distinct products by vendorId — a simpler, self-
+  // contained grouping than reusing groupCartForSplit() (master-orders.module.ts), which
+  // also handles services/commission concerns this preview doesn't need. Products with no
+  // vendor are grouped together under `null` (consistent with checkout treating them as one
+  // "unassigned" bucket).
+  async estimateCartDeliveryCharge(params: {
+    items: { productId: string; quantity?: number }[];
+    addressId?: string;
+    lat?: number;
+    lng?: number;
+    city?: string;
+  }): Promise<{ totalDeliveryCharge: number; breakdown: { vendorId: string | null; tier: DeliveryTier; charge: number }[] }> {
+    const productIds = [...new Set(params.items.map((i) => i.productId))];
+    if (!productIds.length) return { totalDeliveryCharge: 0, breakdown: [] };
+    const products = await this.prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, vendorId: true } });
+    const vendorIds = [...new Set(products.map((p) => p.vendorId))];
+    const breakdown = await Promise.all(vendorIds.map(async (vendorId) => {
+      const representativeProduct = products.find((p) => p.vendorId === vendorId)!;
+      const eligibility = await this.checkEligibility({
+        productId: representativeProduct.id, addressId: params.addressId, lat: params.lat, lng: params.lng, city: params.city,
+      });
+      return { vendorId, tier: eligibility.tier, charge: eligibility.charge };
+    }));
+    const totalDeliveryCharge = breakdown.reduce((s, b) => s + b.charge, 0);
+    return { totalDeliveryCharge, breakdown };
+  }
 }
 
 @ApiTags('Logistics')
@@ -196,6 +225,15 @@ export class LogisticsController {
       lng: lng !== undefined ? Number(lng) : undefined,
       city,
     });
+  }
+
+  // Checkout-preview only — see estimateCartDeliveryCharge()'s comment. Never the source of
+  // truth for what's actually billed.
+  @Public()
+  @Post('delivery-charge-estimate')
+  deliveryChargeEstimate(@Body() body: { items: { productId: string; quantity?: number }[]; addressId?: string; lat?: number; lng?: number; city?: string }) {
+    if (!body?.items?.length) return { totalDeliveryCharge: 0, breakdown: [] };
+    return this.logistics.estimateCartDeliveryCharge(body);
   }
 }
 
@@ -231,14 +269,25 @@ export class ShipmentService {
     const firstProduct = order.items[0].product;
     if (!firstProduct) return;
 
-    const eligibility = await this.logistics.checkEligibility({ productId: firstProduct.id, addressId: order.addressId });
-    await this.prisma.order.update({ where: { id: orderId }, data: { deliveryTier: eligibility.tier, deliveryCharge: eligibility.charge } });
+    // Phase 4 — checkout (master-orders.module.ts) now computes and stores
+    // deliveryTier/deliveryCharge on the Order at creation time, as part of pricing, so the
+    // billed amount and the shipment's tier can never disagree. Read that instead of calling
+    // checkEligibility() a second time here; only fall back to computing it if somehow still
+    // null (should not happen for a PRODUCT order going forward, kept for defensiveness).
+    let tier = order.deliveryTier;
+    let charge = order.deliveryCharge != null ? Number(order.deliveryCharge) : 0;
+    if (!tier) {
+      const eligibility = await this.logistics.checkEligibility({ productId: firstProduct.id, addressId: order.addressId });
+      tier = eligibility.tier;
+      charge = eligibility.charge;
+      await this.prisma.order.update({ where: { id: orderId }, data: { deliveryTier: tier, deliveryCharge: charge } });
+    }
 
     const pickup = firstProduct.vendor?.pickupLocations[0];
     const provider = this.getProvider();
     const { providerRef, estimatedDelivery } = await provider.createShipment({
       orderId,
-      tier: eligibility.tier,
+      tier,
       pickupLat: pickup?.latitude ?? null,
       pickupLng: pickup?.longitude ?? null,
       dropLat: order.address?.latitude ?? null,
@@ -246,7 +295,7 @@ export class ShipmentService {
     });
 
     await this.prisma.shipment.create({
-      data: { orderId, provider: provider.name, providerRef, tier: eligibility.tier, estimatedDelivery, isDemo: true },
+      data: { orderId, provider: provider.name, providerRef, tier, estimatedDelivery, isDemo: true },
     });
   }
 

@@ -17,7 +17,7 @@ import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { DispatchService, RoutingService, OrdersModule } from '../orders/orders.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
-import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
+import { ShipmentService, LogisticsService, LogisticsModule } from '../logistics/logistics.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -212,6 +212,7 @@ export class MasterOrdersService {
     private routing: RoutingService,
     private paymentNotify: PaymentNotificationsService,
     private shipments: ShipmentService,
+    private logistics: LogisticsService,
   ) {}
 
   private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
@@ -358,6 +359,20 @@ export class MasterOrdersService {
       resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
     }
 
+    // Phase 4 — delivery charge per PRODUCT group (backend/src/modules/logistics). Unlike
+    // GST/discount/wallet below, this is naturally a per-group number already (each PRODUCT
+    // group already has its own vendor/product) — never pooled-then-split via
+    // allocateAcrossGroups(), each child Order just gets its own group's own charge directly.
+    // Needs resolvedAddressId, so this must run after address resolution above. A flat line
+    // item, deliberately not itself subject to the GST computed below (a stated
+    // simplification, not a tax-correctness claim).
+    const groupDelivery = await Promise.all(pricedGroups.map(async (g) => {
+      if (g.type !== 'PRODUCT' || !g.items.length) return { tier: null as any, charge: 0 };
+      const eligibility = await this.logistics.checkEligibility({ productId: g.items[0].productId!, addressId: resolvedAddressId });
+      return { tier: eligibility.tier, charge: eligibility.charge };
+    }));
+    const deliveryCharge = groupDelivery.reduce((s, d) => s + d.charge, 0);
+
     // Master-level totals — computed once against the combined subtotal, exactly like
     // OrdersService.create() does for a single order. No promotion-eligibility logic
     // beyond what CouponsService.validate() already does (unchanged, out of scope here).
@@ -380,8 +395,8 @@ export class MasterOrdersService {
 
     const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
     const gstAmount = Math.round(discountedSubtotal * 0.18 * 100) / 100;
-    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
-    const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
+    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount + deliveryCharge);
+    const totalAmount = Math.max(0, discountedSubtotal + gstAmount + deliveryCharge - walletUsed);
 
     // Checked up front, before any rows are created — the actual debit happens later
     // (immediately below for COD, or in confirmPayment() for ONLINE) so an abandoned or
@@ -438,7 +453,7 @@ export class MasterOrdersService {
           paymentStatus: PaymentStatus.PENDING,
           grossServiceAmount, grossProductAmount, subtotal,
           couponCode: dto.couponCode, couponDiscount, membershipDiscount,
-          walletUsed, gstAmount, totalAmount,
+          walletUsed, gstAmount, deliveryCharge, totalAmount,
           guestName: isGuest ? opts.guestName : undefined,
           guestPhone: isGuest ? opts.guestPhone : undefined,
           guestEmail: isGuest ? opts.guestEmail : undefined,
@@ -453,9 +468,10 @@ export class MasterOrdersService {
         const childDiscount = groupDiscounts[i];
         const childGst = groupGst[i];
         const childWallet = groupWallet[i];
+        const childDelivery = groupDelivery[i];
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
-        const childTotal = Math.max(0, g.amount - childDiscount + childGst - childWallet);
+        const childTotal = Math.max(0, g.amount - childDiscount + childGst + childDelivery.charge - childWallet);
 
         // A SERVICE group can now hold several services from the same category (Smart
         // Order Grouping) — sum each line's own commission for the order-level total, and
@@ -494,6 +510,7 @@ export class MasterOrdersService {
             paymentStatus: PaymentStatus.PENDING,
             serviceAmount, productsAmount, subtotal: g.amount,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
+            deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
             guestName: isGuest ? opts.guestName : undefined,

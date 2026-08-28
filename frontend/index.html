@@ -9324,6 +9324,9 @@ function cartCheckout() {
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>GST (18%)</span><span id="co-gst">₹0</span>
         </div>
+        <div id="co-delivery-line" style="display:none;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
+          <span>Delivery Charge</span><span id="co-delivery-line-amt">₹0</span>
+        </div>
         <div id="co-wallet-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>Wallet applied</span><span id="co-wallet-line-amt">−₹0</span>
         </div>
@@ -9355,10 +9358,10 @@ function cartCheckout() {
       <textarea id="co-address" placeholder="Full delivery address (house no, street, landmark, city, pincode)"
         style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;height:80px;resize:none;outline:none;margin-bottom:10px"></textarea>
       <div style="display:flex;gap:10px;margin-bottom:10px">
-        <select id="co-city" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
+        <select id="co-city" onchange="_fetchDeliveryCharge()" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
           <option value="">Select city…</option>
         </select>
-        <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6"
+        <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6" onchange="_fetchDeliveryCharge()"
           style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
       </div>
       <div style="display:flex;gap:10px;margin-bottom:16px">
@@ -9861,6 +9864,7 @@ function openCheckoutModal() {
 
   // Reset per-open state — coupon/wallet selections don't carry over between opens
   _coCoupon = null;
+  _coDeliveryCharge = 0;
   document.getElementById('co-coupon-code').value = '';
   document.getElementById('co-coupon-expanded').style.display = 'none';
   document.getElementById('co-coupon-collapsed').style.display = 'flex';
@@ -9907,6 +9911,7 @@ function openCheckoutModal() {
   }
 
   recalcTotals();
+  _fetchDeliveryCharge(); // fires once per modal open — recalcTotals() above already covers the wallet-balance branch's own call
 
   // Pre-fill contact from saved profile
   var storedUser = null;
@@ -10095,6 +10100,11 @@ function handleCheckoutSubmit() {
 // Recomputes and renders the price breakdown from the current cart + applied coupon +
 // wallet checkbox — mirrors the backend's exact calc order (subtotal → coupon discount →
 // 18% GST on the remainder → minus wallet) so what's shown here matches what gets charged.
+// Phase 4 — _coDeliveryCharge is a PREVIEW only, populated async by _fetchDeliveryCharge()
+// (backend/src/modules/logistics, GET .../delivery-charge-estimate). The actual amount
+// charged via Razorpay is always the backend's own independently-computed totalAmount from
+// MasterOrdersService.checkout() — this display does not need to match it to the paisa.
+var _coDeliveryCharge = 0;
 function recalcTotals() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   var subtotal = 0;
@@ -10103,7 +10113,7 @@ function recalcTotals() {
   var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal) : 0;
   var discounted = Math.max(0, subtotal - couponDiscount);
   var gst = Math.round(discounted * 0.18 * 100) / 100;
-  var preWalletTotal = discounted + gst;
+  var preWalletTotal = discounted + gst + _coDeliveryCharge;
 
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletApplied = (useWalletEl && useWalletEl.checked) ? Math.min(_coWalletBalance, preWalletTotal) : 0;
@@ -10118,6 +10128,13 @@ function recalcTotals() {
     couponLine.style.display = 'none';
   }
   document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+  var deliveryLine = document.getElementById('co-delivery-line');
+  if (_coDeliveryCharge > 0) {
+    deliveryLine.style.display = 'flex';
+    document.getElementById('co-delivery-line-amt').textContent = '₹' + _coDeliveryCharge.toLocaleString('en-IN');
+  } else {
+    deliveryLine.style.display = 'none';
+  }
   var walletLine = document.getElementById('co-wallet-line');
   if (walletApplied > 0) {
     walletLine.style.display = 'flex';
@@ -10126,7 +10143,32 @@ function recalcTotals() {
     walletLine.style.display = 'none';
   }
   document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
-  return { subtotal: subtotal, couponDiscount: couponDiscount, gst: gst, walletApplied: walletApplied, total: total };
+  return { subtotal: subtotal, couponDiscount: couponDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
+}
+
+// Fetches a PREVIEW delivery charge for the current cart + whatever address info is
+// available and re-renders the summary — never the source of truth for billing (see
+// _coDeliveryCharge comment above). Guest checkout only has city/pincode text most of the
+// time; savedLoc (if present) gives real lat/lng for a more accurate preview.
+function _fetchDeliveryCharge() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var items = cart.filter(function(i){ return i.type !== 'service'; }).map(function(i){ return { productId: i.id, quantity: i.qty || 1 }; });
+  if (!items.length) { _coDeliveryCharge = 0; recalcTotals(); return; }
+  var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
+  var cityEl = document.getElementById('co-city');
+  var body = {
+    items: items,
+    lat: savedLoc ? savedLoc.latitude : undefined,
+    lng: savedLoc ? savedLoc.longitude : undefined,
+    city: (cityEl && cityEl.value.trim()) || (savedLoc ? savedLoc.city : undefined),
+  };
+  fetch((API_BASE || '') + '/api/v1/logistics/delivery-charge-estimate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then(function(r){ return r.json(); }).then(function(res){
+    var d = res.data || res;
+    _coDeliveryCharge = Number(d.totalDeliveryCharge || 0);
+    recalcTotals();
+  }).catch(function(){ /* preview only — a failed estimate just shows no delivery line */ });
 }
 
 function toggleCouponInput() {

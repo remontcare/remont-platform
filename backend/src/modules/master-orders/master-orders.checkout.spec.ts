@@ -103,8 +103,12 @@ function makeService() {
   const routing: any = { route: jest.fn(async () => {}) };
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };
   const shipments: any = { createShipmentForOrder: jest.fn(async () => {}) };
+  // Never actually invoked by this spec's fixtures (every SERVICES entry is a SERVICE-type
+  // item, and product.findMany always returns [] — checkout()'s groupDelivery computation
+  // only calls this for PRODUCT groups), but still needed to satisfy the constructor.
+  const logistics: any = { checkEligibility: jest.fn(async () => ({ tier: 'STANDARD', charge: 0 })) };
 
-  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments);
+  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments, logistics);
   return { svc, prisma, createdOrders, createdMasterOrders, payments, routing, dispatch, shipments };
 }
 
