@@ -27,7 +27,7 @@ function makeService() {
     releaseHold: jest.fn().mockResolvedValue({}),
     forfeitHold: jest.fn().mockResolvedValue({}),
   };
-  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, {} as any, {} as any, {} as any, {} as any);
+  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { svc, prisma, ledger };
 }
 

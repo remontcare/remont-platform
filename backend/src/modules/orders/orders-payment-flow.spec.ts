@@ -42,7 +42,7 @@ function makeService() {
   };
   const ledger: any = { postEntry: jest.fn(async () => {}) };
   const invoices: any = { generateForOrder: jest.fn(async () => ({ id: 'inv-1' })) };
-  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, routing, {} as any, payments, paymentNotify, ledger, invoices);
+  const svc = new OrdersService(prisma, {} as any, {} as any, dispatch, routing, {} as any, payments, paymentNotify, ledger, invoices, {} as any);
   return { svc, prisma, payments, dispatch, routing, paymentNotify, ledger, invoices };
 }
 

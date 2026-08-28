@@ -20,6 +20,7 @@ import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { CrmService, CrmModule } from '../crm/crm.module';
 import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
+import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -48,7 +49,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -914,19 +915,61 @@ export class AdminService {
       include: { order: { select: { orderNumber: true, customerId: true } }, supportCase: { select: { caseNumber: true, issueType: true } } },
     });
   }
-  // Admin override for a disputed seller rejection (ReturnShipment.inspectionStatus already
-  // REJECTED, case in ADMIN_REVIEW) — reuses the same ReturnsService.finalize() a seller's own
-  // inspection call uses, just gated PENDING-only there; an admin arbitrating a dispute instead
-  // re-runs the ACCEPTED branch directly against the still-REJECTED-by-seller row when they
-  // side with the customer, or leaves it rejected (no further action) when they side with the
-  // seller — so this only ever needs to call finalize() for the ACCEPTED override case.
+  // Phase 6 — the ONE place any return/replacement decision is finalized. The seller's own
+  // route (ProductVendorsService.recommendReturn()) only ever writes sellerRecommendation now —
+  // it can never move inspectionStatus off PENDING — so finalize()'s existing PENDING guard is
+  // naturally satisfied on this, the admin's, first and only call. No "reset to PENDING" hack
+  // needed anymore (that was only ever necessary because the seller used to be able to finalize
+  // directly).
   async adminDecideReturn(returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', adminId: string, notes?: string) {
-    if (decision === 'REJECTED') {
-      return this.prisma.returnShipment.update({ where: { id: returnShipmentId }, data: { inspectionNotes: notes } });
-    }
-    await this.prisma.returnShipment.update({ where: { id: returnShipmentId }, data: { inspectionStatus: 'PENDING' } });
-    await this.returns.finalize(returnShipmentId, 'ACCEPTED', adminId, UserRole.ADMIN, notes);
+    await this.returns.finalize(returnShipmentId, decision, adminId, UserRole.ADMIN, notes);
     return this.prisma.returnShipment.findUniqueOrThrow({ where: { id: returnShipmentId } });
+  }
+
+  async finalizeRtoRefund(returnShipmentId: string, adminId: string, notes?: string) {
+    await this.returns.finalizeRto(returnShipmentId, adminId, UserRole.ADMIN, notes);
+    return this.prisma.returnShipment.findUniqueOrThrow({ where: { id: returnShipmentId } });
+  }
+
+  // ─── Phase 6 — multi-provider reverse logistics ───────────────────────────
+  async listLogisticsProviders() {
+    const rows = await this.prisma.logisticsProvider.findMany({ orderBy: [{ baseCost: 'asc' }, { priority: 'asc' }] });
+    // Credentials never reach the frontend — return a derived boolean instead of the raw JSON,
+    // deliberately not replicating getIntegrations()'s unmasked-secret behaviour above.
+    return rows.map(({ credentialsJson, ...rest }) => ({ ...rest, hasCredentials: !!credentialsJson }));
+  }
+  async createLogisticsProvider(data: any) {
+    return this.prisma.logisticsProvider.create({ data });
+  }
+  async updateLogisticsProvider(id: string, data: any) {
+    return this.prisma.logisticsProvider.update({ where: { id }, data });
+  }
+  async toggleLogisticsProvider(id: string, isActive: boolean) {
+    return this.prisma.logisticsProvider.update({ where: { id }, data: { isActive } });
+  }
+
+  // Same Promise.all idiom as globalStats() above.
+  async logisticsStats() {
+    const som = new Date(); som.setDate(1); som.setHours(0, 0, 0, 0);
+    const [activeProviders, returnCount, rtoCount, warrantyShipmentCount, pendingAdminDecision, pendingWarrantyDecision, codPendingSettlement] = await Promise.all([
+      this.prisma.logisticsProvider.count({ where: { isActive: true } }),
+      this.prisma.returnShipment.count({ where: { kind: 'RETURN', createdAt: { gte: som } } }),
+      this.prisma.returnShipment.count({ where: { kind: 'RTO', createdAt: { gte: som } } }),
+      this.prisma.returnShipment.count({ where: { kind: 'WARRANTY', createdAt: { gte: som } } }),
+      this.prisma.returnShipment.count({ where: { inspectionStatus: 'PENDING', sellerRecommendation: { not: null } } }),
+      this.prisma.warrantyCase.count({ where: { status: 'ADMIN_REVIEW' } }),
+      this.prisma.shipment.count({ where: { codSettlementStatus: 'COD_SETTLEMENT_PENDING' } }),
+    ]);
+    return { activeProviders, returnCount, rtoCount, warrantyShipmentCount, pendingAdminDecision, pendingWarrantyDecision, codPendingSettlement };
+  }
+
+  // ─── Phase 6 — warranty claims ─────────────────────────────────────────────
+  async listWarrantyCasesForAdmin(status?: string) {
+    return this.warranty.listForAdmin(status);
+  }
+  async adminDecideWarranty(warrantyCaseId: string, decision: 'APPROVED_REPAIR' | 'APPROVED_REPLACEMENT' | 'APPROVED_REFUND' | 'REJECTED', adminId: string, notes?: string) {
+    await this.warranty.decide(warrantyCaseId, decision, adminId, notes);
+    return this.prisma.warrantyCase.findUniqueOrThrow({ where: { id: warrantyCaseId } });
   }
 
   // "Live vendors" for the admin to call/assign directly — mirrors DispatchService's
@@ -1021,7 +1064,24 @@ export class AdminService {
   }
 
   async adminCancelOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { shipment: true, items: { take: 1 } } });
+    // Phase 6 — same product-aware/shipment-stage branch as OrdersService.cancel() (see that
+    // method's doc comment for the full reasoning). SERVICE-order behaviour below is
+    // byte-for-byte unchanged.
+    const isProduct = order?.type === 'PRODUCT' || (order?.items?.length ?? 0) > 0;
+    if (isProduct) {
+      if (order && ['COMPLETED', 'CANCELLED', 'REFUNDED'].includes(order.status)) {
+        throw new BadRequestException('This order can no longer be cancelled — please raise a return request instead');
+      }
+      if (order?.shipment && ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(order.shipment.status)) {
+        await this.returns.initiateRto({ id: order.id, orderNumber: order.orderNumber }, order.shipment.id, actorId || 'ADMIN', reason);
+        return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      }
+      if (order?.shipment?.status === 'DELIVERED') {
+        throw new BadRequestException('This order has already been delivered — please raise a return request instead');
+      }
+      // else: not yet shipped — falls through to the plain-cancel transaction below, unchanged
+    }
     // Same Lead Cost refund guard as OrdersService.cancel() (orders.module.ts) — "admin
     // approves" from the spec maps to this admin-initiated cancel path. The updateMany()
     // compare-and-swap on leadCostRefunded (rather than a plain read-then-write) is what
@@ -2942,6 +3002,25 @@ export class AdminController {
   @Post('return-shipments/:id/decide') decideReturn(
     @CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { decision: 'ACCEPTED' | 'REJECTED'; notes?: string },
   ) { return this.admin.adminDecideReturn(id, b.decision, u.sub, b.notes); }
+  @Post('return-shipments/:id/rto-refund') rtoRefund(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { notes?: string },
+  ) { return this.admin.finalizeRtoRefund(id, u.sub, b?.notes); }
+
+  // ─── Phase 6 — multi-provider reverse logistics + dashboard ───
+  @Get('logistics/providers') listLogisticsProviders() { return this.admin.listLogisticsProviders(); }
+  @Post('logistics/providers') createLogisticsProvider(@Body() b: any) { return this.admin.createLogisticsProvider(b); }
+  @Patch('logistics/providers/:id') updateLogisticsProvider(@Param('id') id: string, @Body() b: any) { return this.admin.updateLogisticsProvider(id, b); }
+  @Patch('logistics/providers/:id/toggle') toggleLogisticsProvider(@Param('id') id: string, @Body() b: { isActive: boolean }) {
+    return this.admin.toggleLogisticsProvider(id, b.isActive);
+  }
+  @Get('logistics/stats') logisticsStats() { return this.admin.logisticsStats(); }
+
+  // ─── Phase 6 — warranty claims ───
+  @Get('warranty-cases') listWarrantyCases(@Query('status') status?: string) { return this.admin.listWarrantyCasesForAdmin(status); }
+  @Post('warranty-cases/:id/decide') decideWarranty(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { decision: 'APPROVED_REPAIR' | 'APPROVED_REPLACEMENT' | 'APPROVED_REFUND' | 'REJECTED'; notes?: string },
+  ) { return this.admin.adminDecideWarranty(id, b.decision, u.sub, b.notes); }
 
   // Cities
   @Get('cities') cities() { return this.admin.listCities(); }
@@ -3219,7 +3298,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

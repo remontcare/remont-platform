@@ -33,7 +33,7 @@ function makeService() {
     getWarrantyDefaults: jest.fn().mockResolvedValue({ days: 7, percent: 0 }), // no warranty cut unless a test opts in
   };
   const paymentNotify: any = { workCompleted: jest.fn().mockResolvedValue({}) };
-  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, paymentNotify, ledger, {} as any);
+  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, paymentNotify, ledger, {} as any, {} as any);
   // autoGenerateInvoice fires-and-forgets against modules not wired up in this unit test —
   // stub it out so it can't throw an unhandled rejection during the test run.
   (svc as any).autoGenerateInvoice = jest.fn().mockResolvedValue(undefined);
@@ -134,7 +134,7 @@ describe('OrdersService.cancel — Lead Cost refund', () => {
     };
     prisma.orderTimeline = { create: jest.fn() };
     const ledger: any = { refundLeadCost: jest.fn().mockResolvedValue({}) };
-    const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, ledger, {} as any);
+    const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, ledger, {} as any, {} as any);
     return { svc, prisma, ledger };
   }
 

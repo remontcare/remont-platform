@@ -592,6 +592,7 @@ function enterDashboard(){
   loadProducts();
   loadOrders();
   loadReturns();
+  loadWarrantyCases();
   loadWalletBalance();
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
@@ -617,7 +618,7 @@ function goView(name){
   document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
   document.getElementById('nav-'+name).classList.add('active');
   document.getElementById('products-fab').style.display = name === 'products' ? 'flex' : 'none';
-  if (name === 'orders') { loadOrders(); loadReturns(); }
+  if (name === 'orders') { loadOrders(); loadReturns(); loadWarrantyCases(); }
 }
 
 /* ── DASHBOARD ── */
@@ -1097,20 +1098,18 @@ function orderCardHtml(o){
     '<span class="badge '+badgeClass+'">'+escHtml(badgeText)+'</span></div>' +
   '</div>';
 }
-// Phase 5 — an incoming return-pickup awaiting this seller's inspection (ReturnShipment
-// reached DELIVERED, inspectionStatus still PENDING). Accept/Reject calls the same endpoint
-// the seller-order actions above use.
+// Phase 5/6 — an incoming return-pickup awaiting this seller's RECOMMENDATION (ReturnShipment
+// reached DELIVERED, no sellerRecommendation recorded yet). The seller no longer makes the
+// final call — admin decides from here (see backend/src/modules/returns ReturnsService).
 function returnCardHtml(rs){
   var orderNumber = (rs.order && rs.order.orderNumber) || '';
-  var actionsHtml = rs.inspectionStatus === 'PENDING'
-    ? '<div class="ic-actions">' +
-        '<button class="btn-mini btn-accept" onclick="sellerInspectReturn(\''+rs.id+'\',\'ACCEPTED\')">✅ Accept Return</button>' +
-        '<button class="btn-mini btn-reject" onclick="sellerInspectReturn(\''+rs.id+'\',\'REJECTED\')">❌ Reject Return</button></div>'
-    : '<div class="ic-meta">Inspection: '+escHtml(rs.inspectionStatus)+'</div>';
+  var actionsHtml = '<div class="ic-actions">' +
+      '<button class="btn-mini btn-accept" onclick="sellerInspectReturn(\''+rs.id+'\',\'ACCEPTED\')">✅ Recommend Accept</button>' +
+      '<button class="btn-mini btn-reject" onclick="sellerInspectReturn(\''+rs.id+'\',\'REJECTED\')">❌ Recommend Reject</button></div>';
   return '<div class="item-card">' +
     '<div class="ic-thumb">↩️</div>' +
     '<div class="ic-info"><div class="ic-title">Return — Order '+escHtml(orderNumber)+'</div>' +
-    '<div class="ic-meta">Item has arrived — please inspect before accepting.</div>' +
+    '<div class="ic-meta">Item has arrived — please inspect and recommend a decision. Admin makes the final call.</div>' +
     actionsHtml + '</div>' +
     '<div class="ic-right"><span class="badge inactive">'+escHtml(rs.status)+'</span></div>' +
   '</div>';
@@ -1120,7 +1119,7 @@ function renderOrders(){
   if (currentOrdersBucket === 'returns') {
     var pendingReturns = myReturns.filter(function(r){ return r.inspectionStatus === 'PENDING'; });
     var rejectedOrders = myOrders.filter(function(o){ return o.productFulfillmentStage === 'SELLER_REJECTED'; });
-    var html = pendingReturns.map(returnCardHtml).join('') + rejectedOrders.map(orderCardHtml).join('');
+    var html = pendingReturns.map(returnCardHtml).join('') + myWarrantyCases.map(warrantyCardHtml).join('') + rejectedOrders.map(orderCardHtml).join('');
     el.innerHTML = html || '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No returns here yet</div></div>';
     return;
   }
@@ -1148,11 +1147,47 @@ function sellerMarkReady(orderId){
 function sellerInspectReturn(returnShipmentId, decision){
   var notes = null;
   if (decision === 'REJECTED') {
-    notes = prompt('Reason for rejecting this return:');
+    notes = prompt('Reason for recommending rejection:');
     if (notes === null) return;
   }
   apiFetch('/vendors/product/me/returns/'+returnShipmentId+'/inspect', { method: 'POST', body: JSON.stringify({ decision: decision, notes: notes }) })
-    .then(function(){ loadOrders(); loadReturns(); })
+    .then(function(){ alert('Recommendation sent — awaiting admin decision.'); loadOrders(); loadReturns(); })
+    .catch(function(e){ alert(e.message); });
+}
+
+/* ── WARRANTY CLAIMS ── */
+var myWarrantyCases = [];
+function loadWarrantyCases(){
+  apiFetch('/vendors/product/me/warranty-cases').then(function(list){ myWarrantyCases = list; if (currentOrdersBucket === 'returns') renderOrders(); }).catch(function(){});
+}
+function warrantyCardHtml(wc){
+  var orderNumber = (wc.order && wc.order.orderNumber) || '';
+  var productName = (wc.product && wc.product.name) || 'Product';
+  return '<div class="item-card">' +
+    '<div class="ic-thumb">🛡️</div>' +
+    '<div class="ic-info"><div class="ic-title">Warranty Claim — '+escHtml(productName)+'</div>' +
+    '<div class="ic-meta">Order '+escHtml(orderNumber)+' — please recommend a resolution. Admin makes the final call.</div>' +
+    '<div class="ic-actions">' +
+      '<select id="war-rec-'+wc.id+'" style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid #e5e7eb">' +
+        '<option value="APPROVED_REPAIR">Recommend: Repair</option>' +
+        '<option value="APPROVED_REPLACEMENT">Recommend: Replacement</option>' +
+        '<option value="APPROVED_REFUND">Recommend: Refund</option>' +
+        '<option value="REJECTED">Recommend: Reject</option>' +
+      '</select>' +
+      '<button class="btn-mini btn-accept" onclick="sellerRecommendWarranty(\''+wc.id+'\')">Send Recommendation</button>' +
+    '</div></div>' +
+    '<div class="ic-right"><span class="badge inactive">'+escHtml(wc.status)+'</span></div>' +
+  '</div>';
+}
+function sellerRecommendWarranty(warrantyCaseId){
+  var decision = document.getElementById('war-rec-'+warrantyCaseId).value;
+  var notes = null;
+  if (decision === 'REJECTED') {
+    notes = prompt('Reason for recommending rejection:');
+    if (notes === null) return;
+  }
+  apiFetch('/vendors/product/me/warranty-cases/'+warrantyCaseId+'/recommend', { method: 'POST', body: JSON.stringify({ decision: decision, notes: notes }) })
+    .then(function(){ alert('Recommendation sent — awaiting admin decision.'); loadWarrantyCases(); })
     .catch(function(e){ alert(e.message); });
 }
 function renderRecentOrders(){

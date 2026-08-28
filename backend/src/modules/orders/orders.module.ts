@@ -20,6 +20,7 @@ import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
+import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -483,6 +484,7 @@ export class OrdersService {
     private paymentNotify: PaymentNotificationsService,
     private ledger: PartnerLedgerService,
     private invoices: InvoicesService,
+    private returns: ReturnsService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -1222,10 +1224,32 @@ export class OrdersService {
     return transactions;
   }
 
+  // Phase 6 — a PRODUCT order's cancellation behaviour now depends on the physical shipment
+  // stage: before pickup, a plain cancel (unchanged, falls through below); after pickup
+  // (PICKED_UP/IN_TRANSIT/OUT_FOR_DELIVERY), the item is physically in the logistics network —
+  // simply flipping status to CANCELLED would silently orphan it, so this triggers an RTO
+  // (return-to-origin) instead via ReturnsService.initiateRto(); once DELIVERED (or
+  // Order.status already COMPLETED), cancellation is no longer possible — the customer must
+  // raise a normal return request instead. SERVICE-order behaviour below is byte-for-byte
+  // unchanged.
   async cancel(userId: string, orderId: string, reason: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { shipment: true, items: { take: 1 } } });
     if (!order || order.customerId !== userId) throw new ForbiddenException();
-    if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
+
+    const isProduct = order.type === 'PRODUCT' || (order.items?.length ?? 0) > 0;
+    if (isProduct) {
+      if (['COMPLETED', 'CANCELLED', 'REFUNDED'].includes(order.status)) {
+        throw new BadRequestException('This order can no longer be cancelled — please raise a return request instead');
+      }
+      if (order.shipment && ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(order.shipment.status)) {
+        await this.returns.initiateRto({ id: order.id, orderNumber: order.orderNumber }, order.shipment.id, userId, reason);
+        return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      }
+      if (order.shipment?.status === 'DELIVERED') {
+        throw new BadRequestException('This order has already been delivered — please raise a return request instead');
+      }
+      // else: not yet shipped — falls through to the plain-cancel transaction below, unchanged
+    } else if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
       throw new BadRequestException('Cannot cancel at this stage');
     }
     // Customer-initiated cancellation refunds any Lead Cost already charged to the assigned
@@ -1699,7 +1723,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule, ReturnsModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService, DispatchRetryService],
   exports: [OrdersService, DispatchService, RoutingService],

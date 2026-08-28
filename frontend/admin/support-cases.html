@@ -79,7 +79,7 @@ var currentCase = null;
 var ISSUE_LABELS = {
   NOT_DELIVERED: 'Not Delivered', DELIVERED_LATE: 'Delivered Late', WRONG_PRODUCT: 'Wrong Product',
   DAMAGED_PRODUCT: 'Damaged Product', MISSING_ITEM: 'Missing Item', CANCEL_PRODUCT: 'Cancel Product',
-  RETURN_PRODUCT: 'Return Product', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
+  RETURN_PRODUCT: 'Return Product', WARRANTY_CLAIM: 'Warranty Claim', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
   PARTNER_ON_THE_WAY: 'Partner On The Way (cancel)', PARTNER_ARRIVED: 'Partner Arrived (cancel)',
   PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
   SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
@@ -140,7 +140,7 @@ function openDetail(id) {
 function renderDetail(c) {
   // Phase 5 — a case already routed to a physical return pickup is decided from the
   // Deliveries & Returns queue (seller inspection, or an admin override there), not here.
-  var isActive = ['RESOLVED', 'CLOSED'].indexOf(c.status) === -1 && c.resolutionType !== 'RETURN_PICKUP_INITIATED';
+  var isActive = ['RESOLVED', 'CLOSED'].indexOf(c.status) === -1 && c.resolutionType !== 'RETURN_PICKUP_INITIATED' && c.resolutionType !== 'WARRANTY_CLAIM_OPENED';
   var evidenceHtml = (c.evidenceUrls || []).length
     ? c.evidenceUrls.map(function(u, i) { return '<a class="sc-evidence-thumb" href="' + escape(u) + '" target="_blank">Evidence ' + (i + 1) + ' ↗</a>'; }).join('')
     : '<span style="color:#9ca3af;font-size:12px">No evidence attached</span>';
@@ -209,6 +209,11 @@ function renderDetail(c) {
     html += '<div style="background:#eff6ff;border-radius:8px;padding:12px;font-size:13px">' +
       '<strong>A return pickup has been scheduled.</strong><br>' +
       'This case will close automatically once the seller inspects the item — see the <a href="/admin/logistics.html">Deliveries & Returns</a> queue.' +
+      '</div>';
+  } else if (c.resolutionType === 'WARRANTY_CLAIM_OPENED') {
+    html += '<div style="background:#eff6ff;border-radius:8px;padding:12px;font-size:13px">' +
+      '<strong>A warranty claim has been opened.</strong><br>' +
+      'This case will close automatically once the seller recommends and admin decides — see the <a href="/admin/logistics.html">Deliveries & Returns</a> Warranty queue.' +
       '</div>';
   } else {
     html += '<div style="background:#f0fdf4;border-radius:8px;padding:12px;font-size:13px">' +

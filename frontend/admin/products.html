@@ -121,6 +121,7 @@
       <button class="modal-tab" onclick="switchModalTab(this,'prod-media')">Images</button>
       <button class="modal-tab" onclick="switchModalTab(this,'prod-seo')">SEO</button>
       <button class="modal-tab" onclick="switchModalTab(this,'prod-cities')">Cities</button>
+      <button class="modal-tab" onclick="switchModalTab(this,'prod-policy')">Policy</button>
       <button class="modal-tab" onclick="switchModalTab(this,'prod-ai')">AI Generate</button>
     </div>
     <input type="hidden" id="prod-id">
@@ -199,6 +200,42 @@
     <div id="prod-cities" class="modal-pane">
       <p id="prod-cities-note" style="font-size:13px;color:#6b7280;margin-top:0">Save product first. Then set city-specific availability, price and stock.</p>
       <div id="prod-cities-list" style="margin-top:8px"><div style="color:#9ca3af;font-size:13px">Save product to manage city availability.</div></div>
+    </div>
+
+    <div id="prod-policy" class="modal-pane">
+      <p style="font-size:13px;color:#6b7280;margin-top:0">Controls what Return/Replacement/Warranty options a customer sees for this product under Help &amp; Support.</p>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-returnable" checked> Return Allowed</label></div>
+        <div class="form-group" style="flex:1"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-replaceable" checked> Replacement Allowed</label></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Return Window (days) <small style="color:#9ca3af">(blank = site default)</small></label><input id="prod-return-window" class="form-control" type="number" placeholder="7"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Replacement Window (days) <small style="color:#9ca3af">(blank = same as return)</small></label><input id="prod-replacement-window" class="form-control" type="number" placeholder="7"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Return Conditions</label><textarea id="prod-return-conditions" class="form-control" rows="2" placeholder="e.g. Unused, in original packaging"></textarea></div>
+      <div class="form-group"><label class="form-label">Replacement Conditions</label><textarea id="prod-replacement-conditions" class="form-control" rows="2" placeholder="e.g. Manufacturing defect only"></textarea></div>
+
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-warranty-available"> Warranty Available</label>
+        <div class="form-row" style="margin-top:8px">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Warranty Type</label>
+            <select id="prod-warranty-type" class="form-control">
+              <option value="MANUFACTURER">Manufacturer</option>
+              <option value="SELLER">Seller</option>
+              <option value="BRAND">Brand</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1"><label class="form-label">Warranty Duration (months)</label><input id="prod-warranty-months" class="form-control" type="number" placeholder="12"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Warranty Instructions</label><textarea id="prod-warranty-instructions" class="form-control" rows="2" placeholder="How the customer should claim this warranty"></textarea></div>
+      </div>
+
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6">
+        <label class="form-label">Evidence Requirements (for Return/Damaged/Warranty claims)</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="prod-evidence-photo" checked> Photo Required</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="prod-evidence-video"> Video Required</label>
+      </div>
     </div>
 
     <div id="prod-ai" class="modal-pane">
@@ -401,6 +438,20 @@ function openProdModal(prod) {
   prodImages = prod ? (prod.images||[]) : [];
   renderProdImages();
   document.getElementById('prod-ai-preview').style.display='none';
+
+  // Phase 6 — after-sales policy tab
+  document.getElementById('prod-returnable').checked = prod ? prod.returnable !== false : true;
+  document.getElementById('prod-replaceable').checked = prod ? prod.replaceable !== false : true;
+  document.getElementById('prod-return-window').value = prod && prod.returnWindowDays != null ? prod.returnWindowDays : '';
+  document.getElementById('prod-replacement-window').value = prod && prod.replacementWindowDays != null ? prod.replacementWindowDays : '';
+  document.getElementById('prod-return-conditions').value = prod ? (prod.returnConditions||'') : '';
+  document.getElementById('prod-replacement-conditions').value = prod ? (prod.replacementConditions||'') : '';
+  document.getElementById('prod-warranty-available').checked = prod ? !!prod.warrantyAvailable : false;
+  document.getElementById('prod-warranty-type').value = prod ? (prod.warrantyType||'MANUFACTURER') : 'MANUFACTURER';
+  document.getElementById('prod-warranty-months').value = prod && prod.warrantyDurationMonths != null ? prod.warrantyDurationMonths : '';
+  document.getElementById('prod-warranty-instructions').value = prod ? (prod.warrantyInstructions||'') : '';
+  document.getElementById('prod-evidence-photo').checked = prod ? prod.evidencePhotoRequired !== false : true;
+  document.getElementById('prod-evidence-video').checked = prod ? !!prod.evidenceVideoRequired : false;
   var coverage = prod ? (prod.coverageType || 'PAN_INDIA') : 'PAN_INDIA';
   var radio = document.querySelector('input[name="prod-coverage"][value="'+coverage+'"]');
   (radio || document.querySelector('input[name="prod-coverage"][value="PAN_INDIA"]')).checked = true;
@@ -451,6 +502,19 @@ function saveProduct() {
     seoDesc: document.getElementById('prod-seo-desc').value.trim()||undefined,
     seoKeywords: document.getElementById('prod-seo-kw').value.trim().split(',').map(function(k){return k.trim();}).filter(Boolean),
     coverageType: document.querySelector('input[name="prod-coverage"]:checked').value,
+    // Phase 6 — after-sales policy
+    returnable: document.getElementById('prod-returnable').checked,
+    replaceable: document.getElementById('prod-replaceable').checked,
+    returnWindowDays: (function(){ var v=parseInt(document.getElementById('prod-return-window').value); return isNaN(v)?null:v; })(),
+    replacementWindowDays: (function(){ var v=parseInt(document.getElementById('prod-replacement-window').value); return isNaN(v)?null:v; })(),
+    returnConditions: document.getElementById('prod-return-conditions').value.trim()||undefined,
+    replacementConditions: document.getElementById('prod-replacement-conditions').value.trim()||undefined,
+    warrantyAvailable: document.getElementById('prod-warranty-available').checked,
+    warrantyType: document.getElementById('prod-warranty-type').value,
+    warrantyDurationMonths: (function(){ var v=parseInt(document.getElementById('prod-warranty-months').value); return isNaN(v)?null:v; })(),
+    warrantyInstructions: document.getElementById('prod-warranty-instructions').value.trim()||undefined,
+    evidencePhotoRequired: document.getElementById('prod-evidence-photo').checked,
+    evidenceVideoRequired: document.getElementById('prod-evidence-video').checked,
   };
   if (!id) { var sku = document.getElementById('prod-sku').value.trim(); if (sku) data.sku = sku; }
   var p = id ? api('PATCH','/admin/products/'+id,data) : api('POST','/admin/products',data);

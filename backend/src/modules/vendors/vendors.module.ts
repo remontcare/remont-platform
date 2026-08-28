@@ -15,6 +15,7 @@ import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/par
 import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { RefundsService, RefundsModule } from '../refunds/refunds.module';
+import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -531,6 +532,7 @@ export class ProductVendorsService {
     private shipments: ShipmentService,
     private returns: ReturnsService,
     private refunds: RefundsService,
+    private warranty: WarrantyService,
   ) {}
 
   private async requireVendor(userId: string) {
@@ -613,7 +615,10 @@ export class ProductVendorsService {
     return this.returns.listIncomingReturnsForVendor(v.id);
   }
 
-  async inspectReturn(userId: string, returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', notes?: string) {
+  // Phase 6 — renamed from inspectReturn(): the seller no longer finalizes anything here, only
+  // records a RECOMMENDATION. Only AdminService.adminDecideReturn() may call
+  // ReturnsService.finalize() now — see recordSellerRecommendation()'s doc comment.
+  async recommendReturn(userId: string, returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', notes?: string) {
     const v = await this.requireVendor(userId);
     const rs = await this.prisma.returnShipment.findUnique({
       where: { id: returnShipmentId },
@@ -623,8 +628,25 @@ export class ProductVendorsService {
     if (!rs.order.items.some((i) => i.product.vendorId === v.id)) {
       throw new ForbiddenException('This return does not belong to your products');
     }
-    await this.returns.finalize(returnShipmentId, decision, userId, UserRole.PRODUCT_VENDOR, notes);
+    await this.returns.recordSellerRecommendation(returnShipmentId, decision, userId, notes);
     return this.prisma.returnShipment.findUniqueOrThrow({ where: { id: returnShipmentId } });
+  }
+
+  async listIncomingWarrantyCases(userId: string) {
+    const v = await this.requireVendor(userId);
+    return this.warranty.listIncomingForVendor(v.id);
+  }
+
+  async recommendWarranty(userId: string, warrantyCaseId: string, decision: 'APPROVED_REPAIR' | 'APPROVED_REPLACEMENT' | 'APPROVED_REFUND' | 'REJECTED', notes?: string) {
+    const v = await this.requireVendor(userId);
+    const wc = await this.prisma.warrantyCase.findUnique({ where: { id: warrantyCaseId } });
+    if (!wc) throw new NotFoundException();
+    if (wc.productId) {
+      const product = await this.prisma.product.findUnique({ where: { id: wc.productId } });
+      if (!product || product.vendorId !== v.id) throw new ForbiddenException('This warranty case does not belong to your products');
+    }
+    await this.warranty.recordSellerRecommendation(warrantyCaseId, decision, userId, notes);
+    return this.prisma.warrantyCase.findUniqueOrThrow({ where: { id: warrantyCaseId } });
   }
 
   // Update-only: a ProductVendor row is created exclusively by
@@ -745,11 +767,18 @@ export class ProductVendorsController {
   @Post('me/orders/:orderId/processing') markProcessing(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.markProcessing(u.sub, id); }
   @Post('me/orders/:orderId/ready-for-pickup') markReady(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.markReadyForPickup(u.sub, id); }
 
-  // ─── Phase 5 — incoming returns inspection ───
+  // ─── Phase 5/6 — incoming returns: seller RECOMMENDS, admin decides (route path unchanged) ───
   @Get('me/returns') myReturns(@CurrentUser() u: JwtPayload) { return this.pv.listIncomingReturns(u.sub); }
-  @Post('me/returns/:id/inspect') inspectReturn(
+  @Post('me/returns/:id/inspect') recommendReturn(
     @CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { decision: 'ACCEPTED' | 'REJECTED'; notes?: string },
-  ) { return this.pv.inspectReturn(u.sub, id, b.decision, b.notes); }
+  ) { return this.pv.recommendReturn(u.sub, id, b.decision, b.notes); }
+
+  // ─── Phase 6 — incoming warranty claims: seller recommends, admin decides ───
+  @Get('me/warranty-cases') myWarrantyCases(@CurrentUser() u: JwtPayload) { return this.pv.listIncomingWarrantyCases(u.sub); }
+  @Post('me/warranty-cases/:id/recommend') recommendWarranty(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { decision: 'APPROVED_REPAIR' | 'APPROVED_REPLACEMENT' | 'APPROVED_REFUND' | 'REJECTED'; notes?: string },
+  ) { return this.pv.recommendWarranty(u.sub, id, b.decision, b.notes); }
 }
 
 // ─── Phase 2: Agency Partner Management (owner-side self-service) ───
@@ -852,7 +881,7 @@ export class AgencyController {
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],

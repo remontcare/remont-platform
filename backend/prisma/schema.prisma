@@ -1003,6 +1003,25 @@ model Product {
   lengthCm        Decimal?            @db.Decimal(8, 2)
   widthCm         Decimal?            @db.Decimal(8, 2)
   heightCm        Decimal?            @db.Decimal(8, 2)
+
+  // Phase 6 — per-product after-sales policy, admin-configurable (frontend/admin/products.html
+  // "Policy" tab). All defaulted so every pre-existing product keeps today's implicit
+  // "always returnable/replaceable, no warranty" behaviour with zero migration/backfill.
+  // Read by SupportPolicyEngine (support.module.ts) to gate which Help & Support options a
+  // customer sees and whether a return/replacement/warranty request is actually honoured.
+  returnable             Boolean  @default(true)
+  returnWindowDays       Int? // null = fall back to SiteSetting support_product_return_window_days
+  returnConditions       String?
+  replaceable            Boolean  @default(true)
+  replacementWindowDays  Int? // null = falls back to returnWindowDays
+  replacementConditions  String?
+  warrantyAvailable      Boolean  @default(false)
+  warrantyType           String? // 'MANUFACTURER' | 'SELLER' | 'BRAND' — plain string, same convention as SupportCase.requestedRemedy
+  warrantyDurationMonths Int?
+  warrantyInstructions   String?
+  evidencePhotoRequired  Boolean  @default(true)
+  evidenceVideoRequired  Boolean  @default(false)
+
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
@@ -1015,6 +1034,7 @@ model Product {
   zones             ProductZone[]
   locationInventory LocationInventory[]
   aiFeatureUsages   AiFeatureUsage[]
+  warrantyCases     WarrantyCase[]
 
   @@index([vendorId])
   @@index([categoryId])
@@ -1806,6 +1826,7 @@ model Order {
   otpLogs         OrderOtpLog[]
   partnerHolds    PartnerHold[]
   returnShipments ReturnShipment[]
+  warrantyCases   WarrantyCase[]
 
   @@index([customerId])
   @@index([masterOrderId])
@@ -2165,6 +2186,9 @@ enum SupportIssueType {
   MISSING_ITEM
   CANCEL_PRODUCT
   RETURN_PRODUCT
+  // Phase 6 — a product-not-working report for a warranty-eligible product, routed to the
+  // WarrantyCase workflow instead of a normal return (see SupportPolicyEngine.recommend()).
+  WARRANTY_CLAIM
   // service
   PARTNER_NOT_ASSIGNED
   PARTNER_ON_THE_WAY
@@ -2207,6 +2231,9 @@ enum SupportResolutionType {
   // Phase 5 — chosen remedy once a return is accepted: a new zero-value replacement Order is
   // created instead of a wallet/gateway refund. See Order.replacementOfOrderId.
   REPLACEMENT
+  // Phase 6 — terminal state for the WARRANTY_CLAIM auto-resolution step: opens a WarrantyCase
+  // instead of moving money. See WarrantyService.openCase().
+  WARRANTY_CLAIM_OPENED
 }
 
 // Item-scoped by design — orderId is always ONE Order (one child order for a service, one
@@ -2264,6 +2291,7 @@ model SupportCase {
 
   logs           SupportCaseLog[]
   returnShipment ReturnShipment?
+  warrantyCase   WarrantyCase?
 
   @@index([orderId])
   @@index([customerId])
@@ -2283,18 +2311,49 @@ model SupportCase {
 // state machine is mechanically identical (created -> picked up -> in
 // transit -> delivered), just customer->seller instead of seller->customer.
 // ═══════════════════════════════════════════════════════════════════════════
+// Phase 6 — RETURN, RTO (return-to-origin, a customer cancellation after the outbound
+// shipment has already been picked up), and WARRANTY pickups all share this exact state
+// machine (created -> picked up -> in transit -> delivered-to-seller), so they reuse this one
+// model via `kind` rather than three parallel tables. `orderId` was never @unique (unlike
+// outbound Shipment), so this reuse is free — see the schema comment on Shipment for why a
+// separate model existed in the first place.
+enum ReturnShipmentKind {
+  RETURN
+  RTO
+  WARRANTY
+}
+
 model ReturnShipment {
   id            String   @id @default(cuid())
   orderId       String
-  supportCaseId String   @unique
+  // Phase 6 — nullable: an RTO is triggered directly from a cancellation request with no
+  // originating SupportCase; manufacturing a fake one would pollute support-case counts/
+  // queues with rows that have no real customer-raised "issue" behind them. @unique on a
+  // nullable Postgres column still permits only one row per non-null value, so every
+  // pre-existing RETURN row (always non-null) keeps behaving exactly as before.
+  supportCaseId String?  @unique
+  kind          ReturnShipmentKind @default(RETURN)
 
   provider    ShipmentProvider @default(MOCK_DEMO)
   providerRef String
   status      ShipmentStatus   @default(CREATED)
   isDemo      Boolean          @default(true)
 
+  // Phase 6 — which LogisticsProvider (cost/eta record) was selected for this reverse-
+  // logistics shipment, via ReverseLogisticsRateEngine.pickCheapest(). Null for rows created
+  // before this existed. Outbound Shipment has no equivalent column — lowest-cost selection
+  // is deliberately scoped to return/RTO/warranty shipments only, never the outbound flow.
+  logisticsProviderId String?
+
   deliveryPartnerId String?
   estimatedPickup   DateTime?
+
+  // Phase 6 — the SELLER's recommendation only; NOT a final decision. Only an admin's call to
+  // ReturnsService.finalize()/finalizeRto() actually moves money — see inspectionStatus below,
+  // which now represents the admin's final decision, still gated PENDING-until-decided.
+  sellerRecommendation      ReturnInspectionStatus?
+  sellerRecommendationNotes String?
+  sellerRecommendedAt       DateTime?
 
   // Customer hands this to the rider at pickup — same OTP-present idiom as outbound delivery.
   // No OTP is needed at the "delivered to seller" end; the seller's own inspectReturn()
@@ -2302,8 +2361,10 @@ model ReturnShipment {
   pickupOtp         String?
   pickupOtpVerified Boolean   @default(false)
 
-  // Seller inspection — the step this whole model exists to add. inspectedBy is a
-  // ProductVendor.id (or an admin userId for an admin override on a disputed rejection).
+  // Phase 6 — this is now the ADMIN's final decision (not the seller's — see
+  // sellerRecommendation above). inspectedBy is the admin's User.id (or, for the pre-Phase-6
+  // seller-decides flow now retired, historically a User.id too — never a ProductVendor.id,
+  // matching every other actorId convention in this codebase).
   inspectionStatus ReturnInspectionStatus @default(PENDING)
   inspectionNotes  String?
   inspectedAt      DateTime?
@@ -2312,12 +2373,116 @@ model ReturnShipment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order           Order            @relation(fields: [orderId], references: [id])
-  supportCase     SupportCase      @relation(fields: [supportCaseId], references: [id])
-  deliveryPartner DeliveryPartner? @relation(fields: [deliveryPartnerId], references: [id])
+  order             Order              @relation(fields: [orderId], references: [id])
+  supportCase       SupportCase?       @relation(fields: [supportCaseId], references: [id])
+  deliveryPartner   DeliveryPartner?   @relation(fields: [deliveryPartnerId], references: [id])
+  logisticsProvider LogisticsProvider? @relation(fields: [logisticsProviderId], references: [id])
 
   @@index([orderId])
   @@index([deliveryPartnerId])
+  @@index([logisticsProviderId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-PROVIDER REVERSE LOGISTICS (Phase 6) — an admin-managed directory of
+// courier/logistics accounts for RETURN/RTO/WARRANTY shipments specifically.
+// Deliberately NOT a ShipmentProviderAdapter (that interface is implemented by
+// code, e.g. MockDeliveryProvider, and stays untouched/outbound-only) — this is
+// pure config data queried by ReverseLogisticsRateEngine.pickCheapest() to pick
+// the lowest-cost eligible option, per the "never default to fastest/express"
+// business rule. Not a SiteSetting group either: the requirement is an
+// arbitrary, independently-toggleable LIST of provider records, not a single
+// settings blob (mirrors why PickupLocation is a real table, not a setting).
+// ═══════════════════════════════════════════════════════════════════════════
+model LogisticsProvider {
+  id          String  @id @default(cuid())
+  name        String
+  // Which adapter implementation actually executes a shipment on this provider's behalf.
+  // Only MOCK_DEMO exists today; every seeded row points at it until a real courier account
+  // is connected — the provider directory (cost/priority/enable) is independent of which
+  // adapter code eventually fulfills it.
+  adapterKey  String  @default("MOCK_DEMO")
+  isActive    Boolean @default(true)
+  // Lower wins a tie on cost — see pickCheapest()'s ORDER BY baseCost asc, priority asc.
+  priority    Int     @default(100)
+  supportsCod Boolean @default(false)
+  environment String  @default("SANDBOX") // SANDBOX | PRODUCTION
+
+  baseCost Decimal @db.Decimal(10, 2) @default(0)
+  etaDays  Int     @default(5)
+
+  // Never returned to any frontend response — AdminService.listLogisticsProviders() omits
+  // this field entirely, returning only a `hasCredentials: boolean` derived flag instead.
+  credentialsJson       Json?
+  serviceableCitiesJson Json? // null = serviceable everywhere (matches Product.coverageType's PAN_INDIA default spirit)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  returnShipments ReturnShipment[]
+
+  @@index([isActive])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRODUCT WARRANTY (Phase 6) — brand/manufacturer warranty claims, distinct
+// from RefundRequest/ReturnShipment (a normal return/replacement) AND from the
+// pre-existing PartnerHold(WARRANTY_HOLD) (a vendor-payout defect-liability
+// hold for SERVICE jobs — confirmed zero overlap, unrelated concept). A claim
+// always originates from a SupportCase(WARRANTY_CLAIM) — see
+// SupportPolicyEngine.recommend() — so evidence reuses SupportCase.evidenceUrls
+// rather than a new attachments table.
+// ═══════════════════════════════════════════════════════════════════════════
+enum WarrantyDecision {
+  APPROVED_REPAIR
+  APPROVED_REPLACEMENT
+  APPROVED_REFUND
+  REJECTED
+}
+
+enum WarrantyCaseStatus {
+  OPEN
+  SELLER_REVIEW
+  ADMIN_REVIEW
+  RESOLVED
+  REJECTED
+  CLOSED
+}
+
+model WarrantyCase {
+  id         String @id @default(cuid())
+  caseNumber String @unique // WAR-000123
+
+  orderId       String
+  orderItemId   String?
+  productId     String
+  customerId    String
+  supportCaseId String @unique
+
+  status WarrantyCaseStatus @default(OPEN)
+
+  // Seller's recommendation only — same seller-recommends/admin-decides split as
+  // ReturnShipment.sellerRecommendation above.
+  sellerRecommendation      WarrantyDecision?
+  sellerRecommendationNotes String?
+  sellerRecommendedAt       DateTime?
+
+  finalDecision   WarrantyDecision?
+  decidedBy       String?
+  decidedAt       DateTime?
+  resolutionNotes String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  order       Order       @relation(fields: [orderId], references: [id])
+  product     Product     @relation(fields: [productId], references: [id])
+  supportCase SupportCase @relation(fields: [supportCaseId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([status])
 }
 
 // Append-only audit trail — same shape/purpose as RefundRequestLog above.

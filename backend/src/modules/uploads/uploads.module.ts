@@ -102,7 +102,10 @@ export class UploadsController {
   // PRODUCT_VENDOR included so sellers can upload real product images (incl. ones
   // found/generated via the paid ai-enrichment flow) as hosted Cloudinary URLs instead of
   // only the pre-existing client-side base64 fallback in seller.html.
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.PRODUCT_VENDOR)
+  // Phase 6 — CUSTOMER included so a customer can attach evidence photos (damaged/wrong
+  // product, warranty claim) to a support/return/warranty case. The handler has no admin-only
+  // side effect (returns Cloudinary URLs only), so this is a safe, minimal widening.
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.PRODUCT_VENDOR, UserRole.CUSTOMER)
   @Post('image')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),

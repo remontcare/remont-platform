@@ -4,6 +4,8 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { generateOrderNumber, addressSnapshotFields, writeOrderTimeline } from '../../common';
 import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 import { NotificationsService, NotificationsModule } from '../notifications/notifications.module';
+import { ReverseLogisticsRateEngine } from '../logistics/reverse-logistics-rate-engine';
+import { LogisticsModule } from '../logistics/logistics.module';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RETURN/REPLACEMENT LOGISTICS (Phase 5) — the physical pickup-from-customer,
@@ -27,6 +29,7 @@ export class ReturnsService {
     private prisma: PrismaService,
     private refunds: RefundsService,
     private notifications: NotificationsService,
+    private rateEngine: ReverseLogisticsRateEngine,
   ) {}
 
   // Called from SupportCasesService.executeResolution() when the policy engine's
@@ -41,8 +44,11 @@ export class ReturnsService {
 
     const providerRef = 'DEMO-RET-' + Math.random().toString(36).slice(2, 10).toUpperCase();
     const pickupOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    // Business rule: return pickups must never default to fastest/express — pick the lowest-
+    // cost eligible provider, same as the RTO leg below.
+    const provider = await this.rateEngine.pickCheapest();
     await this.prisma.returnShipment.create({
-      data: { orderId, supportCaseId, providerRef, pickupOtp },
+      data: { orderId, supportCaseId, providerRef, pickupOtp, logisticsProviderId: provider.id },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: 'RETURN_PICKUP_INITIATED', actorId, actorRole: actorId ? UserRole.ADMIN : undefined });
 
@@ -65,10 +71,14 @@ export class ReturnsService {
   }
 
   // Seller-facing: ProductVendorsService.listIncomingReturns() delegates here.
+  // Phase 6 — "incoming" now specifically means "still needs a seller recommendation": once
+  // the seller has recommended (sellerRecommendation set), it moves to the admin's queue
+  // instead and must stop appearing here, even though inspectionStatus itself stays PENDING
+  // until the admin's own decision (see recordSellerRecommendation()'s doc comment for why).
   async listIncomingReturnsForVendor(vendorId: string) {
     return this.prisma.returnShipment.findMany({
       where: {
-        status: 'DELIVERED', inspectionStatus: 'PENDING',
+        status: 'DELIVERED', inspectionStatus: 'PENDING', sellerRecommendation: null,
         order: { items: { some: { product: { vendorId } } } },
       },
       include: { order: { select: { orderNumber: true, customerId: true } } },
@@ -76,14 +86,32 @@ export class ReturnsService {
     });
   }
 
-  // Seller-facing: ProductVendorsService.inspectReturn() delegates here after authorizing that
-  // the caller actually owns a product on the linked order. Also reachable via an admin
-  // override (AdminService.adminDecideReturn(), for a disputed rejection) — actorRole
-  // distinguishes the two in the audit trail. actorId is always a User.id (same convention
-  // as every other actorId in OrderTimeline/SupportCaseLog elsewhere in this codebase).
+  // Phase 6 — seller-facing: ProductVendorsService.recommendReturn() delegates here. Records
+  // ONLY the seller's recommendation — never moves money and never touches inspectionStatus,
+  // which is now reserved for the ADMIN's final decision (see finalize() below). This is what
+  // makes the seller-recommends/admin-decides split real: a seller can never cause finalize()'s
+  // PENDING guard to be satisfied, so they can never trigger a refund/replacement themselves.
+  async recordSellerRecommendation(returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', actorId: string, notes?: string): Promise<void> {
+    const rs = await this.prisma.returnShipment.findUnique({ where: { id: returnShipmentId } });
+    if (!rs) throw new NotFoundException();
+    if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
+    if (rs.inspectionStatus !== 'PENDING') throw new BadRequestException('This return has already been decided by admin');
+    await this.prisma.returnShipment.update({
+      where: { id: returnShipmentId },
+      data: { sellerRecommendation: decision, sellerRecommendationNotes: notes, sellerRecommendedAt: new Date() },
+    });
+  }
+
+  // Admin-facing FINAL decision — the ONE place a return/replacement actually executes (see
+  // AdminService.adminDecideReturn(), admin.module.ts). Reachable only via the admin controller
+  // now; the seller's own route calls recordSellerRecommendation() above instead. actorId is
+  // always a User.id (same convention as every other actorId in OrderTimeline/SupportCaseLog
+  // elsewhere in this codebase).
   async finalize(returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', actorId: string, actorRole: UserRole, notes?: string): Promise<void> {
     const rs = await this.prisma.returnShipment.findUnique({ where: { id: returnShipmentId }, include: { supportCase: true } });
     if (!rs) throw new NotFoundException();
+    if (rs.kind !== 'RETURN') throw new BadRequestException('Use finalizeRto() for an RTO shipment');
+    if (!rs.supportCase) throw new BadRequestException('This return has no linked support case');
     if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
     if (rs.inspectionStatus !== 'PENDING') throw new BadRequestException('This return has already been inspected');
 
@@ -133,6 +161,51 @@ export class ReturnsService {
     await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RETURN_ACCEPTED', actorId, actorRole: actorRole });
   }
 
+  // Phase 6 — called from OrdersService.cancel()/AdminService.adminCancelOrder() when a
+  // customer cancels a product order AFTER the outbound Shipment has already been picked up
+  // (PICKED_UP/IN_TRANSIT/OUT_FOR_DELIVERY) — the product is physically in the logistics
+  // network, so a plain status flip to CANCELLED would silently orphan it. No SupportCase is
+  // created (this is a cancellation, not a customer-raised issue) — see the nullable
+  // supportCaseId schema comment. Marks the outbound Shipment CANCELLED (never deleted — its
+  // tracking history stays intact) and opens an RTO leg back to the original seller via the
+  // lowest-cost eligible provider, same rule as a normal return pickup.
+  async initiateRto(order: { id: string; orderNumber: string }, shipmentId: string, actorId: string, reason: string): Promise<void> {
+    await this.prisma.shipment.update({ where: { id: shipmentId }, data: { status: 'CANCELLED' } });
+    const provider = await this.rateEngine.pickCheapest();
+    const providerRef = 'DEMO-RTO-' + Math.random().toString(36).slice(2, 10).toUpperCase();
+    // Starts at PICKED_UP, not CREATED — the item is already in the courier's hands (it was
+    // already picked up for outbound delivery); there is no separate "pickup from customer"
+    // step for an RTO, and no pickupOtp either (no customer present to hand a code to a rider).
+    await this.prisma.returnShipment.create({
+      data: { orderId: order.id, kind: 'RTO', providerRef, status: 'PICKED_UP', logisticsProviderId: provider.id },
+    });
+    await writeOrderTimeline(this.prisma, { orderId: order.id, status: 'RTO_INITIATED', note: reason, actorId, actorRole: UserRole.CUSTOMER });
+  }
+
+  // Phase 6 — once the RTO leg reaches the seller (DELIVERED, via the same rider state machine
+  // DeliveryController already runs for RETURN shipments — no code change needed there), an
+  // admin settles it with a full refund. No seller-recommendation step: an RTO is the customer
+  // exercising their own cancellation right, not a quality dispute for the seller to weigh in
+  // on. Reuses RefundsService unmodified, same as finalize()'s own refund branch.
+  async finalizeRto(returnShipmentId: string, actorId: string, actorRole: UserRole, notes?: string): Promise<void> {
+    const rs = await this.prisma.returnShipment.findUnique({ where: { id: returnShipmentId }, include: { order: true } });
+    if (!rs) throw new NotFoundException();
+    if (rs.kind !== 'RTO') throw new BadRequestException('This is not an RTO shipment');
+    if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
+    if (rs.inspectionStatus !== 'PENDING') throw new BadRequestException('This RTO has already been settled');
+
+    const amount = Number(rs.order.totalAmount);
+    if (amount > 0) {
+      const rr = await this.refunds.raise(rs.order.customerId, rs.orderId, undefined, `RTO refund for order ${rs.order.orderNumber}`, []);
+      await this.refunds.decide(actorId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'RTO refund' });
+    }
+    await this.prisma.returnShipment.update({
+      where: { id: returnShipmentId },
+      data: { inspectionStatus: 'ACCEPTED', inspectionNotes: notes, inspectedAt: new Date(), inspectedBy: actorId },
+    });
+    await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RTO_REFUNDED', actorId, actorRole });
+  }
+
   // A replacement is a new, zero-value Order re-entering the exact same seller-accept-> pack
   // -> ship pipeline as any normal product order — no special-casing anywhere downstream.
   // Guarded independently of the SupportCase status check (defense in depth against a
@@ -177,7 +250,7 @@ export class ReturnsService {
 }
 
 @Module({
-  imports: [RefundsModule, NotificationsModule],
+  imports: [RefundsModule, NotificationsModule, LogisticsModule],
   providers: [ReturnsService],
   exports: [ReturnsService],
 })

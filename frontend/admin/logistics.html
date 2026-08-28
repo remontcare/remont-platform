@@ -20,6 +20,13 @@
   </div>
   <div class="content">
     <div class="card">
+      <div class="card-header"><span class="card-title">Logistics Dashboard</span></div>
+      <div id="logistics-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;padding:16px">
+        <div class="loading">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
       <div class="card-header" style="flex-wrap:wrap;gap:8px">
         <span class="card-title">COD Settlement Queue</span>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -51,6 +58,67 @@
         </div>
       </div>
       <div class="table-wrap"><div id="ret-tbl" class="loading">Loading…</div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Warranty Claims Queue</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="war-filter" class="form-control" style="width:200px" onchange="loadWarranty()">
+            <option value="">All Warranty Claims</option>
+            <option value="SELLER_REVIEW">Awaiting Seller</option>
+            <option value="ADMIN_REVIEW" selected>Awaiting Admin</option>
+            <option value="RESOLVED">Resolved</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadWarranty()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="war-tbl" class="loading">Loading…</div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Logistics Providers</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="openProviderModal()">+ Add Provider</button>
+          <button class="btn btn-outline btn-sm" onclick="loadProviders()">↺ Refresh</button>
+        </div>
+      </div>
+      <p style="padding:0 16px;margin:8px 0;font-size:12px;color:#6b7280">Return/RTO/replacement pickups always use the lowest-cost ACTIVE provider below — never the fastest by default.</p>
+      <div class="table-wrap"><div id="prov-tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- PROVIDER MODAL -->
+<div id="prov-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="prov-modal-title">Add Logistics Provider</span>
+      <button class="modal-close" onclick="closeModal('prov-overlay')">×</button>
+    </div>
+    <input type="hidden" id="prov-id">
+    <div class="form-group"><label class="form-label">Name *</label><input id="prov-name" class="form-control" placeholder="e.g. Porter, Shiprocket, Mock Economy"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Base Cost (₹) *</label><input id="prov-cost" class="form-control" type="number" placeholder="55"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">ETA (days)</label><input id="prov-eta" class="form-control" type="number" placeholder="5"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Priority (tiebreaker)</label><input id="prov-priority" class="form-control" type="number" placeholder="100"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Environment</label>
+        <select id="prov-env" class="form-control"><option value="SANDBOX">Sandbox</option><option value="PRODUCTION">Production</option></select>
+      </div>
+      <div class="form-group" style="flex:1;display:flex;align-items:flex-end;gap:16px;padding-bottom:10px">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prov-active" checked> Active</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prov-cod"> Supports COD</label>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">API Credentials (JSON) <small style="color:#9ca3af">(never shown again after saving)</small></label><textarea id="prov-creds" class="form-control" rows="2" placeholder='{"apiKey":"...","apiSecret":"..."}'></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('prov-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProvider()">Save Provider</button>
     </div>
   </div>
 </div>
@@ -113,38 +181,189 @@ function loadReturns() {
   }).catch(function(e) { document.getElementById('ret-tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
 }
 
+var RETURN_KIND_LABEL = { RETURN: 'Return', RTO: 'RTO', WARRANTY: 'Warranty Pickup' };
+
+// Phase 6 — the seller only ever RECOMMENDS now (sellerRecommendation); admin is always the
+// final decision-maker (inspectionStatus). A row needing action is PENDING + already has a
+// seller recommendation (or, for an RTO, simply DELIVERED — there is no seller step for those).
 function renderReturnsTable(list) {
   if (!list.length) { document.getElementById('ret-tbl').innerHTML = '<div class="empty-state">No returns found for this filter.</div>'; return; }
-  document.getElementById('ret-tbl').innerHTML = '<table><thead><tr><th>Order</th><th>Support Case</th><th>Shipment Status</th><th>Inspection</th><th>Notes</th><th>Action</th></tr></thead><tbody>' +
+  document.getElementById('ret-tbl').innerHTML = '<table><thead><tr><th>Order</th><th>Kind</th><th>Support Case</th><th>Shipment Status</th><th>Seller Recommendation</th><th>Final Decision</th><th>Action</th></tr></thead><tbody>' +
     list.map(function(r) {
       var actionHtml = '<span style="color:#9ca3af;font-size:12px">—</span>';
-      // Admin override is only for a DISPUTED rejection (the seller already rejected it, and
-      // the case is under ADMIN_REVIEW) — a normal PENDING inspection is left for the seller.
-      if (r.inspectionStatus === 'REJECTED') {
-        actionHtml = '<button class="btn btn-xs btn-primary" onclick="adminDecideReturn(\'' + r.id + '\')">Override: Accept Anyway</button>';
+      if (r.inspectionStatus === 'PENDING') {
+        if (r.kind === 'RTO') {
+          if (r.status === 'DELIVERED') actionHtml = '<button class="btn btn-xs btn-primary" onclick="rtoRefund(\'' + r.id + '\')">Refund</button>';
+          else actionHtml = '<span style="color:#9ca3af;font-size:12px">Awaiting delivery to seller</span>';
+        } else if (r.sellerRecommendation) {
+          actionHtml = '<button class="btn btn-xs btn-primary" onclick="adminDecideReturn(\'' + r.id + '\',\'ACCEPTED\')">Accept</button> ' +
+            '<button class="btn btn-xs btn-outline" style="color:#ef4444;border-color:#ef4444" onclick="adminDecideReturn(\'' + r.id + '\',\'REJECTED\')">Reject</button>';
+        } else {
+          actionHtml = '<span style="color:#9ca3af;font-size:12px">Awaiting seller review</span>';
+        }
       }
       return '<tr>' +
         '<td>' + escape((r.order && r.order.orderNumber) || r.orderId) + '</td>' +
+        '<td>' + badge(RETURN_KIND_LABEL[r.kind] || r.kind || 'Return', r.kind === 'RTO' ? 'orange' : (r.kind === 'WARRANTY' ? 'purple' : 'blue')) + '</td>' +
         '<td>' + escape((r.supportCase && r.supportCase.caseNumber) || '—') + (r.supportCase ? '<br><small style="color:#6b7280">' + escape(r.supportCase.issueType || '') + '</small>' : '') + '</td>' +
         '<td>' + escape(r.status) + '</td>' +
-        '<td>' + badge(r.inspectionStatus, INSPECTION_COLOR[r.inspectionStatus] || 'gray') + '</td>' +
-        '<td style="max-width:200px">' + (r.inspectionNotes ? escape(r.inspectionNotes) : '<span style="color:#9ca3af">—</span>') + '</td>' +
+        '<td>' + (r.sellerRecommendation ? badge(r.sellerRecommendation, r.sellerRecommendation === 'ACCEPTED' ? 'green' : 'red') + (r.sellerRecommendationNotes ? '<br><small style="color:#6b7280">' + escape(r.sellerRecommendationNotes) + '</small>' : '') : '<span style="color:#9ca3af;font-size:12px">—</span>') + '</td>' +
+        '<td>' + (r.inspectionStatus === 'PENDING' ? '<span style="color:#9ca3af;font-size:12px">Pending</span>' : badge(r.inspectionStatus, INSPECTION_COLOR[r.inspectionStatus] || 'gray')) + '</td>' +
         '<td>' + actionHtml + '</td>' +
         '</tr>';
     }).join('') + '</tbody></table>';
 }
 
-function adminDecideReturn(id) {
-  var notes = prompt('Reason for overriding the seller\'s rejection and accepting this return:');
-  if (notes === null) return;
-  if (!confirm('This will process a refund/replacement for the customer. Continue?')) return;
-  api('POST', '/admin/return-shipments/' + id + '/decide', { decision: 'ACCEPTED', notes: notes }).then(function() {
-    toast('Return accepted', 'success'); loadReturns();
+function adminDecideReturn(id, decision) {
+  var notes = prompt((decision === 'ACCEPTED' ? 'Accepting' : 'Rejecting') + ' this return — add a note (optional):') || undefined;
+  if (decision === 'ACCEPTED' && !confirm('This will process a refund/replacement for the customer. Continue?')) return;
+  api('POST', '/admin/return-shipments/' + id + '/decide', { decision: decision, notes: notes }).then(function() {
+    toast('Return ' + decision.toLowerCase(), 'success'); loadReturns();
   }).catch(function(e) { toast(e.message, 'error'); });
 }
 
+function rtoRefund(id) {
+  var notes = prompt('Note for this RTO refund (optional):') || undefined;
+  if (!confirm('This will refund the customer for the returned-to-origin order. Continue?')) return;
+  api('POST', '/admin/return-shipments/' + id + '/rto-refund', { notes: notes }).then(function() {
+    toast('RTO refunded', 'success'); loadReturns();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────
+function loadLogisticsStats() {
+  api('GET', '/admin/logistics/stats').then(function(s) {
+    var tiles = [
+      ['Active Providers', s.activeProviders], ['Returns (MTD)', s.returnCount], ['RTO (MTD)', s.rtoCount],
+      ['Warranty Pickups (MTD)', s.warrantyShipmentCount], ['Awaiting Admin (Returns)', s.pendingAdminDecision],
+      ['Awaiting Admin (Warranty)', s.pendingWarrantyDecision], ['COD Settlement Pending', s.codPendingSettlement],
+    ];
+    document.getElementById('logistics-stats').innerHTML = tiles.map(function(t) {
+      return '<div style="background:#f9fafb;border-radius:8px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#c4601a">' + (t[1] != null ? t[1] : '—') + '</div><div style="font-size:11px;color:#6b7280;margin-top:4px">' + t[0] + '</div></div>';
+    }).join('');
+  }).catch(function() { document.getElementById('logistics-stats').innerHTML = '<div class="empty-state">Could not load stats.</div>'; });
+}
+
+// ── Warranty claims ────────────────────────────────────────────────
+var WARRANTY_STATUS_COLOR = { OPEN: 'yellow', SELLER_REVIEW: 'yellow', ADMIN_REVIEW: 'blue', RESOLVED: 'green', REJECTED: 'red', CLOSED: 'gray' };
+
+function loadWarranty() {
+  var status = document.getElementById('war-filter').value;
+  document.getElementById('war-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/warranty-cases' + (status ? '?status=' + status : '')).then(function(list) {
+    renderWarrantyTable(list || []);
+  }).catch(function(e) { document.getElementById('war-tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderWarrantyTable(list) {
+  if (!list.length) { document.getElementById('war-tbl').innerHTML = '<div class="empty-state">No warranty claims found for this filter.</div>'; return; }
+  document.getElementById('war-tbl').innerHTML = '<table><thead><tr><th>Order</th><th>Product</th><th>Status</th><th>Seller Recommendation</th><th>Action</th></tr></thead><tbody>' +
+    list.map(function(w) {
+      var actionHtml = '<span style="color:#9ca3af;font-size:12px">—</span>';
+      if (w.status === 'ADMIN_REVIEW') {
+        actionHtml = '<select id="war-decision-' + w.id + '" class="form-control" style="width:170px;display:inline-block">' +
+          '<option value="APPROVED_REPAIR">Approve — Repair</option>' +
+          '<option value="APPROVED_REPLACEMENT">Approve — Replacement</option>' +
+          '<option value="APPROVED_REFUND">Approve — Refund</option>' +
+          '<option value="REJECTED">Reject</option>' +
+          '</select> <button class="btn btn-xs btn-primary" onclick="decideWarranty(\'' + w.id + '\')">Decide</button>';
+      }
+      return '<tr>' +
+        '<td>' + escape((w.order && w.order.orderNumber) || w.orderId) + '</td>' +
+        '<td>' + escape((w.product && w.product.name) || '—') + '</td>' +
+        '<td>' + badge(w.status, WARRANTY_STATUS_COLOR[w.status] || 'gray') + '</td>' +
+        '<td>' + (w.sellerRecommendation ? escape(w.sellerRecommendation) + (w.sellerRecommendationNotes ? '<br><small style="color:#6b7280">' + escape(w.sellerRecommendationNotes) + '</small>' : '') : '<span style="color:#9ca3af;font-size:12px">Awaiting seller</span>') + '</td>' +
+        '<td>' + actionHtml + '</td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function decideWarranty(id) {
+  var decision = document.getElementById('war-decision-' + id).value;
+  var notes = prompt('Note for this decision (optional):') || undefined;
+  if (!confirm('Confirm this warranty decision? This cannot be undone.')) return;
+  api('POST', '/admin/warranty-cases/' + id + '/decide', { decision: decision, notes: notes }).then(function() {
+    toast('Warranty case decided', 'success'); loadWarranty();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── Logistics providers ────────────────────────────────────────────
+var providers = [];
+function loadProviders() {
+  document.getElementById('prov-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/logistics/providers').then(function(list) {
+    providers = list || [];
+    renderProvidersTable();
+  }).catch(function(e) { document.getElementById('prov-tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderProvidersTable() {
+  if (!providers.length) { document.getElementById('prov-tbl').innerHTML = '<div class="empty-state">No logistics providers configured yet.</div>'; return; }
+  document.getElementById('prov-tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Cost</th><th>ETA</th><th>Priority</th><th>COD</th><th>Environment</th><th>Status</th><th>Action</th></tr></thead><tbody>' +
+    providers.map(function(p) {
+      return '<tr>' +
+        '<td>' + escape(p.name) + (p.hasCredentials ? ' <small style="color:#22c55e">🔒 credentials set</small>' : '') + '</td>' +
+        '<td>' + fmtCur(p.baseCost) + '</td>' +
+        '<td>' + p.etaDays + 'd</td>' +
+        '<td>' + p.priority + '</td>' +
+        '<td>' + (p.supportsCod ? '✅' : '—') + '</td>' +
+        '<td>' + escape(p.environment) + '</td>' +
+        '<td>' + badge(p.isActive ? 'Active' : 'Disabled', p.isActive ? 'green' : 'gray') + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" onclick="openProviderModal(\'' + p.id + '\')">Edit</button> ' +
+          '<button class="btn btn-xs btn-outline" onclick="toggleProvider(\'' + p.id + '\',' + !p.isActive + ')">' + (p.isActive ? 'Disable' : 'Enable') + '</button></td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function openProviderModal(id) {
+  var p = id ? providers.find(function(x) { return x.id === id; }) : null;
+  document.getElementById('prov-modal-title').textContent = p ? 'Edit Provider' : 'Add Provider';
+  document.getElementById('prov-id').value = p ? p.id : '';
+  document.getElementById('prov-name').value = p ? p.name : '';
+  document.getElementById('prov-cost').value = p ? p.baseCost : '';
+  document.getElementById('prov-eta').value = p ? p.etaDays : '';
+  document.getElementById('prov-priority').value = p ? p.priority : 100;
+  document.getElementById('prov-env').value = p ? p.environment : 'SANDBOX';
+  document.getElementById('prov-active').checked = p ? p.isActive : true;
+  document.getElementById('prov-cod').checked = p ? p.supportsCod : false;
+  document.getElementById('prov-creds').value = '';
+  document.getElementById('prov-overlay').style.display = 'flex';
+}
+
+function saveProvider() {
+  var id = document.getElementById('prov-id').value;
+  var name = document.getElementById('prov-name').value.trim();
+  var baseCost = parseFloat(document.getElementById('prov-cost').value);
+  if (!name) { toast('Enter a provider name', 'error'); return; }
+  if (isNaN(baseCost) || baseCost < 0) { toast('Enter a valid base cost', 'error'); return; }
+  var data = {
+    name: name, baseCost: baseCost,
+    etaDays: parseInt(document.getElementById('prov-eta').value) || 5,
+    priority: parseInt(document.getElementById('prov-priority').value) || 100,
+    environment: document.getElementById('prov-env').value,
+    isActive: document.getElementById('prov-active').checked,
+    supportsCod: document.getElementById('prov-cod').checked,
+  };
+  var credsRaw = document.getElementById('prov-creds').value.trim();
+  if (credsRaw) {
+    try { data.credentialsJson = JSON.parse(credsRaw); } catch (e) { toast('Credentials must be valid JSON', 'error'); return; }
+  }
+  var p = id ? api('PATCH', '/admin/logistics/providers/' + id, data) : api('POST', '/admin/logistics/providers', data);
+  p.then(function() { toast(id ? 'Provider updated' : 'Provider added', 'success'); closeModal('prov-overlay'); loadProviders(); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
+
+function toggleProvider(id, isActive) {
+  api('PATCH', '/admin/logistics/providers/' + id + '/toggle', { isActive: isActive }).then(function() {
+    toast(isActive ? 'Enabled' : 'Disabled', isActive ? 'success' : 'warning'); loadProviders();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+loadLogisticsStats();
 loadCod();
 loadReturns();
+loadWarranty();
+loadProviders();
 </script>
 </body>
 </html>

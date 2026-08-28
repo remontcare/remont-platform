@@ -10907,6 +10907,16 @@ function _renderOrderCard(o) {
            '<button onclick=\'showAssignedPartner(' + escHtml(JSON.stringify(o.vendor || o.assignedVendor || {})) + ')\' style="padding:6px 14px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🪪 View Partner</button>' +
            (o.status !== 'IN_PROGRESS' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' : '') +
          '</div>'
+       // Phase 6 — a PRODUCT order's cancel behaviour depends on the physical shipment stage
+       // (the backend now enforces this in OrdersService.cancel(); this just labels it
+       // honestly instead of always saying a flat "Cancel"). o.items.length>0 is how every
+       // other product-order check in this file already distinguishes PRODUCT from SERVICE.
+       : (o.items && o.items.length > 0) && (o.status === 'CONFIRMED') ?
+         (!o.shipment || ['CREATED'].indexOf(o.shipment.status) !== -1
+           ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>'
+           : ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].indexOf(o.shipment.status) !== -1
+             ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel (Return to Origin)</button>'
+             : '')
        : o.status === 'CONFIRMED' || o.status === 'VENDOR_ASSIGNED' ? '<button onclick="cancelOrderFromList(\'' + o.id + '\')" style="padding:6px 14px;background:#fee2e2;color:#ef4444;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>' :
        isCompleted && reviewed ? '<span style="font-size:12px;font-weight:600;color:#22c55e">✅ Reviewed</span>' :
        isCompleted ? '<button onclick="openRateModal(\'' + o.id + '\')" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⭐ Rate Service</button>' : '') +
@@ -11444,7 +11454,7 @@ function _renderOrderDetails(o) {
 var SUPPORT_ISSUE_LABELS = {
   NOT_DELIVERED: 'Not Delivered', DELIVERED_LATE: 'Delivered Late', WRONG_PRODUCT: 'Wrong Product',
   DAMAGED_PRODUCT: 'Damaged Product', MISSING_ITEM: 'Missing Item', CANCEL_PRODUCT: 'Cancel Product',
-  RETURN_PRODUCT: 'Return Product', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
+  RETURN_PRODUCT: 'Return Product', WARRANTY_CLAIM: 'Warranty Claim', PARTNER_NOT_ASSIGNED: 'Partner Not Assigned',
   PARTNER_ON_THE_WAY: 'Partner On The Way — I want to cancel', PARTNER_ARRIVED: 'Partner Arrived — I want to cancel',
   PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
   SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
@@ -11498,13 +11508,46 @@ function _renderSupportIssuePicker(ctx) {
     '<div id="sup-preview"></div>';
 }
 
+// Phase 6 — customer evidence photos, attached to the support/return/warranty case.
+// POST /uploads/image now allows CUSTOMER (previously ADMIN/SUPER_ADMIN/PRODUCT_VENDOR only).
+var _supEvidenceUrls = [];
+function _supUploadEvidence(input) {
+  var files = Array.prototype.slice.call(input.files || []).slice(0, 5 - _supEvidenceUrls.length);
+  if (!files.length) return;
+  var list = document.getElementById('sup-evidence-list');
+  files.forEach(function(file) {
+    var fd = new FormData();
+    fd.append('file', file);
+    var token = localStorage.getItem('remont_token');
+    fetch((API_BASE || '') + '/api/v1/uploads/image', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        var data = (res && res.data) ? res.data : res;
+        if (data && data.url) { _supEvidenceUrls.push(data.url); _supRenderEvidence(); }
+      })
+      .catch(function() {});
+  });
+  input.value = '';
+  void list;
+}
+function _supRenderEvidence() {
+  var el = document.getElementById('sup-evidence-list');
+  if (!el) return;
+  el.innerHTML = _supEvidenceUrls.map(function(url, i) {
+    return '<div style="position:relative;display:inline-block;margin-right:6px"><img src="' + escHtml(url) + '" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">' +
+      '<button onclick="_supEvidenceUrls.splice(' + i + ',1);_supRenderEvidence()" style="position:absolute;top:-4px;right:-2px;background:#ef4444;color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;line-height:1">×</button></div>';
+  }).join('');
+}
+
 function _previewSupportIssue(issueType) {
+  _supEvidenceUrls = [];
   document.getElementById('sup-preview').innerHTML = '<p style="color:#6b7280;text-align:center;padding:16px 0">Checking policy…</p>';
   apiPost('/api/v1/support/cases/context', {
     orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType,
   }).then(function(res) {
     var ctx = (res && res.data) ? res.data : res;
     var rec = ctx.recommendation || {};
+    var evidenceRequired = !!ctx.evidenceRequired;
     // Phase 5 — a return-shaped issue can now resolve as a physical pickup, so let the
     // customer say up front whether they'd prefer a refund or a replacement once the seller
     // inspects the item. Not shown for issues that never involve a return (e.g. a still-in-
@@ -11519,8 +11562,13 @@ function _previewSupportIssue(issueType) {
       (rec.reasonForCustomer ? '<div style="font-size:13px;color:#374151;white-space:pre-line;margin-bottom:10px">' + escHtml(rec.reasonForCustomer) + '</div>' : '') +
       (rec.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">Policy: ' + escHtml(rec.policyApplied) + '</div>' : '') +
       remedyHtml +
+      '<div style="margin-bottom:10px">' +
+        '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">Add photos' + (evidenceRequired ? ' (required)' : ' (optional)') + '</div>' +
+        '<div id="sup-evidence-list" style="margin-bottom:6px"></div>' +
+        '<input type="file" accept="image/*" multiple onchange="_supUploadEvidence(this)" style="font-size:12px">' +
+      '</div>' +
       '<textarea id="sup-description" placeholder="Add any extra details (optional)" style="width:100%;min-height:60px;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px"></textarea>' +
-      '<button onclick="_submitSupportCase(' + escHtml(JSON.stringify(issueType)) + ')" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Submit</button>' +
+      '<button onclick="_submitSupportCase(' + escHtml(JSON.stringify(issueType)) + ',' + evidenceRequired + ')" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Submit</button>' +
     '</div>';
     document.getElementById('sup-preview').innerHTML = box;
   }).catch(function() {
@@ -11528,13 +11576,17 @@ function _previewSupportIssue(issueType) {
   });
 }
 
-function _submitSupportCase(issueType) {
+function _submitSupportCase(issueType, evidenceRequired) {
+  if (evidenceRequired && !_supEvidenceUrls.length) {
+    showToast('Please add at least one photo before submitting.', 'error');
+    return;
+  }
   var description = (document.getElementById('sup-description') || {}).value || undefined;
   var remedyInput = document.querySelector('input[name="sup-remedy"]:checked');
   var requestedRemedy = remedyInput ? remedyInput.value : undefined;
   document.getElementById('sup-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:30px 0">Submitting…</p>';
   apiPost('/api/v1/support/cases', {
-    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType, description: description, requestedRemedy: requestedRemedy,
+    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType, description: description, requestedRemedy: requestedRemedy, evidenceUrls: _supEvidenceUrls,
   }).then(function(res) {
     var kase = (res && res.data) ? res.data : res;
     _renderSupportResult(kase);

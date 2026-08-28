@@ -15,6 +15,7 @@ import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/par
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { NotificationsService, NotificationsModule } from '../notifications/notifications.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
+import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ORDER HELP & SUPPORT — a structured "select item -> select issue -> check
@@ -43,6 +44,15 @@ interface PolicyConfig {
   returnWindowDays: number;
 }
 
+// Phase 6 — per-product after-sales policy snapshot (Product.returnable/replaceable/
+// warrantyAvailable etc., schema.prisma), passed in by the caller (getContext()/openCase())
+// rather than fetched here — SupportPolicyEngine stays a pure, DB-free decision function.
+interface ProductPolicy {
+  returnable: boolean;
+  replaceable: boolean;
+  warrantyAvailable: boolean;
+}
+
 interface RecommendInput {
   itemType: SupportItemType;
   issueType: SupportIssueType;
@@ -50,6 +60,7 @@ interface RecommendInput {
   amountBasis: number;
   policy: PolicyConfig;
   warranty: { days: number; percent: number };
+  productPolicy?: ProductPolicy;
 }
 
 interface Recommendation {
@@ -96,7 +107,30 @@ export class SupportPolicyEngine {
 
   // Normalizes the existing OrderStatus lifecycle into the stages the spec's flows are
   // written against — no new status values, purely a read-side projection.
-  deriveServiceStage(order: { status: string; vendorId: string | null }): ServiceStage {
+  //
+  // Phase 6 fix: this used to branch on `!order.vendorId` alone — vendorId is the ServiceVendor
+  // FK, which is ALWAYS null for a PRODUCT order (product attribution lives on
+  // OrderItem.vendorId/Product.vendorId, never Order.vendorId). That meant every product order,
+  // delivered or not, fell into the same "NOT_ASSIGNED" bucket forever — RETURN_PRODUCT could
+  // never be offered (getIssueOptions only adds it at stage COMPLETED) and CANCEL_PRODUCT was
+  // offered forever (see the CANCEL_PRODUCT dead-code fix in recommend() below). PRODUCT orders
+  // now get their own real stage derivation, reading Order.type/productFulfillmentStage instead.
+  deriveServiceStage(order: {
+    status: string; vendorId: string | null; type?: string; productFulfillmentStage?: string | null; items?: unknown[];
+  }): ServiceStage {
+    const isProduct = order.type === 'PRODUCT' || (order.items?.length ?? 0) > 0;
+    if (isProduct) {
+      if (order.status === 'CANCELLED' || order.status === 'REFUNDED') return 'CLOSED';
+      if (order.status === 'COMPLETED') return 'COMPLETED';
+      switch (order.productFulfillmentStage) {
+        case 'SELLER_ACCEPTED':
+        case 'PROCESSING': return 'ASSIGNED';
+        case 'READY_FOR_PICKUP':
+        case 'HANDED_TO_LOGISTICS': return 'EN_ROUTE';
+        case 'SELLER_REJECTED': return 'CLOSED';
+        default: return 'NOT_ASSIGNED'; // null (pre-Phase-5 order) or AWAITING_SELLER
+      }
+    }
     if (!order.vendorId) {
       return order.status === 'CANCELLED' || order.status === 'REFUNDED' ? 'CLOSED' : 'NOT_ASSIGNED';
     }
@@ -115,13 +149,18 @@ export class SupportPolicyEngine {
     }
   }
 
-  getIssueOptions(itemType: SupportItemType, stage: ServiceStage): SupportIssueType[] {
+  // Phase 6 — `productPolicy` gates the two policy-sensitive options: RETURN_PRODUCT only when
+  // the product is actually returnable, WARRANTY_CLAIM only when it's warranty-eligible.
+  // Optional so every pre-existing SERVICE call site (which never has a productPolicy) is
+  // unaffected.
+  getIssueOptions(itemType: SupportItemType, stage: ServiceStage, productPolicy?: ProductPolicy): SupportIssueType[] {
     if (itemType === 'PRODUCT') {
       const opts: SupportIssueType[] = [];
       if (stage !== 'COMPLETED' && stage !== 'CLOSED') opts.push('NOT_DELIVERED', 'DELIVERED_LATE');
       opts.push('WRONG_PRODUCT', 'DAMAGED_PRODUCT', 'MISSING_ITEM');
       if (stage === 'PENDING' || stage === 'NOT_ASSIGNED') opts.push('CANCEL_PRODUCT');
-      if (stage === 'COMPLETED') opts.push('RETURN_PRODUCT');
+      if (stage === 'COMPLETED' && productPolicy?.returnable !== false) opts.push('RETURN_PRODUCT');
+      if (stage === 'COMPLETED' && productPolicy?.warrantyAvailable) opts.push('WARRANTY_CLAIM');
       opts.push('OTHER_ISSUE');
       return opts;
     }
@@ -139,7 +178,11 @@ export class SupportPolicyEngine {
   // `policy` (SiteSetting-backed) or `warranty` (the EXISTING per-category warranty config,
   // via PartnerLedgerService.getWarrantyDefaults) — nothing is hardcoded here.
   recommend(input: RecommendInput): Recommendation {
-    const { itemType, issueType, order, amountBasis, policy, warranty } = input;
+    const { itemType, issueType, order, amountBasis, policy, warranty, productPolicy } = input;
+    // A product with neither return nor replacement allowed can never auto-resolve into a
+    // physical pickup — business rule: route to a policy-explaining response instead, pointing
+    // the customer at Warranty when the product has one configured.
+    const returnBlocked = productPolicy != null && productPolicy.returnable === false && productPolicy.replaceable === false;
 
     if (itemType === 'PRODUCT') {
       switch (issueType) {
@@ -166,6 +209,15 @@ export class SupportPolicyEngine {
           // pickup instead; the refund (or replacement) only fires once the seller's
           // inspection accepts the item — see RETURN_PICKUP_INITIATED in REFUND_RESOLUTIONS'
           // sibling handling in executeResolution() below.
+          if (returnBlocked) {
+            return {
+              routeType: 'SUPPORT_CASE', resolutionType: 'NO_REFUND', amount: null,
+              reasonForCustomer: productPolicy?.warrantyAvailable
+                ? 'This product is not eligible for return or replacement, but it does carry a warranty — please raise a Warranty claim instead.'
+                : 'This product is marked non-returnable and non-replaceable. Our team will review your report manually.',
+              policyApplied: 'Product after-sales policy: return and replacement both disabled for this product.',
+            };
+          }
           return withinWindow
             ? {
                 routeType: 'AUTO_RESOLUTION', resolutionType: 'RETURN_PICKUP_INITIATED', amount: money(amountBasis),
@@ -179,7 +231,11 @@ export class SupportPolicyEngine {
               };
         }
         case 'CANCEL_PRODUCT': {
-          const cancellable = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED'].includes(order.status);
+          // Phase 6 dead-code fix: VENDOR_ASSIGNED is a SERVICE-only OrderStatus value —
+          // product attribution is OrderItem.vendorId, never Order.vendorId, so a PRODUCT
+          // order's Order.status can never actually become VENDOR_ASSIGNED. This check was
+          // inherited from the SERVICE branch's shape and never actually matched anything.
+          const cancellable = ['PENDING_PAYMENT', 'CONFIRMED'].includes(order.status);
           return cancellable
             ? {
                 routeType: 'AUTO_RESOLUTION', resolutionType: 'FULL_REFUND', amount: money(amountBasis),
@@ -198,6 +254,15 @@ export class SupportPolicyEngine {
           // used to be an instant FULL_REFUND. Deliberate, customer-facing behaviour change —
           // a refund is no longer instant within the return window, since physical pickup and
           // seller inspection are now real gates before money moves.
+          if (returnBlocked) {
+            return {
+              routeType: 'SUPPORT_CASE', resolutionType: 'NO_REFUND', amount: null,
+              reasonForCustomer: productPolicy?.warrantyAvailable
+                ? 'This product is not eligible for return or replacement, but it does carry a warranty — please raise a Warranty claim instead.'
+                : 'This product is marked non-returnable and non-replaceable. Our team will review your report manually.',
+              policyApplied: 'Product after-sales policy: return and replacement both disabled for this product.',
+            };
+          }
           return withinWindow
             ? {
                 routeType: 'AUTO_RESOLUTION', resolutionType: 'RETURN_PICKUP_INITIATED', amount: money(amountBasis),
@@ -210,6 +275,15 @@ export class SupportPolicyEngine {
                 policyApplied: `Return window: ${policy.returnWindowDays} days from order date (expired).`,
               };
         }
+        case 'WARRANTY_CLAIM':
+          // Only reachable when getIssueOptions() already gated on productPolicy.warrantyAvailable
+          // — no separate check needed here. Opens a WarrantyCase instead of moving money; the
+          // seller reviews and recommends, admin makes the final call (see WarrantyService).
+          return {
+            routeType: 'AUTO_RESOLUTION', resolutionType: 'WARRANTY_CLAIM_OPENED', amount: null,
+            reasonForCustomer: 'Your warranty claim has been raised. The seller will review it, and our team will confirm the resolution.',
+            policyApplied: productPolicy?.warrantyAvailable ? 'Warranty available for this product.' : 'Warranty claim.',
+          };
         default:
           return {
             routeType: 'SUPPORT_CASE', resolutionType: null, amount: null,
@@ -304,6 +378,7 @@ export class SupportCasesService {
     private paymentNotify: PaymentNotificationsService,
     private notifications: NotificationsService,
     private returns: ReturnsService,
+    private warranty: WarrantyService,
   ) {}
 
   private log(supportCaseId: string, actorId: string | undefined, actorRole: UserRole | undefined, action: string, notes?: string) {
@@ -320,8 +395,20 @@ export class SupportCasesService {
   private async loadOrderForCase(orderId: string) {
     return this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true, service: { include: { category: true } } },
+      // Phase 6 — items.product included so getContext()/openCase() can build a per-product
+      // after-sales policy snapshot (Product.returnable/replaceable/warrantyAvailable/etc.).
+      include: { items: { include: { product: true } }, service: { include: { category: true } } },
     });
+  }
+
+  // Phase 6 — builds the ProductPolicy snapshot SupportPolicyEngine needs, from whichever
+  // product the case concerns (the specific orderItem's product if scoped, else the order's
+  // first item — matches the existing item-level-scoping convention elsewhere in this file).
+  private productPolicyFor(order: { items: { id: string; product: { returnable: boolean; replaceable: boolean; warrantyAvailable: boolean } | null }[] }, orderItem: { id: string } | null) {
+    const item = orderItem ? order.items.find((i) => i.id === orderItem.id) : order.items[0];
+    const product = item?.product;
+    if (!product) return undefined;
+    return { returnable: product.returnable, replaceable: product.replaceable, warrantyAvailable: product.warrantyAvailable };
   }
 
   async getContext(customerId: string, orderId: string, orderItemId?: string, issueType?: SupportIssueType) {
@@ -337,14 +424,20 @@ export class SupportCasesService {
 
     const itemType: SupportItemType = order.items.length > 0 ? 'PRODUCT' : 'SERVICE';
     const stage = this.policyEngine.deriveServiceStage(order);
-    const issueOptions = this.policyEngine.getIssueOptions(itemType, stage);
-    const result: any = { itemType, stage, issueOptions };
+    const productPolicy = itemType === 'PRODUCT' ? this.productPolicyFor(order, orderItem) : undefined;
+    const issueOptions = this.policyEngine.getIssueOptions(itemType, stage, productPolicy);
+    const result: any = {
+      itemType, stage, issueOptions,
+      // Phase 6 — frontend gate: disable Submit until at least one evidence photo is attached
+      // when the concerned product requires it (Product.evidencePhotoRequired).
+      evidenceRequired: itemType === 'PRODUCT' ? (order.items.find((i) => (orderItem ? i.id === orderItem.id : true))?.product?.evidencePhotoRequired ?? true) : false,
+    };
 
     if (issueType) {
       const amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
       const policy = await this.policyEngine.getPolicyConfig();
       const warranty = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
-      result.recommendation = this.policyEngine.recommend({ itemType, issueType, order, amountBasis, policy, warranty });
+      result.recommendation = this.policyEngine.recommend({ itemType, issueType, order, amountBasis, policy, warranty, productPolicy });
     }
     return result;
   }
@@ -368,7 +461,8 @@ export class SupportCasesService {
     const amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
     const policy = await this.policyEngine.getPolicyConfig();
     const warranty = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
-    const rec = this.policyEngine.recommend({ itemType, issueType: dto.issueType, order, amountBasis, policy, warranty });
+    const productPolicy = itemType === 'PRODUCT' ? this.productPolicyFor(order, orderItem) : undefined;
+    const rec = this.policyEngine.recommend({ itemType, issueType: dto.issueType, order, amountBasis, policy, warranty, productPolicy });
 
     const caseNumber = await this.nextCaseNumber();
     const created = await this.prisma.supportCase.create({
@@ -454,6 +548,13 @@ export class SupportCasesService {
       // (IN_REVIEW, not RESOLVED) until the seller's inspection accepts/rejects the item and
       // ReturnsService.finalize() closes it out for real.
       await this.returns.initiate(kase.id, kase.orderId, actorId || undefined);
+    } else if (resolutionType === 'WARRANTY_CLAIM_OPENED') {
+      // Phase 6 — opens a WarrantyCase instead of moving money; same "stays open until a real
+      // decision lands" pattern as RETURN_PICKUP_INITIATED above.
+      const item = kase.orderItemId
+        ? await this.prisma.orderItem.findUnique({ where: { id: kase.orderItemId }, select: { productId: true } })
+        : await this.prisma.orderItem.findFirst({ where: { orderId: kase.orderId }, select: { productId: true } });
+      await this.warranty.openCase(kase.id, kase.orderId, item?.productId, kase.customerId, kase.orderItemId ?? undefined);
     }
     // NO_REFUND / FREE_REVISIT / FREE_REWORK / NEW_SERVICE_REQUIRED / CUSTOMER_PAYABLE /
     // PARTNER_LIABILITY / SPLIT_LIABILITY are recorded on the case only — there is no existing
@@ -461,7 +562,8 @@ export class SupportCasesService {
     // call, and this module does not invent one (see plan doc). Admin can follow up manually
     // (e.g. the existing AdminService.postLedgerAdjustment for a vendor-side consequence).
 
-    const isReturnPickup = resolutionType === 'RETURN_PICKUP_INITIATED';
+    const staysOpen = resolutionType === 'RETURN_PICKUP_INITIATED' || resolutionType === 'WARRANTY_CLAIM_OPENED';
+    const isReturnPickup = staysOpen; // preserves the existing variable name used below
     const updated = await this.prisma.supportCase.update({
       where: { id: caseId },
       data: {
@@ -475,7 +577,8 @@ export class SupportCasesService {
         closedAt: isReturnPickup ? undefined : new Date(),
       },
     });
-    await this.log(caseId, actorId ?? undefined, actorId ? UserRole.ADMIN : undefined, isReturnPickup ? 'RETURN_PICKUP_SCHEDULED' : 'RESOLVED', `${resolutionType ?? 'REVIEWED'}: ${reason}`);
+    const logAction = resolutionType === 'WARRANTY_CLAIM_OPENED' ? 'WARRANTY_CASE_OPENED' : isReturnPickup ? 'RETURN_PICKUP_SCHEDULED' : 'RESOLVED';
+    await this.log(caseId, actorId ?? undefined, actorId ? UserRole.ADMIN : undefined, logAction, `${resolutionType ?? 'REVIEWED'}: ${reason}`);
     if (actorId) {
       await logAudit(this.prisma, {
         actorId, actorRole: UserRole.ADMIN, action: 'SUPPORT_CASE_RESOLVED',
@@ -509,6 +612,12 @@ export class SupportCasesService {
     // otherwise an admin could refund/replace while the item is still in transit.
     if (kase.resolutionType === 'RETURN_PICKUP_INITIATED') {
       throw new BadRequestException('This return is awaiting pickup/inspection — decide it from the Deliveries & Returns queue instead');
+    }
+    // Phase 6 — same reasoning as the return-pickup guard above: a warranty claim must be
+    // closed out via the seller's recommendation + admin's warranty-specific decision, not
+    // re-decided generically here.
+    if (kase.resolutionType === 'WARRANTY_CLAIM_OPENED') {
+      throw new BadRequestException('This warranty claim is awaiting seller/admin review — decide it from the Warranty Cases queue instead');
     }
     return this.executeResolution(caseId, resolutionType, amount ?? null, reason, adminId, opts);
   }
@@ -568,7 +677,7 @@ export class SupportCasesService {
 @ApiBearerAuth() @UseGuards(JwtAuthGuard)
 @Controller('support')
 export class SupportCasesController {
-  constructor(private support: SupportCasesService) {}
+  constructor(private support: SupportCasesService, private warranty: WarrantyService) {}
 
   @Post('cases/context')
   context(@CurrentUser() u: JwtPayload, @Body() b: { orderId: string; orderItemId?: string; issueType?: SupportIssueType }) {
@@ -585,6 +694,7 @@ export class SupportCasesController {
 
   @Get('cases/mine') mine(@CurrentUser() u: JwtPayload) { return this.support.listForCustomer(u.sub); }
   @Get('cases/partner/mine') partnerMine(@CurrentUser() u: JwtPayload) { return this.support.listForPartner(u.sub); }
+  @Get('warranty-cases/mine') myWarrantyCases(@CurrentUser() u: JwtPayload) { return this.warranty.listForCustomer(u.sub); }
 
   @Get('cases/:id') detail(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.support.getDetail(id, u.sub, u.role);
@@ -610,7 +720,7 @@ export class SupportCasesController {
 }
 
 @Module({
-  imports: [RefundsModule, AdminModule, PartnerLedgerModule, PaymentNotificationsModule, NotificationsModule, ReturnsModule],
+  imports: [RefundsModule, AdminModule, PartnerLedgerModule, PaymentNotificationsModule, NotificationsModule, ReturnsModule, WarrantyModule],
   controllers: [SupportCasesController],
   providers: [SupportPolicyEngine, SupportCasesService],
   exports: [SupportPolicyEngine, SupportCasesService],

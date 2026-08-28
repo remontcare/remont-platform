@@ -20,8 +20,8 @@ describe('UploadsController route metadata — public route must have no @Roles 
     return reflector.getAllAndOverride('isPublic', [handler, UploadsController]);
   }
 
-  it('uploadImage requires ADMIN/SUPER_ADMIN or PRODUCT_VENDOR (sellers uploading their own product images)', () => {
-    expect(rolesFor('uploadImage')).toEqual(['ADMIN', 'SUPER_ADMIN', 'PRODUCT_VENDOR']);
+  it('uploadImage requires ADMIN/SUPER_ADMIN, PRODUCT_VENDOR (seller product images), or CUSTOMER (Phase 6 support/return/warranty evidence)', () => {
+    expect(rolesFor('uploadImage')).toEqual(['ADMIN', 'SUPER_ADMIN', 'PRODUCT_VENDOR', 'CUSTOMER']);
     expect(isPublicFor('uploadImage')).toBeFalsy();
   });
 

@@ -40,6 +40,47 @@ describe('SupportPolicyEngine.deriveServiceStage', () => {
   ] as const)('%j -> %s', (order, stage) => {
     expect(engine.deriveServiceStage(order)).toBe(stage);
   });
+
+  // Phase 6 fix: a PRODUCT order's Order.vendorId is ALWAYS null (product attribution is
+  // OrderItem.vendorId, never Order.vendorId) — before the fix, every one of these fell into
+  // the same "NOT_ASSIGNED" bucket as CONFIRMED above, forever, regardless of real delivery
+  // state. These pin down the new product-aware branch.
+  it.each([
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: null }, 'NOT_ASSIGNED'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'AWAITING_SELLER' }, 'NOT_ASSIGNED'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'SELLER_ACCEPTED' }, 'ASSIGNED'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'PROCESSING' }, 'ASSIGNED'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'READY_FOR_PICKUP' }, 'EN_ROUTE'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'HANDED_TO_LOGISTICS' }, 'EN_ROUTE'],
+    [{ status: 'CONFIRMED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'SELLER_REJECTED' }, 'CLOSED'],
+    // The critical fix: a delivered product order now correctly reaches COMPLETED, unlocking
+    // RETURN_PRODUCT/WARRANTY_CLAIM in getIssueOptions() — pre-fix this was unreachable.
+    [{ status: 'COMPLETED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'HANDED_TO_LOGISTICS' }, 'COMPLETED'],
+    [{ status: 'CANCELLED', vendorId: null, type: 'PRODUCT', productFulfillmentStage: 'AWAITING_SELLER' }, 'CLOSED'],
+  ] as const)('%j -> %s', (order, stage) => {
+    expect(engine.deriveServiceStage(order)).toBe(stage);
+  });
+});
+
+describe('SupportPolicyEngine.getIssueOptions — Phase 6 product policy gating', () => {
+  const engine = new SupportPolicyEngine(makePrisma());
+
+  it('offers RETURN_PRODUCT and WARRANTY_CLAIM for a completed, returnable, warrantied product', () => {
+    const opts = engine.getIssueOptions('PRODUCT', 'COMPLETED', { returnable: true, replaceable: true, warrantyAvailable: true });
+    expect(opts).toContain('RETURN_PRODUCT');
+    expect(opts).toContain('WARRANTY_CLAIM');
+  });
+
+  it('hides RETURN_PRODUCT for a non-returnable product, and hides WARRANTY_CLAIM when unavailable', () => {
+    const opts = engine.getIssueOptions('PRODUCT', 'COMPLETED', { returnable: false, replaceable: false, warrantyAvailable: false });
+    expect(opts).not.toContain('RETURN_PRODUCT');
+    expect(opts).not.toContain('WARRANTY_CLAIM');
+  });
+
+  it('defaults to returnable when no productPolicy is passed (backward compatible)', () => {
+    const opts = engine.getIssueOptions('PRODUCT', 'COMPLETED');
+    expect(opts).toContain('RETURN_PRODUCT');
+  });
 });
 
 describe('SupportPolicyEngine.recommend — product flows', () => {
@@ -94,6 +135,38 @@ describe('SupportPolicyEngine.recommend — product flows', () => {
     });
     expect(rec.routeType).toBe('SUPPORT_CASE');
     expect(rec.resolutionType).toBeNull();
+  });
+
+  // Phase 6 — a non-returnable, non-replaceable product must never auto-resolve into a
+  // physical pickup, even within the return window.
+  it('WRONG_PRODUCT is blocked for a non-returnable, non-replaceable product', () => {
+    const rec = engine.recommend({
+      itemType: 'PRODUCT', issueType: 'WRONG_PRODUCT',
+      order: { ...baseOrder, createdAt: new Date(Date.now() - 2 * 86_400_000) },
+      amountBasis: 999, policy, warranty: noWarranty,
+      productPolicy: { returnable: false, replaceable: false, warrantyAvailable: false },
+    });
+    expect(rec.routeType).toBe('SUPPORT_CASE');
+    expect(rec.resolutionType).not.toBe('RETURN_PICKUP_INITIATED');
+  });
+
+  it('RETURN_PRODUCT points the customer at Warranty when return/replacement are disabled but warranty is available', () => {
+    const rec = engine.recommend({
+      itemType: 'PRODUCT', issueType: 'RETURN_PRODUCT',
+      order: { ...baseOrder, createdAt: new Date(Date.now() - 2 * 86_400_000) },
+      amountBasis: 999, policy, warranty: noWarranty,
+      productPolicy: { returnable: false, replaceable: false, warrantyAvailable: true },
+    });
+    expect(rec.reasonForCustomer).toMatch(/warranty/i);
+  });
+
+  it('WARRANTY_CLAIM auto-resolves by opening a warranty case, never moving money directly', () => {
+    const rec = engine.recommend({
+      itemType: 'PRODUCT', issueType: 'WARRANTY_CLAIM',
+      order: baseOrder, amountBasis: 999, policy, warranty: noWarranty,
+      productPolicy: { returnable: true, replaceable: true, warrantyAvailable: true },
+    });
+    expect(rec).toMatchObject({ routeType: 'AUTO_RESOLUTION', resolutionType: 'WARRANTY_CLAIM_OPENED', amount: null });
   });
 });
 

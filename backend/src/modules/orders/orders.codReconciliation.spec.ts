@@ -51,7 +51,7 @@ function makeService() {
   };
   const paymentNotify: any = { workCompleted: jest.fn(async () => {}) };
   const payments: any = { createPaymentLink: jest.fn(async () => null) };
-  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, payments, paymentNotify, ledger, {} as any);
+  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, payments, paymentNotify, ledger, {} as any, {} as any);
   (svc as any).autoGenerateInvoice = jest.fn().mockResolvedValue(undefined);
   return { svc, prisma, ledgerEntries, getPendingPayout: () => pendingPayout };
 }

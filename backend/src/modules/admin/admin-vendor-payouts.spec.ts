@@ -13,7 +13,7 @@ function makeService() {
   const cities: any = {};
   const events: any = { emit: jest.fn() };
   const ledger: any = { postEntry: jest.fn(async () => {}), availableBalance: jest.fn(async () => 0) };
-  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, {} as any, {} as any, {} as any, {} as any);
+  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { svc, prisma, settlements };
 }
 

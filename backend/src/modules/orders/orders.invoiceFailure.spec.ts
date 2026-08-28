@@ -33,7 +33,7 @@ function makeService() {
   };
   const paymentNotify: any = { workCompleted: jest.fn().mockResolvedValue({}) };
   const invoices: any = { generateForOrder: jest.fn() };
-  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, paymentNotify, ledger, invoices);
+  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, paymentNotify, ledger, invoices, {} as any);
   return { svc, prisma, ledger, invoices };
 }
 

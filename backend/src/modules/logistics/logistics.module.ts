@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { Public, JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, writeOrderTimeline } from '../../common';
 import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
+import { ReverseLogisticsRateEngine } from './reverse-logistics-rate-engine';
 
 // Phase 5 — COD settlement ladder adjacency, same idiom as DeliveryController's
 // SHIPMENT_STATUS_NEXT. Rejects an out-of-order or duplicate call instead of silently no-op-ing.
@@ -463,7 +464,7 @@ export class ShipmentController {
 
 @Module({
   controllers: [LogisticsController, ShipmentController],
-  providers: [LogisticsService, ShipmentService, MockDeliveryProvider],
-  exports: [LogisticsService, ShipmentService],
+  providers: [LogisticsService, ShipmentService, MockDeliveryProvider, ReverseLogisticsRateEngine],
+  exports: [LogisticsService, ShipmentService, ReverseLogisticsRateEngine],
 })
 export class LogisticsModule {}

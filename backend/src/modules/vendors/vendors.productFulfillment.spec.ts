@@ -21,8 +21,9 @@ function makeService() {
   const shipments: any = { createShipmentForOrder: jest.fn().mockResolvedValue(undefined) };
   const returns: any = { listIncomingReturnsForVendor: jest.fn(), finalize: jest.fn() };
   const refunds: any = { raise: jest.fn(), decide: jest.fn() };
-  const service = new ProductVendorsService(prisma, shipments, returns, refunds);
-  return { service, prisma, shipments, returns, refunds };
+  const warranty: any = { listIncomingForVendor: jest.fn(), recordSellerRecommendation: jest.fn() };
+  const service = new ProductVendorsService(prisma, shipments, returns, refunds, warranty);
+  return { service, prisma, shipments, returns, refunds, warranty };
 }
 
 describe('ProductVendorsService — product-order fulfillment stage transitions', () => {

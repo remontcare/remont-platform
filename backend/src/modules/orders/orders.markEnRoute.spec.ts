@@ -13,7 +13,7 @@ function makeService() {
     order: { updateMany: jest.fn() },
   };
   prisma.orderTimeline = { create: jest.fn() };
-  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const svc = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { svc, prisma };
 }
 
