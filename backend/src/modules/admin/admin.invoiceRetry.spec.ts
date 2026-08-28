@@ -17,7 +17,7 @@ function makeService() {
   const events: any = { emit: jest.fn() };
   const ledger: any = {};
   const invoices: any = { generateForOrder: jest.fn() };
-  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, invoices, {} as any);
+  const svc = new AdminService(prisma, config, payments, settlements, cities, events, ledger, invoices, {} as any, {} as any, {} as any);
   return { svc, prisma, invoices };
 }
 

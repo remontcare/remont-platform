@@ -179,7 +179,7 @@ describe('ServiceVendorsService security boundary', () => {
 describe('ProductVendorsService.register security boundary', () => {
   it('refuses to create a ProductVendor for a user with no approved seller-registration', async () => {
     const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(null), update: jest.fn() } };
-    const service = new ProductVendorsService(prisma);
+    const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any);
 
     await expect(service.register('user-1', { businessName: 'Self-Activated Store' }))
       .rejects.toBeInstanceOf(NotFoundException);
@@ -193,7 +193,7 @@ describe('ProductVendorsService.register security boundary', () => {
         update: jest.fn().mockResolvedValue({ id: 'vendor-1', userId: 'user-1', businessName: 'Updated Name' }),
       },
     };
-    const service = new ProductVendorsService(prisma);
+    const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any);
 
     await service.register('user-1', { businessName: 'Updated Name', status: 'ACTIVE' });
 
@@ -215,7 +215,7 @@ describe('ProductVendorsService.register security boundary', () => {
 describe('ProductVendorsService.profile — seller-dashboard login gate', () => {
   it('blocks dashboard access for a phone that only completed OTP login, no approved application', async () => {
     const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(null) } };
-    const service = new ProductVendorsService(prisma);
+    const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any);
 
     await expect(service.profile('new-user-1')).rejects.toBeInstanceOf(NotFoundException);
   });
@@ -223,7 +223,7 @@ describe('ProductVendorsService.profile — seller-dashboard login gate', () => 
   it('grants dashboard access to a seller admin already approved via seller-registration', async () => {
     const approvedVendor = { id: 'vendor-1', userId: 'approved-user-1', status: 'ACTIVE', businessName: 'Approved Store', products: [] };
     const prisma: any = { productVendor: { findUnique: jest.fn().mockResolvedValue(approvedVendor) } };
-    const service = new ProductVendorsService(prisma);
+    const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any);
 
     await expect(service.profile('approved-user-1')).resolves.toBe(approvedVendor);
   });

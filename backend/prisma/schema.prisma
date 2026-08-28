@@ -244,9 +244,46 @@ enum ShipmentStatus {
   CREATED
   PICKED_UP
   IN_TRANSIT
+  OUT_FOR_DELIVERY
   DELIVERED
   FAILED
   CANCELLED
+}
+
+// Phase 5 — seller-side product-order fulfillment stage, tracked as a side field on Order
+// rather than a new OrderStatus value. OrderStatus is shared with SERVICE orders and has
+// several exhaustive-ish switches over it elsewhere (SupportPolicyEngine.deriveServiceStage,
+// AdminController.adminUpdateStatus's hardcoded validStatuses array, seller.html's
+// orderBucket()) — widening it risks silently breaking one of those. Mirrors the existing
+// Order.needsAdminReview/routingDecision side-flag pattern. Null for SERVICE orders; Order.status
+// itself stays CONFIRMED for a product order through this whole window, exactly as before.
+enum ProductFulfillmentStage {
+  AWAITING_SELLER
+  SELLER_ACCEPTED
+  SELLER_REJECTED
+  PROCESSING
+  READY_FOR_PICKUP
+  HANDED_TO_LOGISTICS
+}
+
+// Phase 5 — COD settlement ladder for a product Shipment. Deliberately NOT modeled on
+// ServiceVendor.pendingPayout/PartnerLedgerEntry: that system is vendor-collects-directly
+// money; product COD is logistics-provider-collects-on-Remont's-behalf money — a different
+// flow. See Shipment.codSettlementStatus.
+enum CodSettlementStatus {
+  NOT_APPLICABLE
+  COD_EXPECTED
+  COD_COLLECTED
+  COD_SETTLEMENT_PENDING
+  COD_SETTLED
+  COD_RECONCILED
+}
+
+// Phase 5 — outcome of a seller physically inspecting a returned item, see ReturnShipment.
+enum ReturnInspectionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
 }
 
 enum MembershipTier {
@@ -1486,6 +1523,10 @@ model DeliveryPartner {
 
   user       User       @relation(fields: [userId], references: [id])
   deliveries Delivery[]
+  // Phase 5 — outbound/return product shipments assigned to this rider (separate from the
+  // pre-existing `deliveries` above, which back the never-wired-up Delivery model).
+  shipments       Shipment[]
+  returnShipments ReturnShipment[]
 }
 
 model Delivery {
@@ -1618,6 +1659,17 @@ model Order {
   // still-unbilled platformCharges field below).
   deliveryTier      DeliveryTier?
   deliveryCharge    Decimal?      @db.Decimal(10, 2)
+
+  // Phase 5 — seller-side product-order fulfillment stage (see ProductFulfillmentStage doc
+  // comment for why this is a side field, not a new OrderStatus value). Null for SERVICE
+  // orders and for every order created before this field existed.
+  productFulfillmentStage ProductFulfillmentStage?
+  productFulfillmentAt   DateTime?
+  sellerRejectionReason   String?
+  // Set on a new, zero-value Order created by ReturnsService.createReplacementOrder() —
+  // loose id (not a Prisma relation) to avoid a self-relation cycle, same convention as
+  // commissionRuleId elsewhere in this model.
+  replacementOfOrderId   String?
 
   // Address snapshot at the moment of booking — see the matching fields on
   // MasterOrder for why: addressId is a live FK, these are copied once and frozen.
@@ -1753,6 +1805,7 @@ model Order {
   timeline        OrderTimeline[]
   otpLogs         OrderOtpLog[]
   partnerHolds    PartnerHold[]
+  returnShipments ReturnShipment[]
 
   @@index([customerId])
   @@index([masterOrderId])
@@ -1778,7 +1831,34 @@ model Shipment {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
-  order Order @relation(fields: [orderId], references: [id])
+  // Phase 5 — rider assignment. Best-effort/nullable: a shipment can still exist with no
+  // rider available yet, matching the existing "always succeeds" mock-provider behaviour.
+  deliveryPartnerId String?
+  partnerAssignedAt DateTime?
+  partnerNotes      String?
+
+  // Phase 5 — COD collection/settlement ladder. NOT_APPLICABLE for prepaid (ONLINE) orders,
+  // set once at creation and never transitioned. See CodSettlementStatus doc comment.
+  codAmount           Decimal?             @db.Decimal(10, 2)
+  codSettlementStatus CodSettlementStatus  @default(NOT_APPLICABLE)
+  codCollectedAt      DateTime?
+  codCollectedBy      String? // DeliveryPartner.id
+  codHandedOverAt     DateTime?
+  codSettledAt        DateTime?
+  codSettledBy        String? // admin userId
+  codReconciledAt     DateTime?
+  codReconciledBy     String? // admin userId
+
+  // Phase 5 — customer hands this to the rider to confirm real-world delivery, same
+  // customer-present idiom as the pre-existing Delivery.receiverOtp.
+  deliveryOtp         String?
+  deliveryOtpVerified Boolean   @default(false)
+  deliveredAt         DateTime?
+
+  order           Order            @relation(fields: [orderId], references: [id])
+  deliveryPartner DeliveryPartner? @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId])
 }
 
 model OrderItem {
@@ -2120,6 +2200,13 @@ enum SupportResolutionType {
   CUSTOMER_PAYABLE
   PARTNER_LIABILITY
   SPLIT_LIABILITY
+  // Phase 5 — terminal state for the RETURN_PRODUCT/WRONG_PRODUCT/DAMAGED_PRODUCT/MISSING_ITEM
+  // auto-resolution step: a physical pickup is scheduled (see ReturnShipment) instead of an
+  // instant refund. NOT in REFUND_RESOLUTIONS — no money moves until seller inspection accepts.
+  RETURN_PICKUP_INITIATED
+  // Phase 5 — chosen remedy once a return is accepted: a new zero-value replacement Order is
+  // created instead of a wallet/gateway refund. See Order.replacementOfOrderId.
+  REPLACEMENT
 }
 
 // Item-scoped by design — orderId is always ONE Order (one child order for a service, one
@@ -2140,6 +2227,10 @@ model SupportCase {
   issueType   SupportIssueType
   description String?
   evidenceUrls String[]
+  // Phase 5 — customer's preferred remedy for a return-shaped issue, set at openCase() time.
+  // Plain string (not a Prisma enum), matching how routeType is already stored here — defaults
+  // to REFUND behaviour when unset, so every pre-existing case stays backward compatible.
+  requestedRemedy String? // REFUND | REPLACEMENT
 
   // Order.status frozen at the moment the case was opened — the live order can keep
   // moving forward (e.g. a partner who "did not arrive" might complete the job an hour
@@ -2171,12 +2262,62 @@ model SupportCase {
   updatedAt DateTime  @updatedAt
   closedAt  DateTime?
 
-  logs SupportCaseLog[]
+  logs           SupportCaseLog[]
+  returnShipment ReturnShipment?
 
   @@index([orderId])
   @@index([customerId])
   @@index([partnerId])
   @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RETURN LOGISTICS (Phase 5) — the physical pickup-from-customer,
+// deliver-to-ORIGINAL-seller leg of a return, gated by SupportPolicyEngine's
+// RETURN_PICKUP_INITIATED resolution (see backend/src/modules/returns).
+// Deliberately a separate model from Shipment (not a `direction` flag on it):
+// Shipment.orderId is @unique and read as a to-one relation everywhere
+// (ShipmentController, frontend _shipmentBanner()) — relaxing that would
+// silently break every existing read site for a feature most orders never
+// use. Reuses the existing ShipmentProvider/ShipmentStatus enums since the
+// state machine is mechanically identical (created -> picked up -> in
+// transit -> delivered), just customer->seller instead of seller->customer.
+// ═══════════════════════════════════════════════════════════════════════════
+model ReturnShipment {
+  id            String   @id @default(cuid())
+  orderId       String
+  supportCaseId String   @unique
+
+  provider    ShipmentProvider @default(MOCK_DEMO)
+  providerRef String
+  status      ShipmentStatus   @default(CREATED)
+  isDemo      Boolean          @default(true)
+
+  deliveryPartnerId String?
+  estimatedPickup   DateTime?
+
+  // Customer hands this to the rider at pickup — same OTP-present idiom as outbound delivery.
+  // No OTP is needed at the "delivered to seller" end; the seller's own inspectReturn()
+  // acceptance later serves as that leg's confirming step instead.
+  pickupOtp         String?
+  pickupOtpVerified Boolean   @default(false)
+
+  // Seller inspection — the step this whole model exists to add. inspectedBy is a
+  // ProductVendor.id (or an admin userId for an admin override on a disputed rejection).
+  inspectionStatus ReturnInspectionStatus @default(PENDING)
+  inspectionNotes  String?
+  inspectedAt      DateTime?
+  inspectedBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order           Order            @relation(fields: [orderId], references: [id])
+  supportCase     SupportCase      @relation(fields: [supportCaseId], references: [id])
+  deliveryPartner DeliveryPartner? @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([orderId])
+  @@index([deliveryPartnerId])
 }
 
 // Append-only audit trail — same shape/purpose as RefundRequestLog above.

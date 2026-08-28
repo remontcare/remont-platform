@@ -52,9 +52,10 @@ function makeService(orderOverrides: any = {}) {
   const ledger: any = { getWarrantyDefaults: jest.fn().mockResolvedValue({ days: 7, percent: 15 }) };
   const paymentNotify: any = { supportCaseUpdate: jest.fn().mockResolvedValue(undefined) };
   const notifications: any = { create: jest.fn().mockResolvedValue({}) };
+  const returns: any = { initiate: jest.fn().mockResolvedValue(undefined), finalize: jest.fn().mockResolvedValue(undefined) };
 
-  const svc = new SupportCasesService(prisma, policyEngine, refunds, admin, ledger, paymentNotify, notifications);
-  return { svc, prisma, policyEngine, refunds, admin, ledger, paymentNotify, notifications, order };
+  const svc = new SupportCasesService(prisma, policyEngine, refunds, admin, ledger, paymentNotify, notifications, returns);
+  return { svc, prisma, policyEngine, refunds, admin, ledger, paymentNotify, notifications, returns, order };
 }
 
 describe('SupportCasesService.openCase', () => {

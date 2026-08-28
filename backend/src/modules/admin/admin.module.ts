@@ -18,6 +18,8 @@ import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { CrmService, CrmModule } from '../crm/crm.module';
+import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
+import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -46,7 +48,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -894,6 +896,37 @@ export class AdminService {
 
   async adminUpdateNote(orderId: string, note: string) {
     return this.prisma.order.update({ where: { id: orderId }, data: { adminNotes: note } });
+  }
+
+  // ─── Phase 5 — product-order shipments / COD settlement / return-inspection ───
+  async listShipmentsForAdmin(codSettlementStatus?: string) {
+    return this.shipments.listShipments(codSettlementStatus ? { codSettlementStatus: codSettlementStatus as any } : {});
+  }
+  async codSettle(shipmentId: string, adminId: string) { return this.shipments.codSettle(shipmentId, adminId); }
+  async codSettleBatch(shipmentIds: string[], adminId: string) { return this.shipments.codSettleBatch(shipmentIds || [], adminId); }
+  async codReconcile(shipmentId: string, adminId: string) { return this.shipments.codReconcile(shipmentId, adminId); }
+
+  async listReturnShipmentsForAdmin(inspectionStatus?: string) {
+    return this.prisma.returnShipment.findMany({
+      where: inspectionStatus ? { inspectionStatus: inspectionStatus as any } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { order: { select: { orderNumber: true, customerId: true } }, supportCase: { select: { caseNumber: true, issueType: true } } },
+    });
+  }
+  // Admin override for a disputed seller rejection (ReturnShipment.inspectionStatus already
+  // REJECTED, case in ADMIN_REVIEW) — reuses the same ReturnsService.finalize() a seller's own
+  // inspection call uses, just gated PENDING-only there; an admin arbitrating a dispute instead
+  // re-runs the ACCEPTED branch directly against the still-REJECTED-by-seller row when they
+  // side with the customer, or leaves it rejected (no further action) when they side with the
+  // seller — so this only ever needs to call finalize() for the ACCEPTED override case.
+  async adminDecideReturn(returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', adminId: string, notes?: string) {
+    if (decision === 'REJECTED') {
+      return this.prisma.returnShipment.update({ where: { id: returnShipmentId }, data: { inspectionNotes: notes } });
+    }
+    await this.prisma.returnShipment.update({ where: { id: returnShipmentId }, data: { inspectionStatus: 'PENDING' } });
+    await this.returns.finalize(returnShipmentId, 'ACCEPTED', adminId, UserRole.ADMIN, notes);
+    return this.prisma.returnShipment.findUniqueOrThrow({ where: { id: returnShipmentId } });
   }
 
   // "Live vendors" for the admin to call/assign directly — mirrors DispatchService's
@@ -2896,6 +2929,20 @@ export class AdminController {
   @Patch('orders/:id/refund') refund(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason, u.sub, u.role); }
   @Delete('orders/all') deleteAllOrders() { return this.admin.deleteAllOrders(); }
 
+  // ─── Phase 5 — product-order shipments / COD settlement / return-inspection queues ───
+  @Get('shipments') listShipments(@Query('codSettlementStatus') codSettlementStatus?: string) {
+    return this.admin.listShipmentsForAdmin(codSettlementStatus);
+  }
+  @Post('shipments/:id/cod-settle') codSettle(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.codSettle(id, u.sub); }
+  @Post('shipments/cod-settle-batch') codSettleBatch(@CurrentUser() u: JwtPayload, @Body() b: { shipmentIds: string[] }) { return this.admin.codSettleBatch(b.shipmentIds, u.sub); }
+  @Post('shipments/:id/cod-reconcile') codReconcile(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.codReconcile(id, u.sub); }
+  @Get('return-shipments') listReturnShipments(@Query('inspectionStatus') inspectionStatus?: string) {
+    return this.admin.listReturnShipmentsForAdmin(inspectionStatus);
+  }
+  @Post('return-shipments/:id/decide') decideReturn(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { decision: 'ACCEPTED' | 'REJECTED'; notes?: string },
+  ) { return this.admin.adminDecideReturn(id, b.decision, u.sub, b.notes); }
+
   // Cities
   @Get('cities') cities() { return this.admin.listCities(); }
   @Get('cities/stats') citiesStats() { return this.admin.cityStats(); }
@@ -3172,7 +3219,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

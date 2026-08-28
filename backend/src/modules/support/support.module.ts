@@ -14,6 +14,7 @@ import { AdminService, AdminModule } from '../admin/admin.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { NotificationsService, NotificationsModule } from '../notifications/notifications.module';
+import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ORDER HELP & SUPPORT — a structured "select item -> select issue -> check
@@ -160,10 +161,15 @@ export class SupportPolicyEngine {
         case 'DAMAGED_PRODUCT':
         case 'MISSING_ITEM': {
           const withinWindow = (Date.now() - order.createdAt.getTime()) / 86_400_000 <= policy.returnWindowDays;
+          // Phase 5 — was an instant FULL_REFUND with zero physical pickup before real product
+          // fulfillment existed. Now that pickup/inspection is real, this schedules a return
+          // pickup instead; the refund (or replacement) only fires once the seller's
+          // inspection accepts the item — see RETURN_PICKUP_INITIATED in REFUND_RESOLUTIONS'
+          // sibling handling in executeResolution() below.
           return withinWindow
             ? {
-                routeType: 'AUTO_RESOLUTION', resolutionType: 'FULL_REFUND', amount: money(amountBasis),
-                reasonForCustomer: `Reported within the ${policy.returnWindowDays}-day return window — a full refund for this item has been approved.`,
+                routeType: 'AUTO_RESOLUTION', resolutionType: 'RETURN_PICKUP_INITIATED', amount: money(amountBasis),
+                reasonForCustomer: `Within the ${policy.returnWindowDays}-day return window — a pickup has been scheduled. Once the seller inspects the returned item, your refund or replacement will be processed.`,
                 policyApplied: `Return window: ${policy.returnWindowDays} days from order date.`,
               }
             : {
@@ -188,10 +194,14 @@ export class SupportPolicyEngine {
         }
         case 'RETURN_PRODUCT': {
           const withinWindow = (Date.now() - order.createdAt.getTime()) / 86_400_000 <= policy.returnWindowDays;
+          // Phase 5 — see the WRONG_PRODUCT/DAMAGED_PRODUCT/MISSING_ITEM comment above: this
+          // used to be an instant FULL_REFUND. Deliberate, customer-facing behaviour change —
+          // a refund is no longer instant within the return window, since physical pickup and
+          // seller inspection are now real gates before money moves.
           return withinWindow
             ? {
-                routeType: 'AUTO_RESOLUTION', resolutionType: 'FULL_REFUND', amount: money(amountBasis),
-                reasonForCustomer: `Within the ${policy.returnWindowDays}-day return window — full refund approved.`,
+                routeType: 'AUTO_RESOLUTION', resolutionType: 'RETURN_PICKUP_INITIATED', amount: money(amountBasis),
+                reasonForCustomer: `Within the ${policy.returnWindowDays}-day return window — a pickup has been scheduled. Once the seller inspects the returned item, your refund or replacement will be processed.`,
                 policyApplied: `Return window: ${policy.returnWindowDays} days from order date.`,
               }
             : {
@@ -293,6 +303,7 @@ export class SupportCasesService {
     private ledger: PartnerLedgerService,
     private paymentNotify: PaymentNotificationsService,
     private notifications: NotificationsService,
+    private returns: ReturnsService,
   ) {}
 
   private log(supportCaseId: string, actorId: string | undefined, actorRole: UserRole | undefined, action: string, notes?: string) {
@@ -340,6 +351,7 @@ export class SupportCasesService {
 
   async openCase(customerId: string, dto: {
     orderId: string; orderItemId?: string; issueType: SupportIssueType; description?: string; evidenceUrls?: string[];
+    requestedRemedy?: 'REFUND' | 'REPLACEMENT';
   }) {
     if (!dto.orderId) throw new BadRequestException('orderId is required');
     if (!dto.issueType) throw new BadRequestException('issueType is required');
@@ -365,6 +377,7 @@ export class SupportCasesService {
         partnerId: order.vendorId || undefined,
         itemType, issueType: dto.issueType, description: dto.description,
         evidenceUrls: dto.evidenceUrls || [],
+        requestedRemedy: dto.requestedRemedy,
         statusSnapshot: order.status,
         status: rec.routeType === 'DISPUTE' ? 'DISPUTE' : 'OPEN',
         routeType: rec.routeType,
@@ -436,6 +449,11 @@ export class SupportCasesService {
       if (!actorId) throw new BadRequestException('Reassigning a partner requires admin review');
       if (!opts?.newVendorId) throw new BadRequestException('newVendorId is required to reassign a partner');
       await this.admin.forceAssignVendor(kase.orderId, opts.newVendorId, actorId, UserRole.ADMIN);
+    } else if (resolutionType === 'RETURN_PICKUP_INITIATED') {
+      // Phase 5 — schedules the physical pickup instead of moving money; the case stays open
+      // (IN_REVIEW, not RESOLVED) until the seller's inspection accepts/rejects the item and
+      // ReturnsService.finalize() closes it out for real.
+      await this.returns.initiate(kase.id, kase.orderId, actorId || undefined);
     }
     // NO_REFUND / FREE_REVISIT / FREE_REWORK / NEW_SERVICE_REQUIRED / CUSTOMER_PAYABLE /
     // PARTNER_LIABILITY / SPLIT_LIABILITY are recorded on the case only — there is no existing
@@ -443,20 +461,21 @@ export class SupportCasesService {
     // call, and this module does not invent one (see plan doc). Admin can follow up manually
     // (e.g. the existing AdminService.postLedgerAdjustment for a vendor-side consequence).
 
+    const isReturnPickup = resolutionType === 'RETURN_PICKUP_INITIATED';
     const updated = await this.prisma.supportCase.update({
       where: { id: caseId },
       data: {
-        status: 'RESOLVED',
+        status: isReturnPickup ? 'IN_REVIEW' : 'RESOLVED',
         resolutionType: resolutionType ?? undefined,
         resolutionAmount: amount ?? undefined,
         resolutionReason: reason,
         decidedBy: actorId ?? undefined,
-        decidedAt: new Date(),
+        decidedAt: isReturnPickup ? undefined : new Date(),
         refundRequestId,
-        closedAt: new Date(),
+        closedAt: isReturnPickup ? undefined : new Date(),
       },
     });
-    await this.log(caseId, actorId ?? undefined, actorId ? UserRole.ADMIN : undefined, 'RESOLVED', `${resolutionType ?? 'REVIEWED'}: ${reason}`);
+    await this.log(caseId, actorId ?? undefined, actorId ? UserRole.ADMIN : undefined, isReturnPickup ? 'RETURN_PICKUP_SCHEDULED' : 'RESOLVED', `${resolutionType ?? 'REVIEWED'}: ${reason}`);
     if (actorId) {
       await logAudit(this.prisma, {
         actorId, actorRole: UserRole.ADMIN, action: 'SUPPORT_CASE_RESOLVED',
@@ -485,6 +504,12 @@ export class SupportCasesService {
     const kase = await this.prisma.supportCase.findUnique({ where: { id: caseId } });
     if (!kase) throw new NotFoundException('Support case not found');
     if (kase.status === 'RESOLVED' || kase.status === 'CLOSED') throw new BadRequestException('This case has already been resolved');
+    // Phase 5 — a case already routed to a physical return pickup must be closed out via the
+    // seller's inspection (or the admin return-override), not re-decided generically here —
+    // otherwise an admin could refund/replace while the item is still in transit.
+    if (kase.resolutionType === 'RETURN_PICKUP_INITIATED') {
+      throw new BadRequestException('This return is awaiting pickup/inspection — decide it from the Deliveries & Returns queue instead');
+    }
     return this.executeResolution(caseId, resolutionType, amount ?? null, reason, adminId, opts);
   }
 
@@ -553,6 +578,7 @@ export class SupportCasesController {
   @Post('cases')
   open(@CurrentUser() u: JwtPayload, @Body() b: {
     orderId: string; orderItemId?: string; issueType: SupportIssueType; description?: string; evidenceUrls?: string[];
+    requestedRemedy?: 'REFUND' | 'REPLACEMENT';
   }) {
     return this.support.openCase(u.sub, b);
   }
@@ -584,7 +610,7 @@ export class SupportCasesController {
 }
 
 @Module({
-  imports: [RefundsModule, AdminModule, PartnerLedgerModule, PaymentNotificationsModule, NotificationsModule],
+  imports: [RefundsModule, AdminModule, PartnerLedgerModule, PaymentNotificationsModule, NotificationsModule, ReturnsModule],
   controllers: [SupportCasesController],
   providers: [SupportPolicyEngine, SupportCasesService],
   exports: [SupportPolicyEngine, SupportCasesService],

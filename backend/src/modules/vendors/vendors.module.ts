@@ -1,6 +1,6 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, BadRequestException,
+  NotFoundException, ForbiddenException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -12,6 +12,9 @@ import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocat
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
+import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
+import { ReturnsService, ReturnsModule } from '../returns/returns.module';
+import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -508,9 +511,121 @@ export class ServiceVendorsController {
 }
 
 // ─── Product Vendor ───
+// Phase 5 — explicit adjacency for the seller-side product-fulfillment stage, same idiom as
+// DeliveryController's SHIPMENT_STATUS_NEXT. AWAITING_SELLER can move to either terminal
+// accept or reject; everything after that is a straight line.
+const FULFILLMENT_STAGE_NEXT: Record<string, string[]> = {
+  AWAITING_SELLER: ['SELLER_ACCEPTED', 'SELLER_REJECTED'],
+  SELLER_ACCEPTED: ['PROCESSING'],
+  PROCESSING: ['READY_FOR_PICKUP'],
+  READY_FOR_PICKUP: [],
+  SELLER_REJECTED: [],
+  HANDED_TO_LOGISTICS: [],
+};
+
 @Injectable()
 export class ProductVendorsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(ProductVendorsService.name);
+  constructor(
+    private prisma: PrismaService,
+    private shipments: ShipmentService,
+    private returns: ReturnsService,
+    private refunds: RefundsService,
+  ) {}
+
+  private async requireVendor(userId: string) {
+    const v = await this.prisma.productVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException('Seller profile not found');
+    return v;
+  }
+
+  // Server-side ownership check — never trust a bare orderId from the client alone, mirrors
+  // myOrders()'s own product.vendorId scoping.
+  private async assertOwnsOrder(vendorId: string, orderId: string) {
+    const item = await this.prisma.orderItem.findFirst({ where: { orderId, product: { vendorId } } });
+    if (!item) throw new ForbiddenException('This order does not contain any of your products');
+  }
+
+  // Conditional updateMany is the claim lock (same idiom as ServiceVendorsService.acceptJob's
+  // atomic status flip) — two concurrent requests, or a stage-skip, can never both succeed.
+  private async claimStageTransition(orderId: string, fromStage: string, data: Record<string, any>) {
+    if (!FULFILLMENT_STAGE_NEXT[fromStage]?.includes(data.productFulfillmentStage)) {
+      throw new BadRequestException(`Cannot move from ${fromStage} to ${data.productFulfillmentStage}`);
+    }
+    const claimed = await this.prisma.order.updateMany({
+      where: { id: orderId, productFulfillmentStage: fromStage as any },
+      data: { ...data, productFulfillmentAt: new Date() },
+    });
+    if (claimed.count !== 1) throw new BadRequestException(`This order is not currently in the ${fromStage} stage`);
+  }
+
+  async acceptOrder(userId: string, orderId: string) {
+    const v = await this.requireVendor(userId);
+    await this.assertOwnsOrder(v.id, orderId);
+    await this.claimStageTransition(orderId, 'AWAITING_SELLER', { productFulfillmentStage: 'SELLER_ACCEPTED' });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'SELLER_ACCEPTED', actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
+    return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  }
+
+  // Edge case #16 "Seller rejects order": the customer already paid, so a rejection auto-
+  // triggers a full refund via the EXISTING RefundsService pipeline (reused unmodified) rather
+  // than leaving a paid order stuck. Best-effort: a rejection is still recorded even if the
+  // order somehow has nothing to refund (e.g. a COD order not yet marked paid).
+  async rejectOrder(userId: string, orderId: string, reason?: string) {
+    const v = await this.requireVendor(userId);
+    await this.assertOwnsOrder(v.id, orderId);
+    await this.claimStageTransition(orderId, 'AWAITING_SELLER', { productFulfillmentStage: 'SELLER_REJECTED', sellerRejectionReason: reason });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'SELLER_REJECTED', note: reason, actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
+
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    if (['PAID', 'PARTIAL'].includes(order.paymentStatus) && Number(order.totalAmount) > 0) {
+      try {
+        const rr = await this.refunds.raise(order.customerId, orderId, undefined, `Seller rejected the order${reason ? `: ${reason}` : ''}`, []);
+        await this.refunds.decide('SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: Number(order.totalAmount), adminNotes: 'Seller rejected order — auto refund' });
+      } catch (e: any) {
+        this.logger.warn(`Auto-refund on seller rejection failed for order ${orderId}: ${e?.message}`);
+      }
+    }
+    return order;
+  }
+
+  async markProcessing(userId: string, orderId: string) {
+    const v = await this.requireVendor(userId);
+    await this.assertOwnsOrder(v.id, orderId);
+    await this.claimStageTransition(orderId, 'SELLER_ACCEPTED', { productFulfillmentStage: 'PROCESSING' });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'ORDER_PROCESSING', actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
+    return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  }
+
+  async markReadyForPickup(userId: string, orderId: string) {
+    const v = await this.requireVendor(userId);
+    await this.assertOwnsOrder(v.id, orderId);
+    await this.claimStageTransition(orderId, 'PROCESSING', { productFulfillmentStage: 'READY_FOR_PICKUP' });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'READY_FOR_PICKUP', actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
+    // Best-effort, same restraint as every other Shipment side effect in this codebase — never
+    // allowed to fail or roll back the stage transition that already succeeded above.
+    await this.shipments.createShipmentForOrder(orderId).catch(() => {});
+    return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  }
+
+  async listIncomingReturns(userId: string) {
+    const v = await this.requireVendor(userId);
+    return this.returns.listIncomingReturnsForVendor(v.id);
+  }
+
+  async inspectReturn(userId: string, returnShipmentId: string, decision: 'ACCEPTED' | 'REJECTED', notes?: string) {
+    const v = await this.requireVendor(userId);
+    const rs = await this.prisma.returnShipment.findUnique({
+      where: { id: returnShipmentId },
+      include: { order: { include: { items: { include: { product: true } } } } },
+    });
+    if (!rs) throw new NotFoundException();
+    if (!rs.order.items.some((i) => i.product.vendorId === v.id)) {
+      throw new ForbiddenException('This return does not belong to your products');
+    }
+    await this.returns.finalize(returnShipmentId, decision, userId, UserRole.PRODUCT_VENDOR, notes);
+    return this.prisma.returnShipment.findUniqueOrThrow({ where: { id: returnShipmentId } });
+  }
 
   // Update-only: a ProductVendor row is created exclusively by
   // SellerRegistrationService._activateSeller() once an admin approves a seller-registration
@@ -584,6 +699,7 @@ export class ProductVendorsService {
         order: {
           select: {
             id: true, orderNumber: true, status: true, paymentStatus: true, createdAt: true,
+            productFulfillmentStage: true, sellerRejectionReason: true,
             customer: { select: { name: true, phone: true } },
             address: { select: { fullAddress: true, city: true, pincode: true } },
             masterOrder: { select: { masterOrderNumber: true } },
@@ -622,6 +738,18 @@ export class ProductVendorsController {
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.pv.profile(u.sub); }
   @Get('me/dashboard') dash(@CurrentUser() u: JwtPayload) { return this.pv.dashboard(u.sub); }
   @Get('me/orders') orders(@CurrentUser() u: JwtPayload) { return this.pv.myOrders(u.sub); }
+
+  // ─── Phase 5 — product-order fulfillment lifecycle ───
+  @Post('me/orders/:orderId/accept') acceptOrder(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.acceptOrder(u.sub, id); }
+  @Post('me/orders/:orderId/reject') rejectOrder(@CurrentUser() u: JwtPayload, @Param('orderId') id: string, @Body() b: { reason?: string }) { return this.pv.rejectOrder(u.sub, id, b?.reason); }
+  @Post('me/orders/:orderId/processing') markProcessing(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.markProcessing(u.sub, id); }
+  @Post('me/orders/:orderId/ready-for-pickup') markReady(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.markReadyForPickup(u.sub, id); }
+
+  // ─── Phase 5 — incoming returns inspection ───
+  @Get('me/returns') myReturns(@CurrentUser() u: JwtPayload) { return this.pv.listIncomingReturns(u.sub); }
+  @Post('me/returns/:id/inspect') inspectReturn(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { decision: 'ACCEPTED' | 'REJECTED'; notes?: string },
+  ) { return this.pv.inspectReturn(u.sub, id, b.decision, b.notes); }
 }
 
 // ─── Phase 2: Agency Partner Management (owner-side self-service) ───
@@ -724,7 +852,7 @@ export class AgencyController {
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],

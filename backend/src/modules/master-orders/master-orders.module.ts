@@ -215,6 +215,18 @@ export class MasterOrdersService {
     private logistics: LogisticsService,
   ) {}
 
+  // Phase 5 — opens the seller-processing window right after payment confirms, instead of
+  // creating a Shipment immediately (that now only happens once the seller marks the order
+  // ready-for-pickup — see ProductVendorsService.markReadyForPickup(), vendors.module.ts).
+  // Best-effort, called from a .catch()-guarded call site — never allowed to fail checkout.
+  private async openSellerFulfillmentWindow(orderId: string): Promise<void> {
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { productFulfillmentStage: 'AWAITING_SELLER', productFulfillmentAt: new Date() },
+    });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'AWAITING_SELLER' });
+  }
+
   private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
     const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
     if (!user || Number(user.walletBalance) < amount) throw new BadRequestException('Insufficient wallet balance');
@@ -549,10 +561,13 @@ export class MasterOrdersService {
     if (confirmUpfront) {
       for (const child of childOrders) {
         if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
-        // Best-effort demo shipment for product orders — see plan doc "Phase 3 — Shipment
-        // Lifecycle". Never allowed to fail or delay the checkout response; totalAmount/the
-        // response below are computed before this and are never touched by it.
-        if (child.type === OrderType.PRODUCT) this.shipments.createShipmentForOrder(child.id).catch((e) => this.logger.error(`Shipment creation failed: ${e.message}`));
+        // Phase 5 — a Shipment is no longer created right after payment; the seller must
+        // accept -> process -> mark ready-for-pickup first (ProductVendorsService,
+        // vendors.module.ts), which is what actually calls ShipmentService.createShipmentForOrder().
+        // This just opens the seller-processing window. Never allowed to fail or delay the
+        // checkout response; totalAmount/the response below are computed before this and are
+        // never touched by it.
+        if (child.type === OrderType.PRODUCT) this.openSellerFulfillmentWindow(child.id).catch((e) => this.logger.error(`Seller fulfillment window open failed: ${e.message}`));
       }
       return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount, paymentMethod: 'COD', isCOD: true };
     }
@@ -614,7 +629,7 @@ export class MasterOrdersService {
 
     for (const child of existing.childOrders) {
       if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
-      if (child.type === OrderType.PRODUCT) this.shipments.createShipmentForOrder(child.id).catch((e) => this.logger.error(`Shipment creation failed: ${e.message}`));
+      if (child.type === OrderType.PRODUCT) this.openSellerFulfillmentWindow(child.id).catch((e) => this.logger.error(`Seller fulfillment window open failed: ${e.message}`));
     }
 
     this.notifyPaymentSuccess(existing).catch(() => {});
@@ -784,6 +799,8 @@ export class MasterOrdersService {
             items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
             serviceItems: { include: { service: true } },
             invoice: true, delivery: true,
+            // Phase 5 — admin delivery/COD visibility (frontend/admin/master-orders.html).
+            shipment: { include: { deliveryPartner: { select: { id: true, user: { select: { name: true, phone: true } } } } } },
             timeline: { orderBy: { createdAt: 'asc' } },
           },
         },

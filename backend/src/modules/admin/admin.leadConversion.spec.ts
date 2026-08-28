@@ -19,7 +19,7 @@ function makeService() {
   const cities: any = { getServicePrice: jest.fn(async () => null) };
   const crm: any = { markConverted: jest.fn(async () => ({})) };
   const config: any = { get: jest.fn((_key: string, fallback?: any) => fallback) };
-  const svc = new AdminService(prisma, config, {} as any, {} as any, cities, {} as any, {} as any, {} as any, crm);
+  const svc = new AdminService(prisma, config, {} as any, {} as any, cities, {} as any, {} as any, {} as any, crm, {} as any, {} as any);
   return { svc, prisma, crm };
 }
 

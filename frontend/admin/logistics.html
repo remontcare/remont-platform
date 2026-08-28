@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Deliveries & Returns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Deliveries & Returns</h1><p>Cross-order operations queues — COD settlement and return-pickup inspection (Phase 5)</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">COD Settlement Queue</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="cod-filter" class="form-control" style="width:220px" onchange="loadCod()">
+            <option value="">All COD Shipments</option>
+            <option value="COD_EXPECTED">COD Expected (not yet delivered)</option>
+            <option value="COD_COLLECTED">Collected — awaiting hand-over</option>
+            <option value="COD_SETTLEMENT_PENDING" selected>Settlement Pending</option>
+            <option value="COD_SETTLED">Settled</option>
+            <option value="COD_RECONCILED">Reconciled</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadCod()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="cod-tbl" class="loading">Loading…</div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Return Inspection Queue</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="ret-filter" class="form-control" style="width:200px" onchange="loadReturns()">
+            <option value="">All Returns</option>
+            <option value="PENDING" selected>Pending Inspection</option>
+            <option value="ACCEPTED">Accepted</option>
+            <option value="REJECTED">Rejected (disputed)</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadReturns()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="ret-tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('logistics');
+requireAuth();
+
+var COD_LABELS = { NOT_APPLICABLE: 'N/A', COD_EXPECTED: 'COD Expected', COD_COLLECTED: 'Collected', COD_SETTLEMENT_PENDING: 'Settlement Pending', COD_SETTLED: 'Settled', COD_RECONCILED: 'Reconciled' };
+var COD_COLOR = { COD_EXPECTED: 'yellow', COD_COLLECTED: 'blue', COD_SETTLEMENT_PENDING: 'blue', COD_SETTLED: 'green', COD_RECONCILED: 'green' };
+
+function loadCod() {
+  var status = document.getElementById('cod-filter').value;
+  document.getElementById('cod-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/shipments' + (status ? '?codSettlementStatus=' + status : '')).then(function(list) {
+    renderCodTable(list || []);
+  }).catch(function(e) { document.getElementById('cod-tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderCodTable(list) {
+  var codOnly = list.filter(function(s) { return s.codSettlementStatus && s.codSettlementStatus !== 'NOT_APPLICABLE'; });
+  if (!codOnly.length) { document.getElementById('cod-tbl').innerHTML = '<div class="empty-state">No COD shipments found for this filter.</div>'; return; }
+  document.getElementById('cod-tbl').innerHTML = '<table><thead><tr><th>Order</th><th>Amount</th><th>Delivery Partner</th><th>Status</th><th>Collected</th><th>Action</th></tr></thead><tbody>' +
+    codOnly.map(function(s) {
+      var partnerName = (s.deliveryPartner && s.deliveryPartner.user && s.deliveryPartner.user.name) || '—';
+      var actionHtml = '<span style="color:#9ca3af;font-size:12px">—</span>';
+      if (s.codSettlementStatus === 'COD_SETTLEMENT_PENDING') {
+        actionHtml = '<button class="btn btn-xs btn-primary" onclick="codSettle(\'' + s.id + '\')">Mark Settled</button>';
+      } else if (s.codSettlementStatus === 'COD_SETTLED') {
+        actionHtml = '<button class="btn btn-xs btn-primary" onclick="codReconcile(\'' + s.id + '\')">Mark Reconciled</button>';
+      }
+      return '<tr>' +
+        '<td>' + escape((s.order && s.order.orderNumber) || s.orderId) + '</td>' +
+        '<td>' + fmtCur(s.codAmount || 0) + '</td>' +
+        '<td>' + escape(partnerName) + '</td>' +
+        '<td>' + badge((COD_LABELS[s.codSettlementStatus] || s.codSettlementStatus), COD_COLOR[s.codSettlementStatus] || 'gray') + '</td>' +
+        '<td style="color:#9ca3af;font-size:12px">' + (s.codCollectedAt ? fmtDateShort(s.codCollectedAt) : '—') + '</td>' +
+        '<td>' + actionHtml + '</td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function codSettle(id) {
+  if (!confirm('Confirm Remont has received this COD cash/handover?')) return;
+  api('POST', '/admin/shipments/' + id + '/cod-settle', {}).then(function() { toast('Marked settled', 'success'); loadCod(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+function codReconcile(id) {
+  if (!confirm('Confirm this settlement has been reconciled against the expected amount?')) return;
+  api('POST', '/admin/shipments/' + id + '/cod-reconcile', {}).then(function() { toast('Marked reconciled', 'success'); loadCod(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+var INSPECTION_COLOR = { PENDING: 'yellow', ACCEPTED: 'green', REJECTED: 'red' };
+
+function loadReturns() {
+  var status = document.getElementById('ret-filter').value;
+  document.getElementById('ret-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/return-shipments' + (status ? '?inspectionStatus=' + status : '')).then(function(list) {
+    renderReturnsTable(list || []);
+  }).catch(function(e) { document.getElementById('ret-tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function renderReturnsTable(list) {
+  if (!list.length) { document.getElementById('ret-tbl').innerHTML = '<div class="empty-state">No returns found for this filter.</div>'; return; }
+  document.getElementById('ret-tbl').innerHTML = '<table><thead><tr><th>Order</th><th>Support Case</th><th>Shipment Status</th><th>Inspection</th><th>Notes</th><th>Action</th></tr></thead><tbody>' +
+    list.map(function(r) {
+      var actionHtml = '<span style="color:#9ca3af;font-size:12px">—</span>';
+      // Admin override is only for a DISPUTED rejection (the seller already rejected it, and
+      // the case is under ADMIN_REVIEW) — a normal PENDING inspection is left for the seller.
+      if (r.inspectionStatus === 'REJECTED') {
+        actionHtml = '<button class="btn btn-xs btn-primary" onclick="adminDecideReturn(\'' + r.id + '\')">Override: Accept Anyway</button>';
+      }
+      return '<tr>' +
+        '<td>' + escape((r.order && r.order.orderNumber) || r.orderId) + '</td>' +
+        '<td>' + escape((r.supportCase && r.supportCase.caseNumber) || '—') + (r.supportCase ? '<br><small style="color:#6b7280">' + escape(r.supportCase.issueType || '') + '</small>' : '') + '</td>' +
+        '<td>' + escape(r.status) + '</td>' +
+        '<td>' + badge(r.inspectionStatus, INSPECTION_COLOR[r.inspectionStatus] || 'gray') + '</td>' +
+        '<td style="max-width:200px">' + (r.inspectionNotes ? escape(r.inspectionNotes) : '<span style="color:#9ca3af">—</span>') + '</td>' +
+        '<td>' + actionHtml + '</td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function adminDecideReturn(id) {
+  var notes = prompt('Reason for overriding the seller\'s rejection and accepting this return:');
+  if (notes === null) return;
+  if (!confirm('This will process a refund/replacement for the customer. Continue?')) return;
+  api('POST', '/admin/return-shipments/' + id + '/decide', { decision: 'ACCEPTED', notes: notes }).then(function() {
+    toast('Return accepted', 'success'); loadReturns();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+loadCod();
+loadReturns();
+</script>
+</body>
+</html>

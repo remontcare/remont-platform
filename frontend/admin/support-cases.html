@@ -138,7 +138,9 @@ function openDetail(id) {
 }
 
 function renderDetail(c) {
-  var isActive = ['RESOLVED', 'CLOSED'].indexOf(c.status) === -1;
+  // Phase 5 — a case already routed to a physical return pickup is decided from the
+  // Deliveries & Returns queue (seller inspection, or an admin override there), not here.
+  var isActive = ['RESOLVED', 'CLOSED'].indexOf(c.status) === -1 && c.resolutionType !== 'RETURN_PICKUP_INITIATED';
   var evidenceHtml = (c.evidenceUrls || []).length
     ? c.evidenceUrls.map(function(u, i) { return '<a class="sc-evidence-thumb" href="' + escape(u) + '" target="_blank">Evidence ' + (i + 1) + ' ↗</a>'; }).join('')
     : '<span style="color:#9ca3af;font-size:12px">No evidence attached</span>';
@@ -202,6 +204,11 @@ function renderDetail(c) {
       '<div class="modal-footer">' +
         '<button class="btn btn-outline" onclick="closeModal(\'sc-overlay\')">Cancel</button>' +
         '<button class="btn btn-primary" onclick="scDecide()">Submit Decision</button>' +
+      '</div>';
+  } else if (c.resolutionType === 'RETURN_PICKUP_INITIATED') {
+    html += '<div style="background:#eff6ff;border-radius:8px;padding:12px;font-size:13px">' +
+      '<strong>A return pickup has been scheduled.</strong><br>' +
+      'This case will close automatically once the seller inspects the item — see the <a href="/admin/logistics.html">Deliveries & Returns</a> queue.' +
       '</div>';
   } else {
     html += '<div style="background:#f0fdf4;border-radius:8px;padding:12px;font-size:13px">' +

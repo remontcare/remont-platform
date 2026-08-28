@@ -9,7 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
-import { UserRole, FulfillmentType, MemberStatus } from '@prisma/client';
+import { UserRole, FulfillmentType, MemberStatus, DeliveryPartnerType } from '@prisma/client';
 
 // ─── DECORATORS ─────────────────────────────────────────────────────
 
@@ -320,6 +320,30 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
   const dLng = toRad(lng2 - lng1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Phase 5 — shared nearest-available-rider matcher, extracted out of the pre-existing (but
+// previously dead-code) DeliveryService.nearest() so it can be reused by MockDeliveryProvider
+// (backend/src/modules/logistics/providers/mock-provider.ts) without a module import cycle
+// between DeliveryModule and LogisticsModule. Best-effort by design: returns null if nobody
+// is within range, matching the caller's existing "shipment can still be created with no
+// rider available yet" behaviour.
+export async function findNearestDeliveryPartner(
+  prisma: any, type: DeliveryPartnerType, lat: number, lng: number, maxKm: number,
+): Promise<any | null> {
+  const partners = await prisma.deliveryPartner.findMany({
+    where: {
+      type, isAvailable: true, status: 'ACTIVE',
+      currentLatitude: { not: null }, currentLongitude: { not: null },
+    },
+    take: 20,
+  });
+  let best: { partner: any; d: number } | null = null;
+  for (const p of partners) {
+    const d = haversineKm(lat, lng, p.currentLatitude, p.currentLongitude);
+    if (d <= maxKm && (!best || d < best.d)) best = { partner: p, d };
+  }
+  return best?.partner || null;
 }
 
 // No vendor can configure a serviceRadius above this (ServiceVendorRegistrationDto's

@@ -215,6 +215,9 @@ var SIDEBAR_NAV = [
     { key:'agencies', label:'Agencies', icon:'🏢', href:'/admin/agencies.html' },
     { key:'partner-id-cards', label:'Partner ID Cards', icon:'🪪', href:'/admin/partner-id-cards.html' },
   ]},
+  { section: '📦 LOGISTICS', items: [
+    { key:'logistics', label:'Deliveries & Returns', icon:'🚚', href:'/admin/logistics.html' },
+  ]},
   { section: '🚚 SUPPLIERS', items: [
     { key:'suppliers', label:'Suppliers', icon:'🏭', href:'/admin/suppliers.html' },
     { key:'purchase-orders', label:'Purchase Orders', icon:'📄', href:'/admin/purchase-orders.html' },

@@ -10831,18 +10831,31 @@ function payOnlineForCOD(orderId, orderNumber, totalAmount, btn) {
   });
 }
 
-// Phase 3 — demo/mock delivery-shipment badge (backend/src/modules/logistics). Always says
-// "Simulated"/"Demo" in the visible label itself, never presented as a real courier — the
-// backend's isDemo flag is only ever true today (no real provider exists yet), but this UI
-// checks it explicitly anyway rather than assuming.
-var SHIP_STATUS_LABELS = { CREATED: 'Order Received', PICKED_UP: 'Picked Up', IN_TRANSIT: 'In Transit', DELIVERED: 'Delivered', FAILED: 'Delivery Failed', CANCELLED: 'Cancelled' };
+// Phase 3-5 — delivery-lifecycle badge (backend/src/modules/logistics). Phase 5: once a real
+// DeliveryPartner is assigned to the Shipment, this shows the real customer-facing stage list
+// (no "Simulated"/"Demo" wording) — the rider's own status updates are then the source of
+// truth. Falls back to the pre-Phase-5 "(Simulated)" wording only when no real rider is
+// assigned yet (the common case today, since no real riders are registered in production) —
+// that path is still driven by the same elapsed-time mock simulation as before, unchanged.
+var SHIP_STATUS_LABELS = { CREATED: 'Order Confirmed', PICKED_UP: 'Picked Up', IN_TRANSIT: 'In Transit', OUT_FOR_DELIVERY: 'Out for Delivery', DELIVERED: 'Delivered', FAILED: 'Delivery Failed', CANCELLED: 'Cancelled' };
+// Phase 5 — seller-processing stage shown before a Shipment exists at all (seller has not yet
+// marked the order ready-for-pickup).
+var FULFILLMENT_STAGE_LABELS = { AWAITING_SELLER: 'Order Confirmed', SELLER_ACCEPTED: 'Seller Accepted', PROCESSING: 'Preparing Your Order', READY_FOR_PICKUP: 'Packed — Pickup Assigned Shortly' };
+function _shipmentBannerText(shipment) {
+  var label = SHIP_STATUS_LABELS[shipment.status] || shipment.status;
+  var eta = shipment.estimatedDelivery ? new Date(shipment.estimatedDelivery).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
+  var prefix = shipment.deliveryPartnerId ? '🚚 ' : '🚚 (Estimated) ';
+  return prefix + escHtml(label) + (eta ? ' · ETA ' + eta : '');
+}
 function _shipmentBanner(o) {
-  if (!o.shipment) return '';
-  var label = SHIP_STATUS_LABELS[o.shipment.status] || o.shipment.status;
-  var eta = o.shipment.estimatedDelivery ? new Date(o.shipment.estimatedDelivery).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
-  return '<div id="ship-badge-' + o.id + '" style="font-size:11.5px;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:6px 10px;margin-bottom:8px">' +
-    '🚚 Demo Delivery Tracking (Simulated) — ' + escHtml(label) + (eta ? ' · ETA ' + eta : '') +
-  '</div>';
+  if (o.shipment) {
+    return '<div id="ship-badge-' + o.id + '" style="font-size:11.5px;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:6px 10px;margin-bottom:8px">' +
+      _shipmentBannerText(o.shipment) +
+    '</div>';
+  }
+  var stageLabel = o.productFulfillmentStage && FULFILLMENT_STAGE_LABELS[o.productFulfillmentStage];
+  if (!stageLabel) return '';
+  return '<div style="font-size:11.5px;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:6px 10px;margin-bottom:8px">📦 ' + escHtml(stageLabel) + '</div>';
 }
 
 function _refreshShipmentBadges(orders) {
@@ -10853,9 +10866,7 @@ function _refreshShipmentBadges(orders) {
       if (!s || !s.hasShipment) return;
       var el = document.getElementById('ship-badge-' + o.id);
       if (!el) return;
-      var label = SHIP_STATUS_LABELS[s.status] || s.status;
-      var eta = s.estimatedDelivery ? new Date(s.estimatedDelivery).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' }) : '';
-      el.textContent = '🚚 Demo Delivery Tracking (Simulated) — ' + label + (eta ? ' · ETA ' + eta : '');
+      el.textContent = _shipmentBannerText({ status: s.status, estimatedDelivery: s.estimatedDelivery, deliveryPartnerId: s.deliveryPartnerAssigned ? 'yes' : null });
     }).catch(function(){});
   });
 }
@@ -11494,9 +11505,20 @@ function _previewSupportIssue(issueType) {
   }).then(function(res) {
     var ctx = (res && res.data) ? res.data : res;
     var rec = ctx.recommendation || {};
+    // Phase 5 — a return-shaped issue can now resolve as a physical pickup, so let the
+    // customer say up front whether they'd prefer a refund or a replacement once the seller
+    // inspects the item. Not shown for issues that never involve a return (e.g. a still-in-
+    // progress delivery complaint).
+    var isReturnShaped = ['RETURN_PRODUCT', 'WRONG_PRODUCT', 'DAMAGED_PRODUCT', 'MISSING_ITEM'].indexOf(issueType) !== -1;
+    var remedyHtml = isReturnShaped
+      ? '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">Preferred resolution</div>' +
+        '<label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-size:13px;color:#374151"><input type="radio" name="sup-remedy" value="REFUND" checked> Refund</label>' +
+        '<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#374151"><input type="radio" name="sup-remedy" value="REPLACEMENT"> Replacement</label></div>'
+      : '';
     var box = '<div style="margin-top:14px;padding:14px;background:#fef9f5;border:1.5px solid #f3d9c4;border-radius:10px">' +
       (rec.reasonForCustomer ? '<div style="font-size:13px;color:#374151;white-space:pre-line;margin-bottom:10px">' + escHtml(rec.reasonForCustomer) + '</div>' : '') +
       (rec.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">Policy: ' + escHtml(rec.policyApplied) + '</div>' : '') +
+      remedyHtml +
       '<textarea id="sup-description" placeholder="Add any extra details (optional)" style="width:100%;min-height:60px;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px"></textarea>' +
       '<button onclick="_submitSupportCase(' + escHtml(JSON.stringify(issueType)) + ')" style="width:100%;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Submit</button>' +
     '</div>';
@@ -11508,9 +11530,11 @@ function _previewSupportIssue(issueType) {
 
 function _submitSupportCase(issueType) {
   var description = (document.getElementById('sup-description') || {}).value || undefined;
+  var remedyInput = document.querySelector('input[name="sup-remedy"]:checked');
+  var requestedRemedy = remedyInput ? remedyInput.value : undefined;
   document.getElementById('sup-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:30px 0">Submitting…</p>';
   apiPost('/api/v1/support/cases', {
-    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType, description: description,
+    orderId: _supCtx.orderId, orderItemId: _supCtx.orderItemId || undefined, issueType: issueType, description: description, requestedRemedy: requestedRemedy,
   }).then(function(res) {
     var kase = (res && res.data) ? res.data : res;
     _renderSupportResult(kase);

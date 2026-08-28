@@ -2,14 +2,41 @@ import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, UseGuards, NotFoundException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { DeliveryPartnerType, DeliveryStatus, UserRole } from '@prisma/client';
+import { DeliveryPartnerType, DeliveryStatus, ShipmentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, haversineKm } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, findNearestDeliveryPartner } from '../../common';
+import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
+
+// Phase 5 — explicit adjacency map so a rider can never skip a stage or repeat one, mirroring
+// the OTP-gated DELIVERED check DeliveryService.updateStatus() already applies to the
+// pre-existing Delivery model. Applies to both outbound Shipment and ReturnShipment (their
+// status enums are the same ShipmentStatus).
+const SHIPMENT_STATUS_NEXT: Record<ShipmentStatus, ShipmentStatus[]> = {
+  CREATED: [ShipmentStatus.PICKED_UP, ShipmentStatus.FAILED],
+  PICKED_UP: [ShipmentStatus.IN_TRANSIT, ShipmentStatus.FAILED],
+  IN_TRANSIT: [ShipmentStatus.OUT_FOR_DELIVERY, ShipmentStatus.FAILED],
+  OUT_FOR_DELIVERY: [ShipmentStatus.DELIVERED, ShipmentStatus.FAILED],
+  DELIVERED: [],
+  FAILED: [],
+  CANCELLED: [],
+};
+
+// Return-leg ladder is one hop shorter — DELIVERED here means "reached the seller," which has
+// no last-mile "out for delivery" concept, so that rung is skipped for ReturnShipment.
+const RETURN_SHIPMENT_STATUS_NEXT: Record<ShipmentStatus, ShipmentStatus[]> = {
+  CREATED: [ShipmentStatus.PICKED_UP, ShipmentStatus.FAILED],
+  PICKED_UP: [ShipmentStatus.IN_TRANSIT, ShipmentStatus.FAILED],
+  IN_TRANSIT: [ShipmentStatus.DELIVERED, ShipmentStatus.FAILED],
+  OUT_FOR_DELIVERY: [],
+  DELIVERED: [],
+  FAILED: [],
+  CANCELLED: [],
+};
 
 @Injectable()
 export class DeliveryService {
   private readonly logger = new Logger(DeliveryService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private shipments: ShipmentService) {}
 
   async register(userId: string, data: any) {
     return this.prisma.deliveryPartner.upsert({
@@ -98,20 +125,74 @@ export class DeliveryService {
     });
   }
 
-  private async nearest(type: DeliveryPartnerType, lat: number, lng: number, maxKm: number) {
-    const ps = await this.prisma.deliveryPartner.findMany({
-      where: {
-        type, isAvailable: true, status: 'ACTIVE',
-        currentLatitude: { not: null }, currentLongitude: { not: null },
-      },
-      take: 20,
-    });
-    let best: { partner: any; d: number } | null = null;
-    for (const p of ps) {
-      const d = haversineKm(lat, lng, p.currentLatitude!, p.currentLongitude!);
-      if (d <= maxKm && (!best || d < best.d)) best = { partner: p, d };
+  private nearest(type: DeliveryPartnerType, lat: number, lng: number, maxKm: number) {
+    return findNearestDeliveryPartner(this.prisma, type, lat, lng, maxKm);
+  }
+
+  // ─── Phase 5 — rider-facing Shipment (outbound) status advance ──────────────────────
+  private async getOwnPartner(userId: string) {
+    const partner = await this.prisma.deliveryPartner.findUnique({ where: { userId } });
+    if (!partner) throw new NotFoundException('Delivery partner profile not found');
+    return partner;
+  }
+
+  async updateShipmentStatus(userId: string, shipmentId: string, status: ShipmentStatus, opts: { otp?: string; codConfirmed?: boolean } = {}) {
+    const partner = await this.getOwnPartner(userId);
+    const shipment = await this.prisma.shipment.findFirst({ where: { id: shipmentId, deliveryPartnerId: partner.id } });
+    if (!shipment) throw new NotFoundException();
+    if (!SHIPMENT_STATUS_NEXT[shipment.status]?.includes(status)) {
+      throw new BadRequestException(`Cannot move shipment from ${shipment.status} to ${status}`);
     }
-    return best?.partner || null;
+    if (status === ShipmentStatus.DELIVERED) {
+      if (shipment.deliveryOtp && shipment.deliveryOtp !== opts.otp) throw new BadRequestException('Invalid delivery OTP');
+      if (shipment.codSettlementStatus === 'COD_EXPECTED' && !opts.codConfirmed) {
+        throw new BadRequestException('Confirm cash/UPI collection before marking this COD order delivered');
+      }
+    }
+    const updated = await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        status,
+        ...(status === ShipmentStatus.DELIVERED ? { deliveredAt: new Date(), deliveryOtpVerified: !!shipment.deliveryOtp } : {}),
+      },
+    });
+    if (status === ShipmentStatus.DELIVERED) {
+      if (shipment.codSettlementStatus === 'COD_EXPECTED') await this.shipments.markCodCollected(shipmentId, partner.id);
+      await this.shipments.onShipmentDelivered(shipment.orderId);
+    }
+    return updated;
+  }
+
+  async myShipments(userId: string) {
+    const p = await this.getOwnPartner(userId);
+    return this.prisma.shipment.findMany({ where: { deliveryPartnerId: p.id }, orderBy: { createdAt: 'desc' }, take: 50 });
+  }
+
+  async codHandover(userId: string) {
+    const p = await this.getOwnPartner(userId);
+    return this.shipments.codHandover(p.id);
+  }
+
+  // ─── Phase 5 — rider-facing ReturnShipment (pickup-from-customer) status advance ────
+  async updateReturnShipmentStatus(userId: string, returnShipmentId: string, status: ShipmentStatus, otp?: string) {
+    const partner = await this.getOwnPartner(userId);
+    const rs = await this.prisma.returnShipment.findFirst({ where: { id: returnShipmentId, deliveryPartnerId: partner.id } });
+    if (!rs) throw new NotFoundException();
+    if (!RETURN_SHIPMENT_STATUS_NEXT[rs.status]?.includes(status)) {
+      throw new BadRequestException(`Cannot move return shipment from ${rs.status} to ${status}`);
+    }
+    if (status === ShipmentStatus.PICKED_UP && rs.pickupOtp && rs.pickupOtp !== otp) {
+      throw new BadRequestException('Invalid pickup OTP');
+    }
+    return this.prisma.returnShipment.update({
+      where: { id: returnShipmentId },
+      data: { status, ...(status === ShipmentStatus.PICKED_UP ? { pickupOtpVerified: !!rs.pickupOtp } : {}) },
+    });
+  }
+
+  async myReturnShipments(userId: string) {
+    const p = await this.getOwnPartner(userId);
+    return this.prisma.returnShipment.findMany({ where: { deliveryPartnerId: p.id }, orderBy: { createdAt: 'desc' }, take: 50 });
   }
 }
 
@@ -130,9 +211,25 @@ export class DeliveryController {
     @CurrentUser() u: JwtPayload, @Param('id') id: string,
     @Body() b: { status: DeliveryStatus; proofPhotoUrl?: string; otp?: string },
   ) { return this.d.updateStatus(u.sub, id, b.status, b.proofPhotoUrl, b.otp); }
+
+  // ─── Phase 5 — outbound Shipment tracking for a real assigned rider ───────────────
+  @Get('me/shipments') myShipments(@CurrentUser() u: JwtPayload) { return this.d.myShipments(u.sub); }
+  @Patch('shipments/:id/status') shipmentStatus(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { status: ShipmentStatus; otp?: string; codConfirmed?: boolean },
+  ) { return this.d.updateShipmentStatus(u.sub, id, b.status, { otp: b.otp, codConfirmed: b.codConfirmed }); }
+  @Post('me/cod-handover') codHandover(@CurrentUser() u: JwtPayload) { return this.d.codHandover(u.sub); }
+
+  // ─── Phase 5 — return-pickup (customer -> original seller) tracking ───────────────
+  @Get('me/return-shipments') myReturnShipments(@CurrentUser() u: JwtPayload) { return this.d.myReturnShipments(u.sub); }
+  @Patch('return-shipments/:id/status') returnShipmentStatus(
+    @CurrentUser() u: JwtPayload, @Param('id') id: string,
+    @Body() b: { status: ShipmentStatus; otp?: string },
+  ) { return this.d.updateReturnShipmentStatus(u.sub, id, b.status, b.otp); }
 }
 
 @Module({
+  imports: [LogisticsModule],
   controllers: [DeliveryController],
   providers: [DeliveryService],
   exports: [DeliveryService],

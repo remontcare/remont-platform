@@ -121,6 +121,10 @@ a{color:inherit;text-decoration:none}
 .empty-state{text-align:center;padding:40px 20px;color:#9ca3af}
 .empty-state .es-icon{font-size:40px;margin-bottom:10px}
 .empty-state .es-text{font-size:13px}
+.ic-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.btn-mini{font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;border:none;cursor:pointer}
+.btn-mini.btn-accept{background:#166534;color:#fff}
+.btn-mini.btn-reject{background:#991b1b;color:#fff}
 
 .fab{position:fixed;bottom:90px;left:50%;transform:translateX(calc(-50% + 200px));width:52px;height:52px;border-radius:50%;background:var(--sienna);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(196,96,26,.4);z-index:150}
 
@@ -587,6 +591,7 @@ function enterDashboard(){
   loadDashboardStats();
   loadProducts();
   loadOrders();
+  loadReturns();
   loadWalletBalance();
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active')});document.getElementById(id).classList.add('active');}
@@ -612,7 +617,7 @@ function goView(name){
   document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
   document.getElementById('nav-'+name).classList.add('active');
   document.getElementById('products-fab').style.display = name === 'products' ? 'flex' : 'none';
-  if (name === 'orders') loadOrders();
+  if (name === 'orders') { loadOrders(); loadReturns(); }
 }
 
 /* ── DASHBOARD ── */
@@ -1014,12 +1019,18 @@ function saveDeliverySettings(){
 
 /* ── ORDERS ── */
 var myOrders = [];
+var myReturns = [];
 var currentOrdersBucket = 'all';
 
-// Buckets built from the real OrderStatus values this backend actually uses (no dedicated
-// product-fulfillment lifecycle exists yet — see PROJECT_PROGRESS.md — so these are the
-// closest honest groupings of the statuses that do exist).
-function orderBucket(status){
+// Phase 5 — buckets now prefer the real product-fulfillment stage when present
+// (productFulfillmentStage, set on every PRODUCT order going forward). Falls back to the old
+// OrderStatus-based grouping only for orders created before that field existed.
+function orderBucket(o){
+  var stage = o.productFulfillmentStage;
+  if (stage === 'AWAITING_SELLER') return 'pending';
+  if (stage === 'SELLER_ACCEPTED' || stage === 'PROCESSING' || stage === 'READY_FOR_PICKUP' || stage === 'HANDED_TO_LOGISTICS') return 'ongoing';
+  if (stage === 'SELLER_REJECTED') return 'returns';
+  var status = o.status;
   if (status === 'PENDING_PAYMENT' || status === 'CONFIRMED') return 'pending';
   if (status === 'VENDOR_ASSIGNED' || status === 'VENDOR_EN_ROUTE' || status === 'STARTED' || status === 'IN_PROGRESS' || status === 'EXTRA_WORK_ADDED') return 'ongoing';
   if (status === 'COMPLETED' || status === 'INVOICED' || status === 'CLOSED') return 'completed';
@@ -1040,7 +1051,7 @@ function loadOrders(){
 
 function updateOrderCounts(){
   var counts = { pending: 0, ongoing: 0, completed: 0, returns: 0 };
-  myOrders.forEach(function(o){ counts[orderBucket(o.status)]++; });
+  myOrders.forEach(function(o){ counts[orderBucket(o)]++; });
   document.getElementById('cnt-pending').textContent = counts.pending;
   document.getElementById('cnt-ongoing').textContent = counts.ongoing;
   document.getElementById('cnt-completed').textContent = counts.completed;
@@ -1051,25 +1062,98 @@ function statusLabel(s){
   var map={PENDING_PAYMENT:'Pending Payment',CONFIRMED:'Confirmed',VENDOR_ASSIGNED:'Assigned',VENDOR_EN_ROUTE:'En Route',STARTED:'Started',IN_PROGRESS:'In Progress',EXTRA_WORK_ADDED:'Extra Work',COMPLETED:'Completed',INVOICED:'Invoiced',CLOSED:'Closed',CANCELLED:'Cancelled',REFUNDED:'Refunded'};
   return map[s]||s;
 }
+// Phase 5 — product-order fulfillment stage label, shown instead of the raw OrderStatus badge
+// whenever a stage is present (every PRODUCT order going forward).
+function fulfillmentStageLabel(stage){
+  var map={AWAITING_SELLER:'Awaiting your acceptance',SELLER_ACCEPTED:'Accepted — start packing',SELLER_REJECTED:'Rejected',PROCESSING:'Packing in progress',READY_FOR_PICKUP:'Ready for pickup',HANDED_TO_LOGISTICS:'Handed to delivery partner'};
+  return map[stage]||stage;
+}
 function orderCardHtml(o){
   var itemsTxt = o.items.map(function(it){ return it.productName+' ×'+it.quantity; }).join(', ');
   var total = o.items.reduce(function(sum,it){ return sum + Number(it.totalPrice||0); }, 0);
   var custName = (o.customer && o.customer.name) || 'Customer';
-  var bucket = orderBucket(o.status);
+  var bucket = orderBucket(o);
   var badgeClass = bucket === 'completed' ? 'active' : (bucket === 'returns' ? 'low' : 'inactive');
+  var stage = o.productFulfillmentStage;
+  var badgeText = stage ? fulfillmentStageLabel(stage) : statusLabel(o.status);
+  var actionsHtml = '';
+  if (stage === 'AWAITING_SELLER') {
+    actionsHtml = '<div class="ic-actions">' +
+      '<button class="btn-mini btn-accept" onclick="sellerAcceptOrder(\''+o.id+'\')">✅ Accept</button>' +
+      '<button class="btn-mini btn-reject" onclick="sellerRejectOrder(\''+o.id+'\')">❌ Reject</button></div>';
+  } else if (stage === 'SELLER_ACCEPTED') {
+    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="sellerMarkProcessing(\''+o.id+'\')">📦 Start Packing</button></div>';
+  } else if (stage === 'PROCESSING') {
+    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="sellerMarkReady(\''+o.id+'\')">🚚 Mark Ready for Pickup</button></div>';
+  } else if (stage === 'SELLER_REJECTED' && o.sellerRejectionReason) {
+    actionsHtml = '<div class="ic-meta">Reason: '+escHtml(o.sellerRejectionReason)+'</div>';
+  }
   return '<div class="item-card">' +
     '<div class="ic-thumb">🧾</div>' +
     '<div class="ic-info"><div class="ic-title">'+escHtml(o.orderNumber)+' — '+escHtml(custName)+'</div>' +
-    '<div class="ic-meta">'+escHtml(itemsTxt)+(o.masterOrder ? ' · Order '+escHtml(o.masterOrder.masterOrderNumber) : '')+'</div></div>' +
+    '<div class="ic-meta">'+escHtml(itemsTxt)+(o.masterOrder ? ' · Order '+escHtml(o.masterOrder.masterOrderNumber) : '')+'</div>' +
+    actionsHtml + '</div>' +
     '<div class="ic-right"><div class="ic-amount">'+fmtMoney(total)+'</div>' +
-    '<span class="badge '+badgeClass+'">'+statusLabel(o.status)+'</span></div>' +
+    '<span class="badge '+badgeClass+'">'+escHtml(badgeText)+'</span></div>' +
+  '</div>';
+}
+// Phase 5 — an incoming return-pickup awaiting this seller's inspection (ReturnShipment
+// reached DELIVERED, inspectionStatus still PENDING). Accept/Reject calls the same endpoint
+// the seller-order actions above use.
+function returnCardHtml(rs){
+  var orderNumber = (rs.order && rs.order.orderNumber) || '';
+  var actionsHtml = rs.inspectionStatus === 'PENDING'
+    ? '<div class="ic-actions">' +
+        '<button class="btn-mini btn-accept" onclick="sellerInspectReturn(\''+rs.id+'\',\'ACCEPTED\')">✅ Accept Return</button>' +
+        '<button class="btn-mini btn-reject" onclick="sellerInspectReturn(\''+rs.id+'\',\'REJECTED\')">❌ Reject Return</button></div>'
+    : '<div class="ic-meta">Inspection: '+escHtml(rs.inspectionStatus)+'</div>';
+  return '<div class="item-card">' +
+    '<div class="ic-thumb">↩️</div>' +
+    '<div class="ic-info"><div class="ic-title">Return — Order '+escHtml(orderNumber)+'</div>' +
+    '<div class="ic-meta">Item has arrived — please inspect before accepting.</div>' +
+    actionsHtml + '</div>' +
+    '<div class="ic-right"><span class="badge inactive">'+escHtml(rs.status)+'</span></div>' +
   '</div>';
 }
 function renderOrders(){
   var el = document.getElementById('orders-list');
-  var list = currentOrdersBucket === 'all' ? myOrders : myOrders.filter(function(o){ return orderBucket(o.status) === currentOrdersBucket; });
+  if (currentOrdersBucket === 'returns') {
+    var pendingReturns = myReturns.filter(function(r){ return r.inspectionStatus === 'PENDING'; });
+    var rejectedOrders = myOrders.filter(function(o){ return o.productFulfillmentStage === 'SELLER_REJECTED'; });
+    var html = pendingReturns.map(returnCardHtml).join('') + rejectedOrders.map(orderCardHtml).join('');
+    el.innerHTML = html || '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No returns here yet</div></div>';
+    return;
+  }
+  var list = currentOrdersBucket === 'all' ? myOrders : myOrders.filter(function(o){ return orderBucket(o) === currentOrdersBucket; });
   if (!list.length) { el.innerHTML = '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">No orders here yet</div></div>'; return; }
   el.innerHTML = list.map(orderCardHtml).join('');
+}
+function loadReturns(){
+  apiFetch('/vendors/product/me/returns').then(function(list){ myReturns = list; if (currentOrdersBucket === 'returns') renderOrders(); }).catch(function(){});
+}
+function sellerAcceptOrder(orderId){
+  apiFetch('/vendors/product/me/orders/'+orderId+'/accept', { method: 'POST' }).then(loadOrders).catch(function(e){ alert(e.message); });
+}
+function sellerRejectOrder(orderId){
+  var reason = prompt('Reason for rejecting this order (customer will be refunded):');
+  if (reason === null) return;
+  apiFetch('/vendors/product/me/orders/'+orderId+'/reject', { method: 'POST', body: JSON.stringify({ reason: reason }) }).then(loadOrders).catch(function(e){ alert(e.message); });
+}
+function sellerMarkProcessing(orderId){
+  apiFetch('/vendors/product/me/orders/'+orderId+'/processing', { method: 'POST' }).then(loadOrders).catch(function(e){ alert(e.message); });
+}
+function sellerMarkReady(orderId){
+  apiFetch('/vendors/product/me/orders/'+orderId+'/ready-for-pickup', { method: 'POST' }).then(loadOrders).catch(function(e){ alert(e.message); });
+}
+function sellerInspectReturn(returnShipmentId, decision){
+  var notes = null;
+  if (decision === 'REJECTED') {
+    notes = prompt('Reason for rejecting this return:');
+    if (notes === null) return;
+  }
+  apiFetch('/vendors/product/me/returns/'+returnShipmentId+'/inspect', { method: 'POST', body: JSON.stringify({ decision: decision, notes: notes }) })
+    .then(function(){ loadOrders(); loadReturns(); })
+    .catch(function(e){ alert(e.message); });
 }
 function renderRecentOrders(){
   var el = document.getElementById('home-recent-orders');

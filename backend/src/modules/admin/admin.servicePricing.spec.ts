@@ -22,7 +22,7 @@ function makeService() {
     },
   };
   const config: any = { get: jest.fn((_key: string, def: any) => def) };
-  const svc = new AdminService(prisma, config, {} as any, {} as any, {} as any, { emit: jest.fn() } as any, {} as any, {} as any, {} as any);
+  const svc = new AdminService(prisma, config, {} as any, {} as any, {} as any, { emit: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { svc, prisma };
 }
 

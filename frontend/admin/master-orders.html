@@ -129,11 +129,50 @@ function _flattenMasterOrderItems(masterOrder) {
           gst: Math.round(Number(c.gstAmount) * share * 100) / 100,
           timeline: c.timeline || [],
           childOrderNumber: c.orderNumber,
+          // Phase 5 — delivery/COD visibility
+          fulfillmentStage: c.productFulfillmentStage,
+          shipment: c.shipment,
         });
       });
     }
   });
   return items;
+}
+
+// Phase 5 — admin delivery/COD visibility. item.fulfillmentStage is only set for PRODUCT
+// items (null for SERVICE rows, which show a plain dash); item.shipment only exists once the
+// seller has marked the order ready-for-pickup.
+var FULFILLMENT_STAGE_LABELS_ADMIN = { AWAITING_SELLER: 'Awaiting Seller', SELLER_ACCEPTED: 'Seller Accepted', SELLER_REJECTED: 'Seller Rejected', PROCESSING: 'Packing', READY_FOR_PICKUP: 'Ready for Pickup', HANDED_TO_LOGISTICS: 'Shipped' };
+var COD_STATUS_LABELS_ADMIN = { NOT_APPLICABLE: '', COD_EXPECTED: 'COD Expected', COD_COLLECTED: 'COD Collected', COD_SETTLEMENT_PENDING: 'COD Settlement Pending', COD_SETTLED: 'COD Settled', COD_RECONCILED: 'COD Reconciled' };
+function _deliveryCell(item) {
+  if (!item.fulfillmentStage && !item.shipment) return '<span style="color:#9ca3af;font-size:12px">—</span>';
+  var lines = [];
+  if (item.shipment) {
+    lines.push('<span style="font-size:11px;color:#374151">' + escape(item.shipment.tier || '') + ' · ' + escape(item.shipment.status) + '</span>');
+    if (item.shipment.deliveryPartner && item.shipment.deliveryPartner.user) {
+      lines.push('<span style="font-size:11px;color:#6b7280">' + escape(item.shipment.deliveryPartner.user.name || '') + '</span>');
+    }
+    var codLabel = COD_STATUS_LABELS_ADMIN[item.shipment.codSettlementStatus];
+    if (codLabel) {
+      lines.push('<span style="font-size:11px;color:#0369a1">' + escape(codLabel) + '</span>');
+      if (item.shipment.codSettlementStatus === 'COD_SETTLEMENT_PENDING') {
+        lines.push('<button class="btn btn-xs btn-outline" onclick="_codSettle(\'' + item.shipment.id + '\', this)">Mark Settled</button>');
+      } else if (item.shipment.codSettlementStatus === 'COD_SETTLED') {
+        lines.push('<button class="btn btn-xs btn-outline" onclick="_codReconcile(\'' + item.shipment.id + '\', this)">Mark Reconciled</button>');
+      }
+    }
+  } else if (item.fulfillmentStage) {
+    lines.push('<span style="font-size:11px;color:#374151">' + escape(FULFILLMENT_STAGE_LABELS_ADMIN[item.fulfillmentStage] || item.fulfillmentStage) + '</span>');
+  }
+  return lines.join('<br>');
+}
+function _codSettle(shipmentId, btn) {
+  btn.disabled = true;
+  api('POST', '/admin/shipments/' + shipmentId + '/cod-settle', {}).then(function() { if (_currentDetailId) viewDetail(_currentDetailId); }).catch(function(e) { alert(e.message); btn.disabled = false; });
+}
+function _codReconcile(shipmentId, btn) {
+  btn.disabled = true;
+  api('POST', '/admin/shipments/' + shipmentId + '/cod-reconcile', {}).then(function() { if (_currentDetailId) viewDetail(_currentDetailId); }).catch(function(e) { alert(e.message); btn.disabled = false; });
 }
 
 function _timelineSummary(timeline) {
@@ -160,7 +199,9 @@ function toggleTimeline(btn) {
   }
 }
 
+var _currentDetailId = null;
 function viewDetail(id) {
+  _currentDetailId = id;
   document.getElementById('detail-overlay').style.display = 'flex';
   document.getElementById('d-number').textContent = '';
   document.getElementById('d-body').innerHTML = 'Loading…';
@@ -178,9 +219,9 @@ function viewDetail(id) {
     '</p>';
 
     var items = _flattenMasterOrderItems(o);
-    var colspan = 7;
+    var colspan = 8;
     html += '<div class="table-wrap"><table><thead><tr>' +
-      '<th>Item</th><th>Vendor</th><th>Status</th><th>Qty</th><th>Price</th><th>GST</th><th>Timeline</th>' +
+      '<th>Item</th><th>Vendor</th><th>Status</th><th>Qty</th><th>Price</th><th>GST</th><th>Delivery</th><th>Timeline</th>' +
       '</tr></thead><tbody>';
     items.forEach(function(item, i) {
       html += '<tr>' +
@@ -190,6 +231,7 @@ function viewDetail(id) {
         '<td>' + item.qty + '</td>' +
         '<td>' + fmtCur(item.price) + '</td>' +
         '<td>' + fmtCur(item.gst) + '</td>' +
+        '<td>' + _deliveryCell(item) + '</td>' +
         '<td><button class="btn btn-xs btn-outline" onclick="toggleTimeline(this)">' + item.timeline.length + ' event(s)</button><br>' + _timelineSummary(item.timeline) + '</td>' +
       '</tr>';
       html += _timelineDetailRows(item.timeline, colspan);

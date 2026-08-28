@@ -1,10 +1,21 @@
 import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { DeliveryTier } from '@prisma/client';
+import { DeliveryTier, CodSettlementStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { Public, JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords } from '../../common';
+import { Public, JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, writeOrderTimeline } from '../../common';
 import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
+
+// Phase 5 — COD settlement ladder adjacency, same idiom as DeliveryController's
+// SHIPMENT_STATUS_NEXT. Rejects an out-of-order or duplicate call instead of silently no-op-ing.
+const COD_STATUS_NEXT: Record<CodSettlementStatus, CodSettlementStatus[]> = {
+  NOT_APPLICABLE: [],
+  COD_EXPECTED: [CodSettlementStatus.COD_COLLECTED],
+  COD_COLLECTED: [CodSettlementStatus.COD_SETTLEMENT_PENDING],
+  COD_SETTLEMENT_PENDING: [CodSettlementStatus.COD_SETTLED],
+  COD_SETTLED: [CodSettlementStatus.COD_RECONCILED],
+  COD_RECONCILED: [],
+};
 
 // Phase 2 — delivery-speed ELIGIBILITY DECISION ENGINE for product orders. See the plan doc
 // "Phase 2 — Delivery Eligibility Engine" for the full design. Deliberately separate from
@@ -254,18 +265,21 @@ export class ShipmentService {
     return this.providers.MOCK_DEMO;
   }
 
-  // Called as a best-effort side effect right after checkout has already succeeded — never
-  // allowed to fail or delay the checkout response itself (see call site in
-  // master-orders.module.ts). Deliberately creates a demo shipment for EVERY product order
-  // with a resolvable address, regardless of eligibility tier (including STANDARD and
-  // no-vendor products) — there's no real national-courier integration either yet, so this
-  // is what makes the "whole lifecycle testable end-to-end" today.
+  // Phase 5 — called once the SELLER marks the order ready-for-pickup (ProductVendorsService.
+  // markReadyForPickup(), vendors.module.ts), never right after payment anymore. Before Phase
+  // 5 this fired immediately on payment confirmation; the seller-processing window
+  // (AWAITING_SELLER -> SELLER_ACCEPTED -> PROCESSING -> READY_FOR_PICKUP) now happens first.
   async createShipmentForOrder(orderId: string): Promise<void> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: { include: { product: { include: { vendor: { include: { pickupLocations: { where: { isActive: true } } } } } } }, take: 1 }, address: true },
     });
     if (!order || !order.items.length || !order.addressId) return; // service-only or address-less orders: nothing to ship
+    // Defensive re-entrancy guard: a shipment must never be created before the seller has
+    // actually packed the order. The Shipment.orderId @unique constraint is the hard backstop
+    // behind this (a duplicate call after a shipment already exists throws, safely swallowed
+    // by this method's best-effort callers).
+    if (order.productFulfillmentStage !== 'READY_FOR_PICKUP') return;
     const firstProduct = order.items[0].product;
     if (!firstProduct) return;
 
@@ -285,7 +299,7 @@ export class ShipmentService {
 
     const pickup = firstProduct.vendor?.pickupLocations[0];
     const provider = this.getProvider();
-    const { providerRef, estimatedDelivery } = await provider.createShipment({
+    const { providerRef, estimatedDelivery, deliveryPartnerId } = await provider.createShipment({
       orderId,
       tier,
       pickupLat: pickup?.latitude ?? null,
@@ -294,9 +308,30 @@ export class ShipmentService {
       dropLng: order.address?.longitude ?? null,
     });
 
+    const isCod = order.paymentMethod === 'COD';
+    const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
     await this.prisma.shipment.create({
-      data: { orderId, provider: provider.name, providerRef, tier, estimatedDelivery, isDemo: true },
+      data: {
+        orderId, provider: provider.name, providerRef, tier, estimatedDelivery, isDemo: true,
+        deliveryPartnerId, partnerAssignedAt: deliveryPartnerId ? new Date() : undefined,
+        codAmount: isCod ? order.totalAmount : undefined,
+        codSettlementStatus: isCod ? CodSettlementStatus.COD_EXPECTED : CodSettlementStatus.NOT_APPLICABLE,
+        deliveryOtp,
+      },
     });
+    await this.prisma.order.update({ where: { id: orderId }, data: { productFulfillmentStage: 'HANDED_TO_LOGISTICS', productFulfillmentAt: new Date() } });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'SHIPMENT_CREATED', note: deliveryPartnerId ? 'Delivery partner assigned' : 'No delivery partner available yet' });
+  }
+
+  // Phase 5 — called by DeliveryController.updateShipmentStatus() once a rider marks a
+  // Shipment DELIVERED. Product orders never had anything advance Order.status past CONFIRMED
+  // before Phase 5; this is new, purely additive behaviour gated so it can never fire for a
+  // SERVICE order or a bundle order's service child.
+  async onShipmentDelivered(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.type !== 'PRODUCT' || order.serviceId) return;
+    await this.prisma.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: new Date() } });
+    await writeOrderTimeline(this.prisma, { orderId, status: 'DELIVERED' });
   }
 
   async getShipmentStatus(orderId: string, userId: string) {
@@ -305,18 +340,111 @@ export class ShipmentService {
     if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
     if (!order.shipment) return { hasShipment: false };
 
-    const live = await this.getProvider().getStatus(order.shipment.providerRef, order.shipment.createdAt);
-    if (live.status !== order.shipment.status) {
-      await this.prisma.shipment.update({ where: { id: order.shipment.id }, data: { status: live.status } });
+    // Once a real DeliveryPartner is assigned, the rider's own explicit status updates
+    // (DeliveryController) are the sole source of truth — the elapsed-time demo simulation is
+    // only consulted for a shipment with no rider assigned yet (preserves the pre-Phase-5 demo
+    // auto-progression exactly as before for that case).
+    let status = order.shipment.status;
+    let isDemo = order.shipment.isDemo;
+    let providerLabel: string | undefined;
+    if (!order.shipment.deliveryPartnerId) {
+      const live = await this.getProvider().getStatus(order.shipment.providerRef, order.shipment.createdAt);
+      if (live.status !== order.shipment.status) {
+        await this.prisma.shipment.update({ where: { id: order.shipment.id }, data: { status: live.status } });
+        if (live.status === 'DELIVERED') await this.onShipmentDelivered(orderId);
+      }
+      status = live.status;
+      isDemo = live.isDemo;
+      providerLabel = live.providerLabel;
     }
     return {
       hasShipment: true,
       tier: order.shipment.tier,
-      status: live.status,
+      status,
       estimatedDelivery: order.shipment.estimatedDelivery,
-      isDemo: live.isDemo,
-      providerLabel: live.providerLabel,
+      isDemo,
+      providerLabel,
+      deliveryPartnerAssigned: !!order.shipment.deliveryPartnerId,
+      codSettlementStatus: order.shipment.codSettlementStatus,
     };
+  }
+
+  // ─── Phase 5 — COD settlement ladder ───────────────────────────────────────────────
+  // Deliberately separate from ServiceVendor.pendingPayout/PartnerLedgerEntry — see schema
+  // doc comment on CodSettlementStatus for why. Rider collects/hands over; admin settles/
+  // reconciles. Every step validated against COD_STATUS_NEXT so a stale/duplicate/out-of-
+  // order call is rejected, not silently ignored.
+
+  private assertCodTransition(current: CodSettlementStatus, target: CodSettlementStatus) {
+    if (!COD_STATUS_NEXT[current]?.includes(target)) {
+      throw new BadRequestException(`Cannot move COD status from ${current} to ${target}`);
+    }
+  }
+
+  async markCodCollected(shipmentId: string, deliveryPartnerId: string): Promise<void> {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+    if (!shipment) throw new NotFoundException();
+    this.assertCodTransition(shipment.codSettlementStatus, CodSettlementStatus.COD_COLLECTED);
+    await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: { codSettlementStatus: CodSettlementStatus.COD_COLLECTED, codCollectedAt: new Date(), codCollectedBy: deliveryPartnerId },
+    });
+    await writeOrderTimeline(this.prisma, { orderId: shipment.orderId, status: 'COD_COLLECTED' });
+  }
+
+  // Batch hand-over — every one of this rider's COD_COLLECTED shipments moves to
+  // COD_SETTLEMENT_PENDING at once ("I've physically handed today's cash to the hub").
+  async codHandover(deliveryPartnerId: string): Promise<{ count: number }> {
+    const result = await this.prisma.shipment.updateMany({
+      where: { deliveryPartnerId, codSettlementStatus: CodSettlementStatus.COD_COLLECTED },
+      data: { codSettlementStatus: CodSettlementStatus.COD_SETTLEMENT_PENDING, codHandedOverAt: new Date() },
+    });
+    return { count: result.count };
+  }
+
+  async codSettle(shipmentId: string, adminId: string): Promise<void> {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+    if (!shipment) throw new NotFoundException();
+    this.assertCodTransition(shipment.codSettlementStatus, CodSettlementStatus.COD_SETTLED);
+    await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: { codSettlementStatus: CodSettlementStatus.COD_SETTLED, codSettledAt: new Date(), codSettledBy: adminId },
+    });
+    await writeOrderTimeline(this.prisma, { orderId: shipment.orderId, status: 'COD_SETTLED', actorId: adminId, actorRole: 'ADMIN' as any });
+  }
+
+  // Batch settle skips (does not fail on) any shipment already past COD_SETTLEMENT_PENDING —
+  // one stale row shouldn't block the rest of a rider's handover batch.
+  async codSettleBatch(shipmentIds: string[], adminId: string): Promise<{ settled: string[]; skipped: string[] }> {
+    const settled: string[] = []; const skipped: string[] = [];
+    for (const id of shipmentIds) {
+      try { await this.codSettle(id, adminId); settled.push(id); } catch { skipped.push(id); }
+    }
+    return { settled, skipped };
+  }
+
+  async codReconcile(shipmentId: string, adminId: string): Promise<void> {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+    if (!shipment) throw new NotFoundException();
+    this.assertCodTransition(shipment.codSettlementStatus, CodSettlementStatus.COD_RECONCILED);
+    await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: { codSettlementStatus: CodSettlementStatus.COD_RECONCILED, codReconciledAt: new Date(), codReconciledBy: adminId },
+    });
+    await writeOrderTimeline(this.prisma, { orderId: shipment.orderId, status: 'COD_RECONCILED', actorId: adminId, actorRole: 'ADMIN' as any });
+  }
+
+  // Admin operations-queue listing (frontend/admin/logistics.html) — plain paginated list,
+  // no admin action lives here (those are the codSettle/codReconcile methods above, exposed
+  // via AdminController).
+  async listShipments(filters: { codSettlementStatus?: CodSettlementStatus } = {}) {
+    const shipments = await this.prisma.shipment.findMany({
+      where: filters.codSettlementStatus ? { codSettlementStatus: filters.codSettlementStatus } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { order: { select: { orderNumber: true, customerId: true, totalAmount: true } }, deliveryPartner: { select: { id: true, user: { select: { name: true, phone: true } } } } },
+    });
+    return shipments;
   }
 }
 

@@ -16,6 +16,9 @@ export interface CreateShipmentInput {
 export interface CreateShipmentResult {
   providerRef: string;
   estimatedDelivery: Date;
+  // Phase 5 — best-effort rider allocation. Optional: a real future provider that manages its
+  // own riders (rather than ours) simply omits this.
+  deliveryPartnerId?: string;
 }
 
 export interface ShipmentStatusResult {

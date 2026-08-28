@@ -46,13 +46,16 @@ describe('SupportPolicyEngine.recommend — product flows', () => {
   const engine = new SupportPolicyEngine(makePrisma());
   const policy = { visitCharge: 200, diagnosisCharge: 150, slaMin: 60, returnWindowDays: 7 };
 
-  it('WRONG_PRODUCT within the return window auto-resolves a full refund', () => {
+  // Phase 5 — was an instant FULL_REFUND before real return-pickup logistics existed. Now
+  // schedules a physical pickup instead; the refund only fires once the seller's inspection
+  // accepts the returned item (see ReturnsService.finalize()).
+  it('WRONG_PRODUCT within the return window auto-resolves a return pickup (not an instant refund)', () => {
     const rec = engine.recommend({
       itemType: 'PRODUCT', issueType: 'WRONG_PRODUCT',
       order: { ...baseOrder, createdAt: new Date(Date.now() - 2 * 86_400_000) },
       amountBasis: 999, policy, warranty: noWarranty,
     });
-    expect(rec).toMatchObject({ routeType: 'AUTO_RESOLUTION', resolutionType: 'FULL_REFUND', amount: 999 });
+    expect(rec).toMatchObject({ routeType: 'AUTO_RESOLUTION', resolutionType: 'RETURN_PICKUP_INITIATED', amount: 999 });
   });
 
   it('DAMAGED_PRODUCT past the return window routes to a support case with no auto refund', () => {
