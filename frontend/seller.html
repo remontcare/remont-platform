@@ -473,6 +473,18 @@ a{color:inherit;text-decoration:none}
         </div>
       </div>
     </div>
+    <div class="row-2">
+      <div class="field"><label>HSN Code (optional)</label><input type="text" id="pf-hsn" placeholder="e.g. 8415"></div>
+      <div class="field"><label>GST Rate Override % (optional)</label><input type="number" step="0.01" id="pf-gst" placeholder="blank = admin default"></div>
+    </div>
+    <div class="field">
+      <label>GST Price Treatment (optional)</label>
+      <select id="pf-gst-inclusive">
+        <option value="">Use admin default</option>
+        <option value="false">GST Excluded — GST added on top of price</option>
+        <option value="true">GST Included — price already has GST baked in</option>
+      </select>
+    </div>
 
     <!-- ═══ AI Enrichment — optional, paid from wallet ═══ -->
     <div class="field" style="border-top:1px solid var(--mist);padding-top:14px;margin-top:2px">
@@ -863,6 +875,9 @@ function openProductForm(productId){
     document.getElementById('pf-length').value = p.lengthCm || '';
     document.getElementById('pf-width').value = p.widthCm || '';
     document.getElementById('pf-height').value = p.heightCm || '';
+    document.getElementById('pf-hsn').value = p.hsnSac || '';
+    document.getElementById('pf-gst').value = p.gstOverridePercent != null ? p.gstOverridePercent : '';
+    document.getElementById('pf-gst-inclusive').value = p.gstInclusive != null ? String(p.gstInclusive) : '';
     document.getElementById('pf-active').checked = !!p.isActive;
     if (p.images && p.images[0]) {
       pfImageDataUrl = p.images[0];
@@ -893,6 +908,9 @@ function openProductForm(productId){
     document.getElementById('pf-length').value = '';
     document.getElementById('pf-width').value = '';
     document.getElementById('pf-height').value = '';
+    document.getElementById('pf-hsn').value = '';
+    document.getElementById('pf-gst').value = '';
+    document.getElementById('pf-gst-inclusive').value = '';
     document.getElementById('pf-active').checked = true;
     document.querySelector('input[name="pf-coverage"][value="PAN_INDIA"]').checked = true;
     onPfCoverageChange();
@@ -957,6 +975,9 @@ function saveProduct(){
     lengthCm: optFloat('pf-length'),
     widthCm: optFloat('pf-width'),
     heightCm: optFloat('pf-height'),
+    hsnSac: optStr('pf-hsn'),
+    gstOverridePercent: optFloat('pf-gst'),
+    gstInclusive: (function(){ var v=document.getElementById('pf-gst-inclusive').value; return v===''?null:(v==='true'); })(),
     isActive: document.getElementById('pf-active').checked,
     coverageType: document.querySelector('input[name="pf-coverage"]:checked').value,
     cityIds: document.querySelector('input[name="pf-coverage"]:checked').value === 'SELECTED_CITIES'
