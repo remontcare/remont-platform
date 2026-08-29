@@ -130,7 +130,7 @@ a{color:inherit;text-decoration:none}
 
 /* ── BOTTOM NAV ── */
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-top:1px solid var(--mist);display:flex;z-index:200;box-shadow:0 -4px 20px rgba(0,0,0,.06)}
-.nav-item{flex:1;padding:10px 4px 8px;text-align:center;color:#9ca3af;transition:all .2s;display:flex;flex-direction:column;align-items:center;gap:2px}
+.nav-item{flex:1;padding:10px 4px 8px;text-align:center;color:#9ca3af;transition:all .2s;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
 .nav-item .ni-icon{font-size:20px}
 .nav-item .ni-label{font-size:10px;font-weight:600}
 .nav-item.active{color:var(--sienna)}
@@ -164,6 +164,52 @@ a{color:inherit;text-decoration:none}
 .profile-row .pr-left{display:flex;align-items:center;gap:12px;font-size:13px;font-weight:600}
 .profile-row .pr-icon{font-size:18px}
 .profile-row .pr-right{font-size:12px;color:#9ca3af}
+
+/* ══════════════════════════════════════════════════════════════════
+   DESKTOP LAYOUT — everything above is the original mobile-app shell,
+   untouched, and still applies as-is below this breakpoint. On a wide
+   screen the bottom tab bar becomes a left sidebar (same nav-item
+   markup, just re-flowed via CSS Grid — no HTML/JS changes needed) and
+   the content area gets room to show more per row.
+   ══════════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  .app{max-width:1300px;box-shadow:none;background:transparent}
+  #screen-login{max-width:480px;margin:0 auto;box-shadow:var(--shadow-lg);border-radius:var(--radius-lg);background:var(--ivory);min-height:auto}
+
+  #screen-app.active{
+    display:grid;
+    grid-template-columns:230px 1fr;
+    grid-template-rows:auto 1fr;
+    grid-template-areas:"nav header" "nav body";
+    min-height:100vh;
+  }
+  #screen-app .app-header{grid-area:header}
+  #screen-app .app-body{grid-area:body;padding:24px 32px 40px;max-width:1100px}
+
+  #screen-app .bottom-nav{
+    grid-area:nav;position:sticky;top:0;left:auto;bottom:auto;transform:none;
+    width:auto;max-width:none;height:100vh;
+    flex-direction:column;align-items:stretch;justify-content:flex-start;
+    padding:22px 0;gap:2px;border-top:none;border-right:1px solid var(--mist);box-shadow:none;
+  }
+  #screen-app .nav-item{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;padding:13px 26px;border-radius:0}
+  #screen-app .nav-item .ni-icon{font-size:18px}
+  #screen-app .nav-item .ni-label{font-size:13px}
+  #screen-app .nav-item.active{background:var(--cream);border-right:3px solid var(--sienna)}
+  #screen-app .nav-item:not(.active):hover{background:var(--cream);color:var(--charcoal)}
+
+  #products-fab{left:auto;right:40px;bottom:40px;transform:none}
+
+  /* More breathing room / columns now that width isn't scarce */
+  .stat-grid{grid-template-columns:repeat(4,1fr)}
+  .status-tile-grid{grid-template-columns:repeat(4,1fr)}
+  #products-list,#orders-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;align-items:start}
+  #products-list .item-card,#orders-list .item-card{margin-bottom:0}
+
+  /* Add-product sheet becomes a centered modal instead of a bottom sheet */
+  .form-overlay{align-items:center}
+  .form-sheet{border-radius:var(--radius-lg);max-width:640px;animation:fadeIn .25s ease}
+}
 </style>
 </head>
 <body>
