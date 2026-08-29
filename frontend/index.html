@@ -9364,7 +9364,7 @@ function cartCheckout() {
         <input id="co-pincode" type="text" placeholder="Pincode" maxlength="6" onchange="_fetchDeliveryCharge()"
           style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
       </div>
-      <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div id="co-slot-row" style="display:none;gap:10px;margin-bottom:16px">
         <input id="co-date" type="date" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
         <select id="co-time" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
           <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
@@ -9376,7 +9376,10 @@ function cartCheckout() {
           <option value="19:00">7:00 PM</option>
         </select>
       </div>
-      <p style="font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
+      <p id="co-slot-hint" style="display:none;font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
+      <div id="co-delivery-estimate" style="display:none;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600">
+        <span>📦</span><span id="co-delivery-estimate-text">Calculating delivery estimate…</span>
+      </div>
 
       <!-- Wallet (shown for any logged-in customer, alongside Pay Online, so Add Money is always reachable even at ₹0 balance) -->
       <div id="co-wallet-box" style="display:none;margin-bottom:16px">
@@ -9967,6 +9970,13 @@ function openCheckoutModal() {
     coDate.value = today;
     coDate.min = today;
   }
+  // Slot picker is only meaningful for a service visit — a product order ships on its own
+  // schedule, so a product-only cart gets a calculated delivery estimate instead (P0.1 fix).
+  var coCart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var coHasService = coCart.some(function(i){ return i.type === 'service'; });
+  document.getElementById('co-slot-row').style.display = coHasService ? 'flex' : 'none';
+  document.getElementById('co-slot-hint').style.display = coHasService ? 'block' : 'none';
+  document.getElementById('co-delivery-estimate').style.display = coHasService ? 'none' : 'flex';
   if (storedUser && storedUser.email) {
     var coEmail = document.getElementById('co-email');
     if (coEmail && !coEmail.value) coEmail.value = storedUser.email;
@@ -10168,7 +10178,35 @@ function _fetchDeliveryCharge() {
     var d = res.data || res;
     _coDeliveryCharge = Number(d.totalDeliveryCharge || 0);
     recalcTotals();
+    _renderDeliveryEstimate(d.breakdown || []);
   }).catch(function(){ /* preview only — a failed estimate just shows no delivery line */ });
+}
+
+// Turns the cheapest/fastest delivery-eligibility tier per vendor into a single human
+// "Expected delivery" line for a product-only cart (P0.1 fix — replaces the date/time
+// picker, which only applies to services). Shows the SLOWEST tier across vendors so the
+// promise made is never broken by a mixed multi-seller cart shipping separately.
+var _TIER_RANK = { INSTANT: 0, SAME_DAY: 1, NEXT_DAY: 2, STANDARD: 3 };
+function _renderDeliveryEstimate(breakdown) {
+  var estEl = document.getElementById('co-delivery-estimate');
+  if (!estEl || estEl.style.display === 'none') return; // hidden for service carts
+  var textEl = document.getElementById('co-delivery-estimate-text');
+  if (!breakdown.length) { textEl.textContent = 'Delivery estimate will be shown after you add products'; return; }
+  var slowest = breakdown.reduce(function(a, b){
+    return (_TIER_RANK[b.tier] || 0) > (_TIER_RANK[a.tier] || 0) ? b : a;
+  });
+  var today = new Date();
+  var fmt = function(d){ return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
+  var label;
+  switch (slowest.tier) {
+    case 'INSTANT':   label = 'Arriving today, within 30-120 minutes'; break;
+    case 'SAME_DAY':  label = 'Arriving today by evening'; break;
+    case 'NEXT_DAY':  var t = new Date(today); t.setDate(t.getDate() + 1); label = 'Expected delivery by ' + fmt(t); break;
+    default:          var from = new Date(today), to = new Date(today);
+                       from.setDate(from.getDate() + 2); to.setDate(to.getDate() + 7);
+                       label = 'Expected delivery between ' + fmt(from) + ' - ' + fmt(to); break;
+  }
+  textEl.textContent = label + (breakdown.length > 1 ? ' (items from different sellers may arrive separately)' : '');
 }
 
 function toggleCouponInput() {
@@ -10367,10 +10405,11 @@ function submitCheckoutOrder() {
 
   // Merge saved GPS/location data into payload
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
-  // Date + time apply to any services in the cart (slotStart is ignored server-side for
-  // product-only child orders) — combined into one IST-offset timestamp, same format the
-  // old single-service booking flow already sent to the backend.
-  var slotStart = (slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
+  // Date + time apply only to services in the cart (the picker is hidden and slotStart is
+  // ignored server-side for product-only child orders) — combined into one IST-offset
+  // timestamp, same format the old single-service booking flow already sent to the backend.
+  var coHasServiceItem = cart.some(function(i){ return i.type === 'service'; });
+  var slotStart = (coHasServiceItem && slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
   var totals = recalcTotals();
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletAmount = (useWalletEl && useWalletEl.checked && paymentMethod === 'ONLINE') ? totals.walletApplied : undefined;

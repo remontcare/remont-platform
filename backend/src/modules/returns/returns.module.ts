@@ -6,6 +6,7 @@ import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 import { NotificationsService, NotificationsModule } from '../notifications/notifications.module';
 import { ReverseLogisticsRateEngine } from '../logistics/reverse-logistics-rate-engine';
 import { LogisticsModule } from '../logistics/logistics.module';
+import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RETURN/REPLACEMENT LOGISTICS (Phase 5) — the physical pickup-from-customer,
@@ -30,6 +31,7 @@ export class ReturnsService {
     private refunds: RefundsService,
     private notifications: NotificationsService,
     private rateEngine: ReverseLogisticsRateEngine,
+    private productLedger: ProductLedgerService,
   ) {}
 
   // Called from SupportCasesService.executeResolution() when the policy engine's
@@ -149,6 +151,14 @@ export class ReturnsService {
         const rr = await this.refunds.raise(kase.customerId, kase.orderId!, undefined, `Return accepted for support case ${kase.caseNumber}`, kase.evidenceUrls);
         await this.refunds.decide('SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: 'Return inspection accepted' });
         refundRequestId = rr.id;
+        // Phase 7 — reverse this seller's settled fees proportionally to the refunded
+        // fraction (the resolved "proportional reversal" decision). A return only reaches
+        // here after the original order was actually delivered (ReturnShipment.status ===
+        // DELIVERED is required above), so settleProductOrder() already ran for it —
+        // reverseSettlement() is a safe no-op if it somehow hadn't.
+        const settledOrder = await this.prisma.order.findUnique({ where: { id: rs.orderId }, select: { totalAmount: true } });
+        const ratio = settledOrder && Number(settledOrder.totalAmount) > 0 ? amount / Number(settledOrder.totalAmount) : 1;
+        await this.prisma.$transaction((tx) => this.productLedger.reverseSettlement(tx, rs.orderId, ratio, 'RETURN'));
       }
       await this.prisma.supportCase.update({
         where: { id: kase.id },
@@ -188,7 +198,10 @@ export class ReturnsService {
   // exercising their own cancellation right, not a quality dispute for the seller to weigh in
   // on. Reuses RefundsService unmodified, same as finalize()'s own refund branch.
   async finalizeRto(returnShipmentId: string, actorId: string, actorRole: UserRole, notes?: string): Promise<void> {
-    const rs = await this.prisma.returnShipment.findUnique({ where: { id: returnShipmentId }, include: { order: true } });
+    const rs = await this.prisma.returnShipment.findUnique({
+      where: { id: returnShipmentId },
+      include: { order: { include: { items: { select: { vendorId: true } }, shipment: { select: { actualDeliveryCost: true } } } } },
+    });
     if (!rs) throw new NotFoundException();
     if (rs.kind !== 'RTO') throw new BadRequestException('This is not an RTO shipment');
     if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
@@ -198,6 +211,17 @@ export class ReturnsService {
     if (amount > 0) {
       const rr = await this.refunds.raise(rs.order.customerId, rs.orderId, undefined, `RTO refund for order ${rs.order.orderNumber}`, []);
       await this.refunds.decide(actorId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'RTO refund' });
+    }
+    // Phase 7 — an RTO always happens BEFORE the outbound shipment reaches the customer (a
+    // cancellation after delivery must go through a normal return instead — see
+    // OrdersService.cancel()'s comment), so settleProductOrder() never ran for this order and
+    // there is nothing to reverse. Remont still paid the courier for a completed round trip
+    // though — per the resolved decision, the seller absorbs that wasted-trip delivery cost
+    // directly, independent of the normal settlement flow.
+    const vendorId = rs.order.items?.find((it) => it.vendorId)?.vendorId;
+    const deliveryCost = Number(rs.order.shipment?.actualDeliveryCost || 0);
+    if (vendorId && deliveryCost > 0) {
+      await this.prisma.$transaction((tx) => this.productLedger.chargeUnsettledDeliveryCost(tx, rs.orderId, vendorId, deliveryCost));
     }
     await this.prisma.returnShipment.update({
       where: { id: returnShipmentId },
@@ -250,7 +274,7 @@ export class ReturnsService {
 }
 
 @Module({
-  imports: [RefundsModule, NotificationsModule, LogisticsModule],
+  imports: [RefundsModule, NotificationsModule, LogisticsModule, ProductLedgerModule],
   providers: [ReturnsService],
   exports: [ReturnsService],
 })

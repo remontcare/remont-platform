@@ -6,6 +6,7 @@ import { Public, JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndi
 import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
 import { ReverseLogisticsRateEngine } from './reverse-logistics-rate-engine';
+import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 
 // Phase 5 — COD settlement ladder adjacency, same idiom as DeliveryController's
 // SHIPMENT_STATUS_NEXT. Rejects an out-of-order or duplicate call instead of silently no-op-ing.
@@ -258,7 +259,13 @@ export class ShipmentService {
   private readonly logger = new Logger(ShipmentService.name);
   private readonly providers: Record<string, ShipmentProviderAdapter>;
 
-  constructor(private prisma: PrismaService, private logistics: LogisticsService, mockProvider: MockDeliveryProvider) {
+  constructor(
+    private prisma: PrismaService,
+    private logistics: LogisticsService,
+    mockProvider: MockDeliveryProvider,
+    private rateEngine: ReverseLogisticsRateEngine,
+    private productLedger: ProductLedgerService,
+  ) {
     this.providers = { MOCK_DEMO: mockProvider };
   }
 
@@ -311,6 +318,9 @@ export class ShipmentService {
 
     const isCod = order.paymentMethod === 'COD';
     const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    // Phase 7 — cost-accounting reference only (never changes which adapter fulfills the
+    // shipment, still MOCK_DEMO above); null when no LogisticsProvider row is configured.
+    const costRef = await this.rateEngine.pickCostReferenceProvider();
     await this.prisma.shipment.create({
       data: {
         orderId, provider: provider.name, providerRef, tier, estimatedDelivery, isDemo: true,
@@ -318,6 +328,8 @@ export class ShipmentService {
         codAmount: isCod ? order.totalAmount : undefined,
         codSettlementStatus: isCod ? CodSettlementStatus.COD_EXPECTED : CodSettlementStatus.NOT_APPLICABLE,
         deliveryOtp,
+        logisticsProviderId: costRef?.id,
+        actualDeliveryCost: costRef?.baseCost,
       },
     });
     await this.prisma.order.update({ where: { id: orderId }, data: { productFulfillmentStage: 'HANDED_TO_LOGISTICS', productFulfillmentAt: new Date() } });
@@ -331,8 +343,31 @@ export class ShipmentService {
   async onShipmentDelivered(orderId: string): Promise<void> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.type !== 'PRODUCT' || order.serviceId) return;
-    await this.prisma.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: new Date() } });
+    // Race-safe claim — this method is already known to be reachable twice for the same
+    // order (DeliveryController's explicit status update, plus getShipmentStatus()'s polling
+    // fallback). Before Phase 7 a double-fire was harmless (just re-set the same status); now
+    // that settlement posts real ledger money below, only the caller whose updateMany
+    // actually flips status away from COMPLETED may proceed — same claim idiom as
+    // OrdersService.complete()'s own race-safety guard.
+    const claimed = await this.prisma.order.updateMany({
+      where: { id: orderId, status: { not: 'COMPLETED' } },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+    if (claimed.count !== 1) return;
     await writeOrderTimeline(this.prisma, { orderId, status: 'DELIVERED' });
+
+    const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true, productsAmount: true, productFeeBreakdown: true,
+        items: { select: { vendorId: true, product: { select: { returnWindowDays: true } } } },
+      },
+    });
+    if (shipment && fullOrder) {
+      const deliveredAt = shipment.deliveredAt || new Date();
+      await this.prisma.$transaction((tx) => this.productLedger.settleProductOrder(tx, fullOrder as any, shipment, deliveredAt));
+    }
   }
 
   async getShipmentStatus(orderId: string, userId: string) {
@@ -463,6 +498,7 @@ export class ShipmentController {
 }
 
 @Module({
+  imports: [ProductLedgerModule],
   controllers: [LogisticsController, ShipmentController],
   providers: [LogisticsService, ShipmentService, MockDeliveryProvider, ReverseLogisticsRateEngine],
   exports: [LogisticsService, ShipmentService, ReverseLogisticsRateEngine],

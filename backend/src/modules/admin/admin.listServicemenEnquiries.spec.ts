@@ -7,7 +7,7 @@ describe('AdminService.listServicemenEnquiries', () => {
   it('filters on the real VendorStatus.PENDING_VERIFICATION value', async () => {
     const prisma: any = { serviceVendor: { findMany: jest.fn(async () => []) } };
     const config: any = { get: jest.fn((_k: string, fallback?: any) => fallback) };
-    const svc = new AdminService(prisma, config, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const svc = new AdminService(prisma, config, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     await svc.listServicemenEnquiries();
 

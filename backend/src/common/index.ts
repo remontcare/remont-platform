@@ -287,6 +287,83 @@ export async function resolveCommission(
   return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
 }
 
+// ─── Product marketplace fee resolution (Phase 7) ────────────────────────────
+// Same algorithm/idiom as resolveCommission() above, generalized across `feeType`
+// (COMMISSION/MARKETING/GATEWAY/OTHER) so every current and future non-delivery
+// marketplace fee for PRODUCT sellers shares one resolver — see ProductFeeRule in
+// schema.prisma and the plan doc "Phase 7" for why this is a new sibling model rather
+// than an extension of CommissionRule (that one's categoryId/serviceId are typed FKs to
+// ServiceCategory/Service specifically). No city dimension here (product pricing/fees
+// don't vary by city today, unlike services).
+//   (a) a PRODUCT_CATEGORY-level rule applies to every product in that category;
+//   (b) a PRODUCT-level rule OVERRIDES the category rule for that one product;
+//   (c) if nothing matches, resolves to 0 — a SiteSetting default is consulted ONLY for
+//       feeType=COMMISSION (`default_commission_pct`, the exact same key/convention
+//       resolveCommission() already uses for services — deliberately not a new hardcoded
+//       number); MARKETING/GATEWAY/OTHER have no site-wide fallback and simply resolve to
+//       0 with ruleLabel 'No rule — ₹0' when unconfigured, since inventing a default for
+//       those would violate the explicit "never hardcode a fee percentage" requirement.
+type ProductFeeRuleRow = {
+  id: string;
+  scope: 'PRODUCT_CATEGORY' | 'PRODUCT';
+  productCategoryId: string | null;
+  productId: string | null;
+  commissionType: 'PERCENTAGE' | 'FLAT' | 'SLAB';
+  value: unknown;
+  slabJson: unknown;
+  priority: number;
+  stackable: boolean;
+};
+
+function describeProductFeeRule(rule: ProductFeeRuleRow): string {
+  const kind = rule.scope === 'PRODUCT' ? 'Product' : 'Category';
+  if (rule.commissionType === 'PERCENTAGE') return `${kind} rule: ${rule.value}%`;
+  if (rule.commissionType === 'FLAT') return `${kind} rule: ₹${rule.value} flat`;
+  return `${kind} rule: slab-based`;
+}
+
+export async function resolveProductFee(
+  prisma: any,
+  params: { feeType: 'COMMISSION' | 'MARKETING' | 'GATEWAY' | 'OTHER'; productId: string; productCategoryId: string; amount: number },
+): Promise<{ feeAmount: number; ruleId: string | null; ruleLabel: string }> {
+  const { feeType, productId, productCategoryId, amount } = params;
+  const now = new Date();
+
+  const rules: ProductFeeRuleRow[] = await prisma.productFeeRule.findMany({
+    where: {
+      feeType,
+      isActive: true,
+      OR: [{ productId }, { productCategoryId, productId: null }],
+      AND: [
+        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+        { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+      ],
+    },
+    orderBy: { priority: 'desc' },
+  });
+
+  const productRules = rules.filter((r) => r.productId === productId);
+  const categoryRules = rules.filter((r) => r.productCategoryId === productCategoryId && !r.productId);
+  const primary = productRules[0] || categoryRules[0] || null;
+
+  if (!primary) {
+    if (feeType !== 'COMMISSION') {
+      return { feeAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' };
+    }
+    const setting = await prisma.siteSetting.findUnique({ where: { key: 'default_commission_pct' } });
+    const pct = setting ? parseFloat(setting.value) || 0 : 0;
+    const feeAmount = Math.round(((amount * pct) / 100) * 100) / 100;
+    return { feeAmount, ruleId: null, ruleLabel: pct > 0 ? `Default (${pct}%)` : 'No rule — ₹0' };
+  }
+
+  let feeAmount = computeRuleAmount(primary as any, amount);
+  const stacked = rules.filter((r) => r.id !== primary.id && r.stackable);
+  for (const r of stacked) feeAmount += computeRuleAmount(r as any, amount);
+
+  const label = describeProductFeeRule(primary) + (stacked.length ? ` + ${stacked.length} stacked rule(s)` : '');
+  return { feeAmount: Math.round(feeAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
+}
+
 export async function logAudit(prisma: any, entry: {
   actorId: string;
   actorRole: UserRole;

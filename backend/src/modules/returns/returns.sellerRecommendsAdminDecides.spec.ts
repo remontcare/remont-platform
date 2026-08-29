@@ -12,15 +12,18 @@ function makeService() {
     returnShipment: { findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
     supportCase: { update: jest.fn() },
     supportCaseLog: { create: jest.fn().mockResolvedValue({}) },
-    order: { findFirst: jest.fn(), findUnique: jest.fn(), count: jest.fn().mockResolvedValue(0), create: jest.fn() },
+    order: { findFirst: jest.fn(), findUnique: jest.fn().mockResolvedValue({ totalAmount: 500 }), count: jest.fn().mockResolvedValue(0), create: jest.fn() },
     orderTimeline: { create: jest.fn().mockResolvedValue({ id: 'timeline-1' }) },
     shipment: { update: jest.fn() },
+    $transaction: jest.fn((cb: any) => cb(prismaProxy)),
   };
+  const prismaProxy = prisma;
   const refunds: any = { raise: jest.fn().mockResolvedValue({ id: 'refund-1' }), decide: jest.fn().mockResolvedValue({}) };
   const notifications: any = { create: jest.fn().mockResolvedValue({}) };
   const rateEngine: any = { pickCheapest: jest.fn().mockResolvedValue({ id: 'provider-1', name: 'Mock Economy' }) };
-  const service = new ReturnsService(prisma, refunds, notifications, rateEngine);
-  return { service, prisma, refunds, rateEngine };
+  const productLedger: any = { reverseSettlement: jest.fn().mockResolvedValue(undefined), chargeUnsettledDeliveryCost: jest.fn().mockResolvedValue(undefined) };
+  const service = new ReturnsService(prisma, refunds, notifications, rateEngine, productLedger);
+  return { service, prisma, refunds, rateEngine, productLedger };
 }
 
 describe('ReturnsService — seller recommends, admin decides', () => {

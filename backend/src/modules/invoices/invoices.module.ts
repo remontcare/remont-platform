@@ -170,31 +170,41 @@ export class InvoicesService {
     return invoice;
   }
 
+  // order.vendor is the ServiceVendor FK (order.vendorId) — always null for a PRODUCT order,
+  // so it alone can never authorize that order's own product seller. A product order's
+  // invoicing entity is instead whichever ProductVendor owns its line items (see Type 3
+  // branch in generateForOrder() above), so that seller must also be allowed through.
+  private isAuthorizedForInvoice(userId: string, order: { customerId: string; vendor?: { userId: string } | null; items?: { product?: { vendor?: { userId: string } | null } | null }[] }): boolean {
+    if (order.customerId === userId) return true;
+    if (order.vendor?.userId === userId) return true;
+    return !!order.items?.some((it) => it.product?.vendor?.userId === userId);
+  }
+
   async generate(userId: string, orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { vendor: true },
+      include: { vendor: true, items: { include: { product: { include: { vendor: true } } } } },
     });
     if (!order) throw new NotFoundException();
     // Previously ungated — any authenticated user could generate (and thereby read, since
     // the created row is returned directly) another customer's invoice by orderId alone.
-    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
+    if (!this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
     return this.generateForOrder(orderId);
   }
 
   async get(userId: string, orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { invoice: true, vendor: true },
+      include: { invoice: true, vendor: true, items: { include: { product: { include: { vendor: true } } } } },
     });
     if (!order?.invoice) throw new NotFoundException();
-    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
+    if (!this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
     return order.invoice;
   }
 
   async getPdfBuffer(userId: string, orderId: string, docKind: 'CUSTOMER' | 'VENDOR' | 'REMONT') {
     const order = await this.fetchOrderForPdf(orderId);
-    if (order.customerId !== userId && order.vendor?.userId !== userId) throw new ForbiddenException();
+    if (!this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
     return this.renderPdfForOrder(order, docKind);
   }
 

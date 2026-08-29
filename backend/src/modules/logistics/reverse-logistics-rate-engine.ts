@@ -38,4 +38,18 @@ export class ReverseLogisticsRateEngine implements OnModuleInit {
     if (!candidate) throw new BadRequestException('No active logistics provider available');
     return candidate;
   }
+
+  // Phase 7 — cost-accounting reference for the OUTBOUND flow (Shipment.actualDeliveryCost),
+  // separate from pickCheapest() above so a future change to reverse-logistics selection
+  // rules (e.g. requiresCod filtering) can never accidentally affect outbound cost
+  // snapshotting. Returns null rather than throwing when nothing is configured — this is a
+  // best-effort accounting figure, never something that should block a shipment from being
+  // created (see LogisticsProvider seed comment: this data exists from day one via
+  // onModuleInit() above, but must degrade gracefully if it's ever cleared).
+  async pickCostReferenceProvider() {
+    return this.prisma.logisticsProvider.findFirst({
+      where: { isActive: true },
+      orderBy: [{ baseCost: 'asc' }, { priority: 'asc' }],
+    });
+  }
 }

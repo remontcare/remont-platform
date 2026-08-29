@@ -9,7 +9,8 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
@@ -49,7 +50,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -1833,6 +1834,88 @@ Return JSON with:
     return { serviceName: svc.name, amount: testAmount, ...result };
   }
 
+  // ─── Product Fee Rules (Phase 7) ──────────────────────────────────────
+  // CRUD for ProductFeeRule; mirrors the CommissionRule CRUD above exactly. Actual
+  // resolution lives in resolveProductFee() (common/index.ts), shared with the
+  // PRODUCT-order checkout path (MasterOrdersService.checkout()) so admin edits here take
+  // effect on the NEXT order without touching past orders (which keep their snapshotted
+  // productFeeBreakdown — see Order in schema.prisma).
+
+  async listProductFeeRules(feeType?: string, scope?: string, productCategoryId?: string, productId?: string) {
+    return this.prisma.productFeeRule.findMany({
+      where: {
+        ...(feeType ? { feeType: feeType as any } : {}),
+        ...(scope ? { scope: scope as any } : {}),
+        ...(productCategoryId ? { productCategoryId } : {}),
+        ...(productId ? { productId } : {}),
+      },
+      include: {
+        productCategory: { select: { name: true } },
+        product: { select: { name: true } },
+      },
+      orderBy: [{ feeType: 'asc' }, { scope: 'asc' }, { priority: 'desc' }],
+    });
+  }
+
+  async createProductFeeRule(data: any) {
+    if (data.scope === 'PRODUCT_CATEGORY' && !data.productCategoryId) throw new BadRequestException('productCategoryId is required for a PRODUCT_CATEGORY-scoped rule');
+    if (data.scope === 'PRODUCT' && !data.productId) throw new BadRequestException('productId is required for a PRODUCT-scoped rule');
+    return this.prisma.productFeeRule.create({ data });
+  }
+
+  async updateProductFeeRule(id: string, data: any) {
+    const existing = await this.prisma.productFeeRule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Product fee rule not found');
+    return this.prisma.productFeeRule.update({ where: { id }, data });
+  }
+
+  async deleteProductFeeRule(id: string) {
+    return this.prisma.productFeeRule.delete({ where: { id } });
+  }
+
+  // Admin preview: "This product, this fee type -> fee = ₹X (rule: ...)" — reuses the
+  // exact same resolveProductFee() every real product order goes through.
+  async previewProductFee(feeType: string, productId: string, amount?: number) {
+    const p = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!p) throw new NotFoundException('Product not found');
+    const testAmount = amount ?? Number(p.price);
+    const result = await resolveProductFee(this.prisma, { feeType: feeType as any, productId, productCategoryId: p.categoryId, amount: testAmount });
+    return { productName: p.name, amount: testAmount, ...result };
+  }
+
+  // ─── Product Vendor Earnings / Payouts (Phase 7) ──────────────────────
+  // Mirrors the ServiceVendor earnings/settlement admin surface (vendorEarningsSummary /
+  // SettlementsService.record(), further below) — deliberately a separate, additive path
+  // rather than touching that ServiceVendor-only code.
+
+  async listProductVendorEarnings(q?: string) {
+    return this.prisma.productVendor.findMany({
+      where: q ? { businessName: { contains: q, mode: 'insensitive' } } : {},
+      select: {
+        id: true, businessName: true, ownerName: true, totalEarnings: true, pendingPayout: true,
+        bankAccountHolder: true, bankName: true, bankAccountNumber: true, bankIfsc: true, upiId: true,
+      },
+      orderBy: { totalEarnings: 'desc' },
+      take: 200,
+    });
+  }
+
+  async productVendorLedger(vendorId: string, limit = 100) {
+    return this.prisma.productVendorLedgerEntry.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: limit });
+  }
+
+  async recordProductVendorPayout(adminId: string, vendorId: string, amount: number, mode: any, referenceNumber?: string, notes?: string) {
+    const vendor = await this.prisma.productVendor.findUnique({ where: { id: vendorId } });
+    if (!vendor) throw new NotFoundException('Seller not found');
+    if (amount > Number(vendor.pendingPayout)) throw new BadRequestException(`Amount exceeds pending payout (₹${vendor.pendingPayout} available)`);
+    return this.prisma.$transaction(async (tx) => {
+      const settlement = await tx.productVendorSettlement.create({ data: { vendorId, amount, mode, referenceNumber, notes, paidBy: adminId } });
+      await this.productLedger.postEntry(tx, vendorId, 'PAYOUT', -amount, { settlementId: settlement.id, notes });
+      await tx.productVendor.update({ where: { id: vendorId }, data: { pendingPayout: { decrement: amount } } });
+      return settlement;
+    });
+  }
+
   // ─── Site Settings ───────────────────────────────────────────────────
 
   async getSettings(group?: string) {
@@ -3125,6 +3208,25 @@ export class AdminController {
     @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string,
   ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined); }
 
+  // Phase 7 — Product Fee Rules (commission/marketing/gateway/other for PRODUCT sellers)
+  @Get('product-fee-rules') listProductFeeRules(
+    @Query('feeType') feeType?: string, @Query('scope') scope?: string,
+    @Query('productCategoryId') productCategoryId?: string, @Query('productId') productId?: string,
+  ) { return this.admin.listProductFeeRules(feeType, scope, productCategoryId, productId); }
+  @Post('product-fee-rules') createProductFeeRule(@Body() b: any) { return this.admin.createProductFeeRule(b); }
+  @Patch('product-fee-rules/:id') updateProductFeeRule(@Param('id') id: string, @Body() b: any) { return this.admin.updateProductFeeRule(id, b); }
+  @Delete('product-fee-rules/:id') deleteProductFeeRule(@Param('id') id: string) { return this.admin.deleteProductFeeRule(id); }
+  @Get('product-fee-rules/preview') previewProductFee(
+    @Query('feeType') feeType: string, @Query('productId') productId: string, @Query('amount') amount?: string,
+  ) { return this.admin.previewProductFee(feeType, productId, amount ? Number(amount) : undefined); }
+
+  // Phase 7 — Product Seller Earnings / Payouts
+  @Get('product-vendor-earnings') listProductVendorEarnings(@Query('q') q?: string) { return this.admin.listProductVendorEarnings(q); }
+  @Get('product-vendors/:vendorId/ledger') productVendorLedger(@Param('vendorId') vendorId: string) { return this.admin.productVendorLedger(vendorId); }
+  @Post('product-vendor-payouts') recordProductVendorPayout(@CurrentUser() u: JwtPayload, @Body() b: { vendorId: string; amount: number; mode: any; referenceNumber?: string; notes?: string }) {
+    return this.admin.recordProductVendorPayout(u.sub, b.vendorId, b.amount, b.mode, b.referenceNumber, b.notes);
+  }
+
   @Get('settings') getSettings(@Query('group') group?: string) { return this.admin.getSettings(group); }
   @Patch('settings/:key') upsertSetting(@Param('key') key: string, @Body() b: { value: string; label?: string; group?: string }) {
     return this.admin.upsertSetting(key, b.value, b.label, b.group);
@@ -3298,7 +3400,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

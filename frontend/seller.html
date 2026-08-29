@@ -507,6 +507,16 @@ a{color:inherit;text-decoration:none}
   </div>
 </div>
 
+<div class="form-overlay" id="order-detail-overlay">
+  <div class="form-sheet">
+    <div class="fs-header">
+      <span class="fs-title">Order Details</span>
+      <button class="fs-close" onclick="closeOrderDetail()">✕</button>
+    </div>
+    <div id="order-detail-body">Loading…</div>
+  </div>
+</div>
+
 <script src="/shared/remont-auth.js"></script>
 <script src="/shared/remont-notifications.js"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
@@ -1126,16 +1136,16 @@ function orderCardHtml(o){
   var actionsHtml = '';
   if (stage === 'AWAITING_SELLER') {
     actionsHtml = '<div class="ic-actions">' +
-      '<button class="btn-mini btn-accept" onclick="sellerAcceptOrder(\''+o.id+'\')">✅ Accept</button>' +
-      '<button class="btn-mini btn-reject" onclick="sellerRejectOrder(\''+o.id+'\')">❌ Reject</button></div>';
+      '<button class="btn-mini btn-accept" onclick="event.stopPropagation();sellerAcceptOrder(\''+o.id+'\')">✅ Accept</button>' +
+      '<button class="btn-mini btn-reject" onclick="event.stopPropagation();sellerRejectOrder(\''+o.id+'\')">❌ Reject</button></div>';
   } else if (stage === 'SELLER_ACCEPTED') {
-    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="sellerMarkProcessing(\''+o.id+'\')">📦 Start Packing</button></div>';
+    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="event.stopPropagation();sellerMarkProcessing(\''+o.id+'\')">📦 Start Packing</button></div>';
   } else if (stage === 'PROCESSING') {
-    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="sellerMarkReady(\''+o.id+'\')">🚚 Mark Ready for Pickup</button></div>';
+    actionsHtml = '<div class="ic-actions"><button class="btn-mini btn-accept" onclick="event.stopPropagation();sellerMarkReady(\''+o.id+'\')">🚚 Mark Ready for Pickup</button></div>';
   } else if (stage === 'SELLER_REJECTED' && o.sellerRejectionReason) {
     actionsHtml = '<div class="ic-meta">Reason: '+escHtml(o.sellerRejectionReason)+'</div>';
   }
-  return '<div class="item-card">' +
+  return '<div class="item-card" onclick="openOrderDetail(\''+o.id+'\')" style="cursor:pointer">' +
     '<div class="ic-thumb">🧾</div>' +
     '<div class="ic-info"><div class="ic-title">'+escHtml(o.orderNumber)+' — '+escHtml(custName)+'</div>' +
     '<div class="ic-meta">'+escHtml(itemsTxt)+(o.masterOrder ? ' · Order '+escHtml(o.masterOrder.masterOrderNumber) : '')+'</div>' +
@@ -1144,6 +1154,62 @@ function orderCardHtml(o){
     '<span class="badge '+badgeClass+'">'+escHtml(badgeText)+'</span></div>' +
   '</div>';
 }
+
+// QA P0.4 — order detail view: buyer, address, payment, itemized items, status timeline,
+// downloadable invoice. Fetches backend/src/modules/vendors ProductVendorsService.orderDetail().
+var _PAYMENT_METHOD_LABEL = {ONLINE:'Paid Online', COD:'Cash on Delivery', PARTIAL:'Partial Payment', WALLET:'Wallet'};
+function orderTimelineHtml(timeline){
+  if (!timeline || !timeline.length) return '<div class="ic-meta">No status updates yet</div>';
+  return timeline.map(function(t){
+    var d = new Date(t.createdAt);
+    return '<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--mist);font-size:12.5px">' +
+      '<span style="color:#9ca3af;white-space:nowrap">'+d.toLocaleDateString('en-IN')+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</span>' +
+      '<span style="font-weight:600">'+escHtml(t.status)+'</span>' +
+      (t.note ? '<span style="color:#6b7280">— '+escHtml(t.note)+'</span>' : '') +
+    '</div>';
+  }).join('');
+}
+function openOrderDetail(orderId){
+  document.getElementById('order-detail-overlay').classList.add('show');
+  document.getElementById('order-detail-body').innerHTML = 'Loading…';
+  apiFetch('/vendors/product/me/orders/'+orderId).then(function(o){
+    var custName = (o.customer && o.customer.name) || 'Customer';
+    var custPhone = (o.customer && o.customer.phone) || '';
+    var addr = o.address ? (o.address.fullAddress + (o.address.city ? ', '+o.address.city : '') + (o.address.pincode ? ' - '+o.address.pincode : '')) : 'No address on file';
+    var itemsHtml = o.items.map(function(it){
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--mist);font-size:13px">' +
+        '<span>'+escHtml(it.productName)+' ×'+it.quantity+'</span><span>'+fmtMoney(it.totalPrice)+'</span></div>';
+    }).join('');
+    var paymentLabel = _PAYMENT_METHOD_LABEL[o.paymentMethod] || o.paymentMethod || '—';
+    document.getElementById('order-detail-body').innerHTML =
+      '<div class="field"><label>Order</label><div style="font-weight:700">'+escHtml(o.orderNumber)+(o.masterOrder ? ' · '+escHtml(o.masterOrder.masterOrderNumber) : '')+'</div></div>' +
+      '<div class="field"><label>Buyer</label><div>'+escHtml(custName)+(custPhone ? ' · '+escHtml(custPhone) : '')+'</div></div>' +
+      '<div class="field"><label>Delivery Address</label><div style="font-size:13px">'+escHtml(addr)+'</div></div>' +
+      '<div class="field"><label>Payment</label><div>'+escHtml(paymentLabel)+' · '+escHtml(o.paymentStatus)+'</div></div>' +
+      '<div class="field"><label>Items</label>'+itemsHtml+'</div>' +
+      '<div class="field" style="display:flex;justify-content:space-between;font-weight:700;padding-top:6px"><span>Total</span><span>'+fmtMoney(o.totalAmount)+'</span></div>' +
+      '<div class="field"><label>Status Timeline</label>'+orderTimelineHtml(o.timeline)+'</div>' +
+      '<button class="btn-mini btn-accept" onclick="downloadSellerInvoice(\''+o.id+'\')" style="margin-top:10px">📄 Download Invoice</button>';
+  }).catch(function(e){
+    document.getElementById('order-detail-body').innerHTML = '<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-text">'+escHtml(e.message)+'</div></div>';
+  });
+}
+function closeOrderDetail(){ document.getElementById('order-detail-overlay').classList.remove('show'); }
+function downloadSellerInvoice(orderId){
+  apiFetch('/invoices/orders/'+orderId+'/generate', { method: 'POST', body: JSON.stringify({}) }).then(function(){
+    return fetch(API_BASE + '/api/v1/invoices/orders/' + orderId + '/pdf', { headers: { 'Authorization': 'Bearer ' + accessToken } });
+  }).then(function(r){
+    if (!r.ok) return r.json().catch(function(){return{};}).then(function(d){ throw new Error((d && d.message) || 'Could not download invoice'); });
+    return r.blob();
+  }).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'invoice-'+orderId+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }).catch(function(e){ alert(e.message || 'Could not download invoice'); });
+}
+
 // Phase 5/6 — an incoming return-pickup awaiting this seller's RECOMMENDATION (ReturnShipment
 // reached DELIVERED, no sellerRecommendation recorded yet). The seller no longer makes the
 // final call — admin decides from here (see backend/src/modules/returns ReturnsService).

@@ -14,7 +14,9 @@ function makeService() {
   };
   const logistics: any = {};
   const mockProvider: any = { name: 'MOCK_DEMO' };
-  const service = new ShipmentService(prisma, logistics as LogisticsService, mockProvider);
+  const rateEngine: any = { pickCostReferenceProvider: jest.fn().mockResolvedValue(null) };
+  const productLedger: any = { settleProductOrder: jest.fn() };
+  const service = new ShipmentService(prisma, logistics as LogisticsService, mockProvider, rateEngine, productLedger);
   return { service, prisma };
 }
 

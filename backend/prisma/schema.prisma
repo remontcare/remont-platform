@@ -675,6 +675,53 @@ model CommissionRule {
   @@index([serviceId, cityId])
 }
 
+// Phase 7 — marketplace fee rules for PRODUCT sellers (commission/marketing/gateway/future
+// fee types). A new sibling model rather than an extension of CommissionRule above: that
+// model's categoryId/serviceId are typed FKs to ServiceCategory/Service specifically, so
+// growing it for products would make every row polymorphic/sparse and force scope-aware
+// branching into resolveCommission(), its admin CRUD, and its UI for no benefit this
+// dedicated table doesn't already give more cleanly. `feeType` is what lets ALL current and
+// future non-delivery marketplace fees share one table/resolver/admin surface — adding a
+// new kind of fee later is just a new ProductFeeType enum value, never a schema redesign.
+enum ProductFeeType {
+  COMMISSION
+  MARKETING
+  GATEWAY
+  OTHER
+}
+
+enum ProductFeeScope {
+  PRODUCT_CATEGORY
+  PRODUCT
+}
+
+model ProductFeeRule {
+  id                String          @id @default(cuid())
+  feeType           ProductFeeType
+  scope             ProductFeeScope
+  productCategoryId String? // required when scope=PRODUCT_CATEGORY
+  productId         String? // required when scope=PRODUCT
+
+  commissionType CommissionType // reused as-is: PERCENTAGE | FLAT | SLAB
+  value          Decimal        @default(0) @db.Decimal(10, 2)
+  slabJson       Json?
+
+  priority  Int       @default(0)
+  stackable Boolean   @default(false)
+  isActive  Boolean   @default(true)
+  validFrom DateTime?
+  validTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  productCategory ProductCategory? @relation(fields: [productCategoryId], references: [id], onDelete: Cascade)
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([feeType, productCategoryId])
+  @@index([feeType, productId])
+}
+
 // City-wise service pricing & availability override
 model CityService {
   id                String   @id @default(cuid())
@@ -956,7 +1003,8 @@ model ProductCategory {
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
-  products Product[]
+  products        Product[]
+  productFeeRules ProductFeeRule[]
 }
 
 model Product {
@@ -1035,6 +1083,7 @@ model Product {
   locationInventory LocationInventory[]
   aiFeatureUsages   AiFeatureUsage[]
   warrantyCases     WarrantyCase[]
+  productFeeRules   ProductFeeRule[]
 
   @@index([vendorId])
   @@index([categoryId])
@@ -1340,11 +1389,21 @@ model ProductVendor {
   offersSameDayDelivery Boolean @default(false)
   processingTimeMinutes Int     @default(30)    // pack/handover time, factored into cutoff math
 
+  // Phase 7 — running totals kept in sync by every ProductLedgerService write path, same
+  // discipline as ServiceVendor.totalEarnings/pendingPayout. pendingPayout only reflects
+  // what's actually RELEASED from a ProductVendorHold (i.e. withdrawable now) — the settled-
+  // but-still-held amount lives in ProductVendorHold.remaining, not here.
+  totalEarnings Decimal @default(0) @db.Decimal(12, 2)
+  pendingPayout Decimal @default(0) @db.Decimal(12, 2)
+
   user            User             @relation(fields: [userId], references: [id])
   products        Product[]
   documents       SellerDocument[]
   pickupLocations PickupLocation[]
   aiFeatureUsages AiFeatureUsage[]
+  ledgerEntries   ProductVendorLedgerEntry[]
+  holds           ProductVendorHold[]
+  settlements     ProductVendorSettlement[]
 
   @@index([city])
 }
@@ -1737,6 +1796,20 @@ model Order {
   commissionRuleId    String?
   commissionRuleLabel String?
 
+  // Phase 7 — full snapshot of every marketplace-fee line applied to a PRODUCT order (the
+  // commission component above is reused as-is for the COMMISSION line; this JSON carries
+  // everything else). Written incrementally: commission/marketing/gateway/gstOnFees
+  // resolved+written at checkout (MasterOrdersService.checkout()); `delivery` merged in once
+  // Shipment.actualDeliveryCost is known, at settlement time (ProductLedgerService.
+  // settleProductOrder()). JSON rather than more scalar columns so it absorbs new
+  // ProductFeeType values without another migration — same "evolvable per-row detail" idiom
+  // as CommissionRule.slabJson/Product.specifications elsewhere in this schema. Null for
+  // every SERVICE order, and for a PRODUCT order before checkout pricing runs.
+  // Shape: { commission:{amount,ruleId,ruleLabel}, marketing:{amount,ruleId,ruleLabel},
+  //          gateway:{amount,ruleId,ruleLabel}, gstOnFees:{amount,ratePercent},
+  //          delivery:{amount,logisticsProviderId,providerName} }
+  productFeeBreakdown Json?
+
   // Vendor Wallet: Lead Cost — deducted from the vendor's ledger the moment they accept this
   // job (see ServiceVendorsService.acceptJob), trued up against remontCommission at
   // completion. Stamped with what was ACTUALLY charged at accept time (independent of
@@ -1827,6 +1900,8 @@ model Order {
   partnerHolds    PartnerHold[]
   returnShipments ReturnShipment[]
   warrantyCases   WarrantyCase[]
+  productVendorLedgerEntries ProductVendorLedgerEntry[]
+  productVendorHolds         ProductVendorHold[]
 
   @@index([customerId])
   @@index([masterOrderId])
@@ -1876,10 +1951,21 @@ model Shipment {
   deliveryOtpVerified Boolean   @default(false)
   deliveredAt         DateTime?
 
-  order           Order            @relation(fields: [orderId], references: [id])
-  deliveryPartner DeliveryPartner? @relation(fields: [deliveryPartnerId], references: [id])
+  // Phase 7 — cost-accounting reference only, snapshotted once at shipment creation from
+  // the cheapest active LogisticsProvider (see LogisticsService.pickCostReferenceProvider).
+  // Never changes which adapter actually fulfills the shipment (still MOCK_DEMO via
+  // `provider` above) — this exists purely so ProductLedgerService.settleProductOrder() has
+  // a real delivery-cost figure to deduct on the seller's settlement ledger. Null when no
+  // LogisticsProvider row is configured — never fabricate a cost.
+  logisticsProviderId String?
+  actualDeliveryCost  Decimal? @db.Decimal(10, 2)
+
+  order             Order              @relation(fields: [orderId], references: [id])
+  deliveryPartner   DeliveryPartner?   @relation(fields: [deliveryPartnerId], references: [id])
+  logisticsProvider LogisticsProvider? @relation(fields: [logisticsProviderId], references: [id])
 
   @@index([deliveryPartnerId])
+  @@index([logisticsProviderId])
 }
 
 model OrderItem {
@@ -2420,6 +2506,7 @@ model LogisticsProvider {
   updatedAt DateTime @updatedAt
 
   returnShipments ReturnShipment[]
+  shipments       Shipment[]
 
   @@index([isActive])
 }
@@ -2600,6 +2687,108 @@ model WithdrawalRequest {
 
   @@index([vendorId])
   @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 7 — PRODUCT-seller marketplace settlement engine. Deliberately a parallel,
+// ProductVendor-keyed set of tables rather than reusing PartnerLedgerEntry/PartnerHold/
+// PartnerSettlement above — those three are hard-FK'd to ServiceVendor (`vendor
+// ServiceVendor @relation`), and weakening that non-null relation to admit a second vendor
+// type would risk every existing SERVICE-side ledger query. Same single-entry-running-
+// balance idiom, same hold/release lifecycle, same manual-settlement idiom — just mirrored,
+// not shared. See ProductLedgerService (backend/src/modules/product-ledger).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ProductLedgerEntryType {
+  GROSS_SALE // + full productsAmount, posted at settlement (delivery)
+  COMMISSION // - platform commission, resolved via ProductFeeRule
+  GST_ON_FEES // - GST on Remont's own fees, reuses buildTaxRateResolver('PLATFORM_FEE', ...)
+  DELIVERY_COST // - Remont's actual outbound delivery cost for this order's shipment
+  MARKETING_FEE // - marketing/promotion fee, resolved via ProductFeeRule
+  GATEWAY_FEE // - payment gateway fee, resolved via ProductFeeRule
+  OTHER_FEE // - any future ProductFeeType(OTHER) fee
+  RETURN_ADJUSTMENT // +/- reversal posted when a RETURN is finalized, proportional to refunded amount
+  RTO_ADJUSTMENT // +/- reversal posted when an RTO is finalized, proportional to refunded amount
+  HOLD // - moved into a ProductVendorHold (return-window hold) at settlement time
+  HOLD_RELEASE // + released from a ProductVendorHold once its return window has passed
+  PAYOUT // - a ProductVendorSettlement was recorded (money actually paid out)
+  ADJUSTMENT // manual admin correction
+}
+
+// Exact single-entry-with-running-balance idiom as PartnerLedgerEntry (above).
+model ProductVendorLedgerEntry {
+  id           String                 @id @default(cuid())
+  vendorId     String
+  type         ProductLedgerEntryType
+  amount       Decimal                @db.Decimal(12, 2) // signed: + credits seller, - debits
+  balanceAfter Decimal                @db.Decimal(12, 2)
+  orderId      String?
+  settlementId String?
+  notes        String?
+  createdBy    String? // admin userId, when manually posted
+  createdAt    DateTime               @default(now())
+
+  vendor ProductVendor @relation(fields: [vendorId], references: [id])
+  order  Order?        @relation(fields: [orderId], references: [id])
+
+  @@index([vendorId, createdAt])
+  @@index([orderId])
+}
+
+enum ProductHoldType {
+  RETURN_WINDOW_HOLD // the settled net credit for one order, held until its product's return window passes
+  ADMIN_MANUAL // ad-hoc hold an admin places on a seller
+}
+
+enum ProductHoldStatus {
+  HELD
+  RELEASED
+  FORFEITED
+}
+
+// Mirrors PartnerHold (above) exactly — a settled order's net credit is held here (and
+// debited from the live ledger as a HOLD entry) until releaseDueAt passes, then a daily
+// cron (ProductHoldSweepService, same slot as WarrantyHoldSweepService) posts HOLD_RELEASE
+// and moves it into ProductVendor.pendingPayout. A return/RTO that lands while still HELD
+// deducts from `remaining` first, exactly like PartnerLedgerService.deductFromHold().
+model ProductVendorHold {
+  id           String            @id @default(cuid())
+  vendorId     String
+  type         ProductHoldType
+  amount       Decimal           @db.Decimal(12, 2)
+  remaining    Decimal           @db.Decimal(12, 2)
+  orderId      String? // set for RETURN_WINDOW_HOLD
+  status       ProductHoldStatus @default(HELD)
+  releaseDueAt DateTime? // deliveredAt + product.returnWindowDays (falls back to SiteSetting support_product_return_window_days). null = admin-only release (ADMIN_MANUAL)
+  releasedAt   DateTime?
+  releasedBy   String? // admin userId; null when auto-released by the daily cron sweep
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime          @default(now())
+
+  vendor ProductVendor @relation(fields: [vendorId], references: [id])
+  order  Order?        @relation(fields: [orderId], references: [id])
+
+  @@index([vendorId, status])
+  @@index([status, releaseDueAt])
+}
+
+// Mirrors PartnerSettlement (above) — manual admin-recorded payout, reuses SettlementMode.
+model ProductVendorSettlement {
+  id              String         @id @default(cuid())
+  vendorId        String
+  amount          Decimal        @db.Decimal(12, 2)
+  mode            SettlementMode
+  referenceNumber String?
+  notes           String?
+  paidBy          String
+  paidAt          DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+
+  vendor ProductVendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@index([paidAt])
 }
 
 // Minimal daily check-in/out — nothing to extend, no attendance concept existed before.

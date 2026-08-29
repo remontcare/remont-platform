@@ -679,21 +679,26 @@ export class ProductVendorsService {
     // Same today/month/lifetime pattern as ServiceVendorsService.earnings() above — bucketed
     // by createdAt rather than completedAt since product orders don't reliably set
     // completedAt (there's no dedicated product-fulfillment lifecycle yet, unlike services).
+    // Sales are counted once payment is confirmed (paymentStatus PAID), not only once the
+    // order reaches status COMPLETED — a paid, in-progress order is real revenue to the
+    // seller, not zero, and gating on COMPLETED under-counted it (QA P0.3 fix). Cancelled or
+    // refunded orders are excluded even if they were briefly PAID before the refund.
+    const soldWhere = { paymentStatus: 'PAID' as const, status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REFUNDED] } };
     const sod = new Date(); sod.setHours(0, 0, 0, 0);
     const som = new Date(); som.setDate(1); som.setHours(0, 0, 0, 0);
     const [total, orders, revenue, todayRevenue, monthRevenue, lowStock] = await Promise.all([
       this.prisma.product.count({ where: { vendorId: v.id } }),
       this.prisma.orderItem.count({ where: { product: { vendorId: v.id } } }),
       this.prisma.orderItem.aggregate({
-        where: { product: { vendorId: v.id }, order: { status: 'COMPLETED' } },
+        where: { product: { vendorId: v.id }, order: soldWhere },
         _sum: { totalPrice: true },
       }),
       this.prisma.orderItem.aggregate({
-        where: { product: { vendorId: v.id }, order: { status: 'COMPLETED', createdAt: { gte: sod } } },
+        where: { product: { vendorId: v.id }, order: { ...soldWhere, createdAt: { gte: sod } } },
         _sum: { totalPrice: true },
       }),
       this.prisma.orderItem.aggregate({
-        where: { product: { vendorId: v.id }, order: { status: 'COMPLETED', createdAt: { gte: som } } },
+        where: { product: { vendorId: v.id }, order: { ...soldWhere, createdAt: { gte: som } } },
         _sum: { totalPrice: true },
       }),
       this.prisma.product.count({ where: { vendorId: v.id, stock: { lte: 5 } } }),
@@ -748,6 +753,83 @@ export class ProductVendorsService {
     }
     return Array.from(byOrder.values());
   }
+
+  // Single-order detail for the seller order-detail view (QA P0.4) — same product.vendorId
+  // ownership scoping as myOrders() above, plus the fields a summary card doesn't need:
+  // payment mode, the full order-level totals breakdown, the OrderTimeline audit trail, and
+  // whether an invoice already exists (frontend generates one on demand if not).
+  async orderDetail(userId: string, orderId: string) {
+    const v = await this.prisma.productVendor.findUnique({ where: { userId } });
+    if (!v) throw new NotFoundException();
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true, orderNumber: true, status: true, paymentStatus: true, paymentMethod: true, createdAt: true,
+        productFulfillmentStage: true, sellerRejectionReason: true,
+        subtotal: true, couponDiscount: true, gstAmount: true, deliveryCharge: true, walletUsed: true, totalAmount: true,
+        customer: { select: { name: true, phone: true } },
+        address: { select: { fullAddress: true, city: true, pincode: true } },
+        masterOrder: { select: { masterOrderNumber: true } },
+        invoice: { select: { id: true, invoiceNumber: true } },
+        items: {
+          include: { product: { select: { name: true, images: true, vendorId: true } } },
+        },
+      },
+    });
+    if (!order) throw new NotFoundException();
+
+    // Ownership check — only this seller's own line items are ever returned/considered
+    // (mirrors the query-layer scoping myOrders() uses, since this is a direct-by-id lookup
+    // an order.findUnique alone can't scope the way findMany's `where` did there).
+    const myItems = order.items.filter((it) => it.product.vendorId === v.id);
+    if (!myItems.length) throw new NotFoundException();
+
+    const timeline = await this.prisma.orderTimeline.findMany({
+      where: { orderId }, orderBy: { createdAt: 'asc' },
+      select: { status: true, note: true, actorRole: true, createdAt: true },
+    });
+
+    const { invoice, ...orderRest } = order;
+    return {
+      ...orderRest,
+      items: myItems.map((it) => ({
+        id: it.id, productName: it.product.name, productImage: it.product.images?.[0] || null,
+        quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice,
+      })),
+      hasInvoice: !!invoice,
+      invoiceNumber: invoice?.invoiceNumber || null,
+      timeline,
+    };
+  }
+
+  // Phase 7 — seller-facing Payouts screen. Read-only; every write to totalEarnings/
+  // pendingPayout/the ledger itself happens in ProductLedgerService (settlement, hold
+  // release, reversal) or AdminService.recordProductVendorPayout() (manual payout).
+  async payoutsSummary(userId: string) {
+    const v = await this.requireVendor(userId);
+    const heldAgg = await this.prisma.productVendorHold.aggregate({
+      where: { vendorId: v.id, status: 'HELD' },
+      _sum: { remaining: true },
+    });
+    return {
+      totalEarnings: v.totalEarnings,
+      pendingPayout: v.pendingPayout,
+      heldForReturnWindow: heldAgg._sum.remaining || 0,
+      bankAccountHolder: v.bankAccountHolder, bankName: v.bankName,
+      bankAccountNumber: v.bankAccountNumber, bankIfsc: v.bankIfsc, upiId: v.upiId,
+    };
+  }
+
+  async ledgerHistory(userId: string, limit = 100) {
+    const v = await this.requireVendor(userId);
+    return this.prisma.productVendorLedgerEntry.findMany({ where: { vendorId: v.id }, orderBy: { createdAt: 'desc' }, take: limit });
+  }
+
+  async settlementHistory(userId: string, limit = 50) {
+    const v = await this.requireVendor(userId);
+    return this.prisma.productVendorSettlement.findMany({ where: { vendorId: v.id }, orderBy: { paidAt: 'desc' }, take: limit });
+  }
 }
 
 @ApiTags('Vendors')
@@ -760,6 +842,12 @@ export class ProductVendorsController {
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.pv.profile(u.sub); }
   @Get('me/dashboard') dash(@CurrentUser() u: JwtPayload) { return this.pv.dashboard(u.sub); }
   @Get('me/orders') orders(@CurrentUser() u: JwtPayload) { return this.pv.myOrders(u.sub); }
+  @Get('me/orders/:orderId') orderDetail(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.orderDetail(u.sub, id); }
+
+  // ─── Phase 7 — Payouts screen ───
+  @Get('me/payouts/summary') payoutsSummary(@CurrentUser() u: JwtPayload) { return this.pv.payoutsSummary(u.sub); }
+  @Get('me/payouts/ledger') payoutsLedger(@CurrentUser() u: JwtPayload) { return this.pv.ledgerHistory(u.sub); }
+  @Get('me/payouts/settlements') payoutsSettlements(@CurrentUser() u: JwtPayload) { return this.pv.settlementHistory(u.sub); }
 
   // ─── Phase 5 — product-order fulfillment lifecycle ───
   @Post('me/orders/:orderId/accept') acceptOrder(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.acceptOrder(u.sub, id); }

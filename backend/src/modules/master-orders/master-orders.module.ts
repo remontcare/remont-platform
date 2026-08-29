@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, isValidIndiaCoords } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -196,6 +196,15 @@ interface PricedGroup {
   categoryId?: string; // SERVICE groups
   vendorId?: string | null; // PRODUCT groups
   items: { serviceId?: string; productId?: string; quantity: number; unitPrice: number; totalPrice: number }[];
+  // Phase 7 — resolved+summed marketplace fees for a PRODUCT group, snapshotted onto the
+  // child Order's productFeeBreakdown/remontCommission at creation (see checkout() below).
+  // The `delivery` component is added later, at settlement (ProductLedgerService).
+  productFees?: {
+    commission: { amount: number; ruleId: string | null; ruleLabel: string };
+    marketing: { amount: number; ruleId: string | null; ruleLabel: string };
+    gateway: { amount: number; ruleId: string | null; ruleLabel: string };
+    gstOnFees: { amount: number; ratePercent: number };
+  };
 }
 
 // ─── Service ───
@@ -339,7 +348,43 @@ export class MasterOrdersService {
           amount += totalPrice;
           return { productId: it.productId, quantity: it.quantity, unitPrice: Number(p.price), totalPrice };
         });
-        pricedGroups.push({ type: 'PRODUCT', amount, vendorId: g.vendorId, items });
+
+        // Phase 7 — resolve commission/marketing/gateway per line, summed across the group
+        // (one child Order per vendor, so this is the order-level total), same await-in-loop
+        // spirit as the SERVICE branch's commissionByService above. Falls back to 0 whenever
+        // no ProductFeeRule is configured — never a hardcoded percentage.
+        let commissionTotal = 0, marketingTotal = 0, gatewayTotal = 0;
+        let commissionRuleId: string | null = null, commissionRuleLabel = 'No rule — ₹0';
+        let marketingRuleId: string | null = null, marketingRuleLabel = 'No rule — ₹0';
+        let gatewayRuleId: string | null = null, gatewayRuleLabel = 'No rule — ₹0';
+        for (const it of items) {
+          const p = productMap.get(it.productId!)!;
+          const [commission, marketing, gateway] = await Promise.all([
+            resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
+            resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
+            resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
+          ]);
+          commissionTotal += commission.feeAmount; commissionRuleId = commission.ruleId; commissionRuleLabel = commission.ruleLabel;
+          marketingTotal += marketing.feeAmount; marketingRuleId = marketing.ruleId; marketingRuleLabel = marketing.ruleLabel;
+          gatewayTotal += gateway.feeAmount; gatewayRuleId = gateway.ruleId; gatewayRuleLabel = gateway.ruleLabel;
+        }
+        // GST on Remont's own fees (commission + marketing + gateway) — reuses the exact
+        // same PLATFORM_FEE tax scope invoices.module.ts already uses for "Marketplace
+        // Commission" GST, so the two never disagree.
+        const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+        const gstRate = feeTax.rateFor(null, null);
+        const totalFees = commissionTotal + marketingTotal + gatewayTotal;
+        const gstOnFeesAmount = Math.round(((totalFees * gstRate) / 100) * 100) / 100;
+
+        pricedGroups.push({
+          type: 'PRODUCT', amount, vendorId: g.vendorId, items,
+          productFees: {
+            commission: { amount: commissionTotal, ruleId: commissionRuleId, ruleLabel: commissionRuleLabel },
+            marketing: { amount: marketingTotal, ruleId: marketingRuleId, ruleLabel: marketingRuleLabel },
+            gateway: { amount: gatewayTotal, ruleId: gatewayRuleId, ruleLabel: gatewayRuleLabel },
+            gstOnFees: { amount: gstOnFeesAmount, ratePercent: gstRate },
+          },
+        });
       }
     }
 
@@ -500,8 +545,21 @@ export class MasterOrdersService {
             remontCommission += c.commissionAmount;
           }
           primaryRule = commissionByService.get(g.items[0].serviceId!) || { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0' };
+        } else if (g.productFees) {
+          // Phase 7 — commission reuses the existing remontCommission/commissionRuleId/
+          // commissionRuleLabel columns (so invoices.module.ts's already-proven "Marketplace
+          // Commission" invoice line, which reads order.remontCommission, works unmodified).
+          // Marketing/gateway/GST-on-fees have no equivalent scalar columns — they live only
+          // in productFeeBreakdown below, merged with `delivery` at settlement time.
+          remontCommission = g.productFees.commission.amount;
+          primaryRule = { commissionAmount: remontCommission, ruleId: g.productFees.commission.ruleId, ruleLabel: g.productFees.commission.ruleLabel };
         }
-        const vendorPayout = serviceAmount - remontCommission;
+        const vendorPayout = g.type === 'SERVICE'
+          ? serviceAmount - remontCommission
+          : productsAmount - remontCommission - (g.productFees?.marketing.amount || 0) - (g.productFees?.gateway.amount || 0);
+        const productFeeBreakdown = g.type === 'PRODUCT' && g.productFees
+          ? { commission: g.productFees.commission, marketing: g.productFees.marketing, gateway: g.productFees.gateway, gstOnFees: g.productFees.gstOnFees }
+          : undefined;
         const primaryServiceId = g.type === 'SERVICE' ? g.items[0].serviceId : undefined;
         const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
         const startOtp = g.type === 'SERVICE' ? Math.floor(1000 + Math.random() * 9000).toString() : undefined;
@@ -515,8 +573,8 @@ export class MasterOrdersService {
             serviceId: primaryServiceId,
             addressId: resolvedAddressId,
             ...addressSnapshotFields(resolvedAddress),
-            slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
-            slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
+            slotStart: g.type === 'SERVICE' && dto.slotStart ? new Date(dto.slotStart) : null,
+            slotEnd: g.type === 'SERVICE' && dto.slotEnd ? new Date(dto.slotEnd) : null,
             startOtp, endOtp,
             status: confirmUpfront ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
             paymentStatus: PaymentStatus.PENDING,
@@ -525,6 +583,7 @@ export class MasterOrdersService {
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
+            productFeeBreakdown: productFeeBreakdown as any,
             guestName: isGuest ? opts.guestName : undefined,
             guestPhone: isGuest ? opts.guestPhone : undefined,
             items: g.type === 'PRODUCT'
