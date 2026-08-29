@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product Seller Payouts — Remont Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Product Seller Payouts</h1><p>Marketplace fee earnings and settlements for product sellers</p></div>
+    <div class="topbar-right">
+      <div class="tb-user"><div class="tb-avatar" id="tb-avatar-initial">A</div><div><div class="tb-uname" id="tb-uname">Admin</div></div></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <!-- Summary -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">TOTAL EARNED (LIFETIME)</div><div style="font-size:22px;font-weight:800;color:#22c55e" id="e-total">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">READY TO PAY OUT</div><div style="font-size:22px;font-weight:800;color:#f59e0b" id="e-pending">—</div></div>
+      <div class="card"><div style="font-size:11px;color:#6b7280;font-weight:600">SELLERS</div><div style="font-size:22px;font-weight:800;color:#3b82f6" id="e-count">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span class="card-title">Product Sellers</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="filter-q" class="form-control" style="width:220px" placeholder="Search seller/business name…" oninput="load()">
+          <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap"><div id="tbl" class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Payout Modal -->
+<div id="payout-overlay" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Process Payout</span>
+      <button class="modal-close" onclick="closeModal('payout-overlay')">×</button>
+    </div>
+    <div style="margin-bottom:12px;padding:10px;background:#f9fafb;border-radius:8px">
+      <div style="font-weight:600" id="po-name">Seller</div>
+      <div style="font-size:12px;color:#6b7280">Ready to pay out: <strong style="color:#f97316" id="po-amount">₹0</strong></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payout Amount (₹) *</label>
+      <input id="po-pay-amount" type="number" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payment Mode</label>
+      <select id="po-mode" class="form-control">
+        <option value="BANK_TRANSFER">Bank Transfer</option>
+        <option value="UPI">UPI</option>
+        <option value="CASH">Cash</option>
+        <option value="CHEQUE">Cheque</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Transaction Ref / UTR</label>
+      <input id="po-ref" class="form-control" placeholder="UTR or reference number">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input id="po-notes" class="form-control" placeholder="Any notes…">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('payout-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="processPayout()">Process Payout</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('product-seller-earnings');
+requireAuth();
+var payoutVendorId = null;
+
+function load() {
+  var q = document.getElementById('filter-q').value;
+  var params = q ? '?q=' + encodeURIComponent(q) : '';
+  api('GET','/admin/product-vendor-earnings' + params)
+    .then(function(data) {
+      var arr = Array.isArray(data) ? data : (data && data.data ? data.data : []);
+      var totalEarned = arr.reduce(function(s,v){return s+(Number(v.totalEarnings)||0);},0);
+      var totalPending = arr.reduce(function(s,v){return s+(Number(v.pendingPayout)||0);},0);
+      document.getElementById('e-total').textContent = fmtCur(totalEarned);
+      document.getElementById('e-pending').textContent = fmtCur(totalPending);
+      document.getElementById('e-count').textContent = arr.length;
+      if (!arr.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No product sellers yet.</div>'; return; }
+      document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Seller</th><th>Bank / UPI</th><th>Total Earned</th><th>Ready to Pay Out</th><th>Action</th></tr></thead><tbody>' +
+        arr.map(function(v) {
+          var pending = Number(v.pendingPayout || 0);
+          var payoutDest = v.upiId ? v.upiId : ([v.bankName, v.bankAccountNumber].filter(Boolean).join(' · ') || '—');
+          return '<tr>' +
+            '<td><strong>' + escape(v.businessName||'—') + '</strong><br><small style="color:#6b7280">' + escape(v.ownerName||'') + '</small></td>' +
+            '<td style="font-size:12px">' + escape(payoutDest) + '</td>' +
+            '<td><strong style="color:#22c55e">' + fmtCur(v.totalEarnings||0) + '</strong></td>' +
+            '<td><strong style="color:#f59e0b">' + fmtCur(pending) + '</strong></td>' +
+            '<td>' +
+              (pending > 0 ? '<button class="btn btn-xs btn-primary" onclick="openPayout(\''+v.id+'\',\''+escape(v.businessName||'')+'\','+pending+')">💳 Pay</button>' : '<span style="color:#22c55e;font-size:12px">✓ Settled</span>') +
+              ' <button class="btn btn-xs btn-outline" onclick="viewLedger(\''+v.id+'\',\''+escape(v.businessName||'')+'\')">📒 Ledger</button>' +
+            '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    })
+    .catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state">' + escape(e.message) + '</div>'; });
+}
+
+function viewLedger(vendorId, name) {
+  api('GET', '/admin/product-vendors/' + vendorId + '/ledger').then(function(entries) {
+    var lines = (entries || []).slice(0, 25).map(function(e) {
+      var sign = Number(e.amount) >= 0 ? '+' : '';
+      return '  · ' + fmtDate(e.createdAt) + '  ' + e.type + '  ' + sign + fmtCur(e.amount) + '  (bal: ' + fmtCur(e.balanceAfter) + ')' + (e.notes ? ' — ' + e.notes : '');
+    }).join('\n');
+    alert('Ledger — ' + name + '\n\n' + (lines || '(no entries yet)'));
+  }).catch(function(e) { toast('Could not load ledger: ' + e.message, 'error'); });
+}
+
+function openPayout(vendorId, name, amount) {
+  payoutVendorId = vendorId;
+  document.getElementById('po-name').textContent = name;
+  document.getElementById('po-amount').textContent = fmtCur(amount);
+  document.getElementById('po-pay-amount').value = amount;
+  document.getElementById('po-ref').value = '';
+  document.getElementById('po-notes').value = '';
+  document.getElementById('payout-overlay').style.display = 'flex';
+}
+
+function processPayout() {
+  var amount = Number(document.getElementById('po-pay-amount').value);
+  if (!amount || amount <= 0) { toast('Enter valid amount', 'error'); return; }
+  var data = { vendorId: payoutVendorId, amount: amount, mode: document.getElementById('po-mode').value, referenceNumber: document.getElementById('po-ref').value.trim()||undefined, notes: document.getElementById('po-notes').value.trim()||undefined };
+  api('POST','/admin/product-vendor-payouts',data)
+    .then(function(){ toast('Payout processed!','success'); closeModal('payout-overlay'); load(); })
+    .catch(function(e){ toast(e.message,'error'); });
+}
+
+load();
+</script>
+</body>
+</html>

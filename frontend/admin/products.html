@@ -38,6 +38,7 @@
     <div class="tab-bar">
       <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Product Categories</button>
       <button class="tab" id="tab-btn-prod" onclick="showTab('prod')">Products</button>
+      <button class="tab" id="tab-btn-fees" onclick="showTab('fees')">Fee Rules</button>
     </div>
 
     <!-- CATEGORIES TAB -->
@@ -80,6 +81,51 @@
           <button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="clearProdSelect()">Clear</button>
         </div>
         <div class="table-wrap"><div id="prod-tbl" class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- FEE RULES TAB (Phase 7) -->
+    <div id="tab-fees" style="display:none">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title">Preview Fee</span></div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Fee Type</label>
+              <select id="fee-preview-type" class="form-control">
+                <option value="COMMISSION">Platform Commission</option>
+                <option value="MARKETING">Marketing Fee</option>
+                <option value="GATEWAY">Payment Gateway Fee</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label">Product</label>
+              <select id="fee-preview-prod" class="form-control"><option value="">Select a product…</option></select>
+            </div>
+            <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
+              <button class="btn btn-primary" onclick="previewProductFee()">Preview</button>
+            </div>
+          </div>
+          <div id="fee-preview-result" style="display:none;margin-top:8px;padding:12px;background:#f9fafb;border-radius:8px;font-size:14px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Product Fee Rules</span>
+          <div style="display:flex;gap:8px">
+            <select id="fee-filter-type" class="form-control" style="width:200px" onchange="loadProductFeeRules()">
+              <option value="">All Fee Types</option>
+              <option value="COMMISSION">Platform Commission</option>
+              <option value="MARKETING">Marketing Fee</option>
+              <option value="GATEWAY">Payment Gateway Fee</option>
+              <option value="OTHER">Other</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openFeeRuleModal()">+ Add Rule</button>
+          </div>
+        </div>
+        <div class="table-wrap"><div id="fee-tbl" class="loading">Loading…</div></div>
       </div>
     </div>
   </div>
@@ -254,6 +300,73 @@
   </div>
 </div>
 
+<!-- FEE RULE MODAL (Phase 7) -->
+<div id="fee-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="fee-modal-title">Add Fee Rule</span>
+      <button class="modal-close" onclick="closeModal('fee-overlay')">×</button>
+    </div>
+    <input type="hidden" id="fee-id">
+    <div class="form-group">
+      <label class="form-label">Fee Type <span style="color:red">*</span></label>
+      <select id="fee-type" class="form-control">
+        <option value="COMMISSION">Platform Commission</option>
+        <option value="MARKETING">Marketing Fee</option>
+        <option value="GATEWAY">Payment Gateway Fee</option>
+        <option value="OTHER">Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Scope <span style="color:red">*</span></label>
+      <select id="fee-scope" class="form-control" onchange="toggleFeeRuleScopeFields()">
+        <option value="PRODUCT_CATEGORY">Category (applies to every product in it by default)</option>
+        <option value="PRODUCT">Product (overrides the category rule for this one product)</option>
+      </select>
+    </div>
+    <div class="form-group" id="fee-category-field">
+      <label class="form-label">Category <span style="color:red">*</span></label>
+      <select id="fee-category" class="form-control"><option value="">Select category…</option></select>
+    </div>
+    <div class="form-group" id="fee-product-field" style="display:none">
+      <label class="form-label">Product <span style="color:red">*</span></label>
+      <select id="fee-product" class="form-control"><option value="">Select product…</option></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Fee Value Type <span style="color:red">*</span></label>
+        <select id="fee-value-type" class="form-control" onchange="toggleFeeRuleTypeFields()">
+          <option value="PERCENTAGE">Percentage</option>
+          <option value="FLAT">Flat Amount (₹)</option>
+          <option value="SLAB">Slab / Tiered (by price range)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1" id="fee-value-field">
+        <label class="form-label">Value</label>
+        <input id="fee-value" class="form-control" type="number" placeholder="e.g. 8 for 8%, or a flat ₹ amount">
+      </div>
+    </div>
+    <div class="form-group" id="fee-slab-field" style="display:none">
+      <label class="form-label">Slabs <small style="color:#9ca3af">(JSON — one array of {min,max,type,value})</small></label>
+      <textarea id="fee-slab" class="form-control" rows="4" placeholder='[{"min":0,"max":500,"type":"PERCENTAGE","value":5},{"min":501,"max":null,"type":"PERCENTAGE","value":10}]'></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Priority <small style="color:#9ca3af">(higher wins a tie)</small></label>
+        <input id="fee-priority" class="form-control" type="number" value="0">
+      </div>
+      <div class="form-group" style="flex:1;display:flex;align-items:center;gap:16px;padding-top:22px">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="fee-stackable"> Stackable</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="fee-active" checked> Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('fee-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFeeRule()">Save Rule</button>
+    </div>
+  </div>
+</div>
+
 <!-- EXCEL IMPORT MODAL -->
 <div id="xl-overlay" class="overlay" style="display:none">
   <div class="modal" style="max-width:500px">
@@ -294,8 +407,11 @@ var importRows = [];
 function showTab(tab) {
   document.getElementById('tab-cat').style.display = tab==='cat'?'':'none';
   document.getElementById('tab-prod').style.display = tab==='prod'?'':'none';
+  document.getElementById('tab-fees').style.display = tab==='fees'?'':'none';
   document.getElementById('tab-btn-cat').className='tab'+(tab==='cat'?' active':'');
   document.getElementById('tab-btn-prod').className='tab'+(tab==='prod'?' active':'');
+  document.getElementById('tab-btn-fees').className='tab'+(tab==='fees'?' active':'');
+  if (tab === 'fees') loadProductFeeRules();
 }
 
 function switchModalTab(btn, pane) {
@@ -366,6 +482,127 @@ function saveCategory() {
 function deleteCat(id, name) {
   if (!confirm('Delete category "'+name+'"?')) return;
   api('DELETE','/admin/product-categories/'+id).then(function(){ toast('Deleted','warning'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// ── FEE RULES (Phase 7) ────────────────────────────────────────────
+var feeProductsCache = [];
+var _FEE_TYPE_LABEL = { COMMISSION: 'Platform Commission', MARKETING: 'Marketing Fee', GATEWAY: 'Payment Gateway Fee', OTHER: 'Other' };
+
+function _populateFeeDropdowns() {
+  var catOpts = categories.map(function(c){ return '<option value="'+c.id+'">'+escape(c.name)+'</option>'; }).join('');
+  document.getElementById('fee-category').innerHTML = '<option value="">Select category…</option>' + catOpts;
+  return (feeProductsCache.length ? Promise.resolve(feeProductsCache) : api('GET','/admin/products?limit=500')).then(function(prods) {
+    feeProductsCache = prods || [];
+    var prodOpts = feeProductsCache.map(function(p){ return '<option value="'+p.id+'">'+escape(p.name)+'</option>'; }).join('');
+    document.getElementById('fee-product').innerHTML = '<option value="">Select product…</option>' + prodOpts;
+    document.getElementById('fee-preview-prod').innerHTML = '<option value="">Select a product…</option>' + prodOpts;
+  });
+}
+
+function toggleFeeRuleScopeFields() {
+  var isCat = document.getElementById('fee-scope').value === 'PRODUCT_CATEGORY';
+  document.getElementById('fee-category-field').style.display = isCat ? '' : 'none';
+  document.getElementById('fee-product-field').style.display = isCat ? 'none' : '';
+}
+function toggleFeeRuleTypeFields() {
+  var isSlab = document.getElementById('fee-value-type').value === 'SLAB';
+  document.getElementById('fee-value-field').style.display = isSlab ? 'none' : '';
+  document.getElementById('fee-slab-field').style.display = isSlab ? '' : 'none';
+}
+
+function loadProductFeeRules() {
+  document.getElementById('fee-tbl').innerHTML = '<div class="loading">Loading…</div>';
+  var feeType = document.getElementById('fee-filter-type').value;
+  var qs = feeType ? '?feeType=' + encodeURIComponent(feeType) : '';
+  Promise.all([_populateFeeDropdowns(), api('GET','/admin/product-fee-rules'+qs)]).then(function(results) {
+    var rules = results[1] || [];
+    if (!rules.length) { document.getElementById('fee-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><h3>No fee rules yet</h3><p>Resolves to ₹0 for every product until you add one (commission also falls back to the site-wide default, if configured in Settings).</p></div>'; return; }
+    var rows = rules.map(function(r) {
+      var target = r.scope === 'PRODUCT_CATEGORY' ? (r.productCategory ? r.productCategory.name : '—') : (r.product ? r.product.name : '—');
+      var valueLabel = r.commissionType === 'SLAB' ? 'Slab' : (r.commissionType === 'FLAT' ? '₹' + r.value : r.value + '%');
+      return '<tr>' +
+        '<td>' + badge(_FEE_TYPE_LABEL[r.feeType] || r.feeType, 'blue') + '</td>' +
+        '<td>' + badge(r.scope==='PRODUCT'?'Product':'Category', r.scope==='PRODUCT'?'purple':'gray') + '</td>' +
+        '<td>' + escape(target) + '</td>' +
+        '<td>' + escape(valueLabel) + (r.stackable ? ' ' + badge('Stacks','teal') : '') + '</td>' +
+        '<td>' + r.priority + '</td>' +
+        '<td>' + badge(r.isActive?'Active':'Inactive', r.isActive?'green':'gray') + '</td>' +
+        '<td><div style="display:flex;gap:4px">' +
+          '<button class="btn btn-xs btn-outline" onclick=\'openFeeRuleModal(' + JSON.stringify(r) + ')\'>Edit</button>' +
+          '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="deleteFeeRule(\'' + r.id + '\')">Del</button>' +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('fee-tbl').innerHTML = '<table><thead><tr><th>Fee Type</th><th>Scope</th><th>Applies To</th><th>Value</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }).catch(function(e){ document.getElementById('fee-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function openFeeRuleModal(rule) {
+  document.getElementById('fee-modal-title').textContent = rule ? 'Edit Fee Rule' : 'Add Fee Rule';
+  document.getElementById('fee-id').value = rule ? rule.id : '';
+  document.getElementById('fee-type').value = rule ? rule.feeType : 'COMMISSION';
+  document.getElementById('fee-scope').value = rule ? rule.scope : 'PRODUCT_CATEGORY';
+  document.getElementById('fee-category').value = rule ? (rule.productCategoryId||'') : '';
+  document.getElementById('fee-product').value = rule ? (rule.productId||'') : '';
+  document.getElementById('fee-value-type').value = rule ? rule.commissionType : 'PERCENTAGE';
+  document.getElementById('fee-value').value = rule ? rule.value : '';
+  document.getElementById('fee-slab').value = rule && rule.slabJson ? JSON.stringify(rule.slabJson) : '';
+  document.getElementById('fee-priority').value = rule ? rule.priority : 0;
+  document.getElementById('fee-stackable').checked = rule ? !!rule.stackable : false;
+  document.getElementById('fee-active').checked = rule ? rule.isActive : true;
+  toggleFeeRuleScopeFields();
+  toggleFeeRuleTypeFields();
+  document.getElementById('fee-overlay').style.display = 'flex';
+}
+
+function saveFeeRule() {
+  var id = document.getElementById('fee-id').value;
+  var scope = document.getElementById('fee-scope').value;
+  var type = document.getElementById('fee-value-type').value;
+  if (scope === 'PRODUCT_CATEGORY' && !document.getElementById('fee-category').value) { toast('Select a category','error'); return; }
+  if (scope === 'PRODUCT' && !document.getElementById('fee-product').value) { toast('Select a product','error'); return; }
+  var slabJson = null;
+  if (type === 'SLAB') {
+    try { slabJson = JSON.parse(document.getElementById('fee-slab').value || '[]'); }
+    catch (e) { toast('Slab JSON is invalid: ' + e.message, 'error'); return; }
+  }
+  var data = {
+    feeType: document.getElementById('fee-type').value,
+    scope: scope,
+    productCategoryId: scope === 'PRODUCT_CATEGORY' ? document.getElementById('fee-category').value : null,
+    productId: scope === 'PRODUCT' ? document.getElementById('fee-product').value : null,
+    commissionType: type,
+    value: parseFloat(document.getElementById('fee-value').value) || 0,
+    slabJson: slabJson,
+    priority: parseInt(document.getElementById('fee-priority').value) || 0,
+    stackable: document.getElementById('fee-stackable').checked,
+    isActive: document.getElementById('fee-active').checked,
+  };
+  var p = id ? api('PATCH','/admin/product-fee-rules/'+id, data) : api('POST','/admin/product-fee-rules', data);
+  p.then(function(){
+    toast(id?'Rule updated':'Rule created','success');
+    closeModal('fee-overlay');
+    loadProductFeeRules();
+  }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function deleteFeeRule(id) {
+  if (!confirm('Delete this fee rule?')) return;
+  api('DELETE','/admin/product-fee-rules/'+id).then(function(){ toast('Rule deleted','success'); loadProductFeeRules(); }).catch(function(e){ toast(e.message,'error'); });
+}
+
+function previewProductFee() {
+  var productId = document.getElementById('fee-preview-prod').value;
+  if (!productId) { toast('Select a product to preview','error'); return; }
+  var feeType = document.getElementById('fee-preview-type').value;
+  var params = 'feeType=' + encodeURIComponent(feeType) + '&productId=' + encodeURIComponent(productId);
+  api('GET','/admin/product-fee-rules/preview?'+params).then(function(r) {
+    var box = document.getElementById('fee-preview-result');
+    box.style.display = '';
+    box.innerHTML = '<strong>' + escape(r.productName) + '</strong> → ' + escape(_FEE_TYPE_LABEL[feeType]||feeType) +
+      ' = <strong style="color:#c4601a">' + fmtCur(r.feeAmount) + '</strong>' +
+      '<div style="color:#6b7280;font-size:12px;margin-top:4px">' + escape(r.ruleLabel) + '</div>';
+  }).catch(function(e){ toast(e.message,'error'); });
 }
 
 // ── PRODUCTS ────────────────────────────────────────────────────────

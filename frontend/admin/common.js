@@ -212,6 +212,7 @@ var SIDEBAR_NAV = [
     { key:'seller-apps', label:'Seller Applications', icon:'📋', href:'/admin/vendors.html?tab=seller-apps' },
     { key:'partner-ratings', label:'Partner Ratings', icon:'⭐', href:'/admin/reviews.html' },
     { key:'partner-earnings', label:'Partner Earnings', icon:'💰', href:'/admin/partner-earnings.html' },
+    { key:'product-seller-earnings', label:'Product Seller Payouts', icon:'🧾', href:'/admin/product-seller-earnings.html' },
     { key:'agencies', label:'Agencies', icon:'🏢', href:'/admin/agencies.html' },
     { key:'partner-id-cards', label:'Partner ID Cards', icon:'🪪', href:'/admin/partner-id-cards.html' },
   ]},
