@@ -56,7 +56,7 @@ export class ProductLedgerService {
   // (ProductHoldSweepService below) releases once the product's return window passes.
   async settleProductOrder(
     tx: any,
-    order: { id: string; productsAmount: any; productFeeBreakdown: any; items: { vendorId: string | null; product?: { returnWindowDays: number | null } | null }[] },
+    order: { id: string; productsAmount: any; productsTaxableAmount?: any; productFeeBreakdown: any; items: { vendorId: string | null; product?: { returnWindowDays: number | null } | null }[] },
     shipment: { logisticsProviderId: string | null; actualDeliveryCost: any; deliveredAt: Date | null },
     deliveredAt: Date,
   ) {
@@ -76,15 +76,19 @@ export class ProductLedgerService {
     };
     await tx.order.update({ where: { id: order.id }, data: { productFeeBreakdown: fullBreakdown } });
 
-    const productsAmount = Number(order.productsAmount);
-    await this.postEntry(tx, vendorId, 'GROSS_SALE', productsAmount, { orderId: order.id });
+    // Phase 8 — GROSS_SALE is the ex-GST taxable base, not the full customer-charged
+    // amount: GST collected isn't seller revenue to settle against. No-op for a GST-
+    // Excluded (or 0%-rated) order, since productsTaxableAmount equals productsAmount
+    // bit-for-bit there — every order that could exist before this feature shipped.
+    const grossSaleBase = order.productsTaxableAmount != null ? Number(order.productsTaxableAmount) : Number(order.productsAmount);
+    await this.postEntry(tx, vendorId, 'GROSS_SALE', grossSaleBase, { orderId: order.id });
     if (commission > 0) await this.postEntry(tx, vendorId, 'COMMISSION', -commission, { orderId: order.id, notes: p.commission?.ruleLabel });
     if (gstOnFees > 0) await this.postEntry(tx, vendorId, 'GST_ON_FEES', -gstOnFees, { orderId: order.id });
     if (marketing > 0) await this.postEntry(tx, vendorId, 'MARKETING_FEE', -marketing, { orderId: order.id, notes: p.marketing?.ruleLabel });
     if (gateway > 0) await this.postEntry(tx, vendorId, 'GATEWAY_FEE', -gateway, { orderId: order.id, notes: p.gateway?.ruleLabel });
     if (deliveryAmount > 0) await this.postEntry(tx, vendorId, 'DELIVERY_COST', -deliveryAmount, { orderId: order.id });
 
-    const netCredit = Math.round((productsAmount - commission - gstOnFees - marketing - gateway - deliveryAmount) * 100) / 100;
+    const netCredit = Math.round((grossSaleBase - commission - gstOnFees - marketing - gateway - deliveryAmount) * 100) / 100;
     await tx.productVendor.update({ where: { id: vendorId }, data: { totalEarnings: { increment: netCredit } } });
     if (netCredit <= 0) return; // nothing left to hold/pay out (fees exceeded the sale — rare, but not an error)
 
@@ -116,7 +120,7 @@ export class ProductLedgerService {
   async reverseSettlement(tx: any, orderId: string, ratio: number, kind: 'RETURN' | 'RTO') {
     const order = await tx.order.findUnique({
       where: { id: orderId },
-      select: { productFeeBreakdown: true, productsAmount: true, items: { select: { vendorId: true } } },
+      select: { productFeeBreakdown: true, productsAmount: true, productsTaxableAmount: true, items: { select: { vendorId: true } } },
     });
     const vendorId = order?.items.find((it: any) => it.vendorId)?.vendorId;
     const p = (order?.productFeeBreakdown as any) || {};
@@ -133,8 +137,11 @@ export class ProductLedgerService {
       await this.postEntry(tx, vendorId, entryType, scaled, { orderId, notes: `${label} reversal (${Math.round(clampedRatio * 100)}%)` });
       return scaled;
     };
+    // Phase 8 — reverses the same taxable base settleProductOrder() originally credited
+    // (see grossSaleBase there) — a no-op change for a GST-Excluded order.
+    const grossSaleBase = order.productsTaxableAmount != null ? Number(order.productsTaxableAmount) : Number(order.productsAmount || 0);
     let netReversal = 0;
-    netReversal += await reverse('Gross sale', Number(order.productsAmount || 0), -1);
+    netReversal += await reverse('Gross sale', grossSaleBase, -1);
     netReversal += await reverse('Commission', Number(p.commission?.amount || 0), 1);
     netReversal += await reverse('GST on fees', Number(p.gstOnFees?.amount || 0), 1);
     netReversal += await reverse('Marketing fee', Number(p.marketing?.amount || 0), 1);

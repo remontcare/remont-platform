@@ -712,7 +712,12 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: numb
 export interface TaxRateResolver {
   // overridePercent accepts `any` because callers pass a Prisma Decimal directly
   // (Service/Product.gstOverridePercent) — Number() below handles it regardless.
-  rateFor(hsnSac?: string | null, overridePercent?: any): number;
+  // categoryId is Phase 8's new optional 3rd resolution step (category-level default) —
+  // every existing call site omits it and behaves identically to before.
+  rateFor(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): number;
+  // Phase 8 — whether the matched row's price is GST-inclusive or exclusive.
+  // overrideInclusive accepts a Prisma-nullable boolean directly (Product.gstInclusive).
+  priceTypeFor(hsnSac?: string | null, categoryId?: string | null, overrideInclusive?: boolean | null): 'INCLUSIVE' | 'EXCLUSIVE';
   defaultHsn: string | null;
 }
 export async function buildTaxRateResolver(
@@ -720,25 +725,77 @@ export async function buildTaxRateResolver(
   appliesTo: 'SERVICE' | 'PRODUCT' | 'PLATFORM_FEE',
   defaultWhenUnconfigured = 0,
 ): Promise<TaxRateResolver> {
+  const now = new Date();
   const rows = await prisma.taxConfig.findMany({
-    where: { isActive: true, type: 'GST', appliesTo: { has: appliesTo } },
+    where: {
+      isActive: true, type: 'GST', appliesTo: { has: appliesTo },
+      AND: [
+        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+        { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+      ],
+    },
     orderBy: { createdAt: 'asc' },
   });
-  const byHsn = new Map<string, number>();
-  for (const r of rows) if (r.hsnCode) byHsn.set(r.hsnCode, Number(r.rate));
-  const defaultRow = rows[0];
-  const blanketRate = defaultRow ? Number(defaultRow.rate) : defaultWhenUnconfigured;
+  const byHsn = new Map<string, any>();
+  const byCategory = new Map<string, any>();
+  for (const r of rows) {
+    if (r.hsnCode) byHsn.set(r.hsnCode, r);
+    else if (r.productCategoryId) byCategory.set(r.productCategoryId, r);
+  }
+  // "First active row for this scope" — unchanged fallback semantics (byte-for-byte the
+  // same selection as before Phase 8), now also effective-dating-filtered above.
+  const blanketRow = rows[0];
+
+  function resolveRow(hsnSac?: string | null, categoryId?: string | null) {
+    if (hsnSac && byHsn.has(hsnSac)) return byHsn.get(hsnSac);
+    if (categoryId && byCategory.has(categoryId)) return byCategory.get(categoryId);
+    return blanketRow;
+  }
+
   return {
-    rateFor(hsnSac, overridePercent) {
+    rateFor(hsnSac, overridePercent, categoryId) {
       if (overridePercent !== undefined && overridePercent !== null) {
         const n = Number(overridePercent);
         if (!Number.isNaN(n)) return n;
       }
-      if (hsnSac && byHsn.has(hsnSac)) return byHsn.get(hsnSac)!;
-      return blanketRate;
+      const row = resolveRow(hsnSac, categoryId);
+      if (!row) return defaultWhenUnconfigured;
+      if (row.gstApplicable === false) return 0; // exempt — distinct from a genuine 0% NIL rate, but forces the same 0 here
+      return Number(row.rate);
     },
-    defaultHsn: defaultRow?.hsnCode || null,
+    priceTypeFor(hsnSac, categoryId, overrideInclusive) {
+      if (overrideInclusive !== undefined && overrideInclusive !== null) {
+        return overrideInclusive ? 'INCLUSIVE' : 'EXCLUSIVE';
+      }
+      const row = resolveRow(hsnSac, categoryId);
+      return row?.priceType === 'GST_INCLUSIVE' ? 'INCLUSIVE' : 'EXCLUSIVE'; // default EXCLUSIVE preserves today's implicit behavior
+    },
+    defaultHsn: blanketRow?.hsnCode || null,
   };
+}
+
+// Phase 8 — single source of truth for splitting a product line's charged amount into its
+// taxable base + GST component, honoring the resolved inclusive/exclusive treatment. Used
+// by every PRODUCT checkout path (master-orders.module.ts, orders.module.ts) so they never
+// each reimplement this split differently. `lineAmount` is always the amount actually
+// charged for the line (unitPrice*qty) — for an INCLUSIVE line this IS the gross the tax
+// gets backed out of; for an EXCLUSIVE line this is the pre-tax base tax gets added to.
+export async function resolveProductGstLine(
+  prodTax: TaxRateResolver,
+  product: { hsnSac?: string | null; gstOverridePercent?: any; gstInclusive?: boolean | null; categoryId: string },
+  lineAmount: number,
+): Promise<{ taxableValue: number; gstAmount: number; ratePercent: number; inclusive: boolean }> {
+  const ratePercent = prodTax.rateFor(product.hsnSac, product.gstOverridePercent, product.categoryId);
+  const inclusive = prodTax.priceTypeFor(product.hsnSac, product.categoryId, product.gstInclusive) === 'INCLUSIVE';
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  if (ratePercent <= 0) {
+    return { taxableValue: round2(lineAmount), gstAmount: 0, ratePercent: 0, inclusive };
+  }
+  if (inclusive) {
+    const taxableValue = round2(lineAmount / (1 + ratePercent / 100));
+    return { taxableValue, gstAmount: round2(lineAmount - taxableValue), ratePercent, inclusive };
+  }
+  return { taxableValue: round2(lineAmount), gstAmount: round2((lineAmount * ratePercent) / 100), ratePercent, inclusive };
 }
 
 // SAC 999799 ("Other services n.e.c." / business auxiliary services) is the real-world

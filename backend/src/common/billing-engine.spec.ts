@@ -134,6 +134,92 @@ describe('resolveBillingTransactionType', () => {
   });
 });
 
+// Phase 8 — GST-Included pricing: back-derive the taxable base from a gross,
+// tax-inclusive price instead of adding tax on top of it a second time.
+describe('calculateInvoice — GST-Included pricing', () => {
+  it('splits an intra-state ₹1,180 inclusive-of-18%-GST line into ₹1,000 taxable + ₹90 CGST + ₹90 SGST', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Product', qty: 1, rate: 1180, taxRatePercent: 18, priceType: 'INCLUSIVE' }],
+      supplierState: 'Madhya Pradesh',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.taxableValue).toBe(1000);
+    expect(r.cgst).toBe(90);
+    expect(r.sgst).toBe(90);
+    expect(r.igst).toBe(0);
+    // The line's own amount must equal the original gross exactly — never taxed a second time.
+    expect(r.lines[0].amount).toBe(1180);
+    expect(r.total).toBe(1180);
+  });
+
+  it('splits an inter-state ₹1,180 inclusive-of-18%-GST line into ₹1,000 taxable + ₹180 IGST', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Product', qty: 1, rate: 1180, taxRatePercent: 18, priceType: 'INCLUSIVE' }],
+      supplierState: 'Haryana',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.taxableValue).toBe(1000);
+    expect(r.igst).toBe(180);
+    expect(r.cgst).toBe(0);
+    expect(r.sgst).toBe(0);
+    expect(r.lines[0].amount).toBe(1180);
+    expect(r.total).toBe(1180);
+  });
+
+  it('sums a mixed cart of one INCLUSIVE and one EXCLUSIVE line correctly, with no double-taxing', () => {
+    const r = calculateInvoice({
+      lines: [
+        { description: 'Inclusive product', qty: 1, rate: 1180, taxRatePercent: 18, priceType: 'INCLUSIVE' },
+        { description: 'Exclusive product', qty: 1, rate: 1000, taxRatePercent: 18, priceType: 'EXCLUSIVE' },
+      ],
+      supplierState: 'Madhya Pradesh',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    // Inclusive line: taxable 1000, tax 180 (embedded). Exclusive line: taxable 1000, tax 180 (added on top).
+    expect(r.taxableValue).toBe(2000);
+    expect(r.cgst).toBe(180); // 90 + 90
+    expect(r.sgst).toBe(180);
+    // Inclusive line charges exactly 1180 (unchanged); exclusive line charges 1000+180=1180.
+    expect(r.lines[0].amount).toBe(1180);
+    expect(r.lines[1].amount).toBe(1180);
+    expect(r.preRoundTotal).toBe(2360);
+  });
+
+  it('treats an omitted priceType as EXCLUSIVE — every pre-existing call site is unaffected', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Product', qty: 1, rate: 1000, taxRatePercent: 18 }],
+      supplierState: 'Madhya Pradesh',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.lines[0].priceType).toBe('EXCLUSIVE');
+    expect(r.taxableValue).toBe(1000);
+    expect(r.lines[0].amount).toBe(1180);
+  });
+
+  it('an inclusive line with 0% GST has nothing to back out — taxable value equals the gross', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Zero-rated product', qty: 1, rate: 500, taxRatePercent: 0, priceType: 'INCLUSIVE' }],
+      supplierState: 'Madhya Pradesh',
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.taxableValue).toBe(500);
+    expect(r.cgst).toBe(0);
+    expect(r.lines[0].amount).toBe(500);
+  });
+
+  it('an inclusive line for an UNREGISTERED supplier fabricates no GST — amount stays exact', () => {
+    const r = calculateInvoice({
+      lines: [{ description: 'Product', qty: 1, rate: 1180, taxRatePercent: 18, priceType: 'INCLUSIVE' }],
+      supplierState: null,
+      placeOfSupply: 'Madhya Pradesh',
+    });
+    expect(r.supplyType).toBe('UNREGISTERED');
+    expect(r.taxableValue).toBe(1180);
+    expect(r.cgst).toBe(0);
+    expect(r.total).toBe(1180);
+  });
+});
+
 describe('GSTIN helpers', () => {
   it('validates a well-formed GSTIN with a known state code', () => {
     expect(isValidGstinFormat('23AAKCR9036L1ZY')).toBe(true);

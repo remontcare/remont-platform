@@ -360,7 +360,7 @@ export class ShipmentService {
     const fullOrder = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: {
-        id: true, productsAmount: true, productFeeBreakdown: true,
+        id: true, productsAmount: true, productsTaxableAmount: true, productFeeBreakdown: true,
         items: { select: { vendorId: true, product: { select: { returnWindowDays: true } } } },
       },
     });

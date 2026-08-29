@@ -88,6 +88,26 @@ describe('ProductLedgerService.settleProductOrder', () => {
     });
   });
 
+  it('Phase 8: a GST-Included order posts GROSS_SALE at the back-derived taxable base, not the full inclusive productsAmount', async () => {
+    const { service } = makeService();
+    const tx = makeTx();
+    // productsAmount=1180 (what the customer paid, tax-inclusive) but productsTaxableAmount
+    // =1000 (the back-derived ex-GST base) — GROSS_SALE must use the latter.
+    const inclusiveOrder = { ...order, productsAmount: 1180, productsTaxableAmount: 1000 };
+    await service.settleProductOrder(tx, inclusiveOrder as any, shipment as any, new Date('2026-08-29T00:00:00Z'));
+    const grossSaleEntry = tx.productVendorLedgerEntry.create.mock.calls.find((c: any) => c[0].data.type === 'GROSS_SALE')!;
+    expect(grossSaleEntry[0].data.amount).toBe(1000);
+  });
+
+  it('Phase 8: a GST-Excluded order (no productsTaxableAmount, or equal to productsAmount) settles identically to before — no-op regression guard', async () => {
+    const { service } = makeService();
+    const tx = makeTx();
+    const excludedOrder = { ...order, productsTaxableAmount: 1000 }; // same as productsAmount — genuinely excluded
+    await service.settleProductOrder(tx, excludedOrder as any, shipment as any, new Date('2026-08-29T00:00:00Z'));
+    const grossSaleEntry = tx.productVendorLedgerEntry.create.mock.calls.find((c: any) => c[0].data.type === 'GROSS_SALE')!;
+    expect(grossSaleEntry[0].data.amount).toBe(1000); // identical to the original (no productsTaxableAmount) test above
+  });
+
   it('falls back to the SiteSetting return-window default when the product has no override', async () => {
     const { service } = makeService({ value: '10' });
     const tx = makeTx();
@@ -139,6 +159,18 @@ describe('ProductLedgerService.reverseSettlement — proportional reversal', () 
     },
     items: [{ vendorId: 'vendor-1' }],
   };
+
+  it('Phase 8: reverses the back-derived taxable base for a GST-Included order, not the full inclusive productsAmount', async () => {
+    const { service } = makeService();
+    const inclusiveOrder = { ...settledOrder, productsAmount: 1180, productsTaxableAmount: 1000 };
+    const tx = makeTx({
+      order: { findUnique: jest.fn().mockResolvedValue(inclusiveOrder) },
+      productVendorHold: { findFirst: jest.fn().mockResolvedValue(null) },
+    });
+    await service.reverseSettlement(tx, 'order-1', 1, 'RETURN');
+    const entries = tx.productVendorLedgerEntry.create.mock.calls.map((c: any) => c[0].data);
+    expect(entries.find((e: any) => e.notes?.includes('Gross sale')).amount).toBe(-1000); // taxable base, not -1180
+  });
 
   it('is a safe no-op when the order was never settled (e.g. RTO before delivery)', async () => {
     const { service } = makeService();

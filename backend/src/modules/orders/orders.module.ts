@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -521,13 +521,41 @@ export class OrdersService {
       });
     }
 
+    // Phase 8 — resolves each product line's real GST (was previously ignored entirely
+    // here — see gstAmount below) and closes a gap discovered alongside it: this path never
+    // called resolveProductFee() at all, so remontCommission/vendorPayout were hardcoded to
+    // 0/gross for every product bought this way. Same resolvers master-orders.module.ts's
+    // checkout() already uses.
+    let productsTaxableAmount = 0, productGstOnTop = 0;
+    let productCommissionTotal = 0, productMarketingTotal = 0, productGatewayTotal = 0;
+    let productCommissionRuleId: string | null = null, productCommissionRuleLabel = 'No rule — ₹0';
+    let productMarketingRuleId: string | null = null, productMarketingRuleLabel = 'No rule — ₹0';
+    let productGatewayRuleId: string | null = null, productGatewayRuleLabel = 'No rule — ₹0';
     if (dto.items?.length) {
+      const prodTax = await buildTaxRateResolver(this.prisma, 'PRODUCT');
       for (const item of dto.items) {
         const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
         if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
         const total = Number(p.price) * item.quantity;
         productsAmount += total;
-        itemInputs.push({ productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: total });
+
+        const gstLine = await resolveProductGstLine(prodTax, p, total);
+        productsTaxableAmount += gstLine.taxableValue;
+        if (!gstLine.inclusive) productGstOnTop += gstLine.gstAmount;
+
+        const [commission, marketing, gateway] = await Promise.all([
+          resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: total }),
+          resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: total }),
+          resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: total }),
+        ]);
+        productCommissionTotal += commission.feeAmount; productCommissionRuleId = commission.ruleId; productCommissionRuleLabel = commission.ruleLabel;
+        productMarketingTotal += marketing.feeAmount; productMarketingRuleId = marketing.ruleId; productMarketingRuleLabel = marketing.ruleLabel;
+        productGatewayTotal += gateway.feeAmount; productGatewayRuleId = gateway.ruleId; productGatewayRuleLabel = gateway.ruleLabel;
+
+        itemInputs.push({
+          productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: total,
+          gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent, taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+        });
       }
     }
 
@@ -576,11 +604,38 @@ export class OrdersService {
     }
 
     const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
-    const gstAmount = Math.round(discountedSubtotal * 0.18 * 100) / 100;
+    // Phase 8 — SERVICE-side GST stays flat 18%, applied to the service's own discounted
+    // share only (this Order can hold one service AND products together — predates the
+    // Child-Order-split engine). PRODUCT-side GST is the real per-item figure resolved
+    // above; an INCLUSIVE line's tax is embedded in its price and never added again here.
+    const serviceDiscountShare = subtotal > 0
+      ? Math.round(((serviceAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
+      : 0;
+    const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
+    const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
+    const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
     const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
-    const remontCommission = commissionResult.commissionAmount;
-    const vendorPayout = serviceAmount - remontCommission;
+    // remontCommission/vendorPayout now account for BOTH the service leg (unchanged
+    // resolveCommission() figure) and the product leg (Phase-7 resolveProductFee(), newly
+    // wired in here) — kept additive so the existing service-only display/read paths that
+    // expect remontCommission to include the service commission are unaffected when there
+    // are no products on the order (productCommissionTotal is 0 in that case).
+    const remontCommission = commissionResult.commissionAmount + productCommissionTotal;
+    const vendorPayout = (serviceAmount - commissionResult.commissionAmount)
+      + (productsTaxableAmount - productCommissionTotal - productMarketingTotal - productGatewayTotal);
+    const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+    const productFeeGstRate = feeTax.rateFor(null, null);
+    const productFeeTotal = productCommissionTotal + productMarketingTotal + productGatewayTotal;
+    const productGstOnFeesAmount = Math.round(((productFeeTotal * productFeeGstRate) / 100) * 100) / 100;
+    const productFeeBreakdown = dto.items?.length
+      ? {
+          commission: { amount: productCommissionTotal, ruleId: productCommissionRuleId, ruleLabel: productCommissionRuleLabel },
+          marketing: { amount: productMarketingTotal, ruleId: productMarketingRuleId, ruleLabel: productMarketingRuleLabel },
+          gateway: { amount: productGatewayTotal, ruleId: productGatewayRuleId, ruleLabel: productGatewayRuleLabel },
+          gstOnFees: { amount: productGstOnFeesAmount, ratePercent: productFeeGstRate },
+        }
+      : undefined;
 
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -596,6 +651,8 @@ export class OrdersService {
         slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
         startOtp, endOtp, status: OrderStatus.PENDING_PAYMENT,
         serviceAmount, productsAmount, subtotal,
+        productsTaxableAmount: dto.items?.length ? productsTaxableAmount : undefined,
+        productFeeBreakdown: productFeeBreakdown as any,
         couponCode: dto.couponCode, couponDiscount, membershipDiscount,
         walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
         commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
@@ -1484,18 +1541,57 @@ export class GuestBookingService {
       }
     }
 
-    let productsAmount = 0;
+    // Phase 8 — resolves each line's real GST (was previously a flat 18% on the whole
+    // cart, ignoring TaxConfig/HSN/gstOverridePercent/gstInclusive entirely) and closes a
+    // gap discovered alongside it: this guest "buy now" path never called
+    // resolveProductFee() at all, so remontCommission/vendorPayout were hardcoded to 0
+    // below — every guest product purchase bypassed seller settlement. Same resolvers
+    // master-orders.module.ts's checkout() already uses.
+    let productsAmount = 0, productsTaxableAmount = 0, productGstOnTop = 0;
+    let commissionTotal = 0, marketingTotal = 0, gatewayTotal = 0;
+    let commissionRuleId: string | null = null, commissionRuleLabel = 'No rule — ₹0';
+    let marketingRuleId: string | null = null, marketingRuleLabel = 'No rule — ₹0';
+    let gatewayRuleId: string | null = null, gatewayRuleLabel = 'No rule — ₹0';
     const itemInputs: any[] = [];
+    const prodTax = await buildTaxRateResolver(this.prisma, 'PRODUCT');
     for (const item of dto.items) {
       const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
       if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
       const lineTotal = Number(p.price) * item.quantity;
       productsAmount += lineTotal;
-      itemInputs.push({ productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: lineTotal });
+
+      const gstLine = await resolveProductGstLine(prodTax, p, lineTotal);
+      productsTaxableAmount += gstLine.taxableValue;
+      if (!gstLine.inclusive) productGstOnTop += gstLine.gstAmount;
+
+      const [commission, marketing, gateway] = await Promise.all([
+        resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
+        resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
+        resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
+      ]);
+      commissionTotal += commission.feeAmount; commissionRuleId = commission.ruleId; commissionRuleLabel = commission.ruleLabel;
+      marketingTotal += marketing.feeAmount; marketingRuleId = marketing.ruleId; marketingRuleLabel = marketing.ruleLabel;
+      gatewayTotal += gateway.feeAmount; gatewayRuleId = gateway.ruleId; gatewayRuleLabel = gateway.ruleLabel;
+
+      itemInputs.push({
+        productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: lineTotal,
+        gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent, taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+      });
     }
 
-    const gstAmount = Math.round(productsAmount * 0.18 * 100) / 100;
+    const gstAmount = productGstOnTop;
     const totalAmount = productsAmount + gstAmount;
+    const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+    const feeGstRate = feeTax.rateFor(null, null);
+    const feeTotal = commissionTotal + marketingTotal + gatewayTotal;
+    const gstOnFeesAmount = Math.round(((feeTotal * feeGstRate) / 100) * 100) / 100;
+    const productFeeBreakdown = {
+      commission: { amount: commissionTotal, ruleId: commissionRuleId, ruleLabel: commissionRuleLabel },
+      marketing: { amount: marketingTotal, ruleId: marketingRuleId, ruleLabel: marketingRuleLabel },
+      gateway: { amount: gatewayTotal, ruleId: gatewayRuleId, ruleLabel: gatewayRuleLabel },
+      gstOnFees: { amount: gstOnFeesAmount, ratePercent: feeGstRate },
+    };
+    const vendorPayout = productsTaxableAmount - commissionTotal - marketingTotal - gatewayTotal;
 
     const lat = dto.latitude || 0;
     const lng = dto.longitude || 0;
@@ -1524,9 +1620,10 @@ export class GuestBookingService {
         channel: BookingChannel.WEBSITE, addressId: address.id,
         ...addressSnapshotFields(address),
         guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,
-        productsAmount, subtotal: productsAmount, gstAmount, totalAmount,
+        productsAmount, productsTaxableAmount, subtotal: productsAmount, gstAmount, totalAmount,
         startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
-        remontCommission: 0, vendorPayout: 0,
+        remontCommission: commissionTotal, vendorPayout,
+        productFeeBreakdown: productFeeBreakdown as any,
         status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
         paymentStatus: 'PENDING',
         adminNotes: isCOD ? 'COD order' : null,

@@ -123,6 +123,7 @@
               <option value="OTHER">Other</option>
             </select>
             <button class="btn btn-primary btn-sm" onclick="openFeeRuleModal()">+ Add Rule</button>
+            <button class="btn btn-outline btn-sm" onclick="openBulkFeeModal()">⬆ Bulk Import Rules</button>
           </div>
         </div>
         <div class="table-wrap"><div id="fee-tbl" class="loading">Loading…</div></div>
@@ -211,6 +212,14 @@
       <div class="form-row">
         <div class="form-group" style="flex:1"><label class="form-label">HSN Code <small style="color:#9ca3af">(for GST invoicing)</small></label><input id="prod-hsn" class="form-control" placeholder="e.g. 8415"></div>
         <div class="form-group" style="flex:1"><label class="form-label">GST Rate Override (%) <small style="color:#9ca3af">(blank = use Taxes screen)</small></label><input id="prod-gst" class="form-control" type="number" step="0.01" placeholder="e.g. 18"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price Treatment <small style="color:#9ca3af">(blank = use Taxes screen's category/blanket default)</small></label>
+        <select id="prod-gst-inclusive" class="form-control">
+          <option value="">Use Taxes screen default</option>
+          <option value="false">GST Excluded (added on top of price)</option>
+          <option value="true">GST Included (baked into price, e.g. ₹1,180 = ₹1,000 + ₹180 GST)</option>
+        </select>
       </div>
       <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="prod-active" checked> Active</label>
 
@@ -367,6 +376,52 @@
   </div>
 </div>
 
+<!-- BULK FEE RULE IMPORT MODAL (Phase 8) -->
+<div id="fee-bulk-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:820px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title">Bulk Import Fee Rules</span>
+      <button class="modal-close" onclick="closeBulkFeeModal()">×</button>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;background:#f9fafb">
+      <div class="card-body" style="padding:12px 16px;font-size:13px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>Download the template, fill it in (Excel or CSV), then upload it below. New rules are always <strong>added</strong> — an upload never overwrites or edits an existing rule.</span>
+        <button class="btn btn-outline btn-sm" onclick="downloadFeeRuleTemplate()">⬇ Download Template</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Upload File (.xlsx or .csv)</label>
+      <input type="file" id="fee-bulk-file" accept=".xlsx,.xls,.csv" onchange="handleBulkFeeFile(this)">
+    </div>
+
+    <div id="fee-bulk-summary" style="display:none;margin:10px 0;font-size:13px"></div>
+
+    <div id="fee-bulk-warnings" style="display:none;margin-bottom:10px"></div>
+
+    <div id="fee-bulk-invalid-wrap" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong style="color:#ef4444;font-size:13px">✗ Invalid rows</strong>
+        <button class="btn btn-xs btn-outline" onclick="downloadFeeRuleErrorReport()">⬇ Download Error Report</button>
+      </div>
+      <div class="table-wrap" style="max-height:220px;overflow-y:auto"><div id="fee-bulk-invalid-tbl"></div></div>
+    </div>
+
+    <div id="fee-bulk-valid-wrap" style="display:none;margin-top:14px">
+      <strong style="color:#22c55e;font-size:13px">✓ Valid rows (ready to import)</strong>
+      <div class="table-wrap" style="max-height:220px;overflow-y:auto;margin-top:6px"><div id="fee-bulk-valid-tbl"></div></div>
+    </div>
+
+    <div id="fee-bulk-result" style="display:none;margin-top:14px;padding:12px;background:#f0fdf4;border-radius:8px;font-size:13px"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeBulkFeeModal()">Close</button>
+      <button class="btn btn-primary" id="fee-bulk-confirm-btn" style="display:none" onclick="confirmBulkFeeImport()">Confirm Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- EXCEL IMPORT MODAL -->
 <div id="xl-overlay" class="overlay" style="display:none">
   <div class="modal" style="max-width:500px">
@@ -393,6 +448,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="./common.js"></script>
 <script>
 renderSidebar('products');
@@ -605,6 +661,144 @@ function previewProductFee() {
   }).catch(function(e){ toast(e.message,'error'); });
 }
 
+// ── BULK FEE RULE IMPORT (Phase 8) ─────────────────────────────────────
+var FEE_RULE_TEMPLATE_HEADERS = ['feeType','scope','categoryKey','productSku','productId','commissionType','value','slabJson','priority','stackable','isActive','validFrom','validTo','productGstInclusive','productGstOverridePercent','productHsnSac'];
+var _bulkFeeRows = [];
+var _bulkFeeInvalidRows = [];
+
+function openBulkFeeModal() {
+  document.getElementById('fee-bulk-file').value = '';
+  document.getElementById('fee-bulk-summary').style.display = 'none';
+  document.getElementById('fee-bulk-warnings').style.display = 'none';
+  document.getElementById('fee-bulk-invalid-wrap').style.display = 'none';
+  document.getElementById('fee-bulk-valid-wrap').style.display = 'none';
+  document.getElementById('fee-bulk-result').style.display = 'none';
+  document.getElementById('fee-bulk-confirm-btn').style.display = 'none';
+  _bulkFeeRows = []; _bulkFeeInvalidRows = [];
+  document.getElementById('fee-bulk-overlay').style.display = 'flex';
+}
+function closeBulkFeeModal() { document.getElementById('fee-bulk-overlay').style.display = 'none'; }
+
+function downloadFeeRuleTemplate() {
+  var example1 = ['COMMISSION','PRODUCT_CATEGORY','CLEANING_SUPPLIES','','','PERCENTAGE','8','','0','FALSE','TRUE','','','','',''];
+  var example2 = ['MARKETING','PRODUCT','','SKU-001','','FLAT','25','','0','FALSE','TRUE','2026-09-01','','INCLUSIVE','18','8415'];
+  var ws = XLSX.utils.aoa_to_sheet([FEE_RULE_TEMPLATE_HEADERS, example1, example2]);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Fee Rules');
+  var instructions = [
+    ['Column', 'Notes'],
+    ['feeType', 'COMMISSION | MARKETING | GATEWAY | OTHER'],
+    ['scope', 'PRODUCT_CATEGORY | PRODUCT'],
+    ['categoryKey', 'Required if scope=PRODUCT_CATEGORY (matches a Product Category key)'],
+    ['productSku or productId', 'Required if scope=PRODUCT (use one, not both)'],
+    ['commissionType', 'PERCENTAGE | FLAT | SLAB'],
+    ['value', 'Required unless SLAB (0-100 for PERCENTAGE)'],
+    ['slabJson', 'Required if commissionType=SLAB — JSON array of {min,max,type,value}'],
+    ['priority', 'Optional, default 0 — higher wins a tie'],
+    ['stackable', 'TRUE/FALSE, default FALSE'],
+    ['isActive', 'TRUE/FALSE, default TRUE'],
+    ['validFrom / validTo', 'Optional dates, YYYY-MM-DD — a new rule with a later validFrom is how you "change" a rule; existing rules are never overwritten'],
+    ['productGstInclusive', 'Optional, PRODUCT-scoped rows only — INCLUSIVE | EXCLUSIVE'],
+    ['productGstOverridePercent', 'Optional, PRODUCT-scoped rows only — 0-100'],
+    ['productHsnSac', 'Optional, PRODUCT-scoped rows only'],
+  ];
+  var ws2 = XLSX.utils.aoa_to_sheet(instructions);
+  XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+  XLSX.writeFile(wb, 'fee-rule-template.xlsx');
+}
+
+function handleBulkFeeFile(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(e.target.result, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      _bulkFeeRows = rows;
+      validateBulkFeeRows();
+    } catch (ex) {
+      toast('Could not read file: ' + ex.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function validateBulkFeeRows() {
+  if (!_bulkFeeRows.length) { toast('No rows found in file', 'error'); return; }
+  api('POST', '/admin/product-fee-rules/bulk-import/validate', { rows: _bulkFeeRows }).then(function(r) {
+    _bulkFeeInvalidRows = r.invalidRows || [];
+    renderBulkFeePreview(r);
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function renderBulkFeePreview(r) {
+  document.getElementById('fee-bulk-summary').style.display = '';
+  document.getElementById('fee-bulk-summary').innerHTML = 'Total rows: <strong>' + r.totalRows + '</strong> — ' +
+    '<span style="color:#22c55e">' + r.validCount + ' valid</span>, <span style="color:#ef4444">' + r.invalidCount + ' invalid</span>' +
+    ((r.warnings||[]).length ? ', <span style="color:#f59e0b">' + r.warnings.length + ' warning(s)</span>' : '');
+
+  var warnEl = document.getElementById('fee-bulk-warnings');
+  if (r.warnings && r.warnings.length) {
+    warnEl.style.display = '';
+    warnEl.innerHTML = r.warnings.map(function(w) {
+      return '<div style="padding:6px 10px;background:#fffbeb;border-radius:6px;color:#92400e;font-size:12px;margin-bottom:4px">⚠ Row ' + w.row + ': ' + escape(w.warning) + '</div>';
+    }).join('');
+  } else { warnEl.style.display = 'none'; }
+
+  var invalidWrap = document.getElementById('fee-bulk-invalid-wrap');
+  if (r.invalidRows && r.invalidRows.length) {
+    invalidWrap.style.display = '';
+    document.getElementById('fee-bulk-invalid-tbl').innerHTML = '<table><thead><tr><th>Row</th><th>Errors</th></tr></thead><tbody>' +
+      r.invalidRows.map(function(inv) { return '<tr><td>' + inv.row + '</td><td style="color:#ef4444;font-size:12px">' + inv.errors.map(escape).join('; ') + '</td></tr>'; }).join('') +
+      '</tbody></table>';
+  } else { invalidWrap.style.display = 'none'; }
+
+  var validWrap = document.getElementById('fee-bulk-valid-wrap');
+  if (r.validRows && r.validRows.length) {
+    validWrap.style.display = '';
+    document.getElementById('fee-bulk-valid-tbl').innerHTML = '<table><thead><tr><th>Row</th><th>Fee Type</th><th>Scope</th><th>Target</th><th>Value</th></tr></thead><tbody>' +
+      r.validRows.map(function(v) {
+        var d = v.data;
+        var target = d.productCategoryId || d.productId || '—';
+        var valueLabel = d.commissionType === 'SLAB' ? 'Slab' : (d.commissionType === 'FLAT' ? '₹' + d.value : d.value + '%');
+        return '<tr><td>' + v.row + '</td><td>' + escape(d.feeType) + '</td><td>' + escape(d.scope) + '</td><td style="font-size:11px">' + escape(target) + '</td><td>' + escape(valueLabel) + '</td></tr>';
+      }).join('') +
+      '</tbody></table>';
+    document.getElementById('fee-bulk-confirm-btn').style.display = r.validCount > 0 ? '' : 'none';
+  } else {
+    validWrap.style.display = 'none';
+    document.getElementById('fee-bulk-confirm-btn').style.display = 'none';
+  }
+  document.getElementById('fee-bulk-result').style.display = 'none';
+}
+
+function downloadFeeRuleErrorReport() {
+  if (!_bulkFeeInvalidRows.length) return;
+  var rows = _bulkFeeInvalidRows.map(function(inv) { return { row: inv.row, errors: inv.errors.join('; ') }; });
+  downloadCsv(rows, [{key:'row',label:'Row'},{key:'errors',label:'Errors'}], 'fee-rule-import-errors.csv');
+}
+
+function confirmBulkFeeImport() {
+  if (!_bulkFeeRows.length) return;
+  var btn = document.getElementById('fee-bulk-confirm-btn');
+  btn.disabled = true;
+  api('POST', '/admin/product-fee-rules/bulk-import/confirm', { rows: _bulkFeeRows }).then(function(r) {
+    document.getElementById('fee-bulk-result').style.display = '';
+    document.getElementById('fee-bulk-result').innerHTML =
+      '✅ Imported <strong>' + r.rulesCreated + '</strong> fee rule(s)' +
+      (r.productsUpdated ? ', updated <strong>' + r.productsUpdated + '</strong> product GST field(s)' : '') +
+      ((r.skipped||[]).length ? ', <strong style="color:#ef4444">' + r.skipped.length + '</strong> row(s) skipped' : '') + '.';
+    btn.style.display = 'none';
+    toast('Import complete', 'success');
+    loadProductFeeRules();
+  }).catch(function(e) {
+    toast(e.message, 'error');
+    btn.disabled = false;
+  });
+}
+
 // ── PRODUCTS ────────────────────────────────────────────────────────
 
 function loadProducts() {
@@ -667,6 +861,7 @@ function openProdModal(prod) {
   document.getElementById('prod-mrp').value = prod ? (prod.mrp||'') : '';
   document.getElementById('prod-hsn').value = prod ? (prod.hsnSac||'') : '';
   document.getElementById('prod-gst').value = prod && prod.gstOverridePercent != null ? prod.gstOverridePercent : '';
+  document.getElementById('prod-gst-inclusive').value = prod && prod.gstInclusive != null ? String(prod.gstInclusive) : '';
   document.getElementById('prod-stock').value = prod ? prod.stock : 0;
   document.getElementById('prod-active').checked = prod ? prod.isActive : true;
   document.getElementById('prod-seo-title').value = prod ? (prod.seoTitle||'') : '';
@@ -733,6 +928,7 @@ function saveProduct() {
     stock: parseInt(document.getElementById('prod-stock').value)||0,
     hsnSac: document.getElementById('prod-hsn').value.trim()||null,
     gstOverridePercent: (function(){ var v=parseFloat(document.getElementById('prod-gst').value); return isNaN(v)?null:v; })(),
+    gstInclusive: (function(){ var v=document.getElementById('prod-gst-inclusive').value; return v===''?null:(v==='true'); })(),
     images: prodImages,
     isActive: document.getElementById('prod-active').checked,
     seoTitle: document.getElementById('prod-seo-title').value.trim()||undefined,

@@ -1883,6 +1883,177 @@ Return JSON with:
     return { productName: p.name, amount: testAmount, ...result };
   }
 
+  // ─── Product Fee Rule — Bulk Upload (Phase 8) ──────────────────────────
+  // Never PATCHes an existing ProductFeeRule — only ever CREATEs new rows, so a bulk
+  // import can never rewrite a rule a settled order's productFeeBreakdown snapshot
+  // already referenced by id/label. "Changing" a rule via bulk means uploading a new row
+  // with a later validFrom (and higher priority to fully supersede) — the old row is left
+  // untouched. The three optional productGst* columns are the one deliberate exception:
+  // they UPDATE the resolved Product row directly, since they're live, already-editable
+  // master data (same fields the single-product edit form already writes), not a
+  // historical settlement record.
+  private readonly FEE_TYPES = ['COMMISSION', 'MARKETING', 'GATEWAY', 'OTHER'];
+  private readonly FEE_SCOPES = ['PRODUCT_CATEGORY', 'PRODUCT'];
+  private readonly COMMISSION_TYPES = ['PERCENTAGE', 'FLAT', 'SLAB'];
+
+  private parseBool(v: any, fallback: boolean): boolean {
+    if (v === undefined || v === null || v === '') return fallback;
+    const s = String(v).trim().toUpperCase();
+    return s === 'TRUE' || s === '1' || s === 'YES';
+  }
+
+  // Shared by both /validate and /confirm — the confirm endpoint re-runs this from scratch
+  // against the current DB state rather than trusting whatever the client last saw, since
+  // this is a money-affecting operation (product/category could have been deleted, or a
+  // conflicting rule added, in the seconds between preview and confirm).
+  private async validateProductFeeRuleRows(rows: any[], client: any = this.prisma) {
+    if (rows.length > 5000) throw new BadRequestException('File has too many rows (max 5,000 per upload) — split it into smaller batches');
+
+    const categories = await client.productCategory.findMany({ select: { id: true, key: true } });
+    const categoryByKey = new Map(categories.map((c: any) => [c.key.toUpperCase(), c.id]));
+    const productIds = [...new Set(rows.map((r) => (r.productId || '').trim()).filter(Boolean))];
+    const productSkus = [...new Set(rows.map((r) => (r.productSku || '').trim()).filter(Boolean))];
+    const productsById = new Map((await client.product.findMany({ where: { id: { in: productIds } }, select: { id: true, categoryId: true } })).map((p: any) => [p.id, p]));
+    const productsBySku = new Map((await client.product.findMany({ where: { sku: { in: productSkus } }, select: { id: true, sku: true, categoryId: true } })).map((p: any) => [p.sku, p]));
+
+    const seenInFile = new Set<string>();
+    const validRows: any[] = [];
+    const invalidRows: { row: number; errors: string[] }[] = [];
+    const warnings: { row: number; warning: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rowNum = i + 2; // header is row 1, so the first data row is row 2 — matches what the admin sees in the spreadsheet
+      const errors: string[] = [];
+
+      const feeType = String(r.feeType || '').trim().toUpperCase();
+      if (!this.FEE_TYPES.includes(feeType)) errors.push(`feeType must be one of ${this.FEE_TYPES.join(', ')}`);
+      const scope = String(r.scope || '').trim().toUpperCase();
+      if (!this.FEE_SCOPES.includes(scope)) errors.push(`scope must be one of ${this.FEE_SCOPES.join(', ')}`);
+      const commissionType = String(r.commissionType || '').trim().toUpperCase();
+      if (!this.COMMISSION_TYPES.includes(commissionType)) errors.push(`commissionType must be one of ${this.COMMISSION_TYPES.join(', ')}`);
+
+      let productCategoryId: string | null = null;
+      let productId: string | null = null;
+      let resolvedCategoryId: string | null = null; // the product's OWN category, for productGst* target resolution regardless of scope
+      const categoryKey = String(r.categoryKey || '').trim().toUpperCase();
+      const productSku = String(r.productSku || '').trim();
+      const rawProductId = String(r.productId || '').trim();
+      if (scope === 'PRODUCT_CATEGORY') {
+        if (productSku || rawProductId) errors.push('a PRODUCT_CATEGORY-scoped row must not also set productSku/productId');
+        if (!categoryKey) errors.push('categoryKey is required for a PRODUCT_CATEGORY-scoped row');
+        else if (!categoryByKey.has(categoryKey)) errors.push(`categoryKey "${categoryKey}" not found`);
+        else productCategoryId = categoryByKey.get(categoryKey) as string;
+      } else if (scope === 'PRODUCT') {
+        if (categoryKey) errors.push('a PRODUCT-scoped row must not also set categoryKey');
+        if (!productSku && !rawProductId) errors.push('productSku or productId is required for a PRODUCT-scoped row');
+        else if (productSku && rawProductId) errors.push('set only one of productSku or productId, not both');
+        else {
+          const p = productSku ? productsBySku.get(productSku) : productsById.get(rawProductId);
+          if (!p) errors.push(`product "${productSku || rawProductId}" not found`);
+          else { productId = (p as any).id; resolvedCategoryId = (p as any).categoryId; }
+        }
+      }
+
+      const value = r.value !== undefined && r.value !== '' ? Number(r.value) : (commissionType === 'SLAB' ? 0 : NaN);
+      if (Number.isNaN(value) || value < 0) errors.push('value must be a non-negative number');
+      else if (commissionType === 'PERCENTAGE' && value > 100) errors.push('value must be <= 100 for a PERCENTAGE rule');
+      let slabJson: any = null;
+      if (commissionType === 'SLAB') {
+        if (!r.slabJson) errors.push('slabJson is required when commissionType=SLAB');
+        else { try { slabJson = JSON.parse(r.slabJson); if (!Array.isArray(slabJson)) throw new Error('not an array'); } catch { errors.push('slabJson is not valid JSON (expected an array of {min,max,type,value})'); } }
+      }
+
+      const priority = r.priority !== undefined && r.priority !== '' ? parseInt(r.priority, 10) : 0;
+      if (Number.isNaN(priority) || priority < 0) errors.push('priority must be a non-negative integer');
+      const stackable = this.parseBool(r.stackable, false);
+      const isActive = this.parseBool(r.isActive, true);
+
+      let validFrom: Date | null = null, validTo: Date | null = null;
+      if (r.validFrom) { validFrom = new Date(r.validFrom); if (Number.isNaN(validFrom.getTime())) errors.push('validFrom is not a valid date'); }
+      if (r.validTo) { validTo = new Date(r.validTo); if (Number.isNaN(validTo.getTime())) errors.push('validTo is not a valid date'); }
+      if (validFrom && validTo && validFrom.getTime() >= validTo.getTime()) errors.push('validTo must be after validFrom');
+
+      let productGstInclusive: boolean | null | undefined;
+      if (r.productGstInclusive) {
+        const v = String(r.productGstInclusive).trim().toUpperCase();
+        if (v === 'INCLUSIVE') productGstInclusive = true;
+        else if (v === 'EXCLUSIVE') productGstInclusive = false;
+        else errors.push('productGstInclusive must be INCLUSIVE, EXCLUSIVE, or blank');
+      }
+      let productGstOverridePercent: number | undefined;
+      if (r.productGstOverridePercent !== undefined && r.productGstOverridePercent !== '') {
+        productGstOverridePercent = Number(r.productGstOverridePercent);
+        if (Number.isNaN(productGstOverridePercent) || productGstOverridePercent < 0 || productGstOverridePercent > 100) errors.push('productGstOverridePercent must be a number between 0 and 100');
+      }
+      if ((productGstInclusive !== undefined || productGstOverridePercent !== undefined || r.productHsnSac) && scope !== 'PRODUCT') {
+        errors.push('productGstInclusive/productGstOverridePercent/productHsnSac can only be set on a PRODUCT-scoped row');
+      }
+
+      // Duplicate-within-file — same target+feeType+dates appearing twice.
+      const targetKey = `${feeType}|${scope}|${productCategoryId || productId}|${r.validFrom || ''}|${r.validTo || ''}`;
+      if (!errors.length) {
+        if (seenInFile.has(targetKey)) errors.push(`duplicate of an earlier row in this file (same feeType/scope/target/dates)`);
+        else seenInFile.add(targetKey);
+      }
+
+      if (errors.length) { invalidRows.push({ row: rowNum, errors }); continue; }
+
+      // Non-blocking overlap warning against existing active rules for the same target —
+      // legitimate via priority/stackable, but always surfaced so an accidental overlap is
+      // caught before import, not silently changing checkout math after the fact.
+      const existing = await client.productFeeRule.findMany({
+        where: { feeType, scope, isActive: true, ...(productCategoryId ? { productCategoryId } : { productId }) },
+        select: { id: true, validFrom: true, validTo: true },
+      });
+      const overlaps = existing.some((e: any) => {
+        const eFrom = e.validFrom ? new Date(e.validFrom).getTime() : -Infinity;
+        const eTo = e.validTo ? new Date(e.validTo).getTime() : Infinity;
+        const nFrom = validFrom ? validFrom.getTime() : -Infinity;
+        const nTo = validTo ? validTo.getTime() : Infinity;
+        return nFrom < eTo && eFrom < nTo;
+      });
+      if (overlaps) warnings.push({ row: rowNum, warning: 'overlaps an existing active rule for the same target — will stack/compete by priority, not replace it' });
+
+      validRows.push({
+        row: rowNum,
+        data: { feeType, scope, productCategoryId, productId, commissionType, value, slabJson, priority, stackable, isActive, validFrom, validTo },
+        productGstUpdate: (productGstInclusive !== undefined || productGstOverridePercent !== undefined || r.productHsnSac)
+          ? { productId, gstInclusive: productGstInclusive, gstOverridePercent: productGstOverridePercent, hsnSac: r.productHsnSac || undefined }
+          : null,
+      });
+    }
+
+    return { validRows, invalidRows, warnings };
+  }
+
+  async validateProductFeeRuleBulkImport(rows: any[]) {
+    const { validRows, invalidRows, warnings } = await this.validateProductFeeRuleRows(rows);
+    return {
+      totalRows: rows.length, validCount: validRows.length, invalidCount: invalidRows.length,
+      validRows: validRows.map((v) => ({ row: v.row, data: v.data })), invalidRows, warnings,
+    };
+  }
+
+  async confirmProductFeeRuleBulkImport(rows: any[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const { validRows, invalidRows } = await this.validateProductFeeRuleRows(rows, tx);
+      let productsUpdated = 0;
+      for (const v of validRows) {
+        await tx.productFeeRule.create({ data: v.data });
+        if (v.productGstUpdate) {
+          const { productId, ...fields } = v.productGstUpdate;
+          const data: any = {};
+          if (fields.gstInclusive !== undefined) data.gstInclusive = fields.gstInclusive;
+          if (fields.gstOverridePercent !== undefined) data.gstOverridePercent = fields.gstOverridePercent;
+          if (fields.hsnSac !== undefined) data.hsnSac = fields.hsnSac;
+          if (Object.keys(data).length) { await tx.product.update({ where: { id: productId }, data }); productsUpdated++; }
+        }
+      }
+      return { rulesCreated: validRows.length, productsUpdated, skipped: invalidRows };
+    });
+  }
+
   // ─── Product Vendor Earnings / Payouts (Phase 7) ──────────────────────
   // Mirrors the ServiceVendor earnings/settlement admin surface (vendorEarningsSummary /
   // SettlementsService.record(), further below) — deliberately a separate, additive path
@@ -2199,16 +2370,58 @@ Return JSON with:
   }
 
   // ─── Taxes ────────────────────────────────────────────────────────────
+  // Phase 8 additions: gstApplicable/priceType/productCategoryId/validFrom/validTo — the
+  // read side is buildTaxRateResolver() (common/index.ts). No @@unique enforces non-
+  // overlap (effective-dating deliberately allows two rows for the same scope/HSN/
+  // category across non-overlapping date windows); overlap is instead flagged here at
+  // write time, via the same routine the ProductFeeRule bulk-import's conflict detection
+  // above uses conceptually.
 
   async listTaxes() {
-    return this.prisma.taxConfig.findMany({ orderBy: { createdAt: 'asc' } }).catch(() => []);
+    return this.prisma.taxConfig.findMany({
+      include: { productCategory: { select: { name: true } } },
+      orderBy: { createdAt: 'asc' },
+    }).catch(() => []);
   }
 
-  async createTax(data: { name: string; type?: string; rate: number; hsnCode?: string; appliesTo?: string[] }) {
-    return this.prisma.taxConfig.create({ data: { ...data, appliesTo: data.appliesTo || ['SERVICE'] } }).catch((e) => { throw e; });
+  private async assertNoTaxConfigOverlap(data: any, excludeId?: string) {
+    if (!data.appliesTo?.length) return;
+    const existing = await this.prisma.taxConfig.findMany({
+      where: {
+        isActive: true, type: data.type || 'GST', appliesTo: { hasSome: data.appliesTo },
+        ...(data.hsnCode ? { hsnCode: data.hsnCode } : { productCategoryId: data.productCategoryId || null }),
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true, validFrom: true, validTo: true },
+    });
+    const nFrom = data.validFrom ? new Date(data.validFrom).getTime() : -Infinity;
+    const nTo = data.validTo ? new Date(data.validTo).getTime() : Infinity;
+    const overlap = existing.find((e: any) => {
+      const eFrom = e.validFrom ? new Date(e.validFrom).getTime() : -Infinity;
+      const eTo = e.validTo ? new Date(e.validTo).getTime() : Infinity;
+      return nFrom < eTo && eFrom < nTo;
+    });
+    if (overlap) throw new BadRequestException('This HSN/category already has an active GST rule whose effective dates overlap — adjust the dates or deactivate the existing rule first');
   }
 
-  async updateTax(id: string, data: { name?: string; rate?: number; isActive?: boolean; appliesTo?: string[] }) {
+  async createTax(data: {
+    name: string; type?: string; rate: number; hsnCode?: string; appliesTo?: string[];
+    gstApplicable?: boolean; priceType?: 'GST_INCLUSIVE' | 'GST_EXCLUSIVE'; productCategoryId?: string;
+    validFrom?: string; validTo?: string;
+  }) {
+    const payload = { ...data, appliesTo: data.appliesTo || ['SERVICE'] };
+    await this.assertNoTaxConfigOverlap(payload);
+    return this.prisma.taxConfig.create({ data: payload }).catch((e) => { throw e; });
+  }
+
+  async updateTax(id: string, data: {
+    name?: string; rate?: number; isActive?: boolean; appliesTo?: string[];
+    gstApplicable?: boolean; priceType?: 'GST_INCLUSIVE' | 'GST_EXCLUSIVE'; productCategoryId?: string;
+    validFrom?: string; validTo?: string;
+  }) {
+    const existing = await this.prisma.taxConfig.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Tax rate not found');
+    await this.assertNoTaxConfigOverlap({ ...existing, ...data }, id);
     return this.prisma.taxConfig.update({ where: { id }, data }).catch((e) => { throw e; });
   }
 
@@ -3219,6 +3432,10 @@ export class AdminController {
   @Get('product-fee-rules/preview') previewProductFee(
     @Query('feeType') feeType: string, @Query('productId') productId: string, @Query('amount') amount?: string,
   ) { return this.admin.previewProductFee(feeType, productId, amount ? Number(amount) : undefined); }
+
+  // Phase 8 — Bulk Fee-Rule Upload
+  @Post('product-fee-rules/bulk-import/validate') validateBulkFeeRules(@Body() b: { rows: any[] }) { return this.admin.validateProductFeeRuleBulkImport(b.rows || []); }
+  @Post('product-fee-rules/bulk-import/confirm') confirmBulkFeeRules(@Body() b: { rows: any[] }) { return this.admin.confirmProductFeeRuleBulkImport(b.rows || []); }
 
   // Phase 7 — Product Seller Earnings / Payouts
   @Get('product-vendor-earnings') listProductVendorEarnings(@Query('q') q?: string) { return this.admin.listProductVendorEarnings(q); }

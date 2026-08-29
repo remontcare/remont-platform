@@ -1005,6 +1005,7 @@ model ProductCategory {
 
   products        Product[]
   productFeeRules ProductFeeRule[]
+  taxConfigs      TaxConfig[]
 }
 
 model Product {
@@ -1028,6 +1029,11 @@ model Product {
   // (e.g. 12% vs 18% vs 28%); null means resolve by HSN/SAC match against TaxConfig,
   // then the scope's blanket default (see buildTaxRateResolver in common/index.ts).
   gstOverridePercent Decimal? @db.Decimal(5, 2)
+  // Phase 8 — per-product override of GST price treatment. Null = resolve via the same
+  // TaxConfig chain gstOverridePercent already falls back through (HSN match → category
+  // default → blanket default → GST_EXCLUSIVE). Mirrors gstOverridePercent's exact
+  // null-fallback convention.
+  gstInclusive    Boolean?
   stock           Int                 @default(0)
   images          String[]
   aiEnhancedImgs  String[]
@@ -1777,6 +1783,13 @@ model Order {
   // Pricing breakdown
   serviceAmount       Decimal @default(0) @db.Decimal(10, 2)
   productsAmount      Decimal @default(0) @db.Decimal(10, 2)
+  // Phase 8 — sum of OrderItem.taxableValue across this order's PRODUCT items (the ex-GST
+  // base seller settlement is computed against — see ProductLedgerService.
+  // settleProductOrder()). Null for SERVICE orders and for orders created before this
+  // field existed; both fall back to `productsAmount`, which is numerically identical to
+  // the taxable base for any GST-Excluded (or 0%) order — i.e. every order that could
+  // exist before this feature shipped.
+  productsTaxableAmount Decimal? @db.Decimal(10, 2)
   extraWorkAmount     Decimal @default(0) @db.Decimal(10, 2)
   subtotal            Decimal @default(0) @db.Decimal(10, 2)
   couponCode          String?
@@ -1986,6 +1999,16 @@ model OrderItem {
   // seller order queries and the split engine don't have to join through Product every
   // time. Nullable for items created before this field existed.
   vendorId         String?
+
+  // Phase 8 — GST treatment snapshot, resolved once at order-creation time via
+  // resolveProductGstLine(), never recomputed later — a later TaxConfig/Product change
+  // can't retroactively alter what a past order shows. Null on every pre-existing row and
+  // on any order predating this feature; downstream readers must treat null as "legacy
+  // line, exclusive-of-tax by implicit convention" (matches historical checkout behavior).
+  gstInclusive   Boolean?
+  gstRatePercent Decimal? @db.Decimal(5, 2)
+  taxableValue   Decimal? @db.Decimal(10, 2)
+  gstAmount      Decimal? @db.Decimal(10, 2)
 
   order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product        Product         @relation(fields: [productId], references: [id])
@@ -3279,15 +3302,48 @@ model BlogPost {
   updatedAt   DateTime  @updatedAt
 }
 
+enum GstPriceType {
+  GST_INCLUSIVE
+  GST_EXCLUSIVE
+}
+
 model TaxConfig {
   id        String   @id @default(cuid())
   name      String // e.g. "GST 18%"
   type      String   @default("GST") // GST, SERVICE_TAX, CESS
   rate      Decimal  @db.Decimal(5, 2)
   hsnCode   String? // HSN/SAC code
-  appliesTo String[] // SERVICE, PRODUCT, AMC
+  appliesTo String[] // SERVICE, PRODUCT, AMC, PLATFORM_FEE
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  // Phase 8 — distinct from rate=0: real GST law separates NIL-rated (0%, still
+  // "applicable") from exempt (not applicable at all). buildTaxRateResolver() forces
+  // rateFor() to 0 whenever the matched row has this false, regardless of `rate`.
+  gstApplicable Boolean @default(true)
+  // Whether `rate` is baked into the product's quoted price (MRP-style, e.g. ₹1,180
+  // inclusive of 18%) or added on top at checkout (₹1,000 + 18%). Default EXCLUSIVE
+  // preserves every existing row's implicit behavior with zero backfill needed.
+  priceType GstPriceType @default(GST_EXCLUSIVE)
+  // Category-level default — appliesTo is scope-type only (SERVICE/PRODUCT/...), so
+  // there was previously no way to default GST per ProductCategory; null = this row is
+  // a blanket/HSN-generic default for `appliesTo`, exactly as before.
+  productCategoryId String?
+  productCategory   ProductCategory? @relation(fields: [productCategoryId], references: [id], onDelete: Cascade)
+
+  // Effective-dating — mirrors CommissionRule/ProductFeeRule's validFrom/validTo idiom
+  // exactly. No @@unique on (appliesTo,hsnCode)/(appliesTo,productCategoryId): that would
+  // break versioning by forbidding two rows with non-overlapping date windows for the
+  // same scope, which is the entire point of this field. Overlap conflicts are instead
+  // caught by application-level validation at write time (AdminService.createTaxConfig/
+  // updateTaxConfig, and reused by the ProductFeeRule bulk-import's conflict detection).
+  validFrom DateTime?
+  validTo   DateTime?
+
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([appliesTo, hsnCode, isActive])
+  @@index([appliesTo, productCategoryId, isActive])
 }
 
 model SeasonalAd {

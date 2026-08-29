@@ -13,6 +13,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 export type SupplyType = 'INTRA_STATE' | 'INTER_STATE' | 'UNREGISTERED';
+export type GstPriceTypeValue = 'INCLUSIVE' | 'EXCLUSIVE';
 
 export interface BillingLineInput {
   description: string;
@@ -24,6 +25,10 @@ export interface BillingLineInput {
   /** GST rate for this line, e.g. 18 for 18%. Ignored (forced to 0) when the invoicing
    * entity itself is unregistered — see supplierState on BillingCalcInput. */
   taxRatePercent: number;
+  /** Phase 8 — whether `rate` already has GST baked in (MRP-style, e.g. ₹1,180 inclusive
+   * of 18%) or GST is added on top (₹1,000 + 18%). Defaults to 'EXCLUSIVE' when omitted,
+   * so every pre-existing call site (which never sets this) is byte-for-byte unchanged. */
+  priceType?: GstPriceTypeValue;
 }
 
 export interface BillingLineResult {
@@ -39,6 +44,7 @@ export interface BillingLineResult {
   sgst: number;
   igst: number;
   amount: number;
+  priceType: GstPriceTypeValue;
 }
 
 export interface BillingCalcInput {
@@ -104,17 +110,43 @@ export function calculateInvoice(input: BillingCalcInput): BillingCalcResult {
 
   const lines: BillingLineResult[] = input.lines.map((line) => {
     const discount = line.discount || 0;
-    const taxableValue = round2(line.qty * line.rate - discount);
+    const grossValue = round2(line.qty * line.rate - discount);
     const rate = registered ? line.taxRatePercent : 0;
-    let cgst = 0, sgst = 0, igst = 0;
-    if (rate > 0) {
-      if (supplyType === 'INTRA_STATE') {
-        cgst = round2((taxableValue * rate) / 2 / 100);
-        sgst = cgst;
-      } else if (supplyType === 'INTER_STATE') {
-        igst = round2((taxableValue * rate) / 100);
+    const priceType: GstPriceTypeValue = line.priceType === 'INCLUSIVE' ? 'INCLUSIVE' : 'EXCLUSIVE';
+    let taxableValue: number, cgst = 0, sgst = 0, igst = 0, amount: number;
+
+    if (priceType !== 'INCLUSIVE' || rate <= 0) {
+      // Existing exclusive math, byte-for-byte unchanged — also the correct fallback for
+      // an inclusive line with no tax rate at all (nothing to back out).
+      taxableValue = grossValue;
+      if (rate > 0) {
+        if (supplyType === 'INTRA_STATE') {
+          cgst = round2((taxableValue * rate) / 2 / 100);
+          sgst = cgst;
+        } else if (supplyType === 'INTER_STATE') {
+          igst = round2((taxableValue * rate) / 100);
+        }
       }
+      amount = round2(taxableValue + cgst + sgst + igst);
+    } else {
+      // Phase 8 — price already includes GST: back-derive the taxable base from the gross
+      // amount actually charged, rather than adding tax on top of it a second time.
+      taxableValue = round2(grossValue / (1 + rate / 100));
+      const totalTax = round2(grossValue - taxableValue);
+      if (supplyType === 'INTRA_STATE') {
+        // Remainder-safe split (same idiom as allocateAcrossGroups()) so cgst+sgst always
+        // sums exactly to totalTax, never drifts a paisa from independent rounding.
+        cgst = round2(totalTax / 2);
+        sgst = round2(totalTax - cgst);
+      } else if (supplyType === 'INTER_STATE') {
+        igst = totalTax;
+      }
+      // By construction taxableValue + tax already equals grossValue exactly — use the
+      // original gross, not a freshly-summed total, so the line's charged amount never
+      // drifts from what the customer was actually shown/charged.
+      amount = grossValue;
     }
+
     return {
       description: line.description,
       hsnSac: line.hsnSac || null,
@@ -125,7 +157,8 @@ export function calculateInvoice(input: BillingCalcInput): BillingCalcResult {
       taxRatePercent: rate,
       taxableValue,
       cgst, sgst, igst,
-      amount: round2(taxableValue + cgst + sgst + igst),
+      amount,
+      priceType,
     };
   });
 

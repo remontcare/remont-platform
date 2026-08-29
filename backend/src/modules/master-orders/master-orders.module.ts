@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -195,7 +195,11 @@ interface PricedGroup {
   amount: number;
   categoryId?: string; // SERVICE groups
   vendorId?: string | null; // PRODUCT groups
-  items: { serviceId?: string; productId?: string; quantity: number; unitPrice: number; totalPrice: number }[];
+  items: {
+    serviceId?: string; productId?: string; quantity: number; unitPrice: number; totalPrice: number;
+    // Phase 8 — per-item GST snapshot for PRODUCT items, resolved via resolveProductGstLine().
+    gstInclusive?: boolean; gstRatePercent?: number; taxableValue?: number; gstAmount?: number;
+  }[];
   // Phase 7 — resolved+summed marketplace fees for a PRODUCT group, snapshotted onto the
   // child Order's productFeeBreakdown/remontCommission at creation (see checkout() below).
   // The `delivery` component is added later, at settlement (ProductLedgerService).
@@ -205,6 +209,14 @@ interface PricedGroup {
     gateway: { amount: number; ruleId: string | null; ruleLabel: string };
     gstOnFees: { amount: number; ratePercent: number };
   };
+  // Phase 8 — PRODUCT group GST rollups. productGstOnTop is added to reach the customer's
+  // charged total (only EXCLUSIVE lines contribute — an INCLUSIVE line's tax is already
+  // embedded in its own price, never added again). productsTaxableAmount is the ex-GST
+  // base across every line regardless of treatment — this is what settlement's GROSS_SALE
+  // and reporting/breakdown use, per the resolved "seller doesn't earn commission on GST"
+  // decision.
+  productsTaxableAmount?: number;
+  productGstOnTop?: number;
 }
 
 // ─── Service ───
@@ -317,6 +329,12 @@ export class MasterOrdersService {
     // per group instead of once for the whole cart.
     const cityPriceCache = new Map<string, number | null>();
     const commissionByService = new Map<string, { commissionAmount: number; ruleId: string | null; ruleLabel: string }>();
+    // Phase 8 — lazily resolved at most once per checkout() call (only if the cart actually
+    // has a PRODUCT group), reused for every PRODUCT item below — exactly the same resolver
+    // invoices.module.ts's Type 3 branch already uses. Lazy so a pure-SERVICE cart never
+    // issues this query at all.
+    let prodTax: Awaited<ReturnType<typeof buildTaxRateResolver>> | null = null;
+    const getProdTax = async () => (prodTax ??= await buildTaxRateResolver(this.prisma, 'PRODUCT'));
     const pricedGroups: PricedGroup[] = [];
     for (const g of groups) {
       if (g.type === 'SERVICE') {
@@ -342,12 +360,25 @@ export class MasterOrdersService {
         pricedGroups.push({ type: 'SERVICE', amount, categoryId: g.categoryId, items });
       } else {
         let amount = 0;
-        const items: PricedGroup['items'] = g.items.map((it) => {
+        let productsTaxableAmount = 0, productGstOnTop = 0;
+        const items: PricedGroup['items'] = [];
+        for (const it of g.items) {
           const p = productMap.get(it.productId)!;
           const totalPrice = Number(p.price) * it.quantity;
           amount += totalPrice;
-          return { productId: it.productId, quantity: it.quantity, unitPrice: Number(p.price), totalPrice };
-        });
+          // Phase 8 — resolve this line's real GST treatment instead of the old flat-18%-
+          // on-the-whole-cart approach. An INCLUSIVE line's tax is only ever a split of the
+          // price shown (never added again below); an EXCLUSIVE line's tax genuinely adds
+          // to what the customer is charged.
+          const gstLine = await resolveProductGstLine(await getProdTax(), p, totalPrice);
+          productsTaxableAmount += gstLine.taxableValue;
+          if (!gstLine.inclusive) productGstOnTop += gstLine.gstAmount;
+          items.push({
+            productId: it.productId, quantity: it.quantity, unitPrice: Number(p.price), totalPrice,
+            gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent,
+            taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+          });
+        }
 
         // Phase 7 — resolve commission/marketing/gateway per line, summed across the group
         // (one child Order per vendor, so this is the order-level total), same await-in-loop
@@ -378,6 +409,7 @@ export class MasterOrdersService {
 
         pricedGroups.push({
           type: 'PRODUCT', amount, vendorId: g.vendorId, items,
+          productsTaxableAmount, productGstOnTop,
           productFees: {
             commission: { amount: commissionTotal, ruleId: commissionRuleId, ruleLabel: commissionRuleLabel },
             marketing: { amount: marketingTotal, ruleId: marketingRuleId, ruleLabel: marketingRuleLabel },
@@ -451,7 +483,18 @@ export class MasterOrdersService {
     }
 
     const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
-    const gstAmount = Math.round(discountedSubtotal * 0.18 * 100) / 100;
+    // Phase 8 — SERVICE-side GST stays flat 18%, applied to the service's own discounted
+    // share (unchanged methodology, just no longer blended with products). PRODUCT-side
+    // GST is the sum of each group's already-resolved real per-item GST (§ pricing loop
+    // above) — an INCLUSIVE line's tax is embedded in its price and never added here; only
+    // EXCLUSIVE lines contribute to productGstOnTop.
+    const serviceDiscountShare = grossServiceAmount > 0
+      ? allocateAcrossGroups([grossServiceAmount], subtotal, membershipDiscount + couponDiscount)[0]
+      : 0;
+    const discountedServiceAmount = Math.max(0, grossServiceAmount - serviceDiscountShare);
+    const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
+    const productGstOnTop = pricedGroups.filter((g) => g.type === 'PRODUCT').reduce((s, g) => s + (g.productGstOnTop || 0), 0);
+    const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount + deliveryCharge);
     const totalAmount = Math.max(0, discountedSubtotal + gstAmount + deliveryCharge - walletUsed);
 
@@ -494,7 +537,18 @@ export class MasterOrdersService {
     // (read directly by the existing complete()/invoice-generation code) stay consistent.
     const groupAmounts = pricedGroups.map((g) => g.amount);
     const groupDiscounts = allocateAcrossGroups(groupAmounts, subtotal, membershipDiscount + couponDiscount);
-    const groupGst = allocateAcrossGroups(groupAmounts, subtotal, gstAmount);
+    // Phase 8 — GST is no longer one blended pool allocated by amount-share across every
+    // group regardless of type: a PRODUCT group already knows its own exact GST
+    // (productGstOnTop, resolved per-item above) and uses that directly; only the SERVICE-
+    // side flat-18% pool still needs pro-rata splitting, and only among SERVICE groups
+    // (denominator = grossServiceAmount, not the combined subtotal — isolated now that
+    // products are no longer part of this pool).
+    const serviceGroupIndices = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
+    const serviceGstShares = allocateAcrossGroups(serviceGroupIndices.map((i) => pricedGroups[i].amount), grossServiceAmount, serviceGstAmount);
+    const groupGst = pricedGroups.map((g, i) => {
+      if (g.type === 'PRODUCT') return g.productGstOnTop || 0;
+      return serviceGstShares[serviceGroupIndices.indexOf(i)] || 0;
+    });
     const groupWallet = allocateAcrossGroups(groupAmounts, subtotal, walletUsed);
 
     const masterOrderNumber = await this.generateMasterOrderNumber();
@@ -554,9 +608,13 @@ export class MasterOrdersService {
           remontCommission = g.productFees.commission.amount;
           primaryRule = { commissionAmount: remontCommission, ruleId: g.productFees.commission.ruleId, ruleLabel: g.productFees.commission.ruleLabel };
         }
+        // Phase 8 — PRODUCT vendorPayout is computed off the taxable base, not the gross
+        // (GST-inclusive) amount — GST collected isn't seller revenue to pay commission
+        // against. No-op for an Excluded/0%-rated product, since productsTaxableAmount
+        // equals productsAmount bit-for-bit there.
         const vendorPayout = g.type === 'SERVICE'
           ? serviceAmount - remontCommission
-          : productsAmount - remontCommission - (g.productFees?.marketing.amount || 0) - (g.productFees?.gateway.amount || 0);
+          : (g.productsTaxableAmount ?? productsAmount) - remontCommission - (g.productFees?.marketing.amount || 0) - (g.productFees?.gateway.amount || 0);
         const productFeeBreakdown = g.type === 'PRODUCT' && g.productFees
           ? { commission: g.productFees.commission, marketing: g.productFees.marketing, gateway: g.productFees.gateway, gstOnFees: g.productFees.gstOnFees }
           : undefined;
@@ -579,6 +637,7 @@ export class MasterOrdersService {
             status: confirmUpfront ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
             paymentStatus: PaymentStatus.PENDING,
             serviceAmount, productsAmount, subtotal: g.amount,
+            productsTaxableAmount: g.type === 'PRODUCT' ? g.productsTaxableAmount : undefined,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
@@ -587,7 +646,10 @@ export class MasterOrdersService {
             guestName: isGuest ? opts.guestName : undefined,
             guestPhone: isGuest ? opts.guestPhone : undefined,
             items: g.type === 'PRODUCT'
-              ? { create: g.items.map((it) => ({ productId: it.productId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, vendorId: g.vendorId })) }
+              ? { create: g.items.map((it) => ({
+                  productId: it.productId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, vendorId: g.vendorId,
+                  gstInclusive: it.gstInclusive, gstRatePercent: it.gstRatePercent, taxableValue: it.taxableValue, gstAmount: it.gstAmount,
+                })) }
               : undefined,
             serviceItems: g.type === 'SERVICE'
               ? { create: g.items.map((it) => ({ serviceId: it.serviceId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice })) }
