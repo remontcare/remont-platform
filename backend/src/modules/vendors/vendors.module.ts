@@ -830,6 +830,31 @@ export class ProductVendorsService {
     const v = await this.requireVendor(userId);
     return this.prisma.productVendorSettlement.findMany({ where: { vendorId: v.id }, orderBy: { paidAt: 'desc' }, take: limit });
   }
+
+  // Phase 8 (H-08) — a seller previously had no way to see their own TCS withholdings or
+  // credit notes at all (both are Phase 6/7 additions with no seller-facing read surface
+  // yet). Reuses requireVendor() (the SAME ownership check every other me/* endpoint in
+  // this class already uses) — a seller can never see another seller's TCS, and
+  // creditNoteHistory joins through order.items.vendorId so it can never return a credit
+  // note for an order this seller didn't sell on.
+  async tcsHistory(userId: string, limit = 100) {
+    const v = await this.requireVendor(userId);
+    return this.prisma.tcsRecord.findMany({ where: { sellerId: v.id }, orderBy: { createdAt: 'desc' }, take: limit });
+  }
+
+  async creditNoteHistory(userId: string, limit = 100) {
+    const v = await this.requireVendor(userId);
+    // CreditNote.orderId is a loose reference (no Prisma relation to Order — see its schema
+    // comment), so ownership is resolved via the seller's own orders first, same two-step
+    // pattern already used elsewhere in this codebase for loose-reference joins.
+    const myOrders = await this.prisma.order.findMany({ where: { items: { some: { vendorId: v.id } } }, select: { id: true } });
+    if (!myOrders.length) return [];
+    return this.prisma.creditNote.findMany({
+      where: { orderId: { in: myOrders.map((o) => o.id) } },
+      orderBy: { issuedAt: 'desc' },
+      take: limit,
+    });
+  }
 }
 
 @ApiTags('Vendors')
@@ -848,6 +873,10 @@ export class ProductVendorsController {
   @Get('me/payouts/summary') payoutsSummary(@CurrentUser() u: JwtPayload) { return this.pv.payoutsSummary(u.sub); }
   @Get('me/payouts/ledger') payoutsLedger(@CurrentUser() u: JwtPayload) { return this.pv.ledgerHistory(u.sub); }
   @Get('me/payouts/settlements') payoutsSettlements(@CurrentUser() u: JwtPayload) { return this.pv.settlementHistory(u.sub); }
+
+  // ─── Phase 8 (H-08) — seller's own tax/compliance documents ───
+  @Get('me/tax/tcs') myTcs(@CurrentUser() u: JwtPayload) { return this.pv.tcsHistory(u.sub); }
+  @Get('me/tax/credit-notes') myCreditNotes(@CurrentUser() u: JwtPayload) { return this.pv.creditNoteHistory(u.sub); }
 
   // ─── Phase 5 — product-order fulfillment lifecycle ───
   @Post('me/orders/:orderId/accept') acceptOrder(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.pv.acceptOrder(u.sub, id); }

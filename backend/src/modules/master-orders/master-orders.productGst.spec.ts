@@ -38,10 +38,12 @@ function makeService(productIds: string[]) {
     paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID' })) },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
+        product: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) }, // Phase 8 (H-07) stock check — always succeeds by default
         masterOrder: { create: jest.fn(async ({ data }: any) => { const mo = { id: 'mo-1', ...data }; createdMasterOrders.push(mo); return mo; }) },
         order: { create: jest.fn(async ({ data }: any) => { const o = { id: 'order-' + createdOrders.length, ...data }; createdOrders.push(o); return o; }) },
         orderTimeline: { create: jest.fn(async () => ({})) },
         orderOtpLog: { create: jest.fn(async () => ({})) },
+        orderDiscountAllocation: { create: jest.fn(async () => ({})) },
       };
       return fn(tx);
     }),

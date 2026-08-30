@@ -24,7 +24,12 @@ function makeService() {
     },
     siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
     taxConfig: { findMany: jest.fn(async () => []) },
+    $queryRaw: jest.fn(async () => [{ lastNumber: 1 }]),
   };
+  // Phase 5 — generateForOrder() allocates its document number(s) and creates the Invoice
+  // row inside one $transaction(); the mock just runs the callback against this same
+  // `prisma` object so tx.invoice.create()/tx.$queryRaw above are the mocks already set up.
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
   return { svc: new InvoicesService(prisma), prisma };
 }
 

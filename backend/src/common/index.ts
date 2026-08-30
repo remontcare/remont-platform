@@ -10,6 +10,7 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
 import { UserRole, FulfillmentType, MemberStatus, DeliveryPartnerType } from '@prisma/client';
+import * as crypto from 'crypto';
 
 // ─── DECORATORS ─────────────────────────────────────────────────────
 
@@ -364,6 +365,34 @@ export async function resolveProductFee(
   return { feeAmount: Math.round(feeAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
 }
 
+// Phase 8 (H-07) — Product.stock previously existed but was never read or decremented
+// anywhere in checkout (MasterOrdersService.checkout(), OrdersService.create(),
+// GuestBookingService.publicProductCheckout()) — every product order could oversell
+// indefinitely. This is the one shared, minimal fix: an atomic conditional decrement (the
+// same "updateMany guarded on a WHERE condition, check count===1" idiom already used
+// throughout this codebase — e.g. ReturnsService.finalize()'s claim-before-side-effect
+// pattern) so two concurrent checkouts racing on the same product's last unit can never
+// both succeed. A plain read-then-write here would not be safe under concurrency; this is.
+// Deliberately targets only Product.stock (not the separate PickupLocation/CityProduct
+// per-location stock breakdowns) — the minimum extent the current checkout model needs,
+// not a warehouse management system. Must be called with a transaction client so a stock
+// failure rolls back the whole checkout instead of leaving a decremented-but-orderless gap.
+export async function reserveProductStock(tx: any, items: { productId: string; quantity: number }[]): Promise<void> {
+  const qtyByProduct = new Map<string, number>();
+  for (const it of items) qtyByProduct.set(it.productId, (qtyByProduct.get(it.productId) || 0) + it.quantity);
+  for (const [productId, quantity] of qtyByProduct) {
+    if (quantity <= 0) continue;
+    const result = await tx.product.updateMany({
+      where: { id: productId, stock: { gte: quantity } },
+      data: { stock: { decrement: quantity } },
+    });
+    if (result.count !== 1) {
+      const product = await tx.product.findUnique({ where: { id: productId }, select: { name: true, stock: true } });
+      throw new BadRequestException(`Insufficient stock for ${product?.name || 'this product'} (available: ${product?.stock ?? 0}, requested: ${quantity})`);
+    }
+  }
+}
+
 export async function logAudit(prisma: any, entry: {
   actorId: string;
   actorRole: UserRole;
@@ -602,7 +631,7 @@ export function addressSnapshotFields(addr?: {
 // "Generate Invoice" button — didn't even share code with the other two).
 export * from './billing-engine';
 import {
-  calculateInvoice, stateFromGstin,
+  calculateInvoice, stateFromGstin, normalizeState,
   type BillingTransactionTypeValue, type BillingLineInput,
 } from './billing-engine';
 
@@ -629,11 +658,23 @@ export interface InvoiceBuildInput {
   // commission to seller — different recipient, so a distinct placeOfSupply).
   remontLines?: BillingLineInput[];
   remontPlaceOfSupply?: string;
+
+  // Phase 3 (M-04) — the order's real customer-facing discount, always shown on the
+  // invoice (never hardcoded to 0 — see the Phase 3 report). Callers are responsible for
+  // deciding whether it has already been baked into customerLines[].discount (reducing
+  // taxable value — done upstream only when the discount is SELLER-funded or a SERVICE/
+  // DIRECT_PROJECT line, mirroring what checkout already computed GST on) via
+  // discountReducesTaxableValue=true, in which case `discount` here is purely for display
+  // and customerTotal is customer.total unchanged; or left out of every line entirely
+  // (PLATFORM-funded PRODUCT discounts, where GST-law treatment is an open CA decision —
+  // see OrderDiscountAllocation.gstTreatment) via discountReducesTaxableValue=false, in
+  // which case `discount` is subtracted from customer.total post-tax so the invoice total
+  // still reconciles to what the customer actually paid.
+  discount?: number;
+  discountReducesTaxableValue?: boolean;
 }
 
-export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: number) {
-  const invoiceNumber = `INV-${input.orderNumber}-${(invoiceSeq + 1).toString().padStart(4, '0')}`;
-
+export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
   const customer = calculateInvoice({
     lines: input.customerLines,
     supplierState: input.customerSupplierState ?? input.remontState,
@@ -657,8 +698,19 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: numb
     placeOfSupply: input.remontPlaceOfSupply || input.placeOfSupply,
   });
 
+  const discount = Math.round(((input.discount || 0) + Number.EPSILON) * 100) / 100;
+  // discountReducesTaxableValue=true means the caller already folded `discount` into the
+  // relevant customerLines[].discount entries, so customer.total already reflects it —
+  // subtracting it again here would double-count. false (or omitted, e.g. every pre-Phase-3
+  // call site that never sets this and never had a discount concept) means it hasn't been
+  // applied to any line yet, so it comes off the total here, post-tax.
+  const customerTotal = input.discountReducesTaxableValue ? customer.total : Math.round((customer.total - discount) * 100) / 100;
+
   return {
-    invoiceNumber,
+    // Phase 5 (C-07/C-08/L-01) — invoiceNumber/vendorDocumentNumber/remontDocumentNumber
+    // are no longer computed here: each is its own legal document's number, generated
+    // atomically per-series by nextInvoiceDocumentNumber() and attached by the caller
+    // (InvoicesService.generateForOrder()) right before the Invoice row is created.
     transactionType: input.transactionType,
     placeOfSupply: input.placeOfSupply,
     supplierState: input.customerSupplierState ?? input.remontState,
@@ -668,7 +720,7 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: numb
     customerCgst: customer.cgst,
     customerSgst: customer.sgst,
     customerIgst: customer.igst,
-    customerTotal: customer.total,
+    customerTotal,
 
     vendorLabor: vendor?.taxableValue ?? 0,
     vendorMaterial: 0,
@@ -683,12 +735,162 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput, invoiceSeq: numb
     remontIgst: remont.igst,
     remontTotal: remont.total,
 
-    discount: 0,
+    discount,
     roundOff: customer.roundOff,
     // Cast to `any` — Prisma's generated JsonValue input type can't structurally match a
     // typed interface array even though this is plain, JSON-serializable data.
     lineItemsSnapshot: { customer: customer.lines, vendor: vendor?.lines ?? [], remont: remont.lines } as any,
   };
+}
+
+// ─── Phase 5 — invoice document numbering (C-07 concurrency, C-08 document separation,
+// L-01 financial year) ───────────────────────────────────────────────────────────────────
+// Before this, InvoicesService.generateForOrder() derived its one invoiceNumber from
+// `await prisma.invoice.count()` — read-then-compute-then-insert, no locking, no FY
+// component — and reused that SAME number on all 3 PDF pages (invoice-pdf.ts), even
+// though the VENDOR (partner→customer) and REMONT (Remont→seller commission) pages are
+// legally distinct documents from the CUSTOMER page. The database is now the sole
+// authority for uniqueness: nextInvoiceDocumentNumber() below is a single atomic
+// `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` per (series, financial year) — never a
+// separate read followed by a write — so two concurrent invoice generations, even for the
+// same series in the same FY, can never receive the same sequence number.
+
+/** One independent numbering series per legally-distinct document this app can issue.
+ * CUSTOMER_TAX_INVOICE also covers the Type-1 "booking summary" page (never itself a GST
+ * document, but still needs a stable reference number) — see generateForOrder(). */
+export type InvoiceSeries = 'CUSTOMER_TAX_INVOICE' | 'PARTNER_SETTLEMENT_INVOICE' | 'PLATFORM_FEE_INVOICE' | 'CREDIT_NOTE';
+
+const INVOICE_SERIES_TOKEN: Record<InvoiceSeries, string> = {
+  CUSTOMER_TAX_INVOICE: 'CTI',
+  PARTNER_SETTLEMENT_INVOICE: 'PSI',
+  PLATFORM_FEE_INVOICE: 'PFI',
+  // Phase 6 (C-06) — its own series, distinct from every invoice series above: a credit
+  // note is a different legal document type, not a renumbered/replacement invoice.
+  CREDIT_NOTE: 'CN',
+};
+
+/** Indian financial year (Apr 1 – Mar 31), e.g. 2026-08-30 -> '2026-27', 2027-02-01 ->
+ * '2026-27', 2027-04-01 -> '2027-28'. Pure — no DB, trivially unit-testable. */
+export function financialYearLabel(date: Date): string {
+  const isAprOnward = date.getMonth() >= 3; // Date.getMonth() is 0-indexed; 3 = April
+  const startYear = isAprOnward ? date.getFullYear() : date.getFullYear() - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Preserves the existing "INV-" prefix style (was `INV-${orderNumber}-${seq}`) while
+ * adding the two properties that were missing: a series token so different legal
+ * documents can never collide on the same number, and the financial year. */
+function formatInvoiceDocumentNumber(series: InvoiceSeries, financialYear: string, seq: number): string {
+  return `INV-${INVOICE_SERIES_TOKEN[series]}-${financialYear}-${String(seq).padStart(6, '0')}`;
+}
+
+/**
+ * Atomically allocates the next sequence number for one (series, financial year) and
+ * returns the fully formatted document number. Must be called with a Prisma transaction
+ * client (`tx`) that also creates the Invoice row in the SAME transaction (see
+ * InvoicesService.generateForOrder()) — if the invoice insert fails afterward, the whole
+ * transaction rolls back and this number is never actually issued (a gap, not a reuse).
+ * The single INSERT..ON CONFLICT..RETURNING statement is atomic under Postgres row-level
+ * locking on its own — never a separate SELECT followed by an UPDATE — so this is safe
+ * under arbitrary concurrency without any extra application-level locking.
+ */
+export async function nextInvoiceDocumentNumber(tx: any, series: InvoiceSeries, atDate: Date = new Date()): Promise<string> {
+  const financialYear = financialYearLabel(atDate);
+  const id = crypto.randomUUID();
+  const rows: { lastNumber: number | bigint }[] = await tx.$queryRaw`
+    INSERT INTO "InvoiceNumberSequence" ("id", "series", "financialYear", "lastNumber", "updatedAt")
+    VALUES (${id}, ${series}, ${financialYear}, 1, NOW())
+    ON CONFLICT ("series", "financialYear")
+    DO UPDATE SET "lastNumber" = "InvoiceNumberSequence"."lastNumber" + 1, "updatedAt" = NOW()
+    RETURNING "lastNumber"
+  `;
+  return formatInvoiceDocumentNumber(series, financialYear, Number(rows[0].lastNumber));
+}
+
+// ─── Phase 7 — GST TCS (Section 52) ─────────────────────────────────────────────────────
+// Remont acts as an Electronic Commerce Operator for MARKETPLACE_PRODUCT orders — it
+// collects customer consideration on behalf of the ProductVendor and settles them net of
+// its own fees. TCS is withheld from that settlement, not added to the customer invoice —
+// see ProductLedgerService.settleProductOrder() for where this is actually posted.
+
+/** Reads the current TCS rate from the EXISTING TaxConfig table (type: 'TCS',
+ * appliesTo: ['MARKETPLACE_PRODUCT_TCS']) — reused rather than a new rate-config model, so
+ * the admin's existing Taxes screen / effective-dating (validFrom/validTo) idiom covers TCS
+ * too. Returns 0 (nothing withheld) when no active TCS row is configured — this phase never
+ * assumes a rate; an admin/CA must configure one before any TCS is actually collected. */
+export async function resolveTcsRatePercent(prisma: any, atDate: Date = new Date()): Promise<number> {
+  const row = await prisma.taxConfig.findFirst({
+    where: {
+      type: 'TCS', appliesTo: { has: 'MARKETPLACE_PRODUCT_TCS' }, isActive: true,
+      AND: [
+        { OR: [{ validFrom: null }, { validFrom: { lte: atDate } }] },
+        { OR: [{ validTo: null }, { validTo: { gte: atDate } }] },
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  return row ? Number(row.rate) : 0;
+}
+
+/** Splits a TCS amount into CGST/SGST vs IGST components exactly like calculateInvoice()
+ * (billing-engine.ts) splits ordinary GST — same intra/inter-state rule, applied here to
+ * Remont's OWN registered state vs the SELLER's state (TCS is collected against the
+ * supplier's location relative to the ECO's registration, not the customer's). Assumes
+ * Remont holds a single GST registration (this codebase's existing single-state
+ * BillingCompanyConfig model) — a multi-state ECO would need per-state TCS registration,
+ * which is a real compliance requirement this phase does not model (see the Phase 7
+ * report's CA_REVIEW_REQUIRED list). */
+export function computeTcsSplit(taxableBase: number, ratePercent: number, remontState: string, sellerState: string | null): { cgst: number; sgst: number; igst: number; total: number } {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const total = round2((taxableBase * ratePercent) / 100);
+  if (total <= 0) return { cgst: 0, sgst: 0, igst: 0, total: 0 };
+  const intraState = !!sellerState && normalizeState(remontState) === normalizeState(sellerState);
+  if (intraState) {
+    const cgst = round2(total / 2);
+    return { cgst, sgst: round2(total - cgst), igst: 0, total };
+  }
+  return { cgst: 0, sgst: 0, igst: total, total };
+}
+
+// ─── Phase 7 — e-Invoice (IRP) applicability ────────────────────────────────────────────
+// e-Invoicing is mandatory only for a GST-registered issuer whose OWN turnover has crossed
+// the notified threshold (a real-world fact no code can determine) AND only for a B2B
+// supply (an unregistered/no-GSTIN customer is B2C, exempt regardless of turnover). Never
+// assumed true — gated on an explicit per-entity opt-in flag an admin sets only once that
+// entity's own CA has confirmed applicability (Invoice/ProductVendor.eInvoiceEnabled-style
+// flag; Remont's own flag lives in SiteSetting — see EInvoiceService, compliance.module.ts).
+
+export interface EInvoiceApplicabilityInput {
+  issuerGstin?: string | null;
+  issuerEInvoicingEnabled: boolean; // admin-confirmed: this issuing entity's turnover has crossed the threshold
+  recipientGstin?: string | null; // presence = B2B; absence = B2C
+}
+
+export function checkEInvoiceApplicability(input: EInvoiceApplicabilityInput): { required: boolean; reason: string } {
+  if (!input.issuerGstin) return { required: false, reason: 'Issuing entity has no GSTIN — not a registered supply' };
+  if (!input.issuerEInvoicingEnabled) return { required: false, reason: 'e-Invoicing not yet enabled for this issuer (turnover threshold not confirmed)' };
+  if (!input.recipientGstin) return { required: false, reason: 'B2C supply (recipient has no GSTIN) — e-Invoice mandate is B2B only' };
+  return { required: true, reason: 'B2B supply by an e-Invoice-enabled registered issuer' };
+}
+
+// ─── Phase 7 — e-Way Bill applicability ─────────────────────────────────────────────────
+// Only PRODUCT orders move goods; only a consignment value above the notified threshold
+// (configurable — the CGST base threshold has historically been ₹50,000 but is a statutory
+// figure this phase never hardcodes as a fallback rate, only as a fallback UI default) needs
+// one. Intra vs inter-state is recorded for the EWB payload but does not itself gate
+// applicability here — some states additionally exempt certain intra-state movement below
+// higher state-specific thresholds, which is not modeled (see the Phase 7 report).
+
+export interface EWayBillApplicabilityInput {
+  orderType: string; // OrderType — only 'PRODUCT' can ever require one
+  consignmentValue: number;
+  thresholdAmount: number; // admin-configurable, see EWayBillService.getThreshold()
+}
+
+export function checkEWayBillApplicability(input: EWayBillApplicabilityInput): { required: boolean; reason: string } {
+  if (input.orderType !== 'PRODUCT') return { required: false, reason: 'Not a goods movement (SERVICE order)' };
+  if (input.consignmentValue <= input.thresholdAmount) return { required: false, reason: `Consignment value ₹${input.consignmentValue} is at/below the ₹${input.thresholdAmount} threshold` };
+  return { required: true, reason: `Consignment value ₹${input.consignmentValue} exceeds the ₹${input.thresholdAmount} threshold` };
 }
 
 // ── Tax-config resolution — real Indian GST has different rate slabs (0/5/12/18/28%) by
@@ -796,6 +998,142 @@ export async function resolveProductGstLine(
     return { taxableValue, gstAmount: round2(lineAmount - taxableValue), ratePercent, inclusive };
   }
   return { taxableValue: round2(lineAmount), gstAmount: round2((lineAmount * ratePercent) / 100), ratePercent, inclusive };
+}
+
+// ─── Phase 3 — discount funding / GST / settlement consistency (C-02, C-03, M-04) ─────────
+// Before this, a PRODUCT group's per-item GST/taxableValue snapshot (resolveProductGstLine()
+// above) was always resolved BEFORE the checkout's coupon/membership discount was even known,
+// then the discount was subtracted only from the final payable total — never from taxable
+// value, never from the seller's settlement base (ProductLedgerService reads
+// order.productsTaxableAmount directly). SERVICE lines don't have this problem (their GST
+// was already computed on the discounted amount); PRODUCT lines did, silently, for every
+// coupon, with no record of who was actually meant to bear that cost.
+//
+// The fix is opt-in per coupon (Coupon.fundedBy, default PLATFORM): a PLATFORM-funded
+// discount (today's exact behaviour, unchanged) leaves every PRODUCT taxable value/GST/
+// settlement figure exactly as before — deliberately, since whether a platform subsidy
+// legally reduces GST taxable value is an open CA question (see the Phase 3 report), never
+// guessed here. A SELLER-funded discount is a plain settlement fact, not a tax-law guess —
+// the seller chose to give up that revenue — so it's safe to actually reduce the taxable
+// base by the same ratio as the discount, which correctly reduces GST (C-02) and, because
+// settlement is read from the same now-reduced order.productsTaxableAmount field, correctly
+// reduces the seller's own settlement too (C-03) with no separate change needed in
+// ProductLedgerService.
+
+export interface ProductGstLineSnapshot {
+  taxableValue?: number | null;
+  gstAmount?: number | null;
+}
+
+/** Proportionally scales a PRODUCT group's already-resolved per-item GST snapshot down by
+ * the group's own discount share — only ever called for a SELLER-funded coupon. Both the
+ * inclusive and exclusive branches of resolveProductGstLine() are linear in lineAmount, so
+ * scaling taxableValue and gstAmount by the same ratio is exactly equivalent to having
+ * resolved GST against the discounted line amount in the first place — not an approximation.
+ * Mutates nothing; returns the scaled aggregate + per-item values for the caller to persist.
+ * `groupAmount` <= 0 or `groupDiscount` <= 0 is a no-op (ratio 1) — nothing to scale. */
+export function applySellerFundedDiscountToProductGst<T extends ProductGstLineSnapshot>(
+  items: T[],
+  productsTaxableAmount: number,
+  productGstOnTop: number,
+  groupAmount: number,
+  groupDiscount: number,
+): { items: T[]; productsTaxableAmount: number; productGstOnTop: number; ratio: number } {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  if (groupAmount <= 0 || groupDiscount <= 0) {
+    return { items, productsTaxableAmount, productGstOnTop, ratio: 1 };
+  }
+  const ratio = Math.max(0, 1 - groupDiscount / groupAmount);
+  const scaledItems = items.map((it) => ({
+    ...it,
+    taxableValue: it.taxableValue != null ? round2(it.taxableValue * ratio) : it.taxableValue,
+    gstAmount: it.gstAmount != null ? round2(it.gstAmount * ratio) : it.gstAmount,
+  }));
+  return {
+    items: scaledItems,
+    productsTaxableAmount: round2(productsTaxableAmount * ratio),
+    productGstOnTop: round2(productGstOnTop * ratio),
+    ratio,
+  };
+}
+
+export type DiscountGstTreatment =
+  | 'NOT_APPLICABLE_NO_DISCOUNT'
+  | 'SERVICE_TAXABLE_VALUE_REDUCED_PRE_EXISTING'
+  | 'TAXABLE_VALUE_REDUCED_SELLER_FUNDED'
+  | 'NOT_REDUCED_PLATFORM_FUNDED_PENDING_CA_REVIEW'
+  | 'MIXED_ORDER_SERVICE_COMPONENT_REDUCED_PRODUCT_COMPONENT_NOT';
+
+/** Builds the Prisma create-data for one OrderDiscountAllocation row — the single place both
+ * checkout paths (MasterOrdersService.checkout(), OrdersService.create()) construct this
+ * record, so the gstTreatment/accountingTreatment vocabulary can never drift between them. */
+export function buildDiscountAllocationData(input: {
+  orderId: string;
+  couponId?: string | null;
+  sellerId?: string | null; // ProductVendor.id — null for a SERVICE order
+  discountAmount: number;
+  fundingSource: 'PLATFORM' | 'SELLER';
+  isProductOrder: boolean;
+  taxableValueAdjustment?: number; // pre-computed by applySellerFundedDiscountToProductGst() above, when relevant
+  // Phase 3 — true only for OrdersService.create()'s legacy mixed service+product Order
+  // shape (predates the Child-Order-split engine — every MasterOrdersService child Order
+  // is strictly one type, so this is always omitted there): this order ALSO has a SERVICE
+  // component whose own GST already reflects the discount (pre-existing, unconditional),
+  // independent of whatever was decided for the PRODUCT component below.
+  hasReducedServiceComponent?: boolean;
+}) {
+  const discountAmount = Math.round((input.discountAmount || 0) * 100) / 100;
+  const hasDiscount = discountAmount > 0;
+  const sellerFunded = hasDiscount && input.fundingSource === 'SELLER' && input.isProductOrder && !!input.sellerId;
+  const mixedPartialReduction = hasDiscount && input.isProductOrder && !sellerFunded && !!input.hasReducedServiceComponent;
+
+  let gstTreatment: DiscountGstTreatment = 'NOT_APPLICABLE_NO_DISCOUNT';
+  if (hasDiscount) {
+    if (!input.isProductOrder) gstTreatment = 'SERVICE_TAXABLE_VALUE_REDUCED_PRE_EXISTING';
+    else if (sellerFunded) gstTreatment = 'TAXABLE_VALUE_REDUCED_SELLER_FUNDED';
+    else if (mixedPartialReduction) gstTreatment = 'MIXED_ORDER_SERVICE_COMPONENT_REDUCED_PRODUCT_COMPONENT_NOT';
+    else gstTreatment = 'NOT_REDUCED_PLATFORM_FUNDED_PENDING_CA_REVIEW';
+  }
+  const accountingTreatment = !hasDiscount ? 'NONE' : sellerFunded ? 'SELLER_BORNE_PRICE_REDUCTION' : 'PLATFORM_MARKETING_EXPENSE';
+  const taxableValueAdjustment = sellerFunded ? Math.round((input.taxableValueAdjustment || 0) * 100) / 100 : 0;
+
+  return {
+    orderId: input.orderId,
+    couponId: input.couponId || undefined,
+    sellerId: input.sellerId || undefined,
+    customerDiscountAmount: discountAmount,
+    // Reflects what ACTUALLY happened, not merely what the coupon was configured as — a
+    // coupon flagged SELLER but left unattributable (e.g. a multi-vendor cart with no
+    // single seller to charge) is recorded as PLATFORM here, matching taxableValueReduced/
+    // settlementImpact below; a report filtering fundingSource='SELLER' should only ever
+    // return orders where a seller genuinely bore the cost.
+    fundingSource: (!input.isProductOrder ? 'PLATFORM' : (sellerFunded ? 'SELLER' : 'PLATFORM')) as 'PLATFORM' | 'SELLER',
+    fundedAmount: discountAmount,
+    taxableValueReduced: !input.isProductOrder ? hasDiscount : (sellerFunded || mixedPartialReduction),
+    taxableValueAdjustment,
+    settlementImpact: sellerFunded ? -taxableValueAdjustment : 0,
+    gstTreatment,
+    accountingTreatment,
+  };
+}
+
+/** Proportionally distributes a known total discount across a set of already-priced invoice
+ * lines by each line's own gross share (qty*rate), last line absorbing the rounding
+ * remainder — same allocation idiom as MasterOrdersService.allocateAcrossGroups(). Only call
+ * this when the discount is known to legitimately reduce THIS invoice's taxable value (see
+ * OrderDiscountAllocation.taxableValueReduced) — for the non-reducing case the discount
+ * belongs in buildInvoiceBreakdown()'s top-level `discount` input instead, which nets it out
+ * of the total post-tax without touching any line. */
+export function distributeInvoiceDiscount(lines: BillingLineInput[], totalDiscount: number): BillingLineInput[] {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  if (totalDiscount <= 0 || !lines.length) return lines;
+  const gross = lines.map((l) => l.qty * l.rate);
+  const grossSum = gross.reduce((s, g) => s + g, 0);
+  if (grossSum <= 0) return lines;
+  const shares = gross.map((g) => round2((g / grossSum) * totalDiscount));
+  const allocated = shares.reduce((s, a) => s + a, 0);
+  shares[shares.length - 1] = round2(shares[shares.length - 1] + (totalDiscount - allocated));
+  return lines.map((l, i) => ({ ...l, discount: round2((l.discount || 0) + Math.min(Math.max(shares[i], 0), gross[i])) }));
 }
 
 // SAC 999799 ("Other services n.e.c." / business auxiliary services) is the real-world

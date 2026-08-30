@@ -128,6 +128,17 @@ export function buildInvoiceViewModel(
   const lineSnapshot = invoice.lineItemsSnapshot || { customer: [], vendor: [], remont: [] };
   const bank = { name: company.bankName, ifsc: company.bankIfsc, accountNumber: company.bankAccountNumber };
 
+  // C-05 — an issued invoice's party identity (names/address/GSTIN/state) must never
+  // drift just because someone later edits the seller's/customer's/Remont's own master-
+  // data row. generateForOrder() (invoices.module.ts) calls this same function once, at
+  // generation time, and freezes its supplier/recipient output onto
+  // invoice.lineItemsSnapshot.parties[docKind] — every render after that prefers the
+  // frozen block over the live order/company relations below. A pre-existing invoice
+  // (generated before this fix shipped) simply has no `parties` key, so it falls through
+  // to the live derivation exactly as it always has — never retroactively frozen.
+  const frozenPartyKey = docKind === 'VENDOR' ? 'vendor' : docKind === 'REMONT' ? 'remont' : 'customer';
+  const frozenParties = invoice.lineItemsSnapshot?.parties?.[frozenPartyKey] as { supplier?: PartyBlock; recipient?: PartyBlock } | undefined;
+
   // A category-level workmanship warranty (ServiceCategory.warrantyDays) only makes
   // sense on documents where Remont itself (not a marketplace seller) is on the hook for
   // the work — surfaced as a visible term rather than left implicit.
@@ -145,10 +156,14 @@ export function buildInvoiceViewModel(
       isTaxInvoice: vendorRegistered,
       docBadge: vendorRegistered ? 'TAX INVOICE' : 'RECEIPT — NO GST APPLIES',
       copyTag: vendorRegistered ? 'PARTNER SERVICE INVOICE' : 'PARTNER SERVICE RECEIPT',
-      invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
+      // C-08 — this partner document is legally distinct from the customer/Remont pages
+      // and gets its own number/series (see Invoice.vendorDocumentNumber). Falls back to
+      // the shared invoiceNumber only for an invoice generated before this field existed
+      // — never retroactively renumbered.
+      invoiceNumber: invoice.vendorDocumentNumber || invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
       placeOfSupply: invoice.placeOfSupply || customerBlock.state || '',
-      supplier: { name: order.vendor?.fullName || order.vendor?.businessName || 'Partner', gstin: order.vendor?.gstin || null },
-      recipient: customerBlock,
+      supplier: frozenParties?.supplier ?? { name: order.vendor?.fullName || order.vendor?.businessName || 'Partner', gstin: order.vendor?.gstin || null },
+      recipient: frozenParties?.recipient ?? customerBlock,
       lines: lineSnapshot.vendor || [],
       taxableValue: Number(invoice.vendorLabor), cgst: Number(invoice.vendorCgst), sgst: Number(invoice.vendorSgst), igst: 0,
       discount: 0, roundOff: 0, total: Number(invoice.vendorTotal), received: 0, bank: null,
@@ -159,16 +174,21 @@ export function buildInvoiceViewModel(
   if (docKind === 'REMONT') {
     const isMarketplace = invoice.transactionType === 'MARKETPLACE_PRODUCT';
     const sellerVendor = isMarketplace ? order.items?.find((it: any) => it.product?.vendor)?.product?.vendor : null;
-    const recipient: PartyBlock = isMarketplace && sellerVendor
+    const liveRecipient: PartyBlock = isMarketplace && sellerVendor
       ? { name: sellerVendor.businessName, address: sellerVendor.address, gstin: sellerVendor.gstNumber, state: sellerVendor.state }
       : customerBlock;
+    const recipient = frozenParties?.recipient ?? liveRecipient;
     return {
       isTaxInvoice: true,
       docBadge: 'TAX INVOICE',
       copyTag: isMarketplace ? 'ORIGINAL FOR SELLER — MARKETPLACE COMMISSION' : 'ORIGINAL FOR RECIPIENT — PLATFORM FEE',
-      invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
+      // C-08 — Remont's own platform-fee/commission document is a legally distinct
+      // instrument from the customer's (and, for a marketplace order, the seller's own)
+      // tax invoice — never the same number (see Invoice.remontDocumentNumber). Falls
+      // back to the shared invoiceNumber only for a pre-Phase-5 invoice.
+      invoiceNumber: invoice.remontDocumentNumber || invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
       placeOfSupply: recipient.state || invoice.placeOfSupply || '',
-      supplier: companyBlock,
+      supplier: frozenParties?.supplier ?? companyBlock,
       recipient,
       lines: lineSnapshot.remont || [],
       taxableValue: Number(invoice.platformCommission) + Number(invoice.bookingFee),
@@ -183,7 +203,7 @@ export function buildInvoiceViewModel(
   const isMarketplace = invoice.transactionType === 'MARKETPLACE_PRODUCT';
   const sellerVendor = isMarketplace ? order.items?.find((it: any) => it.product?.vendor)?.product?.vendor : null;
   const remontIsSupplier = !isMarketplace || !sellerVendor;
-  const supplier: PartyBlock = isMarketplace && sellerVendor
+  const liveSupplier: PartyBlock = isMarketplace && sellerVendor
     ? { name: sellerVendor.businessName, address: sellerVendor.address, gstin: sellerVendor.gstNumber, state: sellerVendor.state }
     : companyBlock;
   return {
@@ -193,8 +213,8 @@ export function buildInvoiceViewModel(
     copyTag: 'ORIGINAL FOR RECIPIENT',
     invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
     placeOfSupply: invoice.placeOfSupply || '',
-    supplier,
-    recipient: customerBlock,
+    supplier: frozenParties?.supplier ?? liveSupplier,
+    recipient: frozenParties?.recipient ?? customerBlock,
     lines: lineSnapshot.customer || [],
     taxableValue: Number(invoice.customerSubtotal), cgst: Number(invoice.customerCgst), sgst: Number(invoice.customerSgst), igst: Number(invoice.customerIgst),
     discount: Number(invoice.discount), roundOff: Number(invoice.roundOff), total: Number(invoice.customerTotal),
@@ -312,6 +332,13 @@ export async function renderInvoicePdf(
   } else {
     rightLine('GST', 'Not applicable');
   }
+  // Phase 3 (M-04) — previously never rendered at all (vm.discount existed on the view
+  // model but no totals row ever printed it, and vm.total never subtracted it either, so
+  // the PDF's total silently disagreed with what the customer actually paid whenever a
+  // coupon/membership discount applied). vm.total already has this netted in wherever
+  // that's the correct treatment (see buildInvoiceBreakdown's discountReducesTaxableValue)
+  // — this row is always just the transparent "here's the discount" disclosure.
+  if (vm.discount > 0) rightLine('Discount', `- ${rupees(vm.discount)}`);
   if (vm.roundOff) rightLine('Round Off', rupees(vm.roundOff));
   rightLine('Total Amount', rupees(vm.total), true);
   rightLine('Received Amount', rupees(vm.received));

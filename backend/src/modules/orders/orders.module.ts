@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -44,6 +44,7 @@ class PublicProductCheckoutDto {
   @IsOptional() @IsNumber() accuracy?: number;
   @IsOptional() @IsString() locationSource?: string;
   @IsOptional() @IsString() capturedAt?: string;
+  @IsOptional() @IsString() idempotencyKey?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -65,6 +66,11 @@ class GuestBookingDto {
   // Defaults to COD for older/other clients that don't send it yet — matches the
   // pre-existing behavior this field's absence used to (silently) produce.
   @IsOptional() @IsIn(['ONLINE', 'COD']) paymentMethod?: 'ONLINE' | 'COD';
+  // Phase 8 (M-06) — this guest SERVICE booking path was the one remaining order-creation
+  // path with no idempotency support at all (CreateOrderDto/PublicProductCheckoutDto/
+  // CreateMasterOrderDto all already have this — see their matching M-06 comments).
+  // Optional/opt-in: omitted entirely is byte-for-byte today's behaviour.
+  @IsOptional() @IsString() idempotencyKey?: string;
 }
 
 // ─── DTOs ───
@@ -99,6 +105,10 @@ class CreateOrderDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() guestName?: string;
   @IsOptional() @IsString() guestPhone?: string;
+  // Phase 1 hardening (M-06) — optional client-supplied dedupe token; see
+  // MasterOrder.idempotencyKey's schema comment for the full rationale. Omitted entirely,
+  // this is byte-for-byte today's behaviour.
+  @IsOptional() @IsString() idempotencyKey?: string;
 }
 
 // ─── Dispatch (smart vendor matching) ───
@@ -488,6 +498,15 @@ export class OrdersService {
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
+    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+        include: { items: true, service: true, address: true },
+      });
+      if (existing) return existing;
+    }
+
     // City activation gate: if the order names a city that resolves to a managed City row
     // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
     // allowed through unchanged — this only tightens the case we can actually verify.
@@ -531,6 +550,14 @@ export class OrdersService {
     let productCommissionRuleId: string | null = null, productCommissionRuleLabel = 'No rule — ₹0';
     let productMarketingRuleId: string | null = null, productMarketingRuleLabel = 'No rule — ₹0';
     let productGatewayRuleId: string | null = null, productGatewayRuleLabel = 'No rule — ₹0';
+    // Phase 3 (C-02/C-03) — which single ProductVendor (if any, and if there's exactly one)
+    // this order's product lines belong to. This legacy single-Order path (predates the
+    // Child-Order-split engine — see MasterOrdersService.checkout()) can mix products from
+    // several sellers in one Order with no per-seller split, unlike that engine; a
+    // SELLER-funded discount can only be safely attributed when there's exactly one seller
+    // to attribute it to, so a mixed-vendor cart here is deliberately left platform-funded
+    // (today's unchanged behaviour) rather than guessing which seller bears it.
+    const productVendorIds = new Set<string>();
     if (dto.items?.length) {
       const prodTax = await buildTaxRateResolver(this.prisma, 'PRODUCT');
       for (const item of dto.items) {
@@ -538,23 +565,33 @@ export class OrdersService {
         if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
         const total = Number(p.price) * item.quantity;
         productsAmount += total;
+        if (p.vendorId) productVendorIds.add(p.vendorId);
 
         const gstLine = await resolveProductGstLine(prodTax, p, total);
         productsTaxableAmount += gstLine.taxableValue;
         if (!gstLine.inclusive) productGstOnTop += gstLine.gstAmount;
 
+        // C-01 fix — fee base is the resolved ex-GST taxable value, not the gross line total.
+        // No-op for a GST-Exclusive (or 0%/exempt) line, where these are numerically identical.
         const [commission, marketing, gateway] = await Promise.all([
-          resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: total }),
-          resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: total }),
-          resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: total }),
+          resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
+          resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
+          resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
         ]);
         productCommissionTotal += commission.feeAmount; productCommissionRuleId = commission.ruleId; productCommissionRuleLabel = commission.ruleLabel;
         productMarketingTotal += marketing.feeAmount; productMarketingRuleId = marketing.ruleId; productMarketingRuleLabel = marketing.ruleLabel;
         productGatewayTotal += gateway.feeAmount; productGatewayRuleId = gateway.ruleId; productGatewayRuleLabel = gateway.ruleLabel;
 
+        // Fix — vendorId was never copied onto the OrderItem here (unlike
+        // MasterOrdersService.checkout(), which already sets `vendorId: g.vendorId` from
+        // the exact same Product.vendorId field). ProductLedgerService.settleProductOrder()
+        // resolves which seller to settle via `order.items.find(it => it.vendorId)` — with
+        // vendorId always null, a PRODUCT order placed through this endpoint could reach
+        // PAID status and settlement would silently no-op, crediting no seller at all.
         itemInputs.push({
           productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: total,
           gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent, taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+          vendorId: p.vendorId,
         });
       }
     }
@@ -596,11 +633,13 @@ export class OrdersService {
 
     let couponDiscount = 0;
     let couponId: string | undefined;
+    let couponFundedBy: 'PLATFORM' | 'SELLER' = 'PLATFORM';
     if (dto.couponCode) {
       const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount);
       if (!v.valid) throw new BadRequestException(v.reason);
       couponDiscount = v.discountAmount || 0;
       couponId = v.coupon?.id;
+      couponFundedBy = (v.coupon as any)?.fundedBy === 'SELLER' ? 'SELLER' : 'PLATFORM';
     }
 
     const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
@@ -613,6 +652,29 @@ export class OrdersService {
       : 0;
     const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
     const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
+
+    // Phase 3 (C-02/C-03) — a SELLER-funded coupon reduces the PRODUCT taxable base/GST by
+    // its share of the combined discount, exactly like the SERVICE share above already
+    // does — but ONLY when every product line belongs to the same single seller (see the
+    // productVendorIds comment above); a mixed-vendor cart stays platform-funded/unchanged,
+    // since there's no single seller to attribute the reduction to. See
+    // applySellerFundedDiscountToProductGst() in common/index.ts for why scaling both
+    // taxableValue and gstAmount by the same ratio is exact, not an approximation.
+    const singleProductVendorId = productVendorIds.size === 1 ? [...productVendorIds][0] : null;
+    let productTaxableAdjustment = 0;
+    const productSellerFunded = couponFundedBy === 'SELLER' && productsAmount > 0 && !!singleProductVendorId;
+    if (productSellerFunded) {
+      const productDiscountShare = subtotal > 0
+        ? Math.round(((productsAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
+        : 0;
+      const before = productsTaxableAmount;
+      const scaled = applySellerFundedDiscountToProductGst(itemInputs, before, productGstOnTop, productsAmount, productDiscountShare);
+      itemInputs.length = 0;
+      itemInputs.push(...scaled.items);
+      productsTaxableAmount = scaled.productsTaxableAmount;
+      productGstOnTop = scaled.productGstOnTop;
+      productTaxableAdjustment = Math.round((before - scaled.productsTaxableAmount) * 100) / 100;
+    }
     const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
     const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
@@ -641,27 +703,69 @@ export class OrdersService {
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber, customerId,
-        type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
-        serviceId: dto.serviceId, addressId: resolvedAddressId,
-        ...addressSnapshotFields(resolvedAddress),
-        slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
-        slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
-        startOtp, endOtp, status: OrderStatus.PENDING_PAYMENT,
-        serviceAmount, productsAmount, subtotal,
-        productsTaxableAmount: dto.items?.length ? productsTaxableAmount : undefined,
-        productFeeBreakdown: productFeeBreakdown as any,
-        couponCode: dto.couponCode, couponDiscount, membershipDiscount,
-        walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
-        commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
-        aiSessionId: dto.aiSessionId, leadId: dto.leadId,
-        guestName: dto.guestName,
-        guestPhone: dto.guestPhone,
-        items: itemInputs.length ? { create: itemInputs } : undefined,
-      },
-      include: { items: true, service: true, address: true },
+    let order;
+    try {
+      // Phase 8 (H-07) — atomic stock check/decrement for every product line, in the SAME
+      // transaction as order creation (this path predates the Child-Order-split engine and
+      // was never itself wrapped in a transaction before — see MasterOrdersService.
+      // checkout()'s matching call for the shared helper/idiom). Insufficient stock rolls
+      // back the whole create() — no partially-created order, no oversold item.
+      order = await this.prisma.$transaction(async (tx) => {
+        if (dto.items?.length) await reserveProductStock(tx, dto.items.map((i) => ({ productId: i.productId, quantity: i.quantity })));
+        return tx.order.create({
+          data: {
+            orderNumber, customerId,
+            type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
+            serviceId: dto.serviceId, addressId: resolvedAddressId,
+            ...addressSnapshotFields(resolvedAddress),
+            slotStart: dto.slotStart ? new Date(dto.slotStart) : null,
+            slotEnd: dto.slotEnd ? new Date(dto.slotEnd) : null,
+            startOtp, endOtp, status: OrderStatus.PENDING_PAYMENT,
+            serviceAmount, productsAmount, subtotal,
+            productsTaxableAmount: dto.items?.length ? productsTaxableAmount : undefined,
+            productFeeBreakdown: productFeeBreakdown as any,
+            couponCode: dto.couponCode, couponDiscount, membershipDiscount,
+            walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
+            commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
+            aiSessionId: dto.aiSessionId, leadId: dto.leadId,
+            guestName: dto.guestName,
+            guestPhone: dto.guestPhone,
+            idempotencyKey: dto.idempotencyKey || undefined,
+            items: itemInputs.length ? { create: itemInputs } : undefined,
+          },
+          include: { items: true, service: true, address: true },
+        });
+      });
+    } catch (e: any) {
+      // Idempotency race: two concurrent requests with the same key can both pass the
+      // up-front check above before either commits — the @unique constraint is what actually
+      // arbitrates that race; the loser lands here and returns the winner's order.
+      if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
+        const existing = await this.prisma.order.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+          include: { items: true, service: true, address: true },
+        });
+        if (existing) return existing;
+      }
+      throw e;
+    }
+
+    // Phase 3 (C-02/C-03/M-04) — see MasterOrdersService.checkout()'s matching call for
+    // why this is always written, even with zero discount. isProductOrder covers both a
+    // pure product order and a mixed BUNDLE order (dto.items?.length > 0 either way);
+    // hasReducedServiceComponent flags the mixed case's service half separately, since a
+    // single row can't otherwise say "reduced for the service line, not for the products".
+    await this.prisma.orderDiscountAllocation.create({
+      data: buildDiscountAllocationData({
+        orderId: order.id,
+        couponId,
+        sellerId: singleProductVendorId,
+        discountAmount: couponDiscount + membershipDiscount,
+        fundingSource: couponFundedBy,
+        isProductOrder: !!dto.items?.length,
+        taxableValueAdjustment: productTaxableAdjustment,
+        hasReducedServiceComponent: serviceAmount > 0,
+      }),
     });
 
     await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'START', otp: startOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
@@ -1354,6 +1458,19 @@ export class GuestBookingService {
   ) {}
 
   async book(dto: GuestBookingDto) {
+    // Phase 8 (M-06) — the one remaining order-creation path with no idempotency guard at
+    // all; same opt-in pattern as MasterOrdersService.checkout()/OrdersService.create().
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+      if (existing) {
+        return {
+          orderNumber: existing.orderNumber, orderId: existing.id, status: existing.status,
+          paymentMethod: existing.paymentMethod, totalAmount: existing.totalAmount,
+          message: 'Booking already recorded for this request.',
+        };
+      }
+    }
+
     // Find or create customer by phone
     let user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
     if (!user) {
@@ -1437,45 +1554,61 @@ export class GuestBookingService {
     // always auto-confirmed, so a customer choosing "Pay Online" in the booking modal was
     // silently booked without ever being charged.
     const isCOD = dto.paymentMethod !== 'ONLINE';
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber,
-        customerId: user.id,
-        serviceId: dto.serviceId,
-        addressId: address.id,
-        ...addressSnapshotFields(address),
-        type: OrderType.SERVICE,
-        channel: dto.channel || BookingChannel.WEBSITE,
-        status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
-        paymentStatus: 'PENDING',
-        paymentMethod: isCOD ? 'COD' : 'ONLINE',
-        guestName: dto.name,
-        guestPhone: dto.phone,
-        guestEmail: dto.email || null,
-        adminNotes: dto.notes || null,
-        slotStart,
-        slotEnd,
-        startOtp,
-        endOtp,
-        serviceAmount,
-        productsAmount: 0,
-        subtotal: serviceAmount,
-        couponDiscount: 0,
-        membershipDiscount: 0,
-        walletUsed: 0,
-        gstAmount,
-        totalAmount,
-        remontCommission: commissionResult.commissionAmount,
-        vendorPayout: serviceAmount - commissionResult.commissionAmount,
-        commissionRuleId: commissionResult.ruleId,
-        commissionRuleLabel: commissionResult.ruleLabel,
-      },
-      include: {
-        service: { select: { name: true, durationMinutes: true } },
-        address: true,
-        customer: { select: { name: true, phone: true } },
-      },
-    });
+    let order;
+    try {
+      order = await this.prisma.order.create({
+        data: {
+          orderNumber,
+          customerId: user.id,
+          serviceId: dto.serviceId,
+          addressId: address.id,
+          ...addressSnapshotFields(address),
+          type: OrderType.SERVICE,
+          channel: dto.channel || BookingChannel.WEBSITE,
+          status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
+          paymentStatus: 'PENDING',
+          paymentMethod: isCOD ? 'COD' : 'ONLINE',
+          guestName: dto.name,
+          guestPhone: dto.phone,
+          guestEmail: dto.email || null,
+          adminNotes: dto.notes || null,
+          slotStart,
+          slotEnd,
+          startOtp,
+          endOtp,
+          serviceAmount,
+          productsAmount: 0,
+          subtotal: serviceAmount,
+          couponDiscount: 0,
+          membershipDiscount: 0,
+          walletUsed: 0,
+          gstAmount,
+          totalAmount,
+          remontCommission: commissionResult.commissionAmount,
+          vendorPayout: serviceAmount - commissionResult.commissionAmount,
+          commissionRuleId: commissionResult.ruleId,
+          commissionRuleLabel: commissionResult.ruleLabel,
+          idempotencyKey: dto.idempotencyKey || undefined,
+        },
+        include: {
+          service: { select: { name: true, durationMinutes: true } },
+          address: true,
+          customer: { select: { name: true, phone: true } },
+        },
+      });
+    } catch (e: any) {
+      if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
+        const existing = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+        if (existing) {
+          return {
+            orderNumber: existing.orderNumber, orderId: existing.id, status: existing.status,
+            paymentMethod: existing.paymentMethod, totalAmount: existing.totalAmount,
+            message: 'Booking already recorded for this request.',
+          };
+        }
+      }
+      throw e;
+    }
 
     await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'START', otp: startOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
     await writeOtpLog(this.prisma, { orderId: order.id, otpType: 'END', otp: endOtp, action: 'GENERATED', requestedByRole: 'SYSTEM' });
@@ -1522,6 +1655,16 @@ export class GuestBookingService {
   }
 
   async publicProductCheckout(dto: PublicProductCheckoutDto) {
+    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
+    // A guest retrying the same checkout (double-tap, network retry) with the same key gets
+    // back the order already created for it instead of a second one; COD orders are already
+    // CONFIRMED at creation (nothing more to do), an ONLINE order still PENDING_PAYMENT gets
+    // a fresh gateway order bound to this SAME existing Order.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+      if (existing) return this.resumeProductCheckoutResponse(existing);
+    }
+
     // Find or create customer by phone
     let user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
     if (!user) {
@@ -1564,10 +1707,12 @@ export class GuestBookingService {
       productsTaxableAmount += gstLine.taxableValue;
       if (!gstLine.inclusive) productGstOnTop += gstLine.gstAmount;
 
+      // C-01 fix — fee base is the resolved ex-GST taxable value, not the gross line total.
+      // No-op for a GST-Exclusive (or 0%/exempt) line, where these are numerically identical.
       const [commission, marketing, gateway] = await Promise.all([
-        resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
-        resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
-        resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: lineTotal }),
+        resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
+        resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
+        resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: gstLine.taxableValue }),
       ]);
       commissionTotal += commission.feeAmount; commissionRuleId = commission.ruleId; commissionRuleLabel = commission.ruleLabel;
       marketingTotal += marketing.feeAmount; marketingRuleId = marketing.ruleId; marketingRuleLabel = marketing.ruleLabel;
@@ -1614,22 +1759,37 @@ export class GuestBookingService {
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const isCOD = dto.paymentMethod === 'COD';
 
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber, customerId: user.id, type: OrderType.PRODUCT,
-        channel: BookingChannel.WEBSITE, addressId: address.id,
-        ...addressSnapshotFields(address),
-        guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,
-        productsAmount, productsTaxableAmount, subtotal: productsAmount, gstAmount, totalAmount,
-        startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
-        remontCommission: commissionTotal, vendorPayout,
-        productFeeBreakdown: productFeeBreakdown as any,
-        status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
-        paymentStatus: 'PENDING',
-        adminNotes: isCOD ? 'COD order' : null,
-        items: { create: itemInputs },
-      },
-    });
+    let order;
+    try {
+      // Phase 8 (H-07) — same atomic stock check/decrement as the other two checkout
+      // paths, in the same transaction as order creation.
+      order = await this.prisma.$transaction(async (tx) => {
+        await reserveProductStock(tx, dto.items.map((i) => ({ productId: i.productId, quantity: i.quantity })));
+        return tx.order.create({
+          data: {
+            orderNumber, customerId: user.id, type: OrderType.PRODUCT,
+            channel: BookingChannel.WEBSITE, addressId: address.id,
+            ...addressSnapshotFields(address),
+            guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,
+            productsAmount, productsTaxableAmount, subtotal: productsAmount, gstAmount, totalAmount,
+            startOtp: Math.floor(1000 + Math.random() * 9000).toString(),
+            remontCommission: commissionTotal, vendorPayout,
+            productFeeBreakdown: productFeeBreakdown as any,
+            status: isCOD ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
+            paymentStatus: 'PENDING',
+            adminNotes: isCOD ? 'COD order' : null,
+            idempotencyKey: dto.idempotencyKey || undefined,
+            items: { create: itemInputs },
+          },
+        });
+      });
+    } catch (e: any) {
+      if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
+        const existing = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+        if (existing) return this.resumeProductCheckoutResponse(existing);
+      }
+      throw e;
+    }
 
     if (isCOD) {
       return { orderNumber: order.orderNumber, orderId: order.id, totalAmount, paymentMethod: 'COD', isCOD: true };
@@ -1656,6 +1816,28 @@ export class GuestBookingService {
       gatewayOrderId: (payOrder as any).gatewayOrderId,
       razorpayKeyId: (payOrder as any).keyId,
       txId: (payOrder as any).txId,
+    };
+  }
+
+  // Idempotency (M-06) — mirrors MasterOrdersService.resumeCheckoutResponse() for the
+  // single-Order guest product path: never creates a second Order for the same key.
+  private async resumeProductCheckoutResponse(order: { id: string; orderNumber: string; totalAmount: any; status: OrderStatus; customerId: string | null }) {
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      return { orderNumber: order.orderNumber, orderId: order.id, totalAmount: Number(order.totalAmount), paymentMethod: 'COD', isCOD: true, alreadyProcessed: true };
+    }
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder: any = await this.payments.initiatePayment(order.customerId!, Number(order.totalAmount), order.id, frontendUrl);
+    if (payOrder.gateway === 'PHONEPE') {
+      return {
+        orderNumber: order.orderNumber, orderId: order.id, totalAmount: Number(order.totalAmount),
+        paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+        gateway: 'PHONEPE', redirectUrl: payOrder.redirectUrl, txId: payOrder.txId,
+      };
+    }
+    return {
+      orderNumber: order.orderNumber, orderId: order.id, totalAmount: Number(order.totalAmount),
+      paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+      gateway: 'RAZORPAY', gatewayOrderId: payOrder.gatewayOrderId, razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
     };
   }
 

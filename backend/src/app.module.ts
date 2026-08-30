@@ -44,6 +44,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { SupportModule } from './modules/support/support.module';
 import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module';
 import { LogisticsModule } from './modules/logistics/logistics.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { LogisticsModule } from './modules/logistics/logistics.module';
     UploadsModule,
     AiEnrichmentModule,
     LogisticsModule,
+    ComplianceModule,
 
     // B2B
     CorporateModule,

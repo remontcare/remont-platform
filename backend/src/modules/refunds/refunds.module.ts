@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards,
+  Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards, Logger,
   BadRequestException, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
@@ -10,6 +10,7 @@ import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { WalletService, WalletModule } from '../wallet/wallet.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
+import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 
 // Business rule (highest priority, per product): a refund is NEVER automatic, even for an
 // online payment. Full pipeline: customer raises a request -> evidence -> partner response
@@ -26,9 +27,11 @@ interface DecideOptions {
 
 @Injectable()
 export class RefundsService {
+  private readonly logger = new Logger(RefundsService.name);
   constructor(
     private prisma: PrismaService, private payments: PaymentsService, private wallet: WalletService,
     private paymentNotify: PaymentNotificationsService, private ledger: PartnerLedgerService,
+    private invoices: InvoicesService,
   ) {}
 
   private log(refundRequestId: string, actorId: string | undefined, actorRole: UserRole | undefined, action: string, notes?: string) {
@@ -182,107 +185,158 @@ export class RefundsService {
    * "neither the customer nor the partner can trigger a refund directly."
    */
   async decide(adminId: string, refundRequestId: string, decisionMode: RefundDecisionMode, opts: DecideOptions) {
-    const rr = await this.getActiveRequest(refundRequestId);
-    const order = rr.orderId ? await this.prisma.order.findUnique({ where: { id: rr.orderId } }) : null;
-    const masterOrder = rr.masterOrderId ? await this.prisma.masterOrder.findUnique({ where: { id: rr.masterOrderId } }) : null;
-    const totalAmount = Number(order?.totalAmount ?? masterOrder?.totalAmount ?? 0);
-    const customerId = rr.customerId;
-
-    let walletCreditAmount = 0;
-    let gatewayRefundAmount = 0;
-    let gatewayRefundId: string | undefined;
-    let newStatus: RefundRequestStatus = 'PROCESSED';
-
+    // Compute the resulting status up front — a pure function of decisionMode, no side
+    // effects needed — so the atomic claim below can transition straight to it.
+    let newStatus: RefundRequestStatus;
     switch (decisionMode) {
-      case 'NO_REFUND':
-        newStatus = 'REJECTED';
-        break;
+      case 'NO_REFUND': newStatus = 'REJECTED'; break;
       case 'FREE_REWORK':
-      case 'DISCOUNT_COUPON':
-        // Operational follow-up (scheduling a rework visit, issuing a coupon in the existing
-        // Coupons admin screen) happens outside this pipeline — this just records the decision.
-        newStatus = 'APPROVED';
-        break;
-      case 'WALLET_CREDIT': {
-        walletCreditAmount = opts.approvedAmount ?? totalAmount;
-        if (walletCreditAmount <= 0) throw new BadRequestException('approvedAmount must be greater than zero');
-        await this.wallet.credit(customerId, walletCreditAmount, 'REFUND' as any, rr.orderId ?? undefined, opts.adminNotes || 'Refund approved', refundRequestId, adminId);
-        break;
-      }
-      case 'GATEWAY_REFUND': {
-        gatewayRefundAmount = opts.approvedAmount ?? totalAmount;
-        if (gatewayRefundAmount <= 0) throw new BadRequestException('approvedAmount must be greater than zero');
-        const tx = await this.findRefundableTransaction(rr.orderId, rr.masterOrderId, gatewayRefundAmount);
-        const result = await this.payments.refundPayment(tx.id, gatewayRefundAmount);
-        gatewayRefundId = result.refundId;
-        break;
-      }
-      case 'PARTIAL_WALLET_PARTIAL_GATEWAY': {
-        walletCreditAmount = opts.walletCreditAmount ?? 0;
-        gatewayRefundAmount = opts.gatewayRefundAmount ?? 0;
-        if (walletCreditAmount <= 0 && gatewayRefundAmount <= 0) {
-          throw new BadRequestException('Specify walletCreditAmount and/or gatewayRefundAmount');
+      case 'DISCOUNT_COUPON': newStatus = 'APPROVED'; break;
+      case 'WALLET_CREDIT':
+      case 'GATEWAY_REFUND':
+      case 'PARTIAL_WALLET_PARTIAL_GATEWAY': newStatus = 'PROCESSED'; break;
+      default: throw new BadRequestException('Unknown decision mode');
+    }
+
+    // Idempotency/concurrency fix: this used to check status via getActiveRequest() (a plain
+    // findUnique), then move money, then write the final status as the LAST step — a race
+    // window two concurrent/retried decide() calls could both pass, both crediting the
+    // wallet or both calling the payment gateway. This atomic claim — only the caller whose
+    // updateMany actually flips status away from the active set may proceed — makes
+    // refundRequestId itself the idempotent reference, same idiom as
+    // ProductHoldSweepService.releaseHold(). Money only ever moves after a request has been
+    // exclusively claimed.
+    const claimed = await this.prisma.refundRequest.updateMany({
+      where: { id: refundRequestId, status: { in: ACTIVE_STATUSES } },
+      data: { status: newStatus },
+    });
+    if (claimed.count !== 1) throw new BadRequestException('This refund request has already been decided');
+
+    const rr = await this.prisma.refundRequest.findUnique({ where: { id: refundRequestId } });
+    if (!rr) throw new NotFoundException();
+
+    try {
+      const order = rr.orderId ? await this.prisma.order.findUnique({ where: { id: rr.orderId } }) : null;
+      const masterOrder = rr.masterOrderId ? await this.prisma.masterOrder.findUnique({ where: { id: rr.masterOrderId } }) : null;
+      const totalAmount = Number(order?.totalAmount ?? masterOrder?.totalAmount ?? 0);
+      const customerId = rr.customerId;
+
+      let walletCreditAmount = 0;
+      let gatewayRefundAmount = 0;
+      let gatewayRefundId: string | undefined;
+
+      switch (decisionMode) {
+        case 'NO_REFUND':
+          break;
+        case 'FREE_REWORK':
+        case 'DISCOUNT_COUPON':
+          // Operational follow-up (scheduling a rework visit, issuing a coupon in the
+          // existing Coupons admin screen) happens outside this pipeline — this just records
+          // the decision.
+          break;
+        case 'WALLET_CREDIT': {
+          walletCreditAmount = opts.approvedAmount ?? totalAmount;
+          if (walletCreditAmount <= 0) throw new BadRequestException('approvedAmount must be greater than zero');
+          await this.wallet.credit(customerId, walletCreditAmount, 'REFUND' as any, rr.orderId ?? undefined, opts.adminNotes || 'Refund approved', refundRequestId, adminId);
+          break;
         }
-        if (walletCreditAmount > 0) {
-          await this.wallet.credit(customerId, walletCreditAmount, 'REFUND' as any, rr.orderId ?? undefined, opts.adminNotes || 'Partial refund (wallet)', refundRequestId, adminId);
-        }
-        if (gatewayRefundAmount > 0) {
+        case 'GATEWAY_REFUND': {
+          gatewayRefundAmount = opts.approvedAmount ?? totalAmount;
+          if (gatewayRefundAmount <= 0) throw new BadRequestException('approvedAmount must be greater than zero');
           const tx = await this.findRefundableTransaction(rr.orderId, rr.masterOrderId, gatewayRefundAmount);
           const result = await this.payments.refundPayment(tx.id, gatewayRefundAmount);
           gatewayRefundId = result.refundId;
+          break;
         }
-        break;
+        case 'PARTIAL_WALLET_PARTIAL_GATEWAY': {
+          walletCreditAmount = opts.walletCreditAmount ?? 0;
+          gatewayRefundAmount = opts.gatewayRefundAmount ?? 0;
+          if (walletCreditAmount <= 0 && gatewayRefundAmount <= 0) {
+            throw new BadRequestException('Specify walletCreditAmount and/or gatewayRefundAmount');
+          }
+          if (walletCreditAmount > 0) {
+            await this.wallet.credit(customerId, walletCreditAmount, 'REFUND' as any, rr.orderId ?? undefined, opts.adminNotes || 'Partial refund (wallet)', refundRequestId, adminId);
+          }
+          if (gatewayRefundAmount > 0) {
+            const tx = await this.findRefundableTransaction(rr.orderId, rr.masterOrderId, gatewayRefundAmount);
+            const result = await this.payments.refundPayment(tx.id, gatewayRefundAmount);
+            gatewayRefundId = result.refundId;
+          }
+          break;
+        }
       }
-      default:
-        throw new BadRequestException('Unknown decision mode');
-    }
 
-    const approvedAmount = walletCreditAmount + gatewayRefundAmount || opts.approvedAmount || 0;
+      const approvedAmount = walletCreditAmount + gatewayRefundAmount || opts.approvedAmount || 0;
 
-    // Vendor Wallet: a refund that actually returns money is deducted from that order's
-    // Warranty Hold first (if one is still live), rather than clawed back from the vendor's
-    // live balance — see PartnerLedgerService.deductFromHold. NO_REFUND/FREE_REWORK/
-    // DISCOUNT_COUPON never move money here, so there's nothing to deduct.
-    if (rr.orderId && approvedAmount > 0) {
-      const hold = await this.prisma.partnerHold.findFirst({
-        where: { orderId: rr.orderId, status: 'HELD', type: 'WARRANTY_HOLD' },
+      // Vendor Wallet: a refund that actually returns money is deducted from that order's
+      // Warranty Hold first (if one is still live), rather than clawed back from the vendor's
+      // live balance — see PartnerLedgerService.deductFromHold. NO_REFUND/FREE_REWORK/
+      // DISCOUNT_COUPON never move money here, so there's nothing to deduct.
+      if (rr.orderId && approvedAmount > 0) {
+        const hold = await this.prisma.partnerHold.findFirst({
+          where: { orderId: rr.orderId, status: 'HELD', type: 'WARRANTY_HOLD' },
+        });
+        if (hold) {
+          await this.prisma.$transaction((tx) => this.ledger.deductFromHold(tx, hold.id, approvedAmount));
+        } else {
+          // H-06 — this order's warranty hold has already matured/released (vendor already
+          // paid out), or one was never created for it. Previously this branch did nothing —
+          // the vendor kept the full payout and Remont absorbed the entire refund with zero
+          // recovery. Claw it back from the vendor's live balance instead.
+          const svcOrder = await this.prisma.order.findUnique({ where: { id: rr.orderId }, select: { vendorId: true } });
+          if (svcOrder?.vendorId) {
+            await this.prisma.$transaction((tx) =>
+              this.ledger.clawbackFromBalance(tx, svcOrder.vendorId!, rr.orderId!, approvedAmount, `Refund clawback (${decisionMode}) — warranty hold already released`),
+            );
+          }
+        }
+
+        // Phase 6 (C-06) — formally correct the order's already-issued Invoice (if any) with
+        // a Credit Note now that money has actually moved. Best-effort: an invoice-generation
+        // failure here must never undo/block a refund that already happened.
+        await this.invoices
+          .issueCreditNote(rr.orderId, refundRequestId, approvedAmount, opts.adminNotes || `Refund — ${decisionMode}`)
+          .catch((e) => this.logger.error(`Credit note issuance failed for order ${rr.orderId}: ${e.message}`));
+      }
+
+      const updated = await this.prisma.refundRequest.update({
+        where: { id: refundRequestId },
+        data: {
+          decisionMode, approvedAmount,
+          walletCreditAmount: walletCreditAmount || undefined,
+          gatewayRefundAmount: gatewayRefundAmount || undefined,
+          gatewayRefundId, adminNotes: opts.adminNotes, approvedBy: adminId, approvedAt: new Date(),
+        },
       });
-      if (hold) {
-        await this.prisma.$transaction((tx) => this.ledger.deductFromHold(tx, hold.id, approvedAmount));
+      await this.log(refundRequestId, adminId, UserRole.ADMIN, `DECIDED:${decisionMode}`, opts.adminNotes);
+
+      // A full monetary refund (wallet + gateway together covering the whole order) is
+      // reflected on the order/master-order itself. Partial refunds keep the RefundRequest +
+      // WalletTransaction ledger as the source of truth — there's no distinct "partially
+      // refunded" state separate from "partially paid" in the existing PaymentStatus enum.
+      if (totalAmount > 0 && walletCreditAmount + gatewayRefundAmount >= totalAmount) {
+        if (order) await this.prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'REFUNDED' } });
+        if (masterOrder) await this.prisma.masterOrder.update({ where: { id: masterOrder.id }, data: { paymentStatus: 'REFUNDED' } });
       }
-    }
 
-    const updated = await this.prisma.refundRequest.update({
-      where: { id: refundRequestId },
-      data: {
-        status: newStatus, decisionMode, approvedAmount,
-        walletCreditAmount: walletCreditAmount || undefined,
-        gatewayRefundAmount: gatewayRefundAmount || undefined,
-        gatewayRefundId, adminNotes: opts.adminNotes, approvedBy: adminId, approvedAt: new Date(),
-      },
-    });
-    await this.log(refundRequestId, adminId, UserRole.ADMIN, `DECIDED:${decisionMode}`, opts.adminNotes);
-
-    // A full monetary refund (wallet + gateway together covering the whole order) is
-    // reflected on the order/master-order itself. Partial refunds keep the RefundRequest +
-    // WalletTransaction ledger as the source of truth — there's no distinct "partially
-    // refunded" state separate from "partially paid" in the existing PaymentStatus enum.
-    if (totalAmount > 0 && walletCreditAmount + gatewayRefundAmount >= totalAmount) {
-      if (order) await this.prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'REFUNDED' } });
-      if (masterOrder) await this.prisma.masterOrder.update({ where: { id: masterOrder.id }, data: { paymentStatus: 'REFUNDED' } });
-    }
-
-    const orderNumber = order?.orderNumber ?? masterOrder?.masterOrderNumber;
-    if (orderNumber) {
-      const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { phone: true } });
-      if (user?.phone) {
-        const decisionLabel = newStatus === 'REJECTED' ? 'rejected' : 'approved';
-        this.paymentNotify.refundProcessed(
-          customerId, user.phone, orderNumber, approvedAmount, decisionLabel, decisionMode, rr.orderId ?? undefined,
-        ).catch(() => {});
+      const orderNumber = order?.orderNumber ?? masterOrder?.masterOrderNumber;
+      if (orderNumber) {
+        const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { phone: true } });
+        if (user?.phone) {
+          const decisionLabel = newStatus === 'REJECTED' ? 'rejected' : 'approved';
+          this.paymentNotify.refundProcessed(
+            customerId, user.phone, orderNumber, approvedAmount, decisionLabel, decisionMode, rr.orderId ?? undefined,
+          ).catch(() => {});
+        }
       }
+      return updated;
+    } catch (e) {
+      // Roll back the claim so a transient failure (e.g. a gateway timeout) leaves the
+      // request in an active, retryable state instead of stuck in a terminal status with no
+      // money actually moved.
+      await this.prisma.refundRequest.update({ where: { id: refundRequestId }, data: { status: 'UNDER_REVIEW' } }).catch(() => {});
+      throw e;
     }
-    return updated;
   }
 }
 
@@ -336,7 +390,7 @@ export class RefundsController {
 }
 
 @Module({
-  imports: [PaymentsModule, WalletModule, PaymentNotificationsModule, PartnerLedgerModule],
+  imports: [PaymentsModule, WalletModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule],
   controllers: [RefundsController],
   providers: [RefundsService],
   exports: [RefundsService],

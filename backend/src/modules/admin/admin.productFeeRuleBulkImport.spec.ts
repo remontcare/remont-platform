@@ -25,6 +25,8 @@ function makeService() {
       create: jest.fn(async ({ data }: any) => { const row = { id: 'rule-' + created.length, ...data }; created.push(row); return row; }),
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    taxConfig: { findMany: jest.fn(async () => []) }, // no PRODUCT rates configured — H-03 validation is skipped, unaffected by this Phase 8 test file
+    auditLog: { create: jest.fn(async () => ({})) },
   };
   const config: any = { get: jest.fn((_key: string, def: any) => def) };
   const svc = new AdminService(prisma, config, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
@@ -109,12 +111,84 @@ describe('AdminService.validateProductFeeRuleBulkImport', () => {
     const result = await svc.validateProductFeeRuleBulkImport([validCategoryRow({ productGstInclusive: 'INCLUSIVE' })]);
     expect(result.invalidRows[0].errors[0]).toMatch(/can only be set on a PRODUCT-scoped row/);
   });
+
+  // Phase 8 (H-03) — GST slab validation reuses TaxConfig as the source of truth.
+  it('rejects a productGstOverridePercent that matches no configured PRODUCT TaxConfig rate', async () => {
+    const { svc, prisma } = makeService();
+    prisma.taxConfig = { findMany: jest.fn(async () => [{ rate: 18 }, { rate: 12 }]) };
+    const row = validCategoryRow({ scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '19' });
+    const result = await svc.validateProductFeeRuleBulkImport([row]);
+    expect(result.invalidRows[0].errors[0]).toMatch(/does not match any configured GST rate/);
+  });
+
+  it('accepts a productGstOverridePercent that DOES match a configured PRODUCT TaxConfig rate', async () => {
+    const { svc, prisma } = makeService();
+    prisma.taxConfig = { findMany: jest.fn(async () => [{ rate: 18 }, { rate: 12 }]) };
+    const row = validCategoryRow({ scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '18' });
+    const result = await svc.validateProductFeeRuleBulkImport([row]);
+    expect(result.validCount).toBe(1);
+  });
+
+  it('skips GST-rate validation entirely when no PRODUCT TaxConfig is configured yet (never locks out a fresh install)', async () => {
+    const { svc } = makeService(); // default mock: taxConfig.findMany() -> []
+    const row = validCategoryRow({ scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '37' });
+    const result = await svc.validateProductFeeRuleBulkImport([row]);
+    expect(result.validCount).toBe(1);
+  });
+
+  // Phase 8 (M-02) — conflicting GST update for the same product across different rows.
+  it('rejects a second row that sets a DIFFERENT GST value for a product a prior row already updated', async () => {
+    const { svc } = makeService();
+    const rowA = validCategoryRow({ feeType: 'COMMISSION', scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '18' });
+    const rowB = validCategoryRow({ feeType: 'MARKETING', scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '12' });
+    const result = await svc.validateProductFeeRuleBulkImport([rowA, rowB]);
+    expect(result.validCount).toBe(1);
+    expect(result.invalidCount).toBe(1);
+    expect(result.invalidRows[0].errors[0]).toMatch(/conflicting GST update for the same product/);
+  });
+
+  it('allows two rows to repeat the IDENTICAL GST update for the same product (harmless, not a conflict)', async () => {
+    const { svc } = makeService();
+    const rowA = validCategoryRow({ feeType: 'COMMISSION', scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '18' });
+    const rowB = validCategoryRow({ feeType: 'MARKETING', scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstOverridePercent: '18' });
+    const result = await svc.validateProductFeeRuleBulkImport([rowA, rowB]);
+    expect(result.validCount).toBe(2);
+    expect(result.invalidCount).toBe(0);
+  });
+
+  // Phase 8 (M-03) — backdated validFrom is a warning, never a rejection.
+  it('warns (does not reject) on a backdated validFrom', async () => {
+    const { svc } = makeService();
+    const result = await svc.validateProductFeeRuleBulkImport([validCategoryRow({ validFrom: '2020-01-01' })]);
+    expect(result.validCount).toBe(1);
+    expect(result.warnings.some((w: any) => w.warning.match(/in the past/))).toBe(true);
+  });
+});
+
+describe('AdminService.confirmProductFeeRuleBulkImport — audit logging (H-02)', () => {
+  it('writes an AuditLog entry attributing the import to the actor, with row counts', async () => {
+    const { svc, prisma } = makeService();
+    await svc.confirmProductFeeRuleBulkImport([validCategoryRow(), validCategoryRow({ feeType: 'BOGUS' })], 'admin-42', 'ADMIN' as any);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        actorId: 'admin-42', actorRole: 'ADMIN', action: 'PRODUCT_FEE_RULE_BULK_IMPORT',
+        metadata: expect.objectContaining({ totalRows: 2, successRows: 1, rejectedRows: 1 }),
+      }),
+    }));
+  });
+
+  it('a failed audit-log write never blocks or undoes an already-completed import', async () => {
+    const { svc, prisma } = makeService();
+    prisma.auditLog.create.mockRejectedValue(new Error('audit db down'));
+    const result = await svc.confirmProductFeeRuleBulkImport([validCategoryRow()], 'admin-1', 'ADMIN' as any);
+    expect(result.rulesCreated).toBe(1); // import itself still succeeded
+  });
 });
 
 describe('AdminService.confirmProductFeeRuleBulkImport', () => {
   it('only ever calls productFeeRule.create — never .update — for the happy path', async () => {
     const { svc, prisma, created } = makeService();
-    const result = await svc.confirmProductFeeRuleBulkImport([validCategoryRow()]);
+    const result = await svc.confirmProductFeeRuleBulkImport([validCategoryRow()], 'admin-1', 'ADMIN' as any);
     expect(result.rulesCreated).toBe(1);
     expect(created).toHaveLength(1);
     expect(prisma.productFeeRule.create).toHaveBeenCalled();
@@ -124,7 +198,7 @@ describe('AdminService.confirmProductFeeRuleBulkImport', () => {
   it('updates the resolved Product row (not a ProductFeeRule) when GST override columns are present', async () => {
     const { svc, productUpdates } = makeService();
     const row = validCategoryRow({ scope: 'PRODUCT', categoryKey: undefined, productSku: 'SKU-001', productGstInclusive: 'INCLUSIVE', productGstOverridePercent: '18' });
-    const result = await svc.confirmProductFeeRuleBulkImport([row]);
+    const result = await svc.confirmProductFeeRuleBulkImport([row], 'admin-1', 'ADMIN' as any);
     expect(result.rulesCreated).toBe(1);
     expect(result.productsUpdated).toBe(1);
     expect(productUpdates).toHaveLength(1);
@@ -133,7 +207,7 @@ describe('AdminService.confirmProductFeeRuleBulkImport', () => {
 
   it('skips invalid rows and reports them, without creating anything for them', async () => {
     const { svc, created } = makeService();
-    const result = await svc.confirmProductFeeRuleBulkImport([validCategoryRow(), validCategoryRow({ feeType: 'BOGUS' })]);
+    const result = await svc.confirmProductFeeRuleBulkImport([validCategoryRow(), validCategoryRow({ feeType: 'BOGUS' })], 'admin-1', 'ADMIN' as any);
     expect(result.rulesCreated).toBe(1);
     expect(created).toHaveLength(1);
     expect(result.skipped).toHaveLength(1);
@@ -141,7 +215,7 @@ describe('AdminService.confirmProductFeeRuleBulkImport', () => {
 
   it('runs inside a single $transaction', async () => {
     const { svc, prisma } = makeService();
-    await svc.confirmProductFeeRuleBulkImport([validCategoryRow()]);
+    await svc.confirmProductFeeRuleBulkImport([validCategoryRow()], 'admin-1', 'ADMIN' as any);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 });

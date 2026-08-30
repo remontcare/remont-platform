@@ -115,60 +115,108 @@ export class ReturnsService {
     if (rs.kind !== 'RETURN') throw new BadRequestException('Use finalizeRto() for an RTO shipment');
     if (!rs.supportCase) throw new BadRequestException('This return has no linked support case');
     if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
-    if (rs.inspectionStatus !== 'PENDING') throw new BadRequestException('This return has already been inspected');
 
-    await this.prisma.returnShipment.update({
-      where: { id: returnShipmentId },
+    // Idempotency/concurrency fix: only the caller whose updateMany actually flips
+    // inspectionStatus away from PENDING may proceed — a double-click/concurrent decision (or
+    // a retried request) can never process the same return twice, same idiom as
+    // PartnerLedgerService.releaseHold(). Side effects (refund, settlement reversal,
+    // replacement order) only ever run after this exclusive claim succeeds.
+    const claimed = await this.prisma.returnShipment.updateMany({
+      where: { id: returnShipmentId, inspectionStatus: 'PENDING' },
       data: { inspectionStatus: decision, inspectionNotes: notes, inspectedAt: new Date(), inspectedBy: actorId },
     });
+    if (claimed.count !== 1) throw new BadRequestException('This return has already been inspected');
 
     const kase = rs.supportCase;
-    if (decision === 'REJECTED') {
-      // Disputed rejection — reuse the existing DISPUTE/ADMIN_REVIEW states rather than a new
-      // status; a human arbitrates from here (seller says the item wasn't returned in
-      // acceptable condition).
-      await this.prisma.supportCase.update({ where: { id: kase.id }, data: { status: 'ADMIN_REVIEW' } });
-      await this.prisma.supportCaseLog.create({
-        data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_REJECTED_BY_SELLER', notes },
-      });
-      await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RETURN_REJECTED', actorId, actorRole: actorRole });
-      return;
-    }
-
-    const amount = kase.recommendedAmount != null ? Number(kase.recommendedAmount) : 0;
-    if (kase.requestedRemedy === 'REPLACEMENT') {
-      const replacement = await this.createReplacementOrder(rs.orderId, actorId);
-      await this.prisma.supportCase.update({
-        where: { id: kase.id },
-        data: { status: 'RESOLVED', resolutionType: 'REPLACEMENT', resolutionReason: `Replacement order ${replacement.orderNumber} created`, decidedBy: actorId, decidedAt: new Date(), closedAt: new Date() },
-      });
-      await this.prisma.supportCaseLog.create({
-        data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_ACCEPTED', notes: `Replacement order ${replacement.orderNumber} created` },
-      });
-    } else {
-      let refundRequestId: string | undefined;
-      if (amount > 0) {
-        const rr = await this.refunds.raise(kase.customerId, kase.orderId!, undefined, `Return accepted for support case ${kase.caseNumber}`, kase.evidenceUrls);
-        await this.refunds.decide('SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: 'Return inspection accepted' });
-        refundRequestId = rr.id;
-        // Phase 7 — reverse this seller's settled fees proportionally to the refunded
-        // fraction (the resolved "proportional reversal" decision). A return only reaches
-        // here after the original order was actually delivered (ReturnShipment.status ===
-        // DELIVERED is required above), so settleProductOrder() already ran for it —
-        // reverseSettlement() is a safe no-op if it somehow hadn't.
-        const settledOrder = await this.prisma.order.findUnique({ where: { id: rs.orderId }, select: { totalAmount: true } });
-        const ratio = settledOrder && Number(settledOrder.totalAmount) > 0 ? amount / Number(settledOrder.totalAmount) : 1;
-        await this.prisma.$transaction((tx) => this.productLedger.reverseSettlement(tx, rs.orderId, ratio, 'RETURN'));
+    try {
+      if (decision === 'REJECTED') {
+        // Disputed rejection — reuse the existing DISPUTE/ADMIN_REVIEW states rather than a
+        // new status; a human arbitrates from here (seller says the item wasn't returned in
+        // acceptable condition).
+        await this.prisma.supportCase.update({ where: { id: kase.id }, data: { status: 'ADMIN_REVIEW' } });
+        await this.prisma.supportCaseLog.create({
+          data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_REJECTED_BY_SELLER', notes },
+        });
+        await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RETURN_REJECTED', actorId, actorRole: actorRole });
+        return;
       }
-      await this.prisma.supportCase.update({
-        where: { id: kase.id },
-        data: { status: 'RESOLVED', resolutionType: 'FULL_REFUND', resolutionAmount: amount, refundRequestId, decidedBy: actorId, decidedAt: new Date(), closedAt: new Date() },
-      });
-      await this.prisma.supportCaseLog.create({
-        data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_ACCEPTED', notes: `Refund of ₹${amount} processed` },
-      });
+
+      const amount = kase.recommendedAmount != null ? Number(kase.recommendedAmount) : 0;
+      if (kase.requestedRemedy === 'REPLACEMENT') {
+        // C-09 — a replacement must reverse the ORIGINAL sale's settlement (the seller
+        // already got settled for a unit that's now coming back) exactly like the refund
+        // branch below does, not skip it. No refund amount exists here to derive a ratio
+        // from (no money moves), so an item-scoped case reverses that item's own share
+        // (H-04-safe); a whole-order-level case (no orderItemId) reverses the whole thing.
+        const ratio = await this.computeSettlementReversalRatio(rs.orderId, kase.orderItemId, 1);
+        await this.prisma.$transaction((tx) => this.productLedger.reverseSettlement(tx, rs.orderId, ratio, 'RETURN'));
+        const replacement = await this.createReplacementOrder(rs.orderId, actorId);
+        await this.prisma.supportCase.update({
+          where: { id: kase.id },
+          data: { status: 'RESOLVED', resolutionType: 'REPLACEMENT', resolutionReason: `Replacement order ${replacement.orderNumber} created`, decidedBy: actorId, decidedAt: new Date(), closedAt: new Date() },
+        });
+        await this.prisma.supportCaseLog.create({
+          data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_ACCEPTED', notes: `Replacement order ${replacement.orderNumber} created` },
+        });
+      } else {
+        let refundRequestId: string | undefined;
+        if (amount > 0) {
+          const rr = await this.refunds.raise(kase.customerId, kase.orderId!, undefined, `Return accepted for support case ${kase.caseNumber}`, kase.evidenceUrls);
+          await this.refunds.decide('SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: 'Return inspection accepted' });
+          refundRequestId = rr.id;
+          // Phase 7 — reverse this seller's settled fees proportionally to the refunded
+          // fraction (the resolved "proportional reversal" decision). A return only reaches
+          // here after the original order was actually delivered (ReturnShipment.status ===
+          // DELIVERED is required above), so settleProductOrder() already ran for it —
+          // reverseSettlement() is a safe no-op if it somehow hadn't.
+          // H-04 fix — a whole-order customer-price ratio (amount/order.totalAmount) blends
+          // together every item's GST rate/taxable value when an order has more than one
+          // item at different rates. When this case names a specific item
+          // (kase.orderItemId), reverse EXACTLY that item's own frozen taxable-value share
+          // instead — see computeSettlementReversalRatio(). Falls back to the previous
+          // whole-order ratio only when there's no item to scope to.
+          const fallbackOrder = await this.prisma.order.findUnique({ where: { id: rs.orderId }, select: { totalAmount: true } });
+          const fallbackRatio = fallbackOrder && Number(fallbackOrder.totalAmount) > 0 ? amount / Number(fallbackOrder.totalAmount) : 1;
+          const ratio = await this.computeSettlementReversalRatio(rs.orderId, kase.orderItemId, fallbackRatio);
+          await this.prisma.$transaction((tx) => this.productLedger.reverseSettlement(tx, rs.orderId, ratio, 'RETURN'));
+        }
+        await this.prisma.supportCase.update({
+          where: { id: kase.id },
+          data: { status: 'RESOLVED', resolutionType: 'FULL_REFUND', resolutionAmount: amount, refundRequestId, decidedBy: actorId, decidedAt: new Date(), closedAt: new Date() },
+        });
+        await this.prisma.supportCaseLog.create({
+          data: { supportCaseId: kase.id, actorId, actorRole: actorRole, action: 'RETURN_ACCEPTED', notes: `Refund of ₹${amount} processed` },
+        });
+      }
+      await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RETURN_ACCEPTED', actorId, actorRole: actorRole });
+    } catch (e) {
+      // Roll back the claim so this return can be retried after a transient failure instead
+      // of being stuck "inspected" with none of its side effects actually having happened.
+      await this.prisma.returnShipment.update({
+        where: { id: returnShipmentId },
+        data: { inspectionStatus: 'PENDING', inspectionNotes: null, inspectedAt: null, inspectedBy: null },
+      }).catch(() => {});
+      throw e;
     }
-    await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RETURN_ACCEPTED', actorId, actorRole: actorRole });
+  }
+
+  // Phase 6 (H-04) — computes the settlement-reversal ratio to hand to
+  // ProductLedgerService.reverseSettlement(). When this case names a specific OrderItem
+  // (SupportCase.orderItemId — "select item" step of the support flow, already tracked),
+  // reverses EXACTLY that item's own share of the order's taxable value — an exact figure
+  // read from its own frozen Phase-8 GST snapshot, not an approximation — so an order with
+  // multiple items at different GST rates never has one item's return blended into
+  // another's rate. Falls back to the caller-supplied whole-order ratio when there's no
+  // item to scope to (a whole-order-level case, or a legacy case with no orderItemId).
+  private async computeSettlementReversalRatio(orderId: string, orderItemId: string | null | undefined, fallbackRatio: number): Promise<number> {
+    if (!orderItemId) return fallbackRatio;
+    const [item, order] = await Promise.all([
+      this.prisma.orderItem.findUnique({ where: { id: orderItemId }, select: { taxableValue: true } }),
+      this.prisma.order.findUnique({ where: { id: orderId }, select: { productsTaxableAmount: true, productsAmount: true } }),
+    ]);
+    const orderTaxable = Number(order?.productsTaxableAmount ?? order?.productsAmount ?? 0);
+    if (item?.taxableValue == null || orderTaxable <= 0) return fallbackRatio;
+    return Math.min(1, Number(item.taxableValue) / orderTaxable);
   }
 
   // Phase 6 — called from OrdersService.cancel()/AdminService.adminCancelOrder() when a
@@ -205,29 +253,42 @@ export class ReturnsService {
     if (!rs) throw new NotFoundException();
     if (rs.kind !== 'RTO') throw new BadRequestException('This is not an RTO shipment');
     if (rs.status !== 'DELIVERED') throw new BadRequestException('This item has not reached the seller yet');
-    if (rs.inspectionStatus !== 'PENDING') throw new BadRequestException('This RTO has already been settled');
 
-    const amount = Number(rs.order.totalAmount);
-    if (amount > 0) {
-      const rr = await this.refunds.raise(rs.order.customerId, rs.orderId, undefined, `RTO refund for order ${rs.order.orderNumber}`, []);
-      await this.refunds.decide(actorId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'RTO refund' });
-    }
-    // Phase 7 — an RTO always happens BEFORE the outbound shipment reaches the customer (a
-    // cancellation after delivery must go through a normal return instead — see
-    // OrdersService.cancel()'s comment), so settleProductOrder() never ran for this order and
-    // there is nothing to reverse. Remont still paid the courier for a completed round trip
-    // though — per the resolved decision, the seller absorbs that wasted-trip delivery cost
-    // directly, independent of the normal settlement flow.
-    const vendorId = rs.order.items?.find((it) => it.vendorId)?.vendorId;
-    const deliveryCost = Number(rs.order.shipment?.actualDeliveryCost || 0);
-    if (vendorId && deliveryCost > 0) {
-      await this.prisma.$transaction((tx) => this.productLedger.chargeUnsettledDeliveryCost(tx, rs.orderId, vendorId, deliveryCost));
-    }
-    await this.prisma.returnShipment.update({
-      where: { id: returnShipmentId },
+    // Idempotency/concurrency fix — same atomic-claim-before-side-effects idiom as
+    // ReturnsService.finalize() above: only the caller whose updateMany actually flips
+    // inspectionStatus away from PENDING may proceed, so a double-click/concurrent/retried
+    // call can never refund or charge the seller twice for the same RTO.
+    const claimed = await this.prisma.returnShipment.updateMany({
+      where: { id: returnShipmentId, inspectionStatus: 'PENDING' },
       data: { inspectionStatus: 'ACCEPTED', inspectionNotes: notes, inspectedAt: new Date(), inspectedBy: actorId },
     });
-    await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RTO_REFUNDED', actorId, actorRole });
+    if (claimed.count !== 1) throw new BadRequestException('This RTO has already been settled');
+
+    try {
+      const amount = Number(rs.order.totalAmount);
+      if (amount > 0) {
+        const rr = await this.refunds.raise(rs.order.customerId, rs.orderId, undefined, `RTO refund for order ${rs.order.orderNumber}`, []);
+        await this.refunds.decide(actorId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'RTO refund' });
+      }
+      // Phase 7 — an RTO always happens BEFORE the outbound shipment reaches the customer (a
+      // cancellation after delivery must go through a normal return instead — see
+      // OrdersService.cancel()'s comment), so settleProductOrder() never ran for this order
+      // and there is nothing to reverse. Remont still paid the courier for a completed round
+      // trip though — per the resolved decision, the seller absorbs that wasted-trip delivery
+      // cost directly, independent of the normal settlement flow.
+      const vendorId = rs.order.items?.find((it) => it.vendorId)?.vendorId;
+      const deliveryCost = Number(rs.order.shipment?.actualDeliveryCost || 0);
+      if (vendorId && deliveryCost > 0) {
+        await this.prisma.$transaction((tx) => this.productLedger.chargeUnsettledDeliveryCost(tx, rs.orderId, vendorId, deliveryCost));
+      }
+      await writeOrderTimeline(this.prisma, { orderId: rs.orderId, status: 'RTO_REFUNDED', actorId, actorRole });
+    } catch (e) {
+      await this.prisma.returnShipment.update({
+        where: { id: returnShipmentId },
+        data: { inspectionStatus: 'PENDING', inspectionNotes: null, inspectedAt: null, inspectedBy: null },
+      }).catch(() => {});
+      throw e;
+    }
   }
 
   // A replacement is a new, zero-value Order re-entering the exact same seller-accept-> pack
@@ -260,10 +321,26 @@ export class ReturnsService {
         replacementOfOrderId: original.id,
         productFulfillmentStage: 'AWAITING_SELLER',
         productFulfillmentAt: new Date(),
+        // C-09 — a replacement is a real marketplace transaction for GST/settlement
+        // purposes (the seller ships another real unit and is entitled to be settled for
+        // it again via the SAME settleProductOrder() pipeline once THIS order is
+        // delivered — no special-casing there), even though the customer pays nothing
+        // further. Mirrors the original order's own frozen tax/fee snapshot instead of
+        // leaving every financial field at 0 as before — that zero-treatment is exactly
+        // what left a replacement invisible to GST/commission/settlement accounting.
+        // gstAmount stays 0: that field is the CUSTOMER-facing GST added on top, and no
+        // new charge is being made — the ex-GST taxableValue below is what settlement
+        // actually reads.
+        productsAmount: original.productsAmount,
+        productsTaxableAmount: original.productsTaxableAmount,
+        remontCommission: original.remontCommission,
+        vendorPayout: original.vendorPayout,
+        productFeeBreakdown: original.productFeeBreakdown as any,
         items: {
           create: original.items.map((i) => ({
             productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, totalPrice: 0,
             vendorId: i.vendorId, pickupLocationId: i.pickupLocationId,
+            gstInclusive: i.gstInclusive, gstRatePercent: i.gstRatePercent, taxableValue: i.taxableValue, gstAmount: i.gstAmount,
           })),
         },
       },

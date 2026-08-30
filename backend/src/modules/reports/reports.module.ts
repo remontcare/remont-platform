@@ -278,6 +278,167 @@ export class ReportsService {
 
     return toBuffer(wb);
   }
+
+  // ─── Phase 8 (Workstream 1) — TCS Register. One row per TcsRecord (already the exact
+  // per-order/per-seller/per-tax-period record GSTR-8 filing needs — see ProductLedgerService.
+  // settleProductOrder(), Phase 7) — no re-aggregation/recalculation here, just formatted for
+  // export. reversedAmount/status make return/credit-note adjustments (Phase 6) visible
+  // alongside the original collection, never silently netted away.
+  async generateTcsRegister(range: DateRange): Promise<Buffer> {
+    const rows = await this.prisma.tcsRecord.findMany({
+      where: { createdAt: dateFilter(range) },
+      orderBy: { createdAt: 'asc' },
+    });
+    const sellerIds = [...new Set(rows.map((r) => r.sellerId))];
+    const sellers = sellerIds.length ? await this.prisma.productVendor.findMany({ where: { id: { in: sellerIds } }, select: { id: true, businessName: true, gstNumber: true } }) : [];
+    const sellerById = new Map(sellers.map((s) => [s.id, s]));
+
+    const wb = new Excel.Workbook();
+    const ws = wb.addWorksheet('TCS Register');
+    ws.columns = [
+      { header: 'Order ID', key: 'orderId', width: 22 },
+      { header: 'Seller', key: 'sellerName', width: 22 },
+      { header: 'Seller GSTIN', key: 'sellerGstin', width: 18 },
+      { header: 'Financial Year', key: 'financialYear', width: 12 },
+      { header: 'Tax Period', key: 'taxPeriod', width: 12 },
+      { header: 'Taxable Base', key: 'taxableBase', width: 14 },
+      { header: 'TCS Rate %', key: 'tcsRatePercent', width: 10 },
+      { header: 'CGST', key: 'cgstAmount', width: 12 },
+      { header: 'SGST', key: 'sgstAmount', width: 12 },
+      { header: 'IGST', key: 'igstAmount', width: 12 },
+      { header: 'Total TCS', key: 'totalAmount', width: 12 },
+      { header: 'Reversed', key: 'reversedAmount', width: 12 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Date', key: 'createdAt', width: 14 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of rows) {
+      const seller = sellerById.get(r.sellerId);
+      ws.addRow({
+        orderId: r.orderId, sellerName: seller?.businessName || r.sellerId, sellerGstin: seller?.gstNumber || '',
+        financialYear: r.financialYear, taxPeriod: r.taxPeriod,
+        taxableBase: Number(r.taxableBase), tcsRatePercent: Number(r.tcsRatePercent),
+        cgstAmount: Number(r.cgstAmount), sgstAmount: Number(r.sgstAmount), igstAmount: Number(r.igstAmount),
+        totalAmount: Number(r.totalAmount), reversedAmount: Number(r.reversedAmount), status: r.status,
+        createdAt: r.createdAt.toLocaleDateString('en-IN'),
+      });
+    }
+    return toBuffer(wb);
+  }
+
+  // ─── Phase 8 (Workstream 1) — Credit Note Register. One row per CreditNote (Phase 6) —
+  // the formal GST correction issued against an already-issued, never-rewritten Invoice.
+  async generateCreditNoteRegister(range: DateRange): Promise<Buffer> {
+    const rows = await this.prisma.creditNote.findMany({
+      where: { issuedAt: dateFilter(range) },
+      include: { invoice: { select: { invoiceNumber: true, transactionType: true } } },
+      orderBy: { issuedAt: 'asc' },
+    });
+    const wb = new Excel.Workbook();
+    const ws = wb.addWorksheet('Credit Note Register');
+    ws.columns = [
+      { header: 'Credit Note No.', key: 'creditNoteNumber', width: 24 },
+      { header: 'Against Invoice', key: 'invoiceNumber', width: 24 },
+      { header: 'Order ID', key: 'orderId', width: 22 },
+      { header: 'Refund Request', key: 'refundRequestId', width: 22 },
+      { header: 'Reason', key: 'reason', width: 30 },
+      { header: 'Taxable Value Reversed', key: 'taxableValueReversed', width: 18 },
+      { header: 'CGST Reversed', key: 'cgstReversed', width: 14 },
+      { header: 'SGST Reversed', key: 'sgstReversed', width: 14 },
+      { header: 'IGST Reversed', key: 'igstReversed', width: 14 },
+      { header: 'Total Reversed', key: 'totalReversed', width: 14 },
+      { header: 'Issued At', key: 'issuedAt', width: 14 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of rows) {
+      ws.addRow({
+        creditNoteNumber: r.creditNoteNumber, invoiceNumber: r.invoice?.invoiceNumber || '', orderId: r.orderId,
+        refundRequestId: r.refundRequestId || '', reason: r.reason,
+        taxableValueReversed: Number(r.taxableValueReversed), cgstReversed: Number(r.cgstReversed),
+        sgstReversed: Number(r.sgstReversed), igstReversed: Number(r.igstReversed), totalReversed: Number(r.totalReversed),
+        issuedAt: r.issuedAt.toLocaleDateString('en-IN'),
+      });
+    }
+    return toBuffer(wb);
+  }
+
+  /**
+   * Phase 8 (Workstream 2, reconciliation control "E" — Order -> Seller Settlement).
+   * Recomputes each settled PRODUCT order's expected net seller credit from its OWN
+   * snapshotted fields (the identical formula ProductLedgerService.settleProductOrder()
+   * already used to post the ledger) and compares it against what was ACTUALLY posted to
+   * ProductVendorLedgerEntry for that order. These should always match by construction —
+   * this is a safety-net audit control, not an expected-to-fail check. Any mismatch is
+   * returned as an explicit exception, never auto-corrected — see the phase's own
+   * "mismatch must be traceable, require an explicit correction workflow" rule.
+   */
+  async sellerSettlementReconciliation(range: DateRange) {
+    const orders = await this.prisma.order.findMany({
+      where: { type: 'PRODUCT', createdAt: dateFilter(range) },
+      select: { id: true, orderNumber: true, productsAmount: true, productsTaxableAmount: true, productFeeBreakdown: true, items: { select: { vendorId: true } } },
+    });
+    const orderIds = orders.map((o) => o.id);
+    const entries = orderIds.length
+      ? await this.prisma.productVendorLedgerEntry.findMany({ where: { orderId: { in: orderIds } }, select: { orderId: true, type: true, amount: true } })
+      : [];
+    const entriesByOrder = new Map<string, typeof entries>();
+    for (const e of entries) {
+      if (!e.orderId) continue;
+      if (!entriesByOrder.has(e.orderId)) entriesByOrder.set(e.orderId, []);
+      entriesByOrder.get(e.orderId)!.push(e);
+    }
+    const tcsRows = orderIds.length ? await this.prisma.tcsRecord.findMany({ where: { orderId: { in: orderIds } } }) : [];
+    const tcsByOrder = new Map(tcsRows.map((t) => [t.orderId, Number(t.totalAmount)]));
+
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const exceptions: any[] = [];
+    let reconciledCount = 0;
+    for (const o of orders) {
+      const orderEntries = entriesByOrder.get(o.id);
+      if (!orderEntries?.length) continue; // never settled yet (e.g. not delivered) — not a reconciliation subject
+
+      const p = (o.productFeeBreakdown as any) || {};
+      const grossSaleBase = o.productsTaxableAmount != null ? Number(o.productsTaxableAmount) : Number(o.productsAmount);
+      const tcs = tcsByOrder.get(o.id) || 0;
+      const expectedNetCredit = round2(grossSaleBase - Number(p.commission?.amount || 0) - Number(p.gstOnFees?.amount || 0) - Number(p.marketing?.amount || 0) - Number(p.gateway?.amount || 0) - Number(p.delivery?.amount || 0) - tcs);
+
+      // Actual: every fee/sale/TCS line for this order (HOLD/HOLD_RELEASE/PAYOUT are
+      // lifecycle transfers of the SAME already-recognized credit, not separate revenue —
+      // excluded so this compares like with like against expectedNetCredit above).
+      const settlementTypes = new Set(['GROSS_SALE', 'COMMISSION', 'GST_ON_FEES', 'MARKETING_FEE', 'GATEWAY_FEE', 'DELIVERY_COST', 'TCS', 'RETURN_ADJUSTMENT', 'RTO_ADJUSTMENT']);
+      const actualNetCredit = round2(orderEntries.filter((e) => settlementTypes.has(e.type)).reduce((s, e) => s + Number(e.amount), 0));
+
+      if (Math.abs(actualNetCredit - expectedNetCredit) > 0.01) {
+        exceptions.push({
+          orderId: o.id, orderNumber: o.orderNumber, sellerId: o.items.find((it) => it.vendorId)?.vendorId || null,
+          expectedNetCredit, actualNetCredit, difference: round2(actualNetCredit - expectedNetCredit),
+          status: 'RECONCILIATION_EXCEPTION',
+        });
+      } else {
+        reconciledCount++;
+      }
+    }
+    return { checked: orders.length, settled: reconciledCount + exceptions.length, reconciled: reconciledCount, exceptions };
+  }
+
+  // ─── Phase 8 (Workstream 4) — E-Invoice / E-Way Bill registers. environment is always
+  // surfaced so a SANDBOX row (every row this system can currently produce — no live IRP/
+  // EWB credentials exist) can never be mistaken for a real government-issued document.
+  async einvoiceRegister(range: DateRange) {
+    return this.prisma.eInvoiceRecord.findMany({
+      where: { createdAt: dateFilter(range) },
+      select: { invoiceId: true, status: true, environment: true, irn: true, ackNumber: true, ackDate: true, errorCode: true, errorMessage: true, submittedAt: true, cancelledAt: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async ewayBillRegister(range: DateRange) {
+    return this.prisma.eWayBillRecord.findMany({
+      where: { createdAt: dateFilter(range) },
+      select: { orderId: true, status: true, environment: true, ewbNumber: true, ewbDate: true, validUntil: true, consignmentValue: true, errorCode: true, errorMessage: true, cancelledAt: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 }
 
 @ApiTags('Admin Reports')
@@ -308,6 +469,34 @@ export class ReportsController {
   ) {
     const buf = await this.reports.generateLedgerReport(parseRange(from, to), partyType);
     sendXlsx(res, buf, 'ledger-report.xlsx');
+  }
+
+  // ─── Phase 8 (Workstream 1/2) ───
+  @Get('tcs')
+  async tcs(@Query('from') from: string, @Query('to') to: string, @Res() res: Response) {
+    const buf = await this.reports.generateTcsRegister(parseRange(from, to));
+    sendXlsx(res, buf, 'tcs-register.xlsx');
+  }
+
+  @Get('credit-notes')
+  async creditNotes(@Query('from') from: string, @Query('to') to: string, @Res() res: Response) {
+    const buf = await this.reports.generateCreditNoteRegister(parseRange(from, to));
+    sendXlsx(res, buf, 'credit-note-register.xlsx');
+  }
+
+  @Get('reconciliation/seller-settlement')
+  reconciliation(@Query('from') from: string, @Query('to') to: string) {
+    return this.reports.sellerSettlementReconciliation(parseRange(from, to));
+  }
+
+  @Get('e-invoice')
+  einvoiceRegister(@Query('from') from: string, @Query('to') to: string) {
+    return this.reports.einvoiceRegister(parseRange(from, to));
+  }
+
+  @Get('e-way-bill')
+  ewayBillRegister(@Query('from') from: string, @Query('to') to: string) {
+    return this.reports.ewayBillRegister(parseRange(from, to));
   }
 }
 

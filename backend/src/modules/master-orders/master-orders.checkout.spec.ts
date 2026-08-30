@@ -50,7 +50,9 @@ function makeService() {
       // checkout() in a test) see the real, current state — including whatever the
       // transaction below has already mutated in place.
       findUnique: jest.fn(async ({ where }: any) => {
-        const mo = createdMasterOrders.find((m) => m.id === where.id);
+        const mo = where.idempotencyKey
+          ? createdMasterOrders.find((m) => m.idempotencyKey === where.idempotencyKey)
+          : createdMasterOrders.find((m) => m.id === where.id);
         if (!mo) return null;
         // Mirrors what a real `include: { childOrders: { include: { service: true } } }`
         // query would return — switchToCod() reads c.service off each child, so the mock
@@ -91,6 +93,7 @@ function makeService() {
         },
         orderTimeline: { create: jest.fn(async () => ({})) },
         orderOtpLog: { create: jest.fn(async () => ({})) },
+        orderDiscountAllocation: { create: jest.fn(async () => ({})) },
       };
       return fn(tx);
     }),
@@ -409,5 +412,48 @@ describe('MasterOrdersService — Payment Mode business rules (ANY / ONLINE_ONLY
 
     await svc.confirmPayment(result.masterOrderId, 'pay_1');
     createdOrders.forEach((o) => { expect(o.status).toBe('CONFIRMED'); expect(o.paymentStatus).toBe('PAID'); });
+  });
+
+  // M-06 — order-creation idempotency (opt-in). A client that never sends idempotencyKey
+  // gets byte-for-byte today's behaviour (see test 4, "two separate checkout calls... never
+  // merged" above, still unchanged). A client that DOES send one — modeling a double-click or
+  // a browser/network retry of the exact same submission — must get back the SAME order.
+  it('11. Duplicate order request (same idempotencyKey) returns the original master order, never creates a second one', async () => {
+    const { svc, createdOrders, createdMasterOrders, payments } = makeService();
+    const dto = { items: [{ type: 'SERVICE', serviceId: 'fan-install', quantity: 1 }], addressId: 'addr-1', idempotencyKey: 'idem-key-1' } as any;
+
+    const first = await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'ONLINE' });
+    const second = await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'ONLINE' });
+
+    expect(createdMasterOrders).toHaveLength(1);
+    expect(createdOrders).toHaveLength(1);
+    expect(second.masterOrderId).toBe(first.masterOrderId);
+    // The resumed response still gets a usable (fresh) gateway order for the SAME master
+    // order — checkout() once, initiatePayment() called again on the retry to resume payment.
+    expect(payments.initiatePayment).toHaveBeenCalledTimes(2);
+  });
+
+  it('11b. Without idempotencyKey, two identical checkout calls still create two separate orders (unchanged default behaviour)', async () => {
+    const { svc, createdOrders, createdMasterOrders } = makeService();
+    const dto = { items: [{ type: 'SERVICE', serviceId: 'fan-install', quantity: 1 }], addressId: 'addr-1' } as any;
+
+    await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'COD' });
+    await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'COD' });
+
+    expect(createdMasterOrders).toHaveLength(2);
+    expect(createdOrders).toHaveLength(2);
+  });
+
+  it('11c. A COD order already CONFIRMED, retried with the same key, resolves without re-initiating any payment', async () => {
+    const { svc, createdMasterOrders, payments } = makeService();
+    const dto = { items: [{ type: 'SERVICE', serviceId: 'fan-install', quantity: 1 }], addressId: 'addr-1', idempotencyKey: 'idem-key-cod' } as any;
+
+    const first = await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'COD' });
+    const second = await svc.checkout(dto, { customerId: 'cust-1', paymentMethod: 'COD' });
+
+    expect(createdMasterOrders).toHaveLength(1);
+    expect(second.masterOrderId).toBe(first.masterOrderId);
+    expect((second as any).alreadyProcessed).toBe(true);
+    expect(payments.initiatePayment).not.toHaveBeenCalled();
   });
 });

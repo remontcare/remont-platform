@@ -87,7 +87,9 @@ const STATE_ALIASES: Record<string, string> = {
   'nct of delhi': 'delhi',
   'delhi ncr': 'delhi',
 };
-function normalizeState(state?: string | null): string {
+// Exported (Phase 7) so TCS's own intra/inter-state split (computeTcsSplit(), common/
+// index.ts) reuses the exact same normalization instead of a second copy.
+export function normalizeState(state?: string | null): string {
   const s = (state || '').trim().toLowerCase();
   return STATE_ALIASES[s] || s;
 }

@@ -16,14 +16,21 @@ function makeTx(overrides: Record<string, any> = {}) {
       update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
-    productVendor: { update: jest.fn() },
+    productVendor: { update: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
     order: { findUnique: jest.fn(), update: jest.fn() },
+    // Phase 7 (C-10) — no TCS rate configured by default (resolveTcsRatePercent() reads
+    // this via `this.prisma`, not `tx`, but reverseSettlement()'s own TCS-reversal lookup
+    // does use tx) — every existing test in this file is unaffected unless it opts in.
+    tcsRecord: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn(async (args: any) => args.data), update: jest.fn(async (args: any) => args.data) },
     ...overrides,
   };
 }
 
 function makeService(siteSetting: any = null) {
-  const prisma: any = { siteSetting: { findUnique: jest.fn().mockResolvedValue(siteSetting) } };
+  const prisma: any = {
+    siteSetting: { findUnique: jest.fn().mockResolvedValue(siteSetting) },
+    taxConfig: { findFirst: jest.fn().mockResolvedValue(null) }, // no TCS rate configured — resolveTcsRatePercent() returns 0
+  };
   const service = new ProductLedgerService(prisma);
   return { service, prisma };
 }
@@ -238,6 +245,7 @@ describe('ProductHoldSweepService', () => {
     const prisma: any = {
       productVendorHold: { findMany: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
       productVendor: { update: jest.fn() },
+      shipment: { findUnique: jest.fn().mockResolvedValue(null) }, // no shipment row -> fail-open (release eligible), see isCodReleaseEligible
       $transaction: jest.fn((cb: any) => cb(prisma)),
     };
     const service = new ProductHoldSweepService(prisma, ledger);
@@ -261,5 +269,66 @@ describe('ProductHoldSweepService', () => {
     prisma.productVendorHold.updateMany.mockResolvedValue({ count: 0 });
     await service.sweep();
     expect(ledger.postEntry).not.toHaveBeenCalled();
+  });
+
+  // C-14 — a matured return-window hold on a COD order must NOT become payable merely
+  // because the window passed; it must wait for the platform to actually confirm the cash
+  // was settled (or reconciled).
+  it('COD delivered but cash not yet reconciled (COD_SETTLEMENT_PENDING): the matured hold stays HELD, not released', async () => {
+    const { service, prisma, ledger } = makeSweep();
+    prisma.productVendorHold.findMany.mockResolvedValue([{ id: 'hold-1', orderId: 'order-cod-1' }]);
+    prisma.shipment.findUnique.mockResolvedValue({ codSettlementStatus: 'COD_SETTLEMENT_PENDING' });
+
+    await service.sweep();
+
+    expect(prisma.productVendorHold.updateMany).not.toHaveBeenCalled();
+    expect(ledger.postEntry).not.toHaveBeenCalled();
+    expect(prisma.productVendor.update).not.toHaveBeenCalled();
+  });
+
+  it('COD_COLLECTED alone (rider says collected, platform hasn\'t confirmed settlement) still withholds release', async () => {
+    const { service, prisma, ledger } = makeSweep();
+    prisma.productVendorHold.findMany.mockResolvedValue([{ id: 'hold-1', orderId: 'order-cod-1' }]);
+    prisma.shipment.findUnique.mockResolvedValue({ codSettlementStatus: 'COD_COLLECTED' });
+
+    await service.sweep();
+
+    expect(ledger.postEntry).not.toHaveBeenCalled();
+  });
+
+  it('COD reconciled (COD_SETTLED): the matured hold releases normally', async () => {
+    const { service, prisma, ledger } = makeSweep();
+    prisma.productVendorHold.findMany.mockResolvedValue([{ id: 'hold-1', orderId: 'order-cod-1' }]);
+    prisma.productVendorHold.findUnique.mockResolvedValue({ id: 'hold-1', vendorId: 'vendor-1', remaining: 400, orderId: 'order-cod-1' });
+    prisma.productVendorHold.updateMany.mockResolvedValue({ count: 1 });
+    prisma.shipment.findUnique.mockResolvedValue({ codSettlementStatus: 'COD_SETTLED' });
+
+    await service.sweep();
+
+    expect(ledger.postEntry).toHaveBeenCalledWith(prisma, 'vendor-1', 'HOLD_RELEASE', 400, { orderId: 'order-cod-1' });
+  });
+
+  it('COD_RECONCILED (fully closed out) also releases', async () => {
+    const { service, prisma, ledger } = makeSweep();
+    prisma.productVendorHold.findMany.mockResolvedValue([{ id: 'hold-1', orderId: 'order-cod-1' }]);
+    prisma.productVendorHold.findUnique.mockResolvedValue({ id: 'hold-1', vendorId: 'vendor-1', remaining: 400, orderId: 'order-cod-1' });
+    prisma.productVendorHold.updateMany.mockResolvedValue({ count: 1 });
+    prisma.shipment.findUnique.mockResolvedValue({ codSettlementStatus: 'COD_RECONCILED' });
+
+    await service.sweep();
+
+    expect(ledger.postEntry).toHaveBeenCalled();
+  });
+
+  it('a non-COD order (NOT_APPLICABLE) is unaffected — releases exactly as before', async () => {
+    const { service, prisma, ledger } = makeSweep();
+    prisma.productVendorHold.findMany.mockResolvedValue([{ id: 'hold-1', orderId: 'order-online-1' }]);
+    prisma.productVendorHold.findUnique.mockResolvedValue({ id: 'hold-1', vendorId: 'vendor-1', remaining: 200, orderId: 'order-online-1' });
+    prisma.productVendorHold.updateMany.mockResolvedValue({ count: 1 });
+    prisma.shipment.findUnique.mockResolvedValue({ codSettlementStatus: 'NOT_APPLICABLE' });
+
+    await service.sweep();
+
+    expect(ledger.postEntry).toHaveBeenCalledWith(prisma, 'vendor-1', 'HOLD_RELEASE', 200, { orderId: 'order-online-1' });
   });
 });

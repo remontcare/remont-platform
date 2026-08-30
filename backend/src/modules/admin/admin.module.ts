@@ -583,14 +583,34 @@ export class AdminService {
   async approveWithdrawal(id: string, adminId: string, note?: string) {
     const req = await this.prisma.withdrawalRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Withdrawal request not found');
-    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
-    // Hands off to the existing, unchanged settlement-recording flow instead of
-    // re-implementing "pay a vendor" — record() already atomically decrements pendingPayout
-    // AND posts the matching WITHDRAWAL ledger entry (tagged with this withdrawalRequestId),
-    // so there's no separate follow-up ledger post here anymore (that used to happen as a
-    // second, non-atomic transaction after this one).
-    const settlement = await this.settlements.record(req.vendorId, Number(req.amount), SettlementMode.BANK_TRANSFER, adminId, undefined, note, id);
-    await this.prisma.withdrawalRequest.update({ where: { id }, data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date(), settlementId: settlement.id } });
+
+    // Idempotency/concurrency fix: two concurrent "Approve" clicks (or a client retry after a
+    // timeout) on the same withdrawal request used to both pass this status check via a plain
+    // findUnique before either write landed, so both could go on to call record() and pay the
+    // vendor twice for the same request. This atomic claim — only the caller whose updateMany
+    // actually flips status away from PENDING may proceed — makes WithdrawalRequest.id itself
+    // the idempotent reference for "was this specific request already paid", same idiom as
+    // ProductHoldSweepService.releaseHold()'s claim.
+    const claimed = await this.prisma.withdrawalRequest.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: 'PAID', reviewedBy: adminId, reviewNote: note || null, reviewedAt: new Date() },
+    });
+    if (claimed.count !== 1) throw new BadRequestException('This request was already reviewed');
+
+    let settlement;
+    try {
+      // Hands off to the existing, unchanged settlement-recording flow instead of
+      // re-implementing "pay a vendor" — record() already atomically decrements pendingPayout
+      // AND posts the matching WITHDRAWAL ledger entry (tagged with this withdrawalRequestId).
+      settlement = await this.settlements.record(req.vendorId, Number(req.amount), SettlementMode.BANK_TRANSFER, adminId, undefined, note, id);
+    } catch (e) {
+      // Roll back the claim so a transient failure (e.g. an insufficient-balance race that
+      // slipped through, or a DB hiccup) leaves the request retryable instead of permanently
+      // stuck "PAID" with no money actually recorded.
+      await this.prisma.withdrawalRequest.update({ where: { id }, data: { status: 'PENDING', reviewedBy: null, reviewNote: null, reviewedAt: null } }).catch(() => {});
+      throw e;
+    }
+    await this.prisma.withdrawalRequest.update({ where: { id }, data: { settlementId: settlement.id } });
     await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'WITHDRAWAL_APPROVED', targetType: 'WithdrawalRequest', targetId: id, metadata: { amount: req.amount } });
     const vendorForNotify = await this.prisma.serviceVendor.findUnique({ where: { id: req.vendorId }, select: { userId: true } });
     if (vendorForNotify) this.events.emit('withdrawal.approved', { userId: vendorForNotify.userId, amount: Number(req.amount), withdrawalId: id });
@@ -1495,7 +1515,18 @@ export class AdminService {
     return this.prisma.service.updateMany({ where: { id: { in: ids } }, data });
   }
 
-  async deleteAllOrders() {
+  // Dev/seed-reset utility only — never callable in production. Financial records
+  // (Invoice rows especially) must never be hard-deleted once real orders/GST invoices
+  // exist; this bulk-wipe is only safe against a throwaway dev/staging database, and has
+  // no confirming UI anywhere (no frontend call site references this route at all — it's
+  // reachable only by calling the API directly). Gated the same way main.ts already gates
+  // its own dev-only behaviour (`process.env.NODE_ENV !== 'production'`), plus an audit log
+  // for the non-production case so a dev/staging wipe is still traceable to who ran it.
+  async deleteAllOrders(adminId: string, adminRole: UserRole) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('This operation is disabled in production — orders and invoices are financial records and must never be bulk-deleted.');
+    }
+    await logAudit(this.prisma, { actorId: adminId, actorRole: adminRole, action: 'DELETE_ALL_ORDERS_DEV_ONLY' });
     await this.prisma.review.deleteMany({});
     await this.prisma.invoice.deleteMany({});
     const result = await this.prisma.order.deleteMany({});
@@ -1916,7 +1947,25 @@ Return JSON with:
     const productsById = new Map((await client.product.findMany({ where: { id: { in: productIds } }, select: { id: true, categoryId: true } })).map((p: any) => [p.id, p]));
     const productsBySku = new Map((await client.product.findMany({ where: { sku: { in: productSkus } }, select: { id: true, sku: true, categoryId: true } })).map((p: any) => [p.sku, p]));
 
+    // Phase 8 (H-03) — validates productGstOverridePercent against the rates the business
+    // has actually configured (TaxConfig, appliesTo: PRODUCT) rather than accepting any
+    // arbitrary 0-100 number — catches a fat-fingered "19" or "1800" instead of "18" before
+    // it's written to a live Product row. Uses TaxConfig as the existing source of truth
+    // rather than a hardcoded statutory slab list; skipped entirely if nothing is configured
+    // yet, so this can never lock out a fresh install.
+    const configuredProductRates = new Set(
+      (await client.taxConfig.findMany({ where: { appliesTo: { has: 'PRODUCT' }, isActive: true }, select: { rate: true } }))
+        .map((t: any) => Number(t.rate)),
+    );
+
     const seenInFile = new Set<string>();
+    // Phase 8 (M-02) — detects the SAME productId getting conflicting productGstUpdate
+    // values across different rows in one batch (e.g. a COMMISSION row and a MARKETING row
+    // for the same product each also setting a different productGstOverridePercent) — the
+    // duplicate-within-file check above only compares feeType+scope+target+dates, which
+    // does NOT catch this, since the GST update is independent of feeType. Without this,
+    // confirmProductFeeRuleBulkImport() would silently let the last row win.
+    const productGstUpdatesSeen = new Map<string, { gstInclusive?: boolean | null; gstOverridePercent?: number; hsnSac?: string; row: number }>();
     const validRows: any[] = [];
     const invalidRows: { row: number; errors: string[] }[] = [];
     const warnings: { row: number; warning: string }[] = [];
@@ -1985,6 +2034,11 @@ Return JSON with:
       if (r.productGstOverridePercent !== undefined && r.productGstOverridePercent !== '') {
         productGstOverridePercent = Number(r.productGstOverridePercent);
         if (Number.isNaN(productGstOverridePercent) || productGstOverridePercent < 0 || productGstOverridePercent > 100) errors.push('productGstOverridePercent must be a number between 0 and 100');
+        // H-03 — reject a rate that doesn't match any currently-configured PRODUCT TaxConfig
+        // rate (when at least one is configured at all).
+        else if (configuredProductRates.size > 0 && !configuredProductRates.has(productGstOverridePercent)) {
+          errors.push(`productGstOverridePercent ${productGstOverridePercent} does not match any configured GST rate (${[...configuredProductRates].sort((a: number, b: number) => a - b).join(', ')}) — check the Taxes screen or fix this value`);
+        }
       }
       if ((productGstInclusive !== undefined || productGstOverridePercent !== undefined || r.productHsnSac) && scope !== 'PRODUCT') {
         errors.push('productGstInclusive/productGstOverridePercent/productHsnSac can only be set on a PRODUCT-scoped row');
@@ -1995,6 +2049,27 @@ Return JSON with:
       if (!errors.length) {
         if (seenInFile.has(targetKey)) errors.push(`duplicate of an earlier row in this file (same feeType/scope/target/dates)`);
         else seenInFile.add(targetKey);
+      }
+
+      // M-02 — conflicting productGstUpdate for the same product across different rows.
+      if (!errors.length && productId && (productGstInclusive !== undefined || productGstOverridePercent !== undefined || r.productHsnSac)) {
+        const thisUpdate = { gstInclusive: productGstInclusive, gstOverridePercent: productGstOverridePercent, hsnSac: r.productHsnSac || undefined };
+        const prior = productGstUpdatesSeen.get(productId);
+        if (prior) {
+          const conflicts = prior.gstInclusive !== thisUpdate.gstInclusive || prior.gstOverridePercent !== thisUpdate.gstOverridePercent || prior.hsnSac !== thisUpdate.hsnSac;
+          if (conflicts) errors.push(`conflicting GST update for the same product as row ${prior.row} (same productId, different gstInclusive/gstOverridePercent/hsnSac) — fix one of the two rows`);
+        } else {
+          productGstUpdatesSeen.set(productId, { ...thisUpdate, row: rowNum });
+        }
+      }
+
+      // M-03 — a backdated validFrom is allowed (legitimate historical correction is not
+      // blocked) but always surfaced, since a fee rule silently taking effect in the past
+      // can otherwise look like an unexplained retroactive change to someone reviewing it
+      // later. Historical settled orders are never rewritten regardless (see
+      // ProductFeeRule's own effective-dating comment) — this is a warning, not a rejection.
+      if (!errors.length && validFrom && validFrom.getTime() < Date.now()) {
+        warnings.push({ row: rowNum, warning: `validFrom (${validFrom.toISOString().slice(0, 10)}) is in the past — this rule will apply retroactively to any future calculation that reads it, though already-settled orders are never rewritten` });
       }
 
       if (errors.length) { invalidRows.push({ row: rowNum, errors }); continue; }
@@ -2035,8 +2110,12 @@ Return JSON with:
     };
   }
 
-  async confirmProductFeeRuleBulkImport(rows: any[]) {
-    return this.prisma.$transaction(async (tx) => {
+  // Phase 8 (H-02) — actorId/actorRole are now required (previously this method had no
+  // caller identity at all) so the audit entry below can actually attribute the import to
+  // someone; reuses the existing generic AuditLog/logAudit() mechanism rather than a
+  // second audit system.
+  async confirmProductFeeRuleBulkImport(rows: any[], actorId: string, actorRole: UserRole) {
+    const result = await this.prisma.$transaction(async (tx) => {
       const { validRows, invalidRows } = await this.validateProductFeeRuleRows(rows, tx);
       let productsUpdated = 0;
       for (const v of validRows) {
@@ -2052,6 +2131,11 @@ Return JSON with:
       }
       return { rulesCreated: validRows.length, productsUpdated, skipped: invalidRows };
     });
+    await logAudit(this.prisma, {
+      actorId, actorRole, action: 'PRODUCT_FEE_RULE_BULK_IMPORT', targetType: 'ProductFeeRule',
+      metadata: { totalRows: rows.length, successRows: result.rulesCreated, rejectedRows: result.skipped.length, productsUpdated: result.productsUpdated },
+    }).catch(() => {}); // best-effort — never blocks a completed import
+    return result;
   }
 
   // ─── Product Vendor Earnings / Payouts (Phase 7) ──────────────────────
@@ -2075,11 +2159,28 @@ Return JSON with:
     return this.prisma.productVendorLedgerEntry.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' }, take: limit });
   }
 
+  // Race/idempotency fix: the balance check used to read ProductVendor.pendingPayout via a
+  // plain findUnique BEFORE the transaction that actually debits it — two concurrent payout
+  // requests for the same vendor could both pass that stale check and both debit, paying out
+  // more than was owed. The check now happens inside the same row-locked transaction as the
+  // debit (same FOR UPDATE idiom ProductLedgerService.postEntry()/WithdrawalService.request()
+  // already use), so a second concurrent request always sees the first's already-committed
+  // decrement. `referenceNumber` doubles as an idempotent financial reference when supplied:
+  // a retried call with the same (vendorId, referenceNumber) returns the original settlement
+  // instead of creating a second payout for the same reference.
   async recordProductVendorPayout(adminId: string, vendorId: string, amount: number, mode: any, referenceNumber?: string, notes?: string) {
-    const vendor = await this.prisma.productVendor.findUnique({ where: { id: vendorId } });
-    if (!vendor) throw new NotFoundException('Seller not found');
-    if (amount > Number(vendor.pendingPayout)) throw new BadRequestException(`Amount exceeds pending payout (₹${vendor.pendingPayout} available)`);
+    if (!amount || amount <= 0) throw new BadRequestException('Enter a valid payout amount');
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ProductVendor" WHERE id = ${vendorId} FOR UPDATE`;
+      const vendor = await tx.productVendor.findUnique({ where: { id: vendorId } });
+      if (!vendor) throw new NotFoundException('Seller not found');
+
+      if (referenceNumber) {
+        const existing = await tx.productVendorSettlement.findFirst({ where: { vendorId, referenceNumber } });
+        if (existing) return existing;
+      }
+      if (amount > Number(vendor.pendingPayout)) throw new BadRequestException(`Amount exceeds pending payout (₹${vendor.pendingPayout} available)`);
+
       const settlement = await tx.productVendorSettlement.create({ data: { vendorId, amount, mode, referenceNumber, notes, paidBy: adminId } });
       await this.productLedger.postEntry(tx, vendorId, 'PAYOUT', -amount, { settlementId: settlement.id, notes });
       await tx.productVendor.update({ where: { id: vendorId }, data: { pendingPayout: { decrement: amount } } });
@@ -3283,7 +3384,8 @@ export class AdminController {
   @Patch('orders/:id/assign-vendor') assignVendor(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { vendorId: string }) { return this.admin.forceAssignVendor(id, b.vendorId, u.sub, u.role); }
   @Patch('orders/:id/cancel') cancelOrder(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) { return this.admin.adminCancelOrder(id, b.reason, u.sub, u.role); }
   @Patch('orders/:id/refund') refund(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) { return this.admin.refundOrder(id, b.reason, u.sub, u.role); }
-  @Delete('orders/all') deleteAllOrders() { return this.admin.deleteAllOrders(); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Delete('orders/all') deleteAllOrders(@CurrentUser() u: JwtPayload) { return this.admin.deleteAllOrders(u.sub, u.role); }
 
   // ─── Phase 5 — product-order shipments / COD settlement / return-inspection queues ───
   @Get('shipments') listShipments(@Query('codSettlementStatus') codSettlementStatus?: string) {
@@ -3435,7 +3537,7 @@ export class AdminController {
 
   // Phase 8 — Bulk Fee-Rule Upload
   @Post('product-fee-rules/bulk-import/validate') validateBulkFeeRules(@Body() b: { rows: any[] }) { return this.admin.validateProductFeeRuleBulkImport(b.rows || []); }
-  @Post('product-fee-rules/bulk-import/confirm') confirmBulkFeeRules(@Body() b: { rows: any[] }) { return this.admin.confirmProductFeeRuleBulkImport(b.rows || []); }
+  @Post('product-fee-rules/bulk-import/confirm') confirmBulkFeeRules(@CurrentUser() u: JwtPayload, @Body() b: { rows: any[] }) { return this.admin.confirmProductFeeRuleBulkImport(b.rows || [], u.sub, u.role); }
 
   // Phase 7 — Product Seller Earnings / Payouts
   @Get('product-vendor-earnings') listProductVendorEarnings(@Query('q') q?: string) { return this.admin.listProductVendorEarnings(q); }

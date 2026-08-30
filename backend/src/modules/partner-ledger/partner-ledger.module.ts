@@ -187,6 +187,23 @@ export class PartnerLedgerService {
     return tx.partnerHold.findUnique({ where: { id: holdId } });
   }
 
+  /**
+   * Phase 6 (H-06) — a refund decided AFTER this order's warranty hold has already matured/
+   * released (or one was never created for it) previously had no recovery path at all:
+   * deductFromHold() above is a no-op once the hold is gone, so Remont silently absorbed the
+   * whole refund with zero clawback from the vendor who already got paid. This debits the
+   * vendor's live balance directly instead — the same signed-ledger-entry + pendingPayout
+   * pairing every other balance-affecting operation in this class already uses (postEntry()
+   * + a matching ServiceVendor.pendingPayout update), just with no hold left to consume it
+   * from first. Allowed to take pendingPayout negative (a debt against future earnings),
+   * matching ProductLedgerService.reverseSettlement()'s equivalent fallback for products.
+   */
+  async clawbackFromBalance(tx: any, vendorId: string, orderId: string | undefined, amount: number, notes?: string) {
+    if (amount <= 0) return;
+    await this.postEntry(tx, vendorId, 'ADJUSTMENT', -amount, { orderId, notes: notes || 'Refund clawback — warranty hold already released' });
+    await tx.serviceVendor.update({ where: { id: vendorId }, data: { pendingPayout: { decrement: amount } } });
+  }
+
   // ── Vendor Wallet: Lead Cost ──────────────────────────────────────────────
   // Deducted the instant a vendor accepts a job (see ServiceVendorsService.acceptJob),
   // trued up against the order's remontCommission at completion (see OrdersService.complete).

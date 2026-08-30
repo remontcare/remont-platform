@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -157,6 +157,10 @@ export class CreateMasterOrderDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() gstin?: string;
   @IsOptional() @IsString() gstBusinessName?: string;
+  // Phase 1 hardening (M-06) — optional client-supplied dedupe token (e.g. a UUID generated
+  // once per "Place Order" press, resent unchanged on any automatic retry). Omit entirely for
+  // byte-for-byte today's behaviour; see MasterOrder.idempotencyKey's schema comment.
+  @IsOptional() @IsString() idempotencyKey?: string;
 }
 
 export class PublicMasterCheckoutDto {
@@ -179,6 +183,7 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsNumber() @Min(0) walletAmount?: number;
   @IsOptional() @IsString() gstin?: string;
   @IsOptional() @IsString() gstBusinessName?: string;
+  @IsOptional() @IsString() idempotencyKey?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -276,6 +281,15 @@ export class MasterOrdersService {
   // distinct product seller, all linked under one MasterOrder.
   async checkout(dto: CreateMasterOrderDto, opts: CheckoutOpts) {
     if (!dto.items?.length) throw new BadRequestException('Cart is empty');
+
+    // Idempotency (M-06) — opt-in: a client that sends idempotencyKey gets double-click/
+    // network-retry protection; one that doesn't behaves exactly as before. Checked up front
+    // as a fast path; the @unique constraint (caught below, around the actual insert) is what
+    // closes the race for two concurrent requests racing on the same key, not this read alone.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+      if (existing) return this.resumeCheckoutResponse(existing);
+    }
 
     // Resolve customer — authenticated customerId, or guest find-or-create by phone
     // (same pattern as GuestBookingService.book() in orders.module.ts).
@@ -390,10 +404,15 @@ export class MasterOrdersService {
         let gatewayRuleId: string | null = null, gatewayRuleLabel = 'No rule — ₹0';
         for (const it of items) {
           const p = productMap.get(it.productId!)!;
+          // C-01 fix — fee base must be the resolved ex-GST taxable value (it.taxableValue,
+          // from resolveProductGstLine() above), not the gross line total. For a GST-Exclusive
+          // (or 0%/exempt) line these are numerically identical, so this is a no-op there; it
+          // only changes anything for a GST-Inclusive line, where totalPrice includes tax that
+          // was never the seller's revenue to pay commission against.
           const [commission, marketing, gateway] = await Promise.all([
-            resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
-            resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
-            resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: it.totalPrice }),
+            resolveProductFee(this.prisma, { feeType: 'COMMISSION', productId: p.id, productCategoryId: p.categoryId, amount: it.taxableValue! }),
+            resolveProductFee(this.prisma, { feeType: 'MARKETING', productId: p.id, productCategoryId: p.categoryId, amount: it.taxableValue! }),
+            resolveProductFee(this.prisma, { feeType: 'GATEWAY', productId: p.id, productCategoryId: p.categoryId, amount: it.taxableValue! }),
           ]);
           commissionTotal += commission.feeAmount; commissionRuleId = commission.ruleId; commissionRuleLabel = commission.ruleLabel;
           marketingTotal += marketing.feeAmount; marketingRuleId = marketing.ruleId; marketingRuleLabel = marketing.ruleLabel;
@@ -475,11 +494,17 @@ export class MasterOrdersService {
 
     let couponDiscount = 0;
     let couponId: string | undefined;
+    // Phase 3 (C-02/C-03) — who bears this coupon's discount; read from Coupon.fundedBy,
+    // defaulting to PLATFORM (today's unchanged behaviour) whenever there's no coupon at
+    // all (a membership-only discount is always platform-funded — it isn't tied to any
+    // one seller). See applySellerFundedDiscountToProductGst() below for what SELLER does.
+    let couponFundedBy: 'PLATFORM' | 'SELLER' = 'PLATFORM';
     if (dto.couponCode) {
       const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount);
       if (!v.valid) throw new BadRequestException(v.reason);
       couponDiscount = v.discountAmount || 0;
       couponId = v.coupon?.id;
+      couponFundedBy = (v.coupon as any)?.fundedBy === 'SELLER' ? 'SELLER' : 'PLATFORM';
     }
 
     const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
@@ -537,6 +562,29 @@ export class MasterOrdersService {
     // (read directly by the existing complete()/invoice-generation code) stay consistent.
     const groupAmounts = pricedGroups.map((g) => g.amount);
     const groupDiscounts = allocateAcrossGroups(groupAmounts, subtotal, membershipDiscount + couponDiscount);
+
+    // Phase 3 (C-02/C-03) — a SELLER-funded coupon actually reduces the affected PRODUCT
+    // group's own taxable value/GST by its discount share (see
+    // applySellerFundedDiscountToProductGst() in common/index.ts for why this is exact,
+    // not an approximation). Mutating pricedGroups here — before groupGst/the order-create
+    // loop below read productGstOnTop/productsTaxableAmount/items — means every downstream
+    // consumer (child Order's own GST snapshot, and ProductLedgerService.settleProductOrder()
+    // reading order.productsTaxableAmount later) picks up the reduced figure for free, with
+    // no separate change needed there. PLATFORM-funded (the default) is a no-op: every
+    // PRODUCT group's taxable value/GST stays exactly as resolved pre-discount, unchanged.
+    const groupTaxableAdjustment = pricedGroups.map(() => 0);
+    if (couponFundedBy === 'SELLER') {
+      pricedGroups.forEach((g, i) => {
+        if (g.type !== 'PRODUCT') return;
+        const before = g.productsTaxableAmount || 0;
+        const scaled = applySellerFundedDiscountToProductGst(g.items, before, g.productGstOnTop || 0, g.amount, groupDiscounts[i]);
+        g.items = scaled.items;
+        g.productsTaxableAmount = scaled.productsTaxableAmount;
+        g.productGstOnTop = scaled.productGstOnTop;
+        groupTaxableAdjustment[i] = Math.round((before - scaled.productsTaxableAmount) * 100) / 100;
+      });
+    }
+
     // Phase 8 — GST is no longer one blended pool allocated by amount-share across every
     // group regardless of type: a PRODUCT group already knows its own exact GST
     // (productGstOnTop, resolved per-item above) and uses that directly; only the SERVICE-
@@ -554,7 +602,17 @@ export class MasterOrdersService {
     const masterOrderNumber = await this.generateMasterOrderNumber();
     const isGuest = !opts.customerId;
 
-    const { masterOrder, childOrders } = await this.prisma.$transaction(async (tx) => {
+    let masterOrder: any, childOrders: any[];
+    try {
+      ({ masterOrder, childOrders } = await this.prisma.$transaction(async (tx) => {
+      // Phase 8 (H-07) — atomic stock check/decrement for every PRODUCT line in this cart,
+      // inside the same transaction as order creation: insufficient stock rolls back the
+      // whole checkout, never a partially-created order.
+      const productItemsForStock = pricedGroups
+        .filter((g) => g.type === 'PRODUCT')
+        .flatMap((g) => g.items.map((it) => ({ productId: it.productId!, quantity: it.quantity })));
+      if (productItemsForStock.length) await reserveProductStock(tx, productItemsForStock);
+
       const masterOrder = await tx.masterOrder.create({
         data: {
           masterOrderNumber, customerId, addressId: resolvedAddressId,
@@ -570,6 +628,7 @@ export class MasterOrdersService {
           guestEmail: isGuest ? opts.guestEmail : undefined,
           customerGstin: dto.gstin || undefined,
           customerGstName: dto.gstBusinessName || undefined,
+          idempotencyKey: dto.idempotencyKey || undefined,
         },
       });
 
@@ -657,6 +716,21 @@ export class MasterOrdersService {
           },
         });
         await tx.orderTimeline.create({ data: { orderId: childOrder.id, status: childOrder.status } });
+        // Phase 3 (C-02/C-03/M-04) — one allocation row per child Order, always (even with
+        // zero discount), so "how was this order's discount funded and did it affect
+        // GST/settlement" is a single, always-present lookup rather than something invoice/
+        // settlement code has to re-derive from scratch each time. See buildDiscountAllocationData().
+        await tx.orderDiscountAllocation.create({
+          data: buildDiscountAllocationData({
+            orderId: childOrder.id,
+            couponId,
+            sellerId: g.type === 'PRODUCT' ? g.vendorId : null,
+            discountAmount: childDiscount,
+            fundingSource: couponFundedBy,
+            isProductOrder: g.type === 'PRODUCT',
+            taxableValueAdjustment: groupTaxableAdjustment[i],
+          }),
+        });
         if (g.type === 'SERVICE') {
           // One OTP pair per child Order (= one vendor visit), regardless of how many
           // grouped services that visit covers — logged individually here so a master
@@ -668,7 +742,18 @@ export class MasterOrdersService {
       }
 
       return { masterOrder, childOrders };
-    });
+      }));
+    } catch (e: any) {
+      // Idempotency race: two concurrent requests carrying the same key can both pass the
+      // up-front findUnique check above before either commits — the @unique constraint on
+      // idempotencyKey is what actually arbitrates that race. The loser lands here and
+      // returns the winner's order instead of surfacing a raw DB error.
+      if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
+        const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+        if (existing) return this.resumeCheckoutResponse(existing);
+      }
+      throw e;
+    }
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, masterOrder.id, couponDiscount);
 
@@ -705,6 +790,32 @@ export class MasterOrdersService {
     }
     return {
       masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount,
+      paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+      gateway: 'RAZORPAY', gatewayOrderId: payOrder.gatewayOrderId, razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
+    };
+  }
+
+  // Idempotency (M-06) — the response checkout() builds for a MasterOrder that already
+  // exists under the idempotency key just submitted; never creates a second MasterOrder/
+  // Order row. COD orders are CONFIRMED immediately at creation (no separate pay step), so
+  // reaching this for one just means "nothing more to do." An ONLINE order still
+  // PENDING_PAYMENT needs a fresh gateway order to resume payment (Razorpay/PhonePe orders
+  // aren't themselves reusable) — bound to this SAME existing MasterOrder.
+  private async resumeCheckoutResponse(masterOrder: { id: string; masterOrderNumber: string; totalAmount: any; status: string; customerId: string }) {
+    if (masterOrder.status !== MasterOrderStatus.PENDING_PAYMENT) {
+      return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount: Number(masterOrder.totalAmount), paymentMethod: 'COD', isCOD: true, alreadyProcessed: true };
+    }
+    const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
+    const payOrder: any = await this.payments.initiatePayment(masterOrder.customerId, Number(masterOrder.totalAmount), masterOrder.id, frontendUrl);
+    if (payOrder.gateway === 'PHONEPE') {
+      return {
+        masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount: Number(masterOrder.totalAmount),
+        paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
+        gateway: 'PHONEPE', redirectUrl: payOrder.redirectUrl, txId: payOrder.txId,
+      };
+    }
+    return {
+      masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount: Number(masterOrder.totalAmount),
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
       gateway: 'RAZORPAY', gatewayOrderId: payOrder.gatewayOrderId, razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
     };
@@ -968,6 +1079,7 @@ export class PublicMasterOrderController {
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
       walletAmount: dto.walletAmount, gstin: dto.gstin, gstBusinessName: dto.gstBusinessName,
+      idempotencyKey: dto.idempotencyKey,
       slotStart: dto.slotStart, slotEnd: dto.slotEnd, city: dto.city,
       inlineAddress: {
         fullAddress: dto.fullAddress, city: dto.city, state: dto.state, pincode: dto.pincode,

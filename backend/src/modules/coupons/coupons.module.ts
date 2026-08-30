@@ -40,7 +40,11 @@ export class CouponsService {
     return {
       valid: true,
       discountAmount: Math.round(discount * 100) / 100,
-      coupon: { id: coupon.id, code: coupon.code, type: coupon.type },
+      // fundedBy (Phase 3, C-02/C-03) — read by MasterOrdersService.checkout()/
+      // OrdersService.create() to decide whether this coupon's discount is allowed to
+      // reduce PRODUCT GST taxable value / seller settlement (SELLER) or must leave both
+      // untouched (PLATFORM, the default — see OrderDiscountAllocation).
+      coupon: { id: coupon.id, code: coupon.code, type: coupon.type, fundedBy: coupon.fundedBy },
     };
   }
 
