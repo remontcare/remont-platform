@@ -21,7 +21,7 @@ jobs:
           fi
           mkdir -p backups
           TIMESTAMP=$(date -u +'%Y-%m-%d_%H-%M-%S')
-          docker run --rm postgres:17 pg_dump "$DATABASE_URL" | gzip > "backups/backup_${TIMESTAMP}.sql.gz"
+          docker run --rm postgres:18 pg_dump "$DATABASE_URL" | gzip > "backups/backup_${TIMESTAMP}.sql.gz"
           echo "Dump size:"
           du -h backups/backup_${TIMESTAMP}.sql.gz
 
