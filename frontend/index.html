@@ -6195,7 +6195,7 @@
       if (!type) return;
       const badge = card.querySelector('.premium-availability');
       if (!badge) return;
-      if (available.includes(premiumMap[type])) {
+      if (!available || available.includes(premiumMap[type])) {
         badge.style.background = 'rgba(91,140,90,0.25)';
         badge.style.color = '#a8d4a7';
         badge.innerHTML = '';
@@ -6216,7 +6216,7 @@
 
     // If currently displayed service is not available, switch to first available
     const activeSvc = document.querySelector('.svc-item.active');
-    if (activeSvc && !available.includes(activeSvc.dataset.svc)) {
+    if (activeSvc && available && !available.includes(activeSvc.dataset.svc)) {
       const firstAvail = available.find(s => document.querySelector(`.svc-item[data-svc="${s}"]`));
       if (firstAvail) {
         const target = document.querySelector(`.svc-item[data-svc="${firstAvail}"]`);
@@ -6479,6 +6479,7 @@
     // Others
     'ahmedabad': 'Ahmedabad', 'jaipur': 'Jaipur', 'lucknow': 'Lucknow',
     'indore': 'Indore', 'chandigarh': 'Chandigarh',
+    'bhopal': 'Bhopal', 'vadodara': 'Vadodara', 'baroda': 'Vadodara',
   };
 
   function _haversineKm(lat1, lng1, lat2, lng2) {
@@ -6513,7 +6514,10 @@
       matched = _GPS_CITY_ALIASES[geoCity.toLowerCase().trim()] || null;
     }
 
-    if (!matched) return; // GPS city not in our service area
+    if (!matched) {
+      console.warn('[GPS city] no match for coords', lat, lng, 'geoCity:', geoCity);
+      return; // GPS city not in our service area
+    }
 
     if (matched === currentCity) return; // already on the right city
 

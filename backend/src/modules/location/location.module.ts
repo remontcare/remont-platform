@@ -58,7 +58,7 @@ export class LocationService {
     return {
       fullAddress: data.display_name || '',
       area:        a.suburb || a.neighbourhood || a.quarter || a.village || '',
-      city:        a.city || a.town || a.county || a.district || '',
+      city:        a.city || a.town || a.municipality || a.county || a.state_district || a.district || a.village || '',
       state:       a.state || '',
       country:     a.country || 'India',
       pincode:     a.postcode || '',
