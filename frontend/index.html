@@ -5177,51 +5177,260 @@
         <div class="est-form-row">
           <div class="est-field">
             <label data-en="Service Category" data-hi="सर्विस कैटेगरी">Service Category</label>
-            <select>
-              <option>Bathroom Renovation</option>
-              <option>Kitchen Renovation</option>
-              <option>Full Home Painting</option>
-              <option>AC Installation</option>
-              <option>Tile Flooring</option>
-              <option>Electrical Rewiring</option>
-            </select>
+            <select id="est-service"><option>Loading services…</option></select>
           </div>
           <div class="est-field">
             <label data-en="City" data-hi="शहर">City</label>
-            <select>
-              <option>Mumbai</option>
-              <option>Delhi NCR</option>
-              <option>Bangalore</option>
-              <option>Pune</option>
-              <option>Hyderabad</option>
-            </select>
+            <select id="est-city"><option>Loading…</option></select>
           </div>
         </div>
         <div class="est-form-row">
           <div class="est-field">
             <label data-en="Area (sq ft)" data-hi="क्षेत्रफल (वर्ग फीट)">Area (sq ft)</label>
-            <input type="number" value="120" />
+            <input type="number" id="est-sqft" value="120" min="1" />
           </div>
-          <div class="est-field">
-            <label data-en="Quality Tier" data-hi="क्वालिटी टियर">Quality Tier</label>
-            <select>
-              <option>Standard</option>
-              <option>Premium</option>
-              <option>Luxury</option>
-            </select>
+          <div class="est-field" id="est-modifier-field" style="display:none">
+            <label id="est-modifier-label">Quality Tier</label>
+            <select id="est-modifier"></select>
           </div>
         </div>
 
         <div class="est-result">
           <div class="est-result-label" data-en="Estimated Budget Range" data-hi="अनुमानित बजट रेंज">Estimated Budget Range</div>
-          <div class="est-result-value">₹85,000 – ₹1,20,000</div>
-          <div class="est-result-note" data-en="* Indicative range. Final quote provided by assigned vendor after site visit." data-hi="* अनुमानित रेंज। फाइनल कोटेशन असाइन किए गए वेंडर द्वारा साइट विज़िट के बाद दिया जाएगा।">* Indicative range. Final quote provided by assigned vendor after site visit.</div>
+          <!-- Fully dynamic from here down — deliberately no data-en/data-hi (same reason
+               as the Hot Deals/All Products sections): applySiteLang() overwrites innerHTML
+               of any [data-en] element on a language switch, which would wipe a live,
+               real estimate back to static placeholder text. -->
+          <div class="est-result-value" id="est-result-value">Loading…</div>
+          <div class="est-result-note" id="est-result-note">Pick your service, city and area above.</div>
         </div>
-        <button class="est-btn" data-en="Book Free Site Visit →" data-hi="मुफ्त साइट विज़िट बुक करें →">Book Free Site Visit →</button>
+        <button type="button" class="est-btn" onclick="openQuotationModal('construction')" data-en="Book Free Site Visit →" data-hi="मुफ्त साइट विज़िट बुक करें →">Book Free Site Visit →</button>
       </div>
     </div>
   </div>
 </section>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   BUDGET ESTIMATOR — wired to the real, already-tested backend engine
+   (POST /api/v1/estimate, backend/src/modules/estimates/estimate-engine.ts).
+   Previously this card's result was a single hardcoded string that never
+   changed no matter what the customer picked. No new calculation logic is
+   added here — every number shown comes straight from the engine's response.
+
+   Inspection findings that shaped this (see PR/commit notes for detail):
+   - serviceId is REQUIRED by the API — the old "Service Category" dropdown
+     had 6 fabricated labels with no real Service behind them, so it's now
+     populated from GET /api/v1/services, grouped by real category.
+   - Every real service today is pricingType=FIXED (verified against the
+     live catalog — 315/315). The engine only lets `sqft` change the result
+     for PER_SQFT services, of which there are currently none — so the Area
+     field is still sent to the API (a real, accepted parameter, kept for
+     forward compatibility and per the task's instruction to keep existing
+     inputs), but honestly will not move today's estimate. That's the
+     engine's real behaviour, not a frontend limitation.
+   - GET /api/v1/estimate/modifiers?serviceId=X returned {} (no configured
+     ServicePriceModifier rows) for every service checked — the old
+     "Quality Tier: Standard/Premium/Luxury" list was entirely fabricated,
+     since Standard/Premium/Luxury isn't a real, priced concept anywhere in
+     the schema. Real tiering already exists as separate named services
+     instead (e.g. "Bathroom Renovation – Essential/Premium/Luxury Spa
+     Style" are three distinct real Service rows, each with its own real
+     price) — selecting between those in the Service dropdown already
+     captures it. The Quality Tier field is fetched fresh per selected
+     service and only shown if that service actually has real modifier
+     options configured; otherwise it stays hidden rather than presenting
+     three fake choices with no effect on the price.
+   - Only 2 cities are active today (Bhopal, Vadodara) — the old dropdown's
+     Mumbai/Delhi/Bangalore/Pune/Hyderabad list didn't match any of them.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  function get(path) {
+    if (typeof window.apiGet === 'function') return window.apiGet(path);
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    return fetch(base + path).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    });
+  }
+  function post(path, body) {
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    return fetch(base + path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, status: r.status, body: d }; });
+    });
+  }
+  function unwrap(json) { return (json && json.data !== undefined) ? json.data : json; }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function inr(n) { return '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+
+  var els = {};
+  var debounceTimer = null;
+  var requestSeq = 0; // guards against an older, slower request overwriting a newer one
+
+  function setLoading() {
+    els.value.textContent = 'Calculating…';
+    els.value.style.color = '';
+    els.note.textContent = '';
+  }
+  function setError(message) {
+    // Never a stale/hardcoded number on failure — an honest error state instead.
+    els.value.textContent = 'Estimate unavailable';
+    els.value.style.color = '#ef4444';
+    els.note.textContent = message || "Couldn't calculate an estimate right now — please try again.";
+  }
+
+  function renderResult(result) {
+    els.value.style.color = '';
+    if (result.requiresQuotation || !result.estimatedCost) {
+      els.value.textContent = 'Quotation on site visit';
+      els.note.textContent = 'This service is quoted after a site visit — no material estimate applies.';
+      return;
+    }
+    var low = result.estimatedCost.low, high = result.estimatedCost.high;
+    els.value.textContent = (low === high) ? inr(low) : (inr(low) + ' – ' + inr(high));
+
+    var noteParts = [];
+    noteParts.push('* Indicative range. Final quote provided by assigned vendor after site visit.');
+    if (result.finalPayableAmount) noteParts.push('Incl. GST & fees: ' + inr(result.finalPayableAmount) + ' payable.');
+    if (result.bookingEligibility && result.bookingEligibility.message) noteParts.push(result.bookingEligibility.message);
+    els.note.textContent = noteParts.join(' ');
+  }
+
+  function loadModifiersForService(serviceId) {
+    var field = document.getElementById('est-modifier-field');
+    var select = els.modifier;
+    field.style.display = 'none';
+    select.innerHTML = '';
+    if (!serviceId) return Promise.resolve();
+    return get('/api/v1/estimate/modifiers?serviceId=' + encodeURIComponent(serviceId))
+      .then(function (json) {
+        var groups = unwrap(json) || {};
+        var firstGroup = Object.keys(groups)[0];
+        if (!firstGroup || !groups[firstGroup] || !groups[firstGroup].length) return; // no real modifiers for this service — leave hidden
+        document.getElementById('est-modifier-label').textContent = firstGroup;
+        select.innerHTML = groups[firstGroup].map(function (o) {
+          return '<option value="' + esc(o.label) + '" data-group="' + esc(firstGroup) + '">' + esc(o.label) + '</option>';
+        }).join('');
+        field.style.display = '';
+      })
+      .catch(function () { /* modifiers are a nice-to-have — silently keep the field hidden on failure */ });
+  }
+
+  function runEstimate() {
+    var serviceId = els.service.value;
+    if (!serviceId) { setError('No service selected.'); return; }
+    var mySeq = ++requestSeq;
+    setLoading();
+
+    var modifiers = [];
+    if (els.modifierField.style.display !== 'none' && els.modifier.value) {
+      var opt = els.modifier.options[els.modifier.selectedIndex];
+      modifiers.push({ group: opt.getAttribute('data-group'), label: opt.value });
+    }
+
+    var body = {
+      serviceId: serviceId,
+      city: els.city.value || undefined,
+      sqft: Number(els.sqft.value) || undefined,
+      modifiers: modifiers.length ? modifiers : undefined,
+    };
+
+    post('/api/v1/estimate', body).then(function (res) {
+      if (mySeq !== requestSeq) return; // a newer request has already superseded this one
+      if (!res.ok) {
+        setError((res.body && res.body.message) || 'Could not calculate this estimate.');
+        return;
+      }
+      renderResult(unwrap(res.body));
+    }).catch(function () {
+      if (mySeq !== requestSeq) return;
+      setError('Network error — please check your connection and try again.');
+    });
+  }
+
+  function scheduleEstimate() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(runEstimate, 350);
+  }
+
+  function onServiceChanged() {
+    var serviceId = els.service.value;
+    loadModifiersForService(serviceId).then(scheduleEstimate);
+  }
+
+  function loadServices() {
+    return get('/api/v1/services?limit=400').then(function (json) {
+      var list = unwrap(json);
+      var services = Array.isArray(list) ? list : (list && (list.services || list.items)) || [];
+      services = services.filter(function (s) { return s.isActive !== false; });
+      var byCategory = {}; var order = [];
+      services.forEach(function (s) {
+        var catName = (s.category && s.category.name) || 'Other';
+        if (!byCategory[catName]) { byCategory[catName] = []; order.push(catName); }
+        byCategory[catName].push(s);
+      });
+      order.sort();
+      var html = order.map(function (cat) {
+        var opts = byCategory[cat].slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
+          .map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join('');
+        return '<optgroup label="' + esc(cat) + '">' + opts + '</optgroup>';
+      }).join('');
+      els.service.innerHTML = html || '<option value="">No services available</option>';
+    }).catch(function () {
+      els.service.innerHTML = '<option value="">Couldn\'t load services</option>';
+    });
+  }
+
+  function loadCities() {
+    return get('/api/v1/cities').then(function (json) {
+      var list = unwrap(json);
+      var cities = (Array.isArray(list) ? list : []).filter(function (c) { return c.isActive !== false; });
+      els.city.innerHTML = cities.length
+        ? cities.map(function (c) { return '<option value="' + esc(c.name) + '">' + esc(c.name) + '</option>'; }).join('')
+        : '<option value="">No active cities</option>';
+    }).catch(function () {
+      els.city.innerHTML = '<option value="">Couldn\'t load cities</option>';
+    });
+  }
+
+  function bind() {
+    els.service.addEventListener('change', onServiceChanged);
+    els.city.addEventListener('change', scheduleEstimate);
+    els.sqft.addEventListener('input', scheduleEstimate);
+    els.modifier.addEventListener('change', scheduleEstimate);
+  }
+
+  function init() {
+    els.service = document.getElementById('est-service');
+    els.city = document.getElementById('est-city');
+    els.sqft = document.getElementById('est-sqft');
+    els.modifierField = document.getElementById('est-modifier-field');
+    els.modifier = document.getElementById('est-modifier');
+    els.value = document.getElementById('est-result-value');
+    els.note = document.getElementById('est-result-note');
+    if (!els.service) return; // section not on this page
+
+    bind();
+    Promise.all([loadServices(), loadCities()]).then(function () {
+      if (els.service.value) onServiceChanged(); else setError('No services available right now.');
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
 
 <!-- ═══ AMC PLANS ═══ -->
 <section id="amc" class="std">
