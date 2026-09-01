@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shop All Products | Remont India</title>
+<meta name="description" content="Browse the full Remont India product catalog — filter by category, brand, price, discount and availability, sorted your way." />
+<link rel="canonical" href="https://www.remontindia.com/shop" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Remont India" />
+<meta property="og:title" content="Shop All Products | Remont India" />
+<meta property="og:description" content="Browse the full Remont India product catalog — filter by category, brand, price, discount and availability, sorted your way." />
+<meta property="og:url" content="https://www.remontindia.com/shop" />
+<meta property="og:locale" content="en_IN" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<style>
+:root{--cream:#F5F0E8;--ivory:#FDFAF5;--charcoal:#1A1A1A;--graphite:#2D2D2D;--sienna:#C4601A;--amber:#E8A650;--sage:#6B7C5E;--mist:#E8E3DA;--white:#FFFFFF;--txt-muted:#6E6860;--radius:12px;--radius-lg:20px;--shadow:0 6px 28px rgba(26,26,26,0.08);--shadow-lg:0 16px 60px rgba(26,26,26,0.14);--border:#E5DFD4;--ff-display:"Cormorant Garamond",Georgia,serif;--ff-body:"DM Sans",sans-serif;--ff-accent:"Bebas Neue",sans-serif;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--ff-body);background:var(--ivory);color:var(--charcoal);line-height:1.65;-webkit-font-smoothing:antialiased}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+header.site{background:var(--charcoal);color:#fff;padding:16px 0}
+header.site .wrap{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.brand{font-family:var(--ff-accent);font-size:22px;letter-spacing:.5px;color:#fff}
+.brand span{color:var(--amber)}
+.header-right{display:flex;align-items:center;gap:14px}
+.cart-link{position:relative;color:#fff;font-size:20px;display:inline-flex}
+.cart-link .badge{position:absolute;top:-8px;right:-10px;background:var(--sienna);color:#fff;font-size:10px;font-weight:700;border-radius:100px;padding:2px 6px;min-width:16px;text-align:center}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:100px;font-weight:600;font-size:14px;border:none;cursor:pointer;font-family:inherit}
+.btn-primary{background:var(--sienna);color:#fff}
+.btn-outline{border:1.5px solid var(--charcoal);color:var(--charcoal);background:none}
+nav.crumbs{font-size:12.5px;color:var(--txt-muted);padding:14px 0}
+nav.crumbs a{color:var(--sienna)}
+nav.crumbs a:hover{text-decoration:underline}
+.hero{padding:28px 0 8px}
+.hero h1{font-family:var(--ff-display);font-size:clamp(26px,3.4vw,38px);font-weight:600}
+.hero p{color:var(--txt-muted);margin-top:8px;max-width:60ch}
+
+.shop-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:20px 0 6px}
+.shop-search{flex:1;min-width:220px;position:relative}
+.shop-search input{width:100%;border:1px solid var(--border);border-radius:100px;padding:11px 18px 11px 40px;font-size:14px;font-family:inherit;background:#fff}
+.shop-search .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--txt-muted);font-size:14px}
+.ap-count{font-size:13px;color:var(--txt-muted);white-space:nowrap}
+
+.ap-filterbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:18px 0 14px}
+.ap-fbtn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:#fff;color:var(--charcoal);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:100px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.ap-fbtn:hover{border-color:var(--sienna)}
+.ap-fbtn.active-filter{background:var(--cream);border-color:var(--sienna);color:var(--sienna)}
+.ap-fbtn-arrow{font-size:9px;opacity:.7}
+.ap-fbtn-toggle.on{background:var(--sienna);color:#fff;border-color:var(--sienna)}
+.ap-fbar-spacer{flex:1}
+.ap-clearall{border:none;background:none;color:var(--sienna);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;padding:6px 4px;text-decoration:underline}
+
+.ap-mobilebar{display:none;gap:10px;margin:18px 0 14px}
+.ap-mbtn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:#fff;color:var(--charcoal);font-size:13px;font-weight:600;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit}
+.ap-fcount{background:var(--sienna);color:#fff;font-size:10px;font-weight:700;border-radius:100px;padding:1px 6px;margin-left:2px}
+
+.ap-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.ap-chip{display:inline-flex;align-items:center;gap:6px;background:var(--cream);color:var(--charcoal);font-size:12px;font-weight:600;padding:6px 8px 6px 12px;border-radius:100px}
+.ap-chip button{border:none;background:rgba(0,0,0,.12);color:var(--charcoal);width:16px;height:16px;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+
+#shop-page-anchor{position:relative}
+.ap-popover{position:absolute;z-index:60;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-lg);padding:16px;width:260px;max-height:360px;overflow-y:auto}
+.ap-filter-section{display:flex;flex-direction:column;gap:10px}
+.ap-radio,.ap-check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--charcoal);cursor:pointer}
+.ap-radio input,.ap-check input{accent-color:var(--sienna);width:15px;height:15px;flex-shrink:0}
+.ap-checklist{display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto}
+.ap-brand-search{width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit;margin-bottom:4px;box-sizing:border-box}
+.ap-price-custom{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:10px;border-top:1px solid var(--border)}
+.ap-price-custom input{width:70px;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12.5px;font-family:inherit}
+.ap-price-custom button{border:none;background:var(--sienna);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.ap-filter-note{font-size:12px;color:var(--txt-muted);margin:4px 0 0}
+
+.deal-card{background:#fff;border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--mist);transition:all .25s;cursor:pointer;position:relative}
+.deal-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg);border-color:var(--sienna)}
+.deal-card-img{width:100%;height:150px;background-size:cover;background-position:center;background-color:var(--cream)}
+.deal-card-img.dc-fallback{display:grid;place-items:center;font-size:40px;background:linear-gradient(135deg,#F5F0E8 0%,#E8E3DA 100%)}
+.deal-card-body{padding:12px 14px 14px}
+.ap-card-brand{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txt-muted);margin-bottom:4px}
+.ap-card-link{display:contents;color:inherit}
+.deal-card-name{font-size:13px;font-weight:600;color:var(--charcoal);margin-bottom:8px;line-height:1.3;min-height:34px}
+.deal-card-price{display:flex;align-items:baseline;gap:6px}
+.deal-card-price .now{font-size:16px;font-weight:700;color:var(--charcoal)}
+.deal-card-price .was{font-size:11px;color:var(--txt-muted);text-decoration:line-through}
+.deal-card-price .off{font-size:11px;color:var(--sage);font-weight:700}
+.deal-card .dc-add{position:absolute;right:12px;bottom:12px;width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;background:var(--sienna);color:#fff;font-size:18px;line-height:1;display:grid;place-items:center;opacity:0;transform:translateY(6px);transition:.22s;box-shadow:0 4px 14px rgba(196,96,26,.35)}
+.deal-card:hover .dc-add{opacity:1;transform:translateY(0)}
+.deal-card .dc-add:disabled{opacity:.35;cursor:not-allowed}
+.deal-card.ap-oos .deal-card-img{filter:grayscale(65%) opacity(.75)}
+.deal-card .dc-off-badge{position:absolute;left:12px;top:12px;background:var(--sienna);color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px;padding:4px 9px;border-radius:100px}
+.ap-oos-badge{position:absolute;left:12px;top:12px;background:#6b6b6b;color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px;padding:4px 9px;border-radius:100px}
+.deal-skel{background:linear-gradient(90deg,#EFEAE2 25%,#F7F3EC 50%,#EFEAE2 75%);background-size:200% 100%;animation:dealShimmer 1.3s linear infinite;border-radius:var(--radius-lg);min-height:230px}
+@keyframes dealShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@media (max-width:900px){.deal-card .dc-add{opacity:1;transform:none}}
+
+.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;padding:20px 0}
+.ap-empty{grid-column:1/-1;text-align:center;padding:40px 20px;color:var(--txt-muted)}
+@media (max-width:700px){.ap-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}}
+
+.ap-drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90}
+.ap-drawer{position:fixed;left:0;right:0;bottom:0;z-index:91;background:#fff;border-radius:18px 18px 0 0;max-height:82vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.ap-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.ap-drawer-head h3{margin:0;font-size:16px;font-family:var(--ff-display)}
+.ap-drawer-close{border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--charcoal);padding:0}
+.ap-drawer-body{padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:20px}
+.ap-drawer-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--txt-muted);margin-bottom:8px}
+.ap-drawer-foot{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
+.ap-drawer-clear{flex:1;border:1px solid var(--border);background:#fff;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit}
+.ap-drawer-apply{flex:2;border:none;border-radius:10px}
+
+@media (max-width:860px){.ap-filterbar{display:none}.ap-mobilebar{display:flex}}
+
+.ap-pagination{display:flex;align-items:center;justify-content:center;gap:8px;padding:24px 0 48px;flex-wrap:wrap}
+.ap-page-btn{border:1px solid var(--border);background:#fff;color:var(--charcoal);font-size:13px;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;font-family:inherit}
+.ap-page-btn.active{background:var(--sienna);color:#fff;border-color:var(--sienna)}
+.ap-page-btn:disabled{opacity:.4;cursor:not-allowed}
+
+footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 0;margin-top:24px;font-size:13px;text-align:center}
+footer.site a{color:var(--amber)}
+</style>
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a href="/" class="brand">Remont <span>India</span></a>
+    <div class="header-right">
+      <a href="/" class="cart-link" aria-label="Cart" id="shop-cart-link">
+        🛒<span class="badge" id="shop-cart-badge" style="display:none">0</span>
+      </a>
+      <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20have%20a%20product%20query" target="_blank" rel="noopener" class="btn btn-primary" style="padding:9px 16px;font-size:13px">💬 WhatsApp</a>
+    </div>
+  </div>
+</header>
+
+<nav class="crumbs"><div class="wrap"><a href="/">Home</a> / <span>Shop All Products</span></div></nav>
+
+<div class="wrap hero">
+  <h1>Shop <em style="font-style:italic">All Products</em></h1>
+  <p>The complete Remont India catalog — filter by category, brand, price, discount and availability, search by name, and sort your way.</p>
+</div>
+
+<div class="wrap" id="shop-page-anchor">
+
+  <div class="shop-toolbar">
+    <div class="shop-search">
+      <span class="ic">🔎</span>
+      <input type="text" id="ap-search-input" placeholder="Search products by name or brand…" />
+    </div>
+    <div class="ap-count" id="ap-count"></div>
+  </div>
+
+  <div class="ap-filterbar" id="ap-filterbar">
+    <button type="button" class="ap-fbtn" data-filter="category">Category <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-fbtn" data-filter="brand">Brand <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-fbtn" data-filter="price">Price <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-fbtn" data-filter="discount">Discount <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-fbtn" data-filter="availability">Availability <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-fbtn ap-fbtn-toggle" id="ap-onsale-btn">🏷️ On Sale</button>
+    <span class="ap-fbar-spacer"></span>
+    <button type="button" class="ap-fbtn" data-filter="sort">Sort: <span id="ap-sort-label">Relevance</span> <span class="ap-fbtn-arrow">▾</span></button>
+    <button type="button" class="ap-clearall" id="ap-clearall" hidden>Clear All</button>
+  </div>
+
+  <div class="ap-mobilebar" id="ap-mobilebar">
+    <button type="button" class="ap-mbtn" id="ap-mobile-filter-btn">⚙ Filter <span class="ap-fcount" id="ap-fcount" hidden>0</span></button>
+    <button type="button" class="ap-mbtn" id="ap-mobile-sort-btn">↕ Sort</button>
+  </div>
+
+  <div class="ap-chips" id="ap-chips"></div>
+
+  <div class="ap-grid" id="ap-grid">
+    <div class="deal-skel"></div>
+    <div class="deal-skel"></div>
+    <div class="deal-skel"></div>
+    <div class="deal-skel"></div>
+  </div>
+
+  <div class="ap-pagination" id="ap-pagination"></div>
+
+  <div class="ap-popover" id="ap-popover" hidden>
+    <div id="ap-popover-body"></div>
+  </div>
+
+  <div class="ap-drawer-backdrop" id="ap-drawer-backdrop" hidden></div>
+  <div class="ap-drawer" id="ap-drawer" hidden>
+    <div class="ap-drawer-head">
+      <h3 id="ap-drawer-title">Filters</h3>
+      <button type="button" class="ap-drawer-close" id="ap-drawer-close" aria-label="Close">×</button>
+    </div>
+    <div class="ap-drawer-body" id="ap-drawer-body"></div>
+    <div class="ap-drawer-foot">
+      <button type="button" class="ap-drawer-clear" id="ap-drawer-clear">Clear All</button>
+      <button type="button" class="btn-primary ap-drawer-apply" id="ap-drawer-apply">Show Results</button>
+    </div>
+  </div>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/#all-products">Home Showcase</a> · <a href="/about">About</a> · <a href="/contact">Contact</a></p>
+  </div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHOP — full catalog page. The filter/sort engine below (toItem, cardHTML,
+   applyFilters, applySort, distinctCategories/Brands, price/discount bucket
+   builders, popover/drawer wiring) is copied VERBATIM, unmodified, from the
+   homepage's #all-products section (frontend/index.html) — same functions,
+   same behaviour, same class names/CSS — per the instruction not to change
+   the existing filter logic. Only two things were added on top, both purely
+   additive:
+     1. filters.query (search box) — one extra condition in applyFilters(),
+        every existing condition unchanged.
+     2. Client-side pagination — a slicing step applied AFTER the existing
+        applyFilters()/applySort() pipeline, so filtering/sorting itself is
+        untouched; only which page-sized slice of the already-computed
+        result gets rendered.
+
+   Honesty note on "scalable to thousands": GET /api/v1/products only
+   supports a flat `limit` today (backend/src/modules/products/
+   products.module.ts — no skip/offset/cursor param exists). This page still
+   does one batch fetch (PRODUCT_POOL below) and paginates that batch
+   client-side. That's genuinely fine for today's real catalog size, and the
+   pagination UI/UX is real and correct — but true unbounded scale would
+   need a real backend cursor/offset endpoint, which does not exist and was
+   not added here (out of scope — a backend change, not a frontend one).
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var PRODUCT_POOL = 500; // the whole real catalog comfortably fits under this today
+  var PAGE_SIZE = 24;
+  var currentPage = 1;
+
+  var CAT_EMOJI = {
+    'PLUMBING_PRODUCTS': '🚰', 'ELECTRICAL_PRODUCTS': '💡', 'AC_PRODUCTS': '❄️',
+    'KITCHEN_PRODUCTS': '🍳',  'FURNITURE': '🪑',           'TILES': '🧱',
+    'PAINT_PRODUCTS': '🎨',    'LIGHTING': '💡',            'HARDWARE': '🔧',
+    'CLEANING_PRODUCTS': '🧽', 'APPLIANCE_PRODUCTS': '🏠'
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function inr(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
+
+  function get(path) {
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    return fetch(base + path).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    });
+  }
+  function extractList(json) {
+    var d = (json && json.data) ? json.data : json;
+    if (Array.isArray(d)) return d;
+    if (d && Array.isArray(d.products)) return d.products;
+    if (d && Array.isArray(d.items))    return d.items;
+    return [];
+  }
+
+  // ── Cart primitives — same localStorage key/shape as index.html/product.html ──
+  function cartGet() {
+    try { return JSON.parse(window.localStorage.getItem('remont_cart') || '[]'); } catch (e) { return []; }
+  }
+  function cartSet(c) { window.localStorage.setItem('remont_cart', JSON.stringify(c)); }
+  function updateCartBadge() {
+    var badge = document.getElementById('shop-cart-badge');
+    var total = cartGet().reduce(function (s, i) { return s + (i.qty || 1); }, 0);
+    if (total > 0) { badge.style.display = ''; badge.textContent = total; }
+    else { badge.style.display = 'none'; }
+  }
+  window.addToCart = function (item) {
+    var c = cartGet();
+    var existing = c.find(function (x) { return x.id === item.id; });
+    if (existing) existing.qty = (existing.qty || 1) + 1;
+    else c.push(Object.assign({ qty: 1 }, item));
+    cartSet(c);
+    updateCartBadge();
+  };
+
+  // ═══ Everything below this line, down to init(), is the unmodified All
+  // Products engine from index.html — same function bodies verbatim. ═══
+
+  function toItem(p) {
+    if (p.isActive === false) return null;
+    var price = Number(p.price), mrp = Number(p.mrp);
+    var cat = p.category || {};
+    var hasDiscount = mrp > price;
+    return {
+      id: p.id,
+      name: p.name || 'Product',
+      slug: p.slug || null,
+      price: price,
+      mrp: hasDiscount ? mrp : null,
+      off: hasDiscount ? Math.round((1 - price / mrp) * 100) : 0,
+      img: (p.images && p.images[0]) || null,
+      catName: cat.name || 'Other',
+      catKey: cat.key || 'OTHER',
+      emoji: cat.icon || CAT_EMOJI[cat.key] || '🏠',
+      brand: (p.brand || '').trim() || null,
+      rating: Number(p.rating) || 0,
+      reviewCount: Number(p.reviewCount) || 0,
+      inStock: p.stock == null || Number(p.stock) > 0,
+      createdAt: p.createdAt ? new Date(p.createdAt).getTime() : 0
+    };
+  }
+
+  function imgMarkup(d) {
+    return d.img
+      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
+      : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
+  }
+
+  function cardHTML(d) {
+    var href = d.slug ? '/product/' + encodeURIComponent(d.slug) : '#';
+    return '' +
+      '<div class="deal-card' + (!d.inStock ? ' ap-oos' : '') + '" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
+           '" data-ap-price="' + d.price + '" data-ap-instock="' + (d.inStock ? '1' : '0') + '">' +
+        (!d.inStock ? '<span class="ap-oos-badge">Out of Stock</span>' : (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '')) +
+        '<a href="' + esc(href) + '" class="ap-card-link" aria-label="View ' + esc(d.name) + '">' +
+          imgMarkup(d) +
+          '<div class="deal-card-body">' +
+            (d.brand ? '<div class="ap-card-brand">' + esc(d.brand) + '</div>' : '') +
+            '<div class="deal-card-name">' + esc(d.name) + '</div>' +
+            '<div class="deal-card-price">' +
+              '<span class="now">' + inr(d.price) + '</span>' +
+              (d.mrp ? '<span class="was">' + inr(d.mrp) + '</span>' : '') +
+              (d.off > 0 ? '<span class="off">' + d.off + '% off</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</a>' +
+        '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>' +
+      '</div>';
+  }
+
+  var allItems = [];
+  var filters = { category: 'ALL', brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false, query: '' };
+  var sortBy = 'relevance';
+  var openPopoverType = null;
+
+  function itemsInCategory(catKey) {
+    return catKey === 'ALL' ? allItems : allItems.filter(function (d) { return d.catKey === catKey; });
+  }
+  function distinctCategories() {
+    var seen = {}; var list = [];
+    allItems.forEach(function (d) { if (!seen[d.catKey]) { seen[d.catKey] = d.catName; list.push({ key: d.catKey, name: d.catName }); } });
+    return list;
+  }
+  function distinctBrands() {
+    var pool = itemsInCategory(filters.category);
+    var seen = {};
+    pool.forEach(function (d) { if (d.brand) seen[d.brand] = (seen[d.brand] || 0) + 1; });
+    return Object.keys(seen).sort().map(function (b) { return { name: b, count: seen[b] }; });
+  }
+  function maxDiscount(pool) { var m = 0; pool.forEach(function (d) { if (d.off > m) m = d.off; }); return m; }
+  function priceBounds(pool) {
+    var min = Infinity, max = 0;
+    pool.forEach(function (d) { if (d.price < min) min = d.price; if (d.price > max) max = d.price; });
+    if (min === Infinity) min = 0;
+    return { min: min, max: max };
+  }
+
+  // The ONLY new condition in this function is the `filters.query` check at the top —
+  // every other line is unchanged from index.html's #all-products applyFilters().
+  function applyFilters(list) {
+    return list.filter(function (d) {
+      if (filters.query) {
+        var q = filters.query.toLowerCase();
+        var hay = (d.name + ' ' + (d.brand || '')).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      if (filters.category !== 'ALL' && d.catKey !== filters.category) return false;
+      if (filters.brands.length && (!d.brand || filters.brands.indexOf(d.brand) === -1)) return false;
+      if (filters.priceMin != null && d.price < filters.priceMin) return false;
+      if (filters.priceMax != null && d.price > filters.priceMax) return false;
+      if (filters.discountMin > 0 && d.off < filters.discountMin) return false;
+      if (filters.onSale && d.off <= 0) return false;
+      var avail = d.inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
+      if (filters.availability.indexOf(avail) === -1) return false;
+      return true;
+    });
+  }
+  function applySort(list) {
+    var sorted = list.slice();
+    if (sortBy === 'price_low') sorted.sort(function (a, b) { return a.price - b.price; });
+    else if (sortBy === 'price_high') sorted.sort(function (a, b) { return b.price - a.price; });
+    else if (sortBy === 'discount') sorted.sort(function (a, b) { return b.off - a.off; });
+    else if (sortBy === 'rating') sorted.sort(function (a, b) { return b.rating - a.rating; });
+    else if (sortBy === 'newest') sorted.sort(function (a, b) { return b.createdAt - a.createdAt; });
+    return sorted;
+  }
+  function getResult() { return applySort(applyFilters(allItems)); }
+
+  function activeFilterCount() {
+    var n = 0;
+    if (filters.category !== 'ALL') n++;
+    n += filters.brands.length;
+    if (filters.priceMin != null || filters.priceMax != null) n++;
+    if (filters.discountMin > 0) n++;
+    if (filters.onSale) n++;
+    if (!(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK')) n++;
+    return n;
+  }
+
+  function renderCount() {
+    document.getElementById('ap-count').textContent = 'Showing ' + getResult().length + ' of ' + allItems.length + ' products';
+  }
+
+  function renderChips() {
+    var chips = [];
+    if (filters.category !== 'ALL') {
+      var cat = distinctCategories().filter(function (c) { return c.key === filters.category; })[0];
+      chips.push({ label: cat ? cat.name : filters.category, clear: function () { filters.category = 'ALL'; filters.brands = []; } });
+    }
+    filters.brands.forEach(function (b) {
+      chips.push({ label: b, clear: function () { filters.brands = filters.brands.filter(function (x) { return x !== b; }); } });
+    });
+    if (filters.priceMin != null || filters.priceMax != null) {
+      var lbl = 'Price: ' + (filters.priceMin != null ? inr(filters.priceMin) : '₹0') + ' – ' + (filters.priceMax != null ? inr(filters.priceMax) : 'Any');
+      chips.push({ label: lbl, clear: function () { filters.priceMin = null; filters.priceMax = null; } });
+    }
+    if (filters.discountMin > 0) chips.push({ label: filters.discountMin + '% or more off', clear: function () { filters.discountMin = 0; } });
+    if (filters.onSale) chips.push({ label: 'On Sale', clear: function () { filters.onSale = false; } });
+    if (!(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK')) {
+      var lbl2 = filters.availability.length === 2 ? 'All Availability' : (filters.availability[0] === 'OUT_OF_STOCK' ? 'Out of Stock Only' : 'In Stock');
+      chips.push({ label: lbl2, clear: function () { filters.availability = ['IN_STOCK']; } });
+    }
+    if (filters.query) {
+      chips.push({ label: 'Search: "' + filters.query + '"', clear: function () { filters.query = ''; document.getElementById('ap-search-input').value = ''; } });
+    }
+    var chipsEl = document.getElementById('ap-chips');
+    chipsEl.innerHTML = chips.map(function (c, i) {
+      return '<span class="ap-chip" data-chip-i="' + i + '">' + esc(c.label) + '<button type="button" aria-label="Remove">×</button></span>';
+    }).join('');
+    chipsEl._clears = chips.map(function (c) { return c.clear; });
+    document.getElementById('ap-clearall').hidden = chips.length === 0;
+  }
+
+  // Pagination is a pure slicing step applied AFTER the unchanged filter+sort result —
+  // filtering/sorting themselves are never paginated internally.
+  function renderGrid() {
+    var grid = document.getElementById('ap-grid');
+    var result = getResult();
+    var totalPages = Math.max(1, Math.ceil(result.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (!result.length) {
+      grid.innerHTML = '<div class="ap-empty">No products match these filters.<br><button type="button" id="ap-empty-clear" style="margin-top:8px;border:none;background:none;color:var(--sienna);font-weight:700;cursor:pointer;text-decoration:underline;font-family:inherit;">Clear filters</button></div>';
+      document.getElementById('ap-pagination').innerHTML = '';
+      return;
+    }
+    var pageItems = result.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    grid.innerHTML = pageItems.map(cardHTML).join('');
+    renderPagination(totalPages);
+  }
+
+  function renderPagination(totalPages) {
+    var el = document.getElementById('ap-pagination');
+    if (totalPages <= 1) { el.innerHTML = ''; return; }
+    var html = '<button type="button" class="ap-page-btn" data-page="' + (currentPage - 1) + '"' + (currentPage === 1 ? ' disabled' : '') + '>‹ Prev</button>';
+    for (var i = 1; i <= totalPages; i++) {
+      html += '<button type="button" class="ap-page-btn' + (i === currentPage ? ' active' : '') + '" data-page="' + i + '">' + i + '</button>';
+    }
+    html += '<button type="button" class="ap-page-btn" data-page="' + (currentPage + 1) + '"' + (currentPage === totalPages ? ' disabled' : '') + '>Next ›</button>';
+    el.innerHTML = html;
+  }
+
+  function syncFilterButtonStates() {
+    document.querySelectorAll('.ap-fbtn[data-filter]').forEach(function (btn) {
+      var type = btn.getAttribute('data-filter'); var active = false;
+      if (type === 'category') active = filters.category !== 'ALL';
+      else if (type === 'brand') active = filters.brands.length > 0;
+      else if (type === 'price') active = filters.priceMin != null || filters.priceMax != null;
+      else if (type === 'discount') active = filters.discountMin > 0;
+      else if (type === 'availability') active = !(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK');
+      btn.classList.toggle('active-filter', active);
+    });
+    var onSaleBtn = document.getElementById('ap-onsale-btn');
+    if (onSaleBtn) onSaleBtn.classList.toggle('on', filters.onSale);
+    var sortLabelMap = { relevance: 'Relevance', price_low: 'Price: Low to High', price_high: 'Price: High to Low', discount: 'Discount', rating: 'Rating', newest: 'Newest' };
+    var sortLabelEl = document.getElementById('ap-sort-label');
+    if (sortLabelEl) sortLabelEl.textContent = sortLabelMap[sortBy] || 'Relevance';
+    var fcountEl = document.getElementById('ap-fcount'); var n = activeFilterCount();
+    if (fcountEl) { fcountEl.hidden = n === 0; fcountEl.textContent = n; }
+  }
+
+  function renderAll() { renderCount(); renderChips(); renderGrid(); syncFilterButtonStates(); }
+
+  function sectionCategoryHTML(prefix) {
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'cat" value="ALL"' + (filters.category === 'ALL' ? ' checked' : '') + '> All Categories (' + allItems.length + ')</label>';
+    distinctCategories().forEach(function (c) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'cat" value="' + esc(c.key) + '"' + (filters.category === c.key ? ' checked' : '') + '> ' + esc(c.name) + ' (' + itemsInCategory(c.key).length + ')</label>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function sectionBrandHTML(prefix) {
+    var brands = distinctBrands();
+    if (!brands.length) return '<div class="ap-filter-section"><p class="ap-filter-note">No brand data for this category.</p></div>';
+    var html = '<div class="ap-filter-section"><input type="text" class="ap-brand-search" placeholder="Search brand…"><div class="ap-checklist">';
+    html += brands.map(function (b) {
+      var checked = filters.brands.indexOf(b.name) !== -1;
+      return '<label class="ap-check" data-brand-name="' + esc(b.name.toLowerCase()) + '"><input type="checkbox" value="' + esc(b.name) + '"' + (checked ? ' checked' : '') + '> ' + esc(b.name) + ' (' + b.count + ')</label>';
+    }).join('');
+    html += '</div></div>';
+    return html;
+  }
+  function sectionPriceHTML(prefix) {
+    var pool = itemsInCategory(filters.category);
+    var b = priceBounds(pool);
+    if (!pool.length || b.max <= 0) return '<div class="ap-filter-section"><p class="ap-filter-note">No priced products in this category.</p></div>';
+    var step = b.max > 20000 ? 5000 : (b.max > 5000 ? 1000 : 500);
+    var breakpoints = []; var cur = 0;
+    while (cur < b.max && breakpoints.length < 4) { cur += step; breakpoints.push(cur); }
+    var ranges = []; var prev = 0;
+    breakpoints.forEach(function (bp, i) {
+      if (i === breakpoints.length - 1) ranges.push({ min: prev, max: null, label: 'Above ' + inr(prev) });
+      else ranges.push({ min: prev, max: bp, label: inr(prev) + ' – ' + inr(bp) });
+      prev = bp;
+    });
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'price" value=""' + (filters.priceMin == null && filters.priceMax == null ? ' checked' : '') + '> Any Price</label>';
+    ranges.forEach(function (r) {
+      var val = r.min + '-' + (r.max == null ? '' : r.max);
+      var checked = filters.priceMin === r.min && filters.priceMax === (r.max == null ? null : r.max);
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'price" value="' + val + '"' + (checked ? ' checked' : '') + '> ' + esc(r.label) + '</label>';
+    });
+    html += '<div class="ap-price-custom">' +
+      '<input type="number" class="ap-price-min" placeholder="Min" value="' + (filters.priceMin != null ? filters.priceMin : '') + '" min="0">' +
+      '<span>–</span>' +
+      '<input type="number" class="ap-price-max" placeholder="Max" value="' + (filters.priceMax != null ? filters.priceMax : '') + '" min="0">' +
+      '<button type="button" class="ap-price-go">Go</button>' +
+      '</div></div>';
+    return html;
+  }
+  function sectionDiscountHTML(prefix) {
+    var maxD = maxDiscount(itemsInCategory(filters.category));
+    var tiers = [10, 20, 30].filter(function (t) { return t <= maxD; });
+    if (!tiers.length && maxD > 0) tiers = [maxD >= 5 ? Math.floor(maxD / 2) : maxD];
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'disc" value="0"' + (filters.discountMin === 0 ? ' checked' : '') + '> Any Discount</label>';
+    tiers.forEach(function (t) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'disc" value="' + t + '"' + (filters.discountMin === t ? ' checked' : '') + '> ' + t + '% or more</label>';
+    });
+    if (!maxD) html += '<p class="ap-filter-note">No discounted products in this category right now.</p>';
+    html += '</div>';
+    return html;
+  }
+  function sectionAvailabilityHTML(prefix) {
+    var pool = itemsInCategory(filters.category);
+    var inStockCount = pool.filter(function (d) { return d.inStock; }).length;
+    var oosCount = pool.length - inStockCount;
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-check"><input type="checkbox" class="ap-avail" value="IN_STOCK"' + (filters.availability.indexOf('IN_STOCK') !== -1 ? ' checked' : '') + '> In Stock (' + inStockCount + ')</label>';
+    html += '<label class="ap-check"><input type="checkbox" class="ap-avail" value="OUT_OF_STOCK"' + (filters.availability.indexOf('OUT_OF_STOCK') !== -1 ? ' checked' : '') + '> Out of Stock (' + oosCount + ')</label>';
+    html += '</div>';
+    return html;
+  }
+  function sectionSortHTML(prefix) {
+    var opts = [['relevance', 'Relevance'], ['price_low', 'Price: Low to High'], ['price_high', 'Price: High to Low'], ['discount', 'Discount: High to Low'], ['rating', 'Rating'], ['newest', 'Newest']];
+    var html = '<div class="ap-filter-section">';
+    opts.forEach(function (o) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'sort" value="' + o[0] + '"' + (sortBy === o[0] ? ' checked' : '') + '> ' + o[1] + '</label>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function onFiltersChanged(categoryChanged) {
+    currentPage = 1; // any filter/search change resets to page 1 — pure addition, not a change to filter behaviour
+    renderAll();
+    if (categoryChanged) {
+      var drawerBrandHost = document.querySelector('#ap-drawer-body [data-drawer-section="brand"] .ap-filter-section-mount');
+      if (drawerBrandHost) { drawerBrandHost.innerHTML = sectionBrandHTML('dw-'); wireSectionEvents(drawerBrandHost, 'dw-', false); }
+    }
+  }
+
+  function wireSectionEvents(container, prefix, isPopover) {
+    container.querySelectorAll('input[name="' + prefix + 'cat"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        filters.category = r.value; filters.brands = [];
+        onFiltersChanged(true);
+        if (isPopover) closePopover();
+      });
+    });
+    container.querySelectorAll('.ap-check input[type="checkbox"]:not(.ap-avail)').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var name = cb.value;
+        if (cb.checked) { if (filters.brands.indexOf(name) === -1) filters.brands.push(name); }
+        else { filters.brands = filters.brands.filter(function (b) { return b !== name; }); }
+        onFiltersChanged(false);
+      });
+    });
+    var brandSearch = container.querySelector('.ap-brand-search');
+    if (brandSearch) {
+      brandSearch.addEventListener('input', function () {
+        var q = brandSearch.value.trim().toLowerCase();
+        container.querySelectorAll('.ap-check[data-brand-name]').forEach(function (lab) {
+          lab.style.display = lab.getAttribute('data-brand-name').indexOf(q) !== -1 ? '' : 'none';
+        });
+      });
+    }
+    container.querySelectorAll('input[name="' + prefix + 'price"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        if (!r.value) { filters.priceMin = null; filters.priceMax = null; }
+        else { var parts = r.value.split('-'); filters.priceMin = Number(parts[0]); filters.priceMax = parts[1] ? Number(parts[1]) : null; }
+        onFiltersChanged(false);
+        if (isPopover) closePopover();
+      });
+    });
+    var priceGo = container.querySelector('.ap-price-go');
+    if (priceGo) {
+      priceGo.addEventListener('click', function () {
+        var minEl = container.querySelector('.ap-price-min'), maxEl = container.querySelector('.ap-price-max');
+        filters.priceMin = minEl.value !== '' ? Number(minEl.value) : null;
+        filters.priceMax = maxEl.value !== '' ? Number(maxEl.value) : null;
+        onFiltersChanged(false);
+        if (isPopover) closePopover();
+      });
+    }
+    container.querySelectorAll('input[name="' + prefix + 'disc"]').forEach(function (r) {
+      r.addEventListener('change', function () { filters.discountMin = Number(r.value); onFiltersChanged(false); if (isPopover) closePopover(); });
+    });
+    container.querySelectorAll('.ap-avail').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var checked = Array.prototype.filter.call(container.querySelectorAll('.ap-avail'), function (x) { return x.checked; }).map(function (x) { return x.value; });
+        filters.availability = checked.length ? checked : ['IN_STOCK'];
+        onFiltersChanged(false);
+      });
+    });
+    container.querySelectorAll('input[name="' + prefix + 'sort"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        sortBy = r.value; onFiltersChanged(false);
+        if (isPopover) closePopover(); else closeDrawer();
+      });
+    });
+  }
+
+  function openPopover(type, btn) {
+    var builders = { category: sectionCategoryHTML, brand: sectionBrandHTML, price: sectionPriceHTML, discount: sectionDiscountHTML, availability: sectionAvailabilityHTML, sort: sectionSortHTML };
+    if (!builders[type]) return;
+    var pop = document.getElementById('ap-popover'), body = document.getElementById('ap-popover-body');
+    openPopoverType = type;
+    body.innerHTML = builders[type]('pop-');
+    wireSectionEvents(body, 'pop-', true);
+    pop.hidden = false;
+    var rect = btn.getBoundingClientRect();
+    var parentRect = document.getElementById('shop-page-anchor').getBoundingClientRect();
+    pop.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+    pop.style.left = Math.max(0, Math.min(rect.left - parentRect.left, parentRect.width - 280)) + 'px';
+  }
+  function closePopover() { document.getElementById('ap-popover').hidden = true; openPopoverType = null; }
+
+  function openDrawer() {
+    document.getElementById('ap-drawer-title').textContent = 'Filters';
+    var body = document.getElementById('ap-drawer-body');
+    body.innerHTML =
+      '<div><div class="ap-drawer-section-title">Category</div>' + sectionCategoryHTML('dw-') + '</div>' +
+      '<div data-drawer-section="brand"><div class="ap-drawer-section-title">Brand</div><div class="ap-filter-section-mount">' + sectionBrandHTML('dw-') + '</div></div>' +
+      '<div><div class="ap-drawer-section-title">Price</div>' + sectionPriceHTML('dw-') + '</div>' +
+      '<div><div class="ap-drawer-section-title">Discount</div>' + sectionDiscountHTML('dw-') + '</div>' +
+      '<div><div class="ap-drawer-section-title">Availability</div>' + sectionAvailabilityHTML('dw-') + '</div>';
+    wireSectionEvents(body, 'dw-', false);
+    document.getElementById('ap-drawer-backdrop').hidden = false;
+    document.getElementById('ap-drawer').hidden = false;
+  }
+  function openSortDrawer() {
+    document.getElementById('ap-drawer-title').textContent = 'Sort By';
+    var body = document.getElementById('ap-drawer-body');
+    body.innerHTML = sectionSortHTML('dw-');
+    wireSectionEvents(body, 'dw-', false);
+    document.getElementById('ap-drawer-backdrop').hidden = false;
+    document.getElementById('ap-drawer').hidden = false;
+  }
+  function closeDrawer() {
+    document.getElementById('ap-drawer-backdrop').hidden = true;
+    document.getElementById('ap-drawer').hidden = true;
+  }
+
+  function clearAll() {
+    filters = { category: 'ALL', brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false, query: '' };
+    document.getElementById('ap-search-input').value = '';
+    currentPage = 1;
+    renderAll();
+    closePopover();
+  }
+
+  function load() {
+    get('/api/v1/products?limit=' + PRODUCT_POOL)
+      .then(function (json) {
+        allItems = extractList(json).map(toItem).filter(Boolean);
+        renderAll();
+      })
+      .catch(function () {
+        document.getElementById('ap-grid').innerHTML = '<div class="ap-empty">Couldn\'t load products right now — please refresh.</div>';
+      });
+  }
+
+  function addItemToCart(el) {
+    if (el.getAttribute('data-ap-instock') === '0') return;
+    var id = el.getAttribute('data-ap-id');
+    var name = el.getAttribute('data-ap-name');
+    var price = Number(el.getAttribute('data-ap-price')) || 0;
+    if (!id) return;
+    window.addToCart({ id: id, name: name, price: price, type: 'product', unit: 'piece' });
+  }
+
+  var searchDebounce = null;
+  function bind() {
+    var searchInput = document.getElementById('ap-search-input');
+    searchInput.addEventListener('input', function () {
+      clearTimeout(searchDebounce);
+      var val = searchInput.value;
+      searchDebounce = setTimeout(function () { filters.query = val.trim(); onFiltersChanged(false); }, 300);
+    });
+
+    document.addEventListener('click', function (e) {
+      var fbtn = e.target.closest('#ap-filterbar .ap-fbtn[data-filter]');
+      if (fbtn) {
+        var type = fbtn.getAttribute('data-filter');
+        if (openPopoverType === type) closePopover(); else openPopover(type, fbtn);
+        return;
+      }
+      if (e.target.closest('#ap-onsale-btn')) { filters.onSale = !filters.onSale; onFiltersChanged(false); return; }
+      if (e.target.closest('#ap-clearall')) { clearAll(); return; }
+      if (e.target.id === 'ap-empty-clear') { clearAll(); return; }
+      if (e.target.closest('#ap-mobile-filter-btn')) { openDrawer(); return; }
+      if (e.target.closest('#ap-mobile-sort-btn')) { openSortDrawer(); return; }
+      if (e.target.closest('#ap-drawer-close') || e.target.closest('#ap-drawer-backdrop') || e.target.closest('#ap-drawer-apply')) { closeDrawer(); return; }
+      if (e.target.closest('#ap-drawer-clear')) { clearAll(); closeDrawer(); return; }
+      var chipX = e.target.closest('.ap-chip button');
+      if (chipX) {
+        var chip = chipX.closest('.ap-chip');
+        var i = Number(chip.getAttribute('data-chip-i'));
+        var chipsEl = document.getElementById('ap-chips');
+        if (chipsEl._clears && chipsEl._clears[i]) { chipsEl._clears[i](); currentPage = 1; renderAll(); }
+        return;
+      }
+      var pageBtn = e.target.closest('.ap-page-btn');
+      if (pageBtn && !pageBtn.disabled) {
+        var p = Number(pageBtn.getAttribute('data-page'));
+        if (p >= 1) { currentPage = p; renderGrid(); window.scrollTo({ top: document.getElementById('shop-page-anchor').offsetTop - 80, behavior: 'smooth' }); }
+        return;
+      }
+      if (!e.target.closest('#ap-popover') && !e.target.closest('#ap-filterbar')) closePopover();
+      var addBtn = e.target.closest('.dc-add');
+      if (addBtn) {
+        e.preventDefault();
+        var card = addBtn.closest('.deal-card');
+        if (card) addItemToCart(card);
+        return;
+      }
+    });
+    window.addEventListener('resize', function () { closePopover(); closeDrawer(); });
+  }
+
+  function init() {
+    updateCartBadge();
+    bind();
+    load();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

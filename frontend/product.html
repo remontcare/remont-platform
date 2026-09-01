@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title id="pageTitle">Product | Remont India</title>
+<meta name="description" id="pageDesc" content="Shop quality home improvement products on Remont India." />
+<link rel="canonical" id="pageCanonical" href="https://www.remontindia.com/product" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+<meta property="og:type" content="product" />
+<meta property="og:site_name" content="Remont India" />
+<meta property="og:title" id="ogTitle" content="Product | Remont India" />
+<meta property="og:description" id="ogDesc" content="Shop quality home improvement products on Remont India." />
+<meta property="og:url" id="ogUrl" content="https://www.remontindia.com/product" />
+<meta property="og:locale" content="en_IN" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" id="twTitle" content="Product | Remont India" />
+<meta name="twitter:description" id="twDesc" content="Shop quality home improvement products on Remont India." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<style>
+:root{--cream:#F5F0E8;--ivory:#FDFAF5;--charcoal:#1A1A1A;--graphite:#2D2D2D;--sienna:#C4601A;--amber:#E8A650;--sage:#6B7C5E;--mist:#E8E3DA;--white:#FFFFFF;--txt-muted:#6E6860;--radius:12px;--radius-lg:20px;--shadow:0 6px 28px rgba(26,26,26,0.08);--ff-display:"Cormorant Garamond",Georgia,serif;--ff-body:"DM Sans",sans-serif;--ff-accent:"Bebas Neue",sans-serif;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--ff-body);background:var(--ivory);color:var(--charcoal);line-height:1.65;-webkit-font-smoothing:antialiased}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+header.site{background:var(--charcoal);color:#fff;padding:16px 0}
+header.site .wrap{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.brand{font-family:var(--ff-accent);font-size:22px;letter-spacing:.5px;color:#fff}
+.brand span{color:var(--amber)}
+.header-right{display:flex;align-items:center;gap:14px}
+.cart-link{position:relative;color:#fff;font-size:20px;display:inline-flex}
+.cart-link .badge{position:absolute;top:-8px;right:-10px;background:var(--sienna);color:#fff;font-size:10px;font-weight:700;border-radius:100px;padding:2px 6px;min-width:16px;text-align:center}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:100px;font-weight:600;font-size:14px;border:none;cursor:pointer;font-family:inherit}
+.btn-primary{background:var(--sienna);color:#fff}
+.btn-outline{border:1.5px solid var(--charcoal);color:var(--charcoal);background:none}
+nav.crumbs{font-size:12.5px;color:var(--txt-muted);padding:14px 0}
+nav.crumbs a{color:var(--sienna)}
+nav.crumbs a:hover{text-decoration:underline}
+section.block{padding:36px 0;border-bottom:1px solid var(--mist)}
+section.block:last-of-type{border-bottom:none}
+section.block h2{font-family:var(--ff-display);font-size:24px;font-weight:600;margin-bottom:14px}
+
+.pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding:36px 0}
+@media(max-width:760px){.pd-grid{grid-template-columns:1fr;gap:24px}}
+.pd-image{width:100%;aspect-ratio:1/1;border-radius:var(--radius-lg);background:linear-gradient(135deg,var(--cream),var(--mist));display:grid;place-items:center;font-size:90px;background-size:cover;background-position:center}
+.pd-brand{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sienna);margin-bottom:6px}
+.pd-info h1{font-family:var(--ff-display);font-size:clamp(24px,3vw,34px);font-weight:600;line-height:1.2;margin-bottom:14px}
+.pd-price-row{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.pd-now{font-size:28px;font-weight:700;color:var(--charcoal)}
+.pd-mrp{font-size:15px;color:var(--txt-muted);text-decoration:line-through}
+.pd-off{font-size:13px;font-weight:700;color:var(--sage)}
+.pd-stock{font-size:13px;font-weight:600;margin-bottom:16px}
+.pd-stock.in{color:var(--sage)}
+.pd-stock.out{color:#b91c1c}
+.pd-desc{color:var(--graphite);margin-bottom:20px;max-width:60ch}
+.pd-qty-row{display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap}
+.pd-qty-stepper{display:flex;align-items:center;border:1.5px solid var(--mist);border-radius:100px;overflow:hidden}
+.pd-qty-stepper button{width:38px;height:38px;border:none;background:var(--cream);font-size:18px;cursor:pointer;font-family:inherit}
+.pd-qty-stepper span{min-width:36px;text-align:center;font-weight:600;font-size:15px}
+.pd-policies{display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--graphite)}
+.pd-added-msg{font-size:13px;font-weight:600;color:var(--sage);margin-left:4px}
+
+table.pd-specs{width:100%;border-collapse:collapse;font-size:14px}
+table.pd-specs td{padding:10px 12px;border-bottom:1px solid var(--mist)}
+table.pd-specs td:first-child{color:var(--txt-muted);width:40%}
+
+.pd-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--charcoal);color:#fff;padding:12px 22px;border-radius:100px;font-size:13.5px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;z-index:200}
+.pd-toast.show{opacity:1}
+
+footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 0;margin-top:24px;font-size:13px;text-align:center}
+footer.site a{color:var(--amber)}
+</style>
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a href="/" class="brand">Remont <span>India</span></a>
+    <div class="header-right">
+      <a href="/#all-products" class="cart-link" aria-label="Cart" id="pd-cart-link">
+        🛒<span class="badge" id="pd-cart-badge" style="display:none">0</span>
+      </a>
+      <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20have%20a%20product%20query" target="_blank" rel="noopener" class="btn btn-primary" style="padding:9px 16px;font-size:13px">💬 WhatsApp</a>
+    </div>
+  </div>
+</header>
+
+<nav class="crumbs"><div class="wrap"><a href="/">Home</a> / <a href="/#all-products">Shop All Products</a> / <span id="pd-crumb-current">Product</span></div></nav>
+
+<div class="wrap" id="pd-loading" style="padding:80px 24px;text-align:center;color:var(--txt-muted)">Loading product…</div>
+
+<div class="wrap" id="pd-error" style="display:none;padding:80px 24px;text-align:center;">
+  <h1 style="font-family:var(--ff-display);font-size:28px;margin-bottom:12px;">Product not found</h1>
+  <p style="color:var(--txt-muted);margin-bottom:22px;">This product may have been removed, or the link is incorrect.</p>
+  <a href="/#all-products" class="btn btn-primary">Browse All Products</a>
+</div>
+
+<section class="block" id="pd-content" style="display:none;border-bottom:none;">
+  <div class="wrap pd-grid">
+    <div class="pd-image" id="pd-image"></div>
+    <div class="pd-info">
+      <div class="pd-brand" id="pd-brand" style="display:none"></div>
+      <h1 id="pd-name"></h1>
+      <div class="pd-price-row">
+        <span class="pd-now" id="pd-now"></span>
+        <span class="pd-mrp" id="pd-mrp" style="display:none"></span>
+        <span class="pd-off" id="pd-off" style="display:none"></span>
+      </div>
+      <div class="pd-stock" id="pd-stock"></div>
+      <p class="pd-desc" id="pd-desc"></p>
+      <div class="pd-qty-row">
+        <div class="pd-qty-stepper">
+          <button type="button" id="pd-qty-minus" aria-label="Decrease quantity">−</button>
+          <span id="pd-qty">1</span>
+          <button type="button" id="pd-qty-plus" aria-label="Increase quantity">+</button>
+        </div>
+        <button type="button" class="btn btn-primary" id="pd-add-btn">Add to Cart</button>
+        <span class="pd-added-msg" id="pd-added-msg" style="display:none">✓ Added to cart</span>
+      </div>
+      <div class="pd-policies" id="pd-policies"></div>
+    </div>
+  </div>
+
+  <div class="wrap" id="pd-specs-block" style="display:none;padding-top:8px;padding-bottom:36px;border-top:1px solid var(--mist);">
+    <h2 style="font-family:var(--ff-display);font-size:22px;margin:28px 0 14px;">Specifications</h2>
+    <table class="pd-specs" id="pd-specs-table"></table>
+  </div>
+
+  <div class="wrap" style="padding-top:8px;padding-bottom:40px;border-top:1px solid var(--mist);">
+    <h2 style="font-family:var(--ff-display);font-size:22px;margin:28px 0 14px;">Reviews</h2>
+    <p style="color:var(--txt-muted);font-size:14px;">No reviews yet — be the first to review this product after purchase.</p>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/#all-products">All Products</a> · <a href="/about">About</a> · <a href="/contact">Contact</a></p>
+  </div>
+</footer>
+
+<div class="pd-toast" id="pd-toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCT DETAIL PAGE — a real, standalone, shareable page per product
+   (/product/:slug, rewritten to this file by vercel.json), reachable from
+   the homepage's "Shop All Products" catalog. Fixes audit issue #8 ("no
+   product detail page — clicking any product card goes nowhere").
+
+   Self-contained by design: this is a separate document from index.html
+   (different <head>/<body>), so it duplicates the minimal cart primitives
+   (same localStorage key/shape as index.html's addToCart) rather than
+   reaching into index.html's inline script — there is no shared JS module
+   in this codebase to import instead. Cart state itself IS shared (same
+   'remont_cart' localStorage key, same origin), so adding a product here
+   and later opening the cart on the homepage shows it correctly.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var CAT_EMOJI = {
+    'PLUMBING_PRODUCTS': '🚰', 'ELECTRICAL_PRODUCTS': '💡', 'AC_PRODUCTS': '❄️',
+    'KITCHEN_PRODUCTS': '🍳',  'FURNITURE': '🪑',           'TILES': '🧱',
+    'PAINT_PRODUCTS': '🎨',    'LIGHTING': '💡',            'HARDWARE': '🔧',
+    'CLEANING_PRODUCTS': '🧽', 'APPLIANCE_PRODUCTS': '🏠'
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function inr(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
+
+  function slugFromUrl() {
+    // /product/<slug> (vercel.json rewrite) — falls back to a query param for local
+    // testing/direct file access where no rewrite is in effect.
+    var m = window.location.pathname.match(/\/product\/([^\/?#]+)/);
+    if (m) return decodeURIComponent(m[1]);
+    var params = new URLSearchParams(window.location.search);
+    return params.get('slug') || '';
+  }
+
+  function showToast(msg) {
+    var t = document.getElementById('pd-toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+
+  function cartGet() {
+    try { return JSON.parse(window.localStorage.getItem('remont_cart') || '[]'); } catch (e) { return []; }
+  }
+  function cartSet(c) { window.localStorage.setItem('remont_cart', JSON.stringify(c)); }
+  function updateCartBadge() {
+    var badge = document.getElementById('pd-cart-badge');
+    var total = cartGet().reduce(function (s, i) { return s + (i.qty || 1); }, 0);
+    if (total > 0) { badge.style.display = ''; badge.textContent = total; }
+    else { badge.style.display = 'none'; }
+  }
+  function addToCart(item, qty) {
+    var c = cartGet();
+    var existing = c.find(function (x) { return x.id === item.id; });
+    if (existing) existing.qty = (existing.qty || 1) + qty;
+    else c.push(Object.assign({ qty: qty }, item));
+    cartSet(c);
+    updateCartBadge();
+  }
+
+  function imgMarkup(el, img, emoji) {
+    if (img) { el.style.backgroundImage = "url('" + img.replace(/'/g, "\\'") + "')"; el.textContent = ''; }
+    else { el.style.backgroundImage = ''; el.textContent = emoji; }
+  }
+
+  function renderPolicies(p) {
+    var parts = [];
+    if (p.returnable) parts.push('✓ Returnable' + (p.returnWindowDays ? ' within ' + p.returnWindowDays + ' days' : ''));
+    if (p.replaceable) parts.push('✓ Replaceable' + (p.replacementWindowDays ? ' within ' + p.replacementWindowDays + ' days' : ''));
+    if (p.warrantyAvailable) parts.push('🛡️ ' + (p.warrantyDurationMonths ? p.warrantyDurationMonths + '-month' : 'Manufacturer') + ' warranty');
+    if (p.manufacturer) parts.push('🏭 Sold by ' + esc(p.manufacturer));
+    return parts.map(function (t) { return '<div>' + t + '</div>'; }).join('');
+  }
+
+  function renderSpecs(specs) {
+    if (!specs || typeof specs !== 'object' || !Object.keys(specs).length) return '';
+    return Object.keys(specs).map(function (k) {
+      return '<tr><td>' + esc(k) + '</td><td>' + esc(specs[k]) + '</td></tr>';
+    }).join('');
+  }
+
+  function render(p) {
+    document.getElementById('pd-loading').style.display = 'none';
+    document.getElementById('pd-content').style.display = '';
+
+    var price = Number(p.price), mrp = Number(p.mrp);
+    var hasDiscount = mrp > price;
+    var cat = p.category || {};
+    var emoji = cat.icon || CAT_EMOJI[cat.key] || '🏠';
+    var img = (p.images && p.images[0]) || null;
+    var inStock = p.stock == null || Number(p.stock) > 0;
+    var desc = p.description || p.aiGeneratedDesc || '';
+
+    document.title = (p.seoTitle || (p.name + ' | Remont India'));
+    var descMeta = p.seoDesc || desc.slice(0, 155) || ('Buy ' + p.name + ' on Remont India.');
+    document.getElementById('pageDesc').setAttribute('content', descMeta);
+    document.getElementById('ogTitle').setAttribute('content', document.title);
+    document.getElementById('ogDesc').setAttribute('content', descMeta);
+    document.getElementById('twTitle').setAttribute('content', document.title);
+    document.getElementById('twDesc').setAttribute('content', descMeta);
+    var canonicalUrl = 'https://www.remontindia.com/product/' + encodeURIComponent(p.slug);
+    document.getElementById('pageCanonical').setAttribute('href', canonicalUrl);
+    document.getElementById('ogUrl').setAttribute('content', canonicalUrl);
+    document.getElementById('pd-crumb-current').textContent = p.name;
+
+    imgMarkup(document.getElementById('pd-image'), img, emoji);
+
+    var brandEl = document.getElementById('pd-brand');
+    if (p.brand) { brandEl.textContent = p.brand; brandEl.style.display = ''; }
+
+    document.getElementById('pd-name').textContent = p.name;
+    document.getElementById('pd-now').textContent = inr(price);
+    if (hasDiscount) {
+      var offPct = Math.round((1 - price / mrp) * 100);
+      document.getElementById('pd-mrp').textContent = inr(mrp);
+      document.getElementById('pd-mrp').style.display = '';
+      document.getElementById('pd-off').textContent = offPct + '% off';
+      document.getElementById('pd-off').style.display = '';
+    }
+
+    var stockEl = document.getElementById('pd-stock');
+    stockEl.textContent = inStock ? '✓ In Stock' : 'Out of Stock';
+    stockEl.className = 'pd-stock ' + (inStock ? 'in' : 'out');
+
+    document.getElementById('pd-desc').textContent = desc;
+    document.getElementById('pd-policies').innerHTML = renderPolicies(p);
+
+    var specsHtml = renderSpecs(p.specifications);
+    if (specsHtml) {
+      document.getElementById('pd-specs-table').innerHTML = specsHtml;
+      document.getElementById('pd-specs-block').style.display = '';
+    }
+
+    var qty = 1;
+    var qtyEl = document.getElementById('pd-qty');
+    document.getElementById('pd-qty-minus').addEventListener('click', function () {
+      qty = Math.max(1, qty - 1); qtyEl.textContent = qty;
+    });
+    document.getElementById('pd-qty-plus').addEventListener('click', function () {
+      qty = qty + 1; qtyEl.textContent = qty;
+    });
+
+    var addBtn = document.getElementById('pd-add-btn');
+    if (!inStock) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; addBtn.style.opacity = '.5'; addBtn.style.cursor = 'not-allowed'; }
+    addBtn.addEventListener('click', function () {
+      if (!inStock) return;
+      addToCart({ id: p.id, name: p.name, price: price, type: 'product', unit: p.unit || 'piece' }, qty);
+      showToast('Added ' + qty + ' × ' + p.name + ' to cart');
+      var msg = document.getElementById('pd-added-msg');
+      msg.style.display = '';
+      setTimeout(function () { msg.style.display = 'none'; }, 2200);
+    });
+
+    updateCartBadge();
+  }
+
+  function renderError() {
+    document.getElementById('pd-loading').style.display = 'none';
+    document.getElementById('pd-error').style.display = '';
+  }
+
+  function init() {
+    updateCartBadge();
+    var slug = slugFromUrl();
+    if (!slug) { renderError(); return; }
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    fetch(base + '/api/v1/products/' + encodeURIComponent(slug))
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+      })
+      .then(function (json) {
+        var p = (json && json.data) ? json.data : json;
+        if (!p || !p.id) throw new Error('not found');
+        render(p);
+      })
+      .catch(function () { renderError(); });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
