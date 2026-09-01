@@ -288,6 +288,20 @@ export async function resolveCommission(
   return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
 }
 
+// ─── Bundle offer (product + service checked out together) ──────────────────
+// Admin-configurable via SiteSetting key 'bundle_discount_percent' (seeded to '10' by the
+// migration that introduced this feature; also editable from Admin > Settings >
+// Operations, same generic key/value UI every other percent-style setting already uses —
+// see resolveCommission()'s 'default_commission_pct' above for the identical read pattern).
+// Clamped to [0, 100] so an admin fat-finger (e.g. "1000") can never zero out or invert a
+// service's price; missing/unparsable falls back to 10, matching the seeded default.
+export async function getBundleDiscountPercent(prisma: any): Promise<number> {
+  const setting = await prisma.siteSetting.findUnique({ where: { key: 'bundle_discount_percent' } });
+  const pct = setting ? parseFloat(setting.value) : NaN;
+  if (!Number.isFinite(pct) || pct < 0) return 10;
+  return Math.min(pct, 100);
+}
+
 // ─── Product marketplace fee resolution (Phase 7) ────────────────────────────
 // Same algorithm/idiom as resolveCommission() above, generalized across `feeType`
 // (COMMISSION/MARKETING/GATEWAY/OTHER) so every current and future non-delivery

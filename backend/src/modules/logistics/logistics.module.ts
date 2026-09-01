@@ -7,6 +7,7 @@ import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
 import { ReverseLogisticsRateEngine } from './reverse-logistics-rate-engine';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
+import { RoutingService, OrdersModule } from '../orders/orders.module';
 
 // Phase 5 — COD settlement ladder adjacency, same idiom as DeliveryController's
 // SHIPMENT_STATUS_NEXT. Rejects an out-of-order or duplicate call instead of silently no-op-ing.
@@ -265,6 +266,7 @@ export class ShipmentService {
     mockProvider: MockDeliveryProvider,
     private rateEngine: ReverseLogisticsRateEngine,
     private productLedger: ProductLedgerService,
+    private routing: RoutingService,
   ) {
     this.providers = { MOCK_DEMO: mockProvider };
   }
@@ -367,6 +369,38 @@ export class ShipmentService {
     if (shipment && fullOrder) {
       const deliveredAt = shipment.deliveredAt || new Date();
       await this.prisma.$transaction((tx) => this.productLedger.settleProductOrder(tx, fullOrder as any, shipment, deliveredAt));
+    }
+
+    // Bundle offer (product + service checked out together) — the SERVICE sibling(s) in
+    // this same MasterOrder were deliberately never routed at checkout (see
+    // MasterOrdersService.checkout()'s bundleDispatchDeferred writes). Now that THIS product
+    // has been delivered, check whether every PRODUCT sibling has too; only once all of them
+    // have, route the deferred SERVICE sibling(s) — never partial, never early.
+    if (order.masterOrderId) {
+      const siblingProducts = await this.prisma.order.findMany({
+        where: { masterOrderId: order.masterOrderId, type: 'PRODUCT' },
+        select: { status: true },
+      });
+      const allProductsDelivered = siblingProducts.every((p) => p.status === 'COMPLETED');
+      if (allProductsDelivered) {
+        const deferredServices = await this.prisma.order.findMany({
+          where: { masterOrderId: order.masterOrderId, type: 'SERVICE', bundleDispatchDeferred: true },
+          select: { id: true },
+        });
+        for (const svc of deferredServices) {
+          // Race-safe claim (same idiom as the COMPLETED claim above) — onShipmentDelivered()
+          // can run more than once for the last product to finish; only the caller whose
+          // updateMany actually flips the flag may route, so a deferred service is never
+          // routed twice.
+          const claimedSvc = await this.prisma.order.updateMany({
+            where: { id: svc.id, bundleDispatchDeferred: true },
+            data: { bundleDispatchDeferred: false },
+          });
+          if (claimedSvc.count === 1) {
+            this.routing.route(svc.id).catch((e) => this.logger.error(`Bundle-deferred routing failed for ${svc.id}: ${e.message}`));
+          }
+        }
+      }
     }
   }
 
@@ -498,7 +532,7 @@ export class ShipmentController {
 }
 
 @Module({
-  imports: [ProductLedgerModule],
+  imports: [ProductLedgerModule, OrdersModule],
   controllers: [LogisticsController, ShipmentController],
   providers: [LogisticsService, ShipmentService, MockDeliveryProvider, ReverseLogisticsRateEngine],
   exports: [LogisticsService, ShipmentService, ReverseLogisticsRateEngine],

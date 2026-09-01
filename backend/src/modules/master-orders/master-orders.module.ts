@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -489,6 +489,15 @@ export class MasterOrdersService {
     const subtotal = grossServiceAmount + grossProductAmount;
     if (subtotal <= 0) throw new BadRequestException('Order total must be greater than zero');
 
+    // Bundle offer — auto-applies whenever this single checkout mixes at least one SERVICE
+    // group with at least one PRODUCT group; reduces only the service side, never products.
+    // Percent is admin-configurable (SiteSetting 'bundle_discount_percent', see
+    // getBundleDiscountPercent()) and gets frozen onto each affected child Order below, so a
+    // later admin change never retroactively alters an already-placed order's total.
+    const isBundleOrder = grossServiceAmount > 0 && grossProductAmount > 0;
+    const bundleDiscountPercent = isBundleOrder ? await getBundleDiscountPercent(this.prisma) : 0;
+    const bundleDiscount = isBundleOrder ? Math.round(((grossServiceAmount * bundleDiscountPercent) / 100) * 100) / 100 : 0;
+
     const membershipPct = await this.memberships.getActiveDiscount(customerId);
     const membershipDiscount = Math.round(((subtotal * membershipPct) / 100) * 100) / 100;
 
@@ -500,14 +509,14 @@ export class MasterOrdersService {
     // one seller). See applySellerFundedDiscountToProductGst() below for what SELLER does.
     let couponFundedBy: 'PLATFORM' | 'SELLER' = 'PLATFORM';
     if (dto.couponCode) {
-      const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount);
+      const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount - bundleDiscount);
       if (!v.valid) throw new BadRequestException(v.reason);
       couponDiscount = v.discountAmount || 0;
       couponId = v.coupon?.id;
       couponFundedBy = (v.coupon as any)?.fundedBy === 'SELLER' ? 'SELLER' : 'PLATFORM';
     }
 
-    const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
+    const discountedSubtotal = subtotal - membershipDiscount - couponDiscount - bundleDiscount;
     // Phase 8 — SERVICE-side GST stays flat 18%, applied to the service's own discounted
     // share (unchanged methodology, just no longer blended with products). PRODUCT-side
     // GST is the sum of each group's already-resolved real per-item GST (§ pricing loop
@@ -516,7 +525,7 @@ export class MasterOrdersService {
     const serviceDiscountShare = grossServiceAmount > 0
       ? allocateAcrossGroups([grossServiceAmount], subtotal, membershipDiscount + couponDiscount)[0]
       : 0;
-    const discountedServiceAmount = Math.max(0, grossServiceAmount - serviceDiscountShare);
+    const discountedServiceAmount = Math.max(0, grossServiceAmount - serviceDiscountShare - bundleDiscount);
     const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
     const productGstOnTop = pricedGroups.filter((g) => g.type === 'PRODUCT').reduce((s, g) => s + (g.productGstOnTop || 0), 0);
     const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
@@ -597,6 +606,17 @@ export class MasterOrdersService {
       if (g.type === 'PRODUCT') return g.productGstOnTop || 0;
       return serviceGstShares[serviceGroupIndices.indexOf(i)] || 0;
     });
+
+    // Bundle discount split across SERVICE groups only, proportional to each one's own
+    // amount share of grossServiceAmount — mirrors serviceGstShares just above. Zero for
+    // every PRODUCT group and a no-op array of zeros whenever this isn't a bundle checkout.
+    const bundleDiscountShares = bundleDiscount > 0
+      ? allocateAcrossGroups(serviceGroupIndices.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount)
+      : [];
+    const groupBundleDiscount = pricedGroups.map((g, i) => {
+      if (g.type === 'PRODUCT') return 0;
+      return bundleDiscountShares[serviceGroupIndices.indexOf(i)] || 0;
+    });
     const groupWallet = allocateAcrossGroups(groupAmounts, subtotal, walletUsed);
 
     const masterOrderNumber = await this.generateMasterOrderNumber();
@@ -635,13 +655,27 @@ export class MasterOrdersService {
       const childOrders: any[] = [];
       for (let i = 0; i < pricedGroups.length; i++) {
         const g = pricedGroups[i];
+        // couponDiscount (the stored column) keeps its pre-existing meaning — membership +
+        // coupon only. The bundle offer is kept as a separate amount (childBundleDiscount /
+        // Order.bundleDiscountAmount) so a report reading Order.couponDiscount never silently
+        // picks up a discount that was never a coupon; totalChildDiscount is only for the
+        // customer-facing total and the allocation row below, both of which must reflect
+        // every discount actually applied, combined.
         const childDiscount = groupDiscounts[i];
+        const childBundleDiscount = groupBundleDiscount[i] || 0;
+        const totalChildDiscount = childDiscount + childBundleDiscount;
         const childGst = groupGst[i];
         const childWallet = groupWallet[i];
         const childDelivery = groupDelivery[i];
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
-        const childTotal = Math.max(0, g.amount - childDiscount + childGst + childDelivery.charge - childWallet);
+        const childTotal = Math.max(0, g.amount - totalChildDiscount + childGst + childDelivery.charge - childWallet);
+        // A bundle's SERVICE child never gets a partner assigned at checkout — see the
+        // dispatch-deferral loops below (confirmPayment()/switchToCod()/the COD branch here),
+        // which skip RoutingService.route() for it, and ShipmentService.onShipmentDelivered()
+        // (logistics.module.ts), which actually triggers it once every sibling PRODUCT child
+        // in this same MasterOrder reaches COMPLETED.
+        const deferDispatchForBundle = isBundleOrder && g.type === 'SERVICE';
 
         // A SERVICE group can now hold several services from the same category (Smart
         // Order Grouping) — sum each line's own commission for the order-level total, and
@@ -698,6 +732,9 @@ export class MasterOrdersService {
             serviceAmount, productsAmount, subtotal: g.amount,
             productsTaxableAmount: g.type === 'PRODUCT' ? g.productsTaxableAmount : undefined,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
+            bundleDiscountPercent: childBundleDiscount > 0 ? bundleDiscountPercent : undefined,
+            bundleDiscountAmount: childBundleDiscount,
+            bundleDispatchDeferred: deferDispatchForBundle,
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
@@ -725,7 +762,7 @@ export class MasterOrdersService {
             orderId: childOrder.id,
             couponId,
             sellerId: g.type === 'PRODUCT' ? g.vendorId : null,
-            discountAmount: childDiscount,
+            discountAmount: totalChildDiscount,
             fundingSource: couponFundedBy,
             isProductOrder: g.type === 'PRODUCT',
             taxableValueAdjustment: groupTaxableAdjustment[i],
@@ -766,7 +803,10 @@ export class MasterOrdersService {
 
     if (confirmUpfront) {
       for (const child of childOrders) {
-        if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+        // A bundle's SERVICE child (bundleDispatchDeferred) never routes here — no partner
+        // until every sibling PRODUCT child is delivered; see ShipmentService.
+        // onShipmentDelivered() (logistics.module.ts) for where it actually happens.
+        if (child.serviceId && !child.bundleDispatchDeferred) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
         // Phase 5 — a Shipment is no longer created right after payment; the seller must
         // accept -> process -> mark ready-for-pickup first (ProductVendorsService,
         // vendors.module.ts), which is what actually calls ShipmentService.createShipmentForOrder().
@@ -775,7 +815,7 @@ export class MasterOrdersService {
         // never touched by it.
         if (child.type === OrderType.PRODUCT) this.openSellerFulfillmentWindow(child.id).catch((e) => this.logger.error(`Seller fulfillment window open failed: ${e.message}`));
       }
-      return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount, paymentMethod: 'COD', isCOD: true };
+      return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount, paymentMethod: 'COD', isCOD: true, isBundleOrder, bundleDiscountPercent, bundleDiscount };
     }
 
     const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
@@ -786,12 +826,14 @@ export class MasterOrdersService {
         masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount,
         paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
         gateway: 'PHONEPE', redirectUrl: payOrder.redirectUrl, txId: payOrder.txId,
+        isBundleOrder, bundleDiscountPercent, bundleDiscount,
       };
     }
     return {
       masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount,
       paymentMethod: 'ONLINE', isCOD: false, requiresPayment: true,
       gateway: 'RAZORPAY', gatewayOrderId: payOrder.gatewayOrderId, razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
+      isBundleOrder, bundleDiscountPercent, bundleDiscount,
     };
   }
 
@@ -860,7 +902,9 @@ export class MasterOrdersService {
     }
 
     for (const child of existing.childOrders) {
-      if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+      // A bundle's SERVICE child (bundleDispatchDeferred) never routes here — see the
+      // matching comment at the COD branch above.
+      if (child.serviceId && !child.bundleDispatchDeferred) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
       if (child.type === OrderType.PRODUCT) this.openSellerFulfillmentWindow(child.id).catch((e) => this.logger.error(`Seller fulfillment window open failed: ${e.message}`));
     }
 
@@ -936,7 +980,9 @@ export class MasterOrdersService {
     });
 
     for (const child of existing.childOrders) {
-      if (child.serviceId) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
+      // A bundle's SERVICE child (bundleDispatchDeferred) never routes here — see the
+      // matching comment at the COD branch above.
+      if (child.serviceId && !child.bundleDispatchDeferred) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
     }
 
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });

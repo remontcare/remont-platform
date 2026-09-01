@@ -1829,6 +1829,18 @@ model Order {
   couponCode          String?
   couponDiscount      Decimal @default(0) @db.Decimal(10, 2)
   membershipDiscount  Decimal @default(0) @db.Decimal(10, 2)
+  // Bundle offer (product + service checked out together in one MasterOrder) — applies
+  // only to a SERVICE child's own amount, never a PRODUCT child's. Percent is frozen at
+  // checkout time (see getBundleDiscountPercent() in common/index.ts, admin-configurable
+  // via SiteSetting key 'bundle_discount_percent') so a later admin change never
+  // retroactively alters an existing order's already-charged total.
+  bundleDiscountPercent Decimal? @db.Decimal(5, 2)
+  bundleDiscountAmount  Decimal  @default(0) @db.Decimal(10, 2)
+  // True only for a bundle's SERVICE child at creation — MasterOrdersService.checkout()
+  // deliberately skips RoutingService.route() for it (no partner assigned yet); set back to
+  // false the moment ShipmentService.onShipmentDelivered() confirms every sibling PRODUCT
+  // child in the same MasterOrder has reached COMPLETED and actually triggers routing.
+  bundleDispatchDeferred Boolean @default(false)
   walletUsed          Decimal @default(0) @db.Decimal(10, 2)
   gstAmount           Decimal @default(0) @db.Decimal(10, 2)
   platformCharges     Decimal @default(0) @db.Decimal(10, 2)

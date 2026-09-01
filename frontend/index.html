@@ -5554,6 +5554,37 @@
     }
   };
 
+  // Bundle offer display percent — admin-configurable (SiteSetting 'bundle_discount_percent',
+  // same value MasterOrdersService.checkout() actually applies at checkout time; see
+  // _coBundleDiscountPercent for the checkout-modal copy of this same fetch). Defaults to 10
+  // until the fetch below resolves, or forever if it fails — never blocks rendering.
+  var BUNDLE_DISCOUNT_PERCENT_DISPLAY = 10;
+  fetch((typeof API_BASE === 'string' ? API_BASE : '') + '/api/v1/cms/settings?group=operations')
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var list = (res && res.data) || res || [];
+      var row = Array.isArray(list) ? list.find(function(s) { return s.key === 'bundle_discount_percent'; }) : null;
+      if (row) BUNDLE_DISCOUNT_PERCENT_DISPLAY = Number(row.value) || 10;
+    })
+    .catch(function() { /* keeps the default 10% copy */ });
+
+  // "Claim Bundle" — the product cards in THIS panel are illustrative sample data (fixed
+  // IDs like "prod-clean-1", not real Product rows), so sending a customer there would let
+  // them "Add to Cart" something checkout() would then reject as not found. #deals (Hot
+  // Deals on Home Essentials) is genuinely API-backed real inventory with working add-to-
+  // cart, so that's where this sends them instead — the bundle discount itself applies
+  // automatically at checkout the moment both a service and a product are in the cart
+  // together, no code/coupon needed.
+  function _scrollToBundleProducts() {
+    var target = document.getElementById('deals') || document.getElementById('shop');
+    if (!target) return;
+    var hdr = document.getElementById('header');
+    var offset = (hdr ? hdr.offsetHeight : 70) + 10;
+    var y = target.getBoundingClientRect().top + document.documentElement.scrollTop - offset;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+    if (typeof showToast === 'function') showToast('Add a product below — your bundle discount applies automatically at checkout', 'success');
+  }
+
   // Escape value for safe use inside HTML markup. Must be defined before renderService()
   // is called further down in this same block.
   function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(char){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }
@@ -5582,9 +5613,9 @@
         <div class="pp-text">
           <div class="pp-tag">Bundle Offer</div>
           <div class="pp-title">Book Service + Buy Product</div>
-          <div class="pp-sub">Save extra 10% when you book this service with any related product below.</div>
+          <div class="pp-sub">Save ${BUNDLE_DISCOUNT_PERCENT_DISPLAY}% on this service when you add any related product below to your cart too — applied automatically at checkout.</div>
         </div>
-        <button class="pp-btn">Claim Bundle →</button>
+        <button type="button" class="pp-btn" onclick="_scrollToBundleProducts()">Claim Bundle →</button>
       </div>
       <div class="product-row-title">
         ${d.productTitle}
@@ -9503,6 +9534,9 @@ function cartCheckout() {
         <div id="co-coupon-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>Coupon discount</span><span id="co-coupon-line-amt">−₹0</span>
         </div>
+        <div id="co-bundle-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
+          <span>🎁 Bundle offer (<span id="co-bundle-line-pct">10</span>% off service)</span><span id="co-bundle-line-amt">−₹0</span>
+        </div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>GST (18%)</span><span id="co-gst">₹0</span>
         </div>
@@ -10042,6 +10076,7 @@ function verifyOtpAuth() {
 // Checkout-modal state shared by recalcTotals()/applyCoupon()/submitCheckoutOrder()
 var _coCoupon = null;      // { code, discountAmount } once applied
 var _coWalletBalance = 0;  // logged-in customer's wallet balance, fetched on open
+var _coBundleDiscountPercent = 10; // admin-configurable (SiteSetting 'bundle_discount_percent'), refetched on every modal open — server-side checkout() is always the source of truth for the actual charged amount, this is a preview only
 
 function openCheckoutModal() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
@@ -10097,6 +10132,18 @@ function openCheckoutModal() {
 
   recalcTotals();
   _fetchDeliveryCharge(); // fires once per modal open — recalcTotals() above already covers the wallet-balance branch's own call
+
+  // Bundle offer preview — refetched on every open so an admin's live change to the
+  // percent is always reflected; falls back to the last-known value (default 10) if the
+  // request fails, matching every other best-effort preview fetch on this page.
+  fetch((API_BASE || '') + '/api/v1/cms/settings?group=operations')
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var list = (res && res.data) || res || [];
+      var row = Array.isArray(list) ? list.find(function(s) { return s.key === 'bundle_discount_percent'; }) : null;
+      if (row) { _coBundleDiscountPercent = Number(row.value) || 10; recalcTotals(); }
+    })
+    .catch(function() { /* preview only — checkout total already comes from the server either way */ });
 
   // Pre-fill contact from saved profile
   var storedUser = null;
@@ -10302,8 +10349,21 @@ function recalcTotals() {
   var subtotal = 0;
   cart.forEach(function(item) { subtotal += (item.price || 0) * (item.qty || 1); });
 
-  var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal) : 0;
-  var discounted = Math.max(0, subtotal - couponDiscount);
+  // Bundle offer preview — MasterOrdersService.checkout() applies this automatically
+  // whenever the cart mixes a service with a product, on the SERVICE amount only. Client-
+  // side estimate, same restraint as _coDeliveryCharge above: the server's own computation
+  // at checkout is what actually gets charged.
+  var serviceSubtotal = 0, hasService = false, hasProduct = false;
+  cart.forEach(function(item) {
+    var lineTotal = (item.price || 0) * (item.qty || 1);
+    if (item.type === 'service') { serviceSubtotal += lineTotal; hasService = true; }
+    else { hasProduct = true; }
+  });
+  var isBundleCart = hasService && hasProduct;
+  var bundleDiscount = isBundleCart ? Math.round(serviceSubtotal * _coBundleDiscountPercent / 100 * 100) / 100 : 0;
+
+  var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal - bundleDiscount) : 0;
+  var discounted = Math.max(0, subtotal - couponDiscount - bundleDiscount);
   var gst = Math.round(discounted * 0.18 * 100) / 100;
   var preWalletTotal = discounted + gst + _coDeliveryCharge;
 
@@ -10312,6 +10372,14 @@ function recalcTotals() {
   var total = Math.max(0, preWalletTotal - walletApplied);
 
   document.getElementById('co-subtotal').textContent = '₹' + subtotal.toLocaleString('en-IN');
+  var bundleLine = document.getElementById('co-bundle-line');
+  if (bundleDiscount > 0) {
+    bundleLine.style.display = 'flex';
+    document.getElementById('co-bundle-line-pct').textContent = _coBundleDiscountPercent;
+    document.getElementById('co-bundle-line-amt').textContent = '−₹' + bundleDiscount.toLocaleString('en-IN');
+  } else {
+    bundleLine.style.display = 'none';
+  }
   var couponLine = document.getElementById('co-coupon-line');
   if (couponDiscount > 0) {
     couponLine.style.display = 'flex';
@@ -10335,7 +10403,7 @@ function recalcTotals() {
     walletLine.style.display = 'none';
   }
   document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
-  return { subtotal: subtotal, couponDiscount: couponDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
+  return { subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
 }
 
 // Fetches a PREVIEW delivery charge for the current cart + whatever address info is
