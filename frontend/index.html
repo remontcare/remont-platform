@@ -3762,7 +3762,7 @@
     <a href="#shop" class="cat-link"><span class="ic">📺</span> <span data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</span></a>
     <a href="#shop" class="cat-link"><span class="ic">🧹</span> <span data-en="Cleaning" data-hi="सफाई">Cleaning</span></a>
     <a href="#premium" class="cat-link premium-link"><span class="ic">✨</span> <span data-en="Interior · Renovation · Construction" data-hi="इंटीरियर · रेनोवेशन · कंस्ट्रक्शन">Interior · Renovation · Construction</span></a>
-    <a href="#products" class="cat-link"><span class="ic">🛍️</span> <span data-en="Shop Products" data-hi="प्रोडक्ट्स खरीदें">Shop Products</span></a>
+    <a href="#all-products" class="cat-link"><span class="ic">🛍️</span> <span data-en="Shop Products" data-hi="प्रोडक्ट्स खरीदें">Shop Products</span></a>
     <a href="#amc" class="cat-link amc"><span class="ic">📅</span> <span data-en="AMC Plans" data-hi="AMC प्लान">AMC Plans</span></a>
     <a href="#corporate" class="cat-link"><span class="ic">🏢</span> <span data-en="For Business" data-hi="बिज़नेस के लिए">For Business</span></a>
   </div>
@@ -8146,7 +8146,7 @@
         var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
         navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
       });
-      navLinks.push('<a href="#products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
+      navLinks.push('<a href="#all-products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
       navLinks.push('<a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>');
       navLinks.push('<a href="#corporate" class="cat-link"><span class="ic">🏢</span> For Business</a>');
       catNav.innerHTML = navLinks.join('');
