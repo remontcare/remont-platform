@@ -4216,6 +4216,194 @@
 })();
 </script>
 
+<!-- ═══ ALL PRODUCTS (full live catalog — Hot Deals above only shows the top 7 discounted
+     items, so anything a seller/admin adds without a discount, or beyond that top 7, was
+     otherwise invisible anywhere on the site) ═══ -->
+<style>
+  .ap-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ap-tab {
+    border: 1px solid var(--border, #E5DFD4); background: #fff; color: var(--charcoal);
+    font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 100px;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .ap-tab.active { background: var(--sienna); color: #fff; border-color: var(--sienna); }
+  .ap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+  .ap-empty { grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--txt-muted); }
+  @media (max-width: 700px) { .ap-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; } }
+</style>
+
+<section id="all-products" class="std">
+  <div class="inner">
+
+    <div class="std-header reveal visible">
+      <div>
+        <div class="section-label">Full Catalog</div>
+        <h2 class="section-title">Shop <strong>All Products</strong></h2>
+      </div>
+      <div class="ap-tabs" id="ap-tabs"></div>
+    </div>
+
+    <div class="ap-grid reveal visible" id="ap-grid">
+      <div class="deal-skel"></div>
+      <div class="deal-skel"></div>
+      <div class="deal-skel"></div>
+      <div class="deal-skel"></div>
+    </div>
+
+  </div>
+</section>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   ALL PRODUCTS — full live catalog, every active in-stock product, real
+   category tabs built from whatever categories actually exist in the data
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var PRODUCT_POOL = 100; // matches the deals section's own pool size
+
+  var CAT_EMOJI = {
+    'PLUMBING_PRODUCTS': '🚰', 'ELECTRICAL_PRODUCTS': '💡', 'AC_PRODUCTS': '❄️',
+    'KITCHEN_PRODUCTS': '🍳',  'FURNITURE': '🪑',           'TILES': '🧱',
+    'PAINT_PRODUCTS': '🎨',    'LIGHTING': '💡',            'HARDWARE': '🔧',
+    'CLEANING_PRODUCTS': '🧽', 'APPLIANCE_PRODUCTS': '🏠'
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function inr(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
+
+  function get(path) {
+    if (typeof window.apiGet === 'function') return window.apiGet(path);
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    return fetch(base + path).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    });
+  }
+
+  function extractList(json) {
+    var d = (json && json.data) ? json.data : json;
+    if (Array.isArray(d)) return d;
+    if (d && Array.isArray(d.products)) return d.products;
+    if (d && Array.isArray(d.items))    return d.items;
+    return [];
+  }
+
+  function toItem(p) {
+    if (p.isActive === false) return null;
+    if (p.stock != null && Number(p.stock) <= 0) return null;
+    var price = Number(p.price), mrp = Number(p.mrp);
+    var cat = p.category || {};
+    var hasDiscount = mrp > price;
+    return {
+      id: p.id,
+      name: p.name || 'Product',
+      price: price,
+      mrp: hasDiscount ? mrp : null,
+      off: hasDiscount ? Math.round((1 - price / mrp) * 100) : 0,
+      img: (p.images && p.images[0]) || null,
+      catName: cat.name || 'Other',
+      catKey: cat.key || 'OTHER',
+      emoji: cat.icon || CAT_EMOJI[cat.key] || '🏠'
+    };
+  }
+
+  function imgMarkup(d) {
+    return d.img
+      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
+      : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
+  }
+
+  function cardHTML(d) {
+    return '' +
+      '<div class="deal-card" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
+           '" data-ap-price="' + d.price + '" data-ap-cat="' + esc(d.catKey) + '">' +
+        (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '') +
+        imgMarkup(d) +
+        '<div class="deal-card-body">' +
+          '<div class="deal-card-cat">' + esc(d.catName) + '</div>' +
+          '<div class="deal-card-name">' + esc(d.name) + '</div>' +
+          '<div class="deal-card-price">' +
+            '<span class="now">' + inr(d.price) + '</span>' +
+            (d.mrp ? '<span class="was">' + inr(d.mrp) + '</span>' : '') +
+            (d.off > 0 ? '<span class="off">' + d.off + '% off</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="dc-add" aria-label="Add to cart">+</button>' +
+      '</div>';
+  }
+
+  var allItems = [];
+  var activeCat = 'ALL';
+
+  function renderTabs() {
+    var tabsEl = document.getElementById('ap-tabs');
+    var seen = {}; var cats = [];
+    allItems.forEach(function (d) { if (!seen[d.catKey]) { seen[d.catKey] = d.catName; cats.push(d.catKey); } });
+    var html = '<button type="button" class="ap-tab' + (activeCat === 'ALL' ? ' active' : '') + '" data-cat="ALL">All</button>';
+    html += cats.map(function (key) {
+      return '<button type="button" class="ap-tab' + (activeCat === key ? ' active' : '') + '" data-cat="' + esc(key) + '">' + esc(seen[key]) + '</button>';
+    }).join('');
+    tabsEl.innerHTML = html;
+  }
+
+  function renderGrid() {
+    var grid = document.getElementById('ap-grid');
+    var filtered = activeCat === 'ALL' ? allItems : allItems.filter(function (d) { return d.catKey === activeCat; });
+    if (!filtered.length) { grid.innerHTML = '<div class="ap-empty">No products in this category yet.</div>'; return; }
+    grid.innerHTML = filtered.map(cardHTML).join('');
+  }
+
+  function load() {
+    get('/api/v1/products?limit=' + PRODUCT_POOL)
+      .then(function (json) {
+        allItems = extractList(json).map(toItem).filter(Boolean);
+        renderTabs();
+        renderGrid();
+      })
+      .catch(function () {
+        document.getElementById('ap-grid').innerHTML = '<div class="ap-empty">Couldn\'t load products right now — please refresh.</div>';
+      });
+  }
+
+  function addItemToCart(el) {
+    var id    = el.getAttribute('data-ap-id');
+    var name  = el.getAttribute('data-ap-name');
+    var price = Number(el.getAttribute('data-ap-price')) || 0;
+    if (!id || typeof window.addToCart !== 'function') return;
+    window.addToCart({ id: id, name: name, price: price, type: 'product', unit: 'piece' });
+  }
+
+  function bind() {
+    document.addEventListener('click', function (e) {
+      var tab = e.target.closest('#ap-tabs .ap-tab');
+      if (tab) { activeCat = tab.getAttribute('data-cat'); renderTabs(); renderGrid(); return; }
+      var card = e.target.closest('#all-products .deal-card');
+      if (!card) return;
+      e.preventDefault();
+      addItemToCart(card);
+    });
+  }
+
+  function init() {
+    bind();
+    load();
+    window.refreshAllProducts = load; // callable after a city / catalogue change
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
 <!-- ═══ PREMIUM SHOWCASE (Interior · Renovation · Construction) ═══ -->
 <section id="premium" class="std">
   <div class="inner">
