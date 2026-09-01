@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DeliveryTier, CodSettlementStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -7,7 +7,15 @@ import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
 import { ReverseLogisticsRateEngine } from './reverse-logistics-rate-engine';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
-import { RoutingService, OrdersModule } from '../orders/orders.module';
+// Type-only — OrdersModule -> ReturnsModule -> LogisticsModule is an existing chain, and
+// this file needs RoutingService/OrdersModule back, so a normal (value) import here would
+// close that into a real circular require(): whichever of these three files starts loading
+// first, one of the others would try to read its exports before they exist yet (exactly
+// the "module at index [2] is undefined" crash). A type-only import is erased by the
+// compiler — it can never trigger that require() — and every runtime usage below goes
+// through a deferred require() inside forwardRef() instead, which Nest only calls once
+// the whole module graph has already finished loading.
+import type { RoutingService, OrdersModule } from '../orders/orders.module';
 
 // Phase 5 — COD settlement ladder adjacency, same idiom as DeliveryController's
 // SHIPMENT_STATUS_NEXT. Rejects an out-of-order or duplicate call instead of silently no-op-ing.
@@ -266,7 +274,9 @@ export class ShipmentService {
     mockProvider: MockDeliveryProvider,
     private rateEngine: ReverseLogisticsRateEngine,
     private productLedger: ProductLedgerService,
-    private routing: RoutingService,
+    // See the type-only import above — the require() below only runs when Nest actually
+    // resolves this provider, long after module loading (and any cycle) is done.
+    @Inject(forwardRef(() => require('../orders/orders.module').RoutingService)) private routing: RoutingService,
   ) {
     this.providers = { MOCK_DEMO: mockProvider };
   }
@@ -532,7 +542,7 @@ export class ShipmentController {
 }
 
 @Module({
-  imports: [ProductLedgerModule, OrdersModule],
+  imports: [ProductLedgerModule, forwardRef(() => require('../orders/orders.module').OrdersModule)],
   controllers: [LogisticsController, ShipmentController],
   providers: [LogisticsService, ShipmentService, MockDeliveryProvider, ReverseLogisticsRateEngine],
   exports: [LogisticsService, ShipmentService, ReverseLogisticsRateEngine],
