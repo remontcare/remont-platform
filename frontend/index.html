@@ -4220,15 +4220,107 @@
      items, so anything a seller/admin adds without a discount, or beyond that top 7, was
      otherwise invisible anywhere on the site) ═══ -->
 <style>
-  .ap-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-  .ap-tab {
+  #all-products { position: relative; } /* anchors the desktop filter popover below */
+  .ap-count { font-size: 13px; color: var(--txt-muted); white-space: nowrap; }
+
+  .ap-filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 14px; }
+  .ap-fbtn {
+    display: inline-flex; align-items: center; gap: 5px;
     border: 1px solid var(--border, #E5DFD4); background: #fff; color: var(--charcoal);
-    font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 100px;
+    font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 100px;
     cursor: pointer; font-family: inherit; white-space: nowrap;
   }
-  .ap-tab.active { background: var(--sienna); color: #fff; border-color: var(--sienna); }
+  .ap-fbtn:hover { border-color: var(--sienna); }
+  .ap-fbtn.active-filter { background: var(--cream); border-color: var(--sienna); color: var(--sienna); }
+  .ap-fbtn-arrow { font-size: 9px; opacity: .7; }
+  .ap-fbtn-toggle.on { background: var(--sienna); color: #fff; border-color: var(--sienna); }
+  .ap-fbar-spacer { flex: 1; }
+  .ap-clearall {
+    border: none; background: none; color: var(--sienna); font-size: 12.5px; font-weight: 700;
+    cursor: pointer; font-family: inherit; padding: 6px 4px; text-decoration: underline;
+  }
+
+  .ap-mobilebar { display: none; gap: 10px; margin: 18px 0 14px; }
+  .ap-mbtn {
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px solid var(--border, #E5DFD4); background: #fff; color: var(--charcoal);
+    font-size: 13px; font-weight: 600; padding: 10px; border-radius: 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  .ap-fcount {
+    background: var(--sienna); color: #fff; font-size: 10px; font-weight: 700;
+    border-radius: 100px; padding: 1px 6px; margin-left: 2px;
+  }
+
+  .ap-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .ap-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--cream); color: var(--charcoal); font-size: 12px; font-weight: 600;
+    padding: 6px 8px 6px 12px; border-radius: 100px;
+  }
+  .ap-chip button {
+    border: none; background: rgba(0,0,0,.12); color: var(--charcoal); width: 16px; height: 16px;
+    border-radius: 50%; font-size: 11px; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0;
+  }
+
+  /* Shared popover — one absolutely-positioned panel, repopulated per filter clicked */
+  .ap-popover {
+    position: absolute; z-index: 60; background: #fff; border: 1px solid var(--border, #E5DFD4);
+    border-radius: 14px; box-shadow: var(--shadow-lg); padding: 16px; width: 260px;
+    max-height: 360px; overflow-y: auto;
+  }
+  .ap-filter-section { display: flex; flex-direction: column; gap: 10px; }
+  .ap-radio, .ap-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--charcoal); cursor: pointer; }
+  .ap-radio input, .ap-check input { accent-color: var(--sienna); width: 15px; height: 15px; flex-shrink: 0; }
+  .ap-checklist { display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
+  .ap-brand-search {
+    width: 100%; border: 1px solid var(--border, #E5DFD4); border-radius: 8px; padding: 7px 10px;
+    font-size: 12.5px; font-family: inherit; margin-bottom: 4px; box-sizing: border-box;
+  }
+  .ap-price-custom { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border, #E5DFD4); }
+  .ap-price-custom input {
+    width: 70px; border: 1px solid var(--border, #E5DFD4); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-family: inherit;
+  }
+  .ap-price-custom button {
+    border: none; background: var(--sienna); color: #fff; border-radius: 8px; padding: 6px 12px;
+    font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .ap-filter-note { font-size: 12px; color: var(--txt-muted); margin: 4px 0 0; }
+
+  .ap-oos-badge {
+    position: absolute; left: 12px; top: 12px; background: #6b6b6b; color: #fff;
+    font-size: 11px; font-weight: 700; letter-spacing: .3px; padding: 4px 9px; border-radius: 100px;
+  }
+  .ap-card-brand { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--txt-muted); margin-bottom: 4px; }
+  .deal-card .dc-add:disabled { opacity: .35; cursor: not-allowed; }
+  .deal-card.ap-oos .deal-card-img { filter: grayscale(65%) opacity(.75); }
+
   .ap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
   .ap-empty { grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--txt-muted); }
+
+  /* Mobile drawer (Filter and Sort share the same drawer shell) */
+  .ap-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 90; }
+  .ap-drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; background: #fff;
+    border-radius: 18px 18px 0 0; max-height: 82vh; display: flex; flex-direction: column;
+    box-shadow: var(--shadow-lg);
+  }
+  .ap-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border, #E5DFD4); }
+  .ap-drawer-head h3 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; }
+  .ap-drawer-close { border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--charcoal); padding: 0; }
+  .ap-drawer-body { padding: 16px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+  .ap-drawer-section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--txt-muted); margin-bottom: 8px; }
+  .ap-drawer-foot { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border, #E5DFD4); }
+  .ap-drawer-clear {
+    flex: 1; border: 1px solid var(--border, #E5DFD4); background: #fff; border-radius: 10px;
+    font-weight: 700; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .ap-drawer-apply { flex: 2; border: none; border-radius: 10px; }
+
+  @media (max-width: 860px) {
+    .ap-filterbar { display: none; }
+    .ap-mobilebar { display: flex; }
+  }
   @media (max-width: 700px) { .ap-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; } }
 </style>
 
@@ -4240,8 +4332,27 @@
         <div class="section-label">Full Catalog</div>
         <h2 class="section-title">Shop <strong>All Products</strong></h2>
       </div>
-      <div class="ap-tabs" id="ap-tabs"></div>
+      <div class="ap-count" id="ap-count"></div>
     </div>
+
+    <div class="ap-filterbar" id="ap-filterbar">
+      <button type="button" class="ap-fbtn" data-filter="category">Category <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-fbtn" data-filter="brand">Brand <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-fbtn" data-filter="price">Price <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-fbtn" data-filter="discount">Discount <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-fbtn" data-filter="availability">Availability <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-fbtn ap-fbtn-toggle" id="ap-onsale-btn">🏷️ On Sale</button>
+      <span class="ap-fbar-spacer"></span>
+      <button type="button" class="ap-fbtn" data-filter="sort">Sort: <span id="ap-sort-label">Relevance</span> <span class="ap-fbtn-arrow">▾</span></button>
+      <button type="button" class="ap-clearall" id="ap-clearall" hidden>Clear All</button>
+    </div>
+
+    <div class="ap-mobilebar" id="ap-mobilebar">
+      <button type="button" class="ap-mbtn" id="ap-mobile-filter-btn">⚙ Filter <span class="ap-fcount" id="ap-fcount" hidden>0</span></button>
+      <button type="button" class="ap-mbtn" id="ap-mobile-sort-btn">↕ Sort</button>
+    </div>
+
+    <div class="ap-chips" id="ap-chips"></div>
 
     <div class="ap-grid reveal visible" id="ap-grid">
       <div class="deal-skel"></div>
@@ -4251,12 +4362,51 @@
     </div>
 
   </div>
+
+  <div class="ap-popover" id="ap-popover" hidden>
+    <div id="ap-popover-body"></div>
+  </div>
+
+  <div class="ap-drawer-backdrop" id="ap-drawer-backdrop" hidden></div>
+  <div class="ap-drawer" id="ap-drawer" hidden>
+    <div class="ap-drawer-head">
+      <h3 id="ap-drawer-title">Filters</h3>
+      <button type="button" class="ap-drawer-close" id="ap-drawer-close" aria-label="Close">×</button>
+    </div>
+    <div class="ap-drawer-body" id="ap-drawer-body"></div>
+    <div class="ap-drawer-foot">
+      <button type="button" class="ap-drawer-clear" id="ap-drawer-clear">Clear All</button>
+      <button type="button" class="btn-primary ap-drawer-apply" id="ap-drawer-apply">Show Results</button>
+    </div>
+  </div>
 </section>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════════
-   ALL PRODUCTS — full live catalog, every active in-stock product, real
-   category tabs built from whatever categories actually exist in the data
+   ALL PRODUCTS — full live catalog with an ecommerce-style filter bar
+   (Category, Brand, Price, Discount, Availability, On Sale, Sort). Every
+   filter reads from real Product/ProductCategory fields already returned by
+   GET /api/v1/products — nothing here is fabricated. Filtering/sorting is
+   entirely client-side over the one fetched batch (matches this catalog's
+   existing size — see PRODUCT_POOL), so switching filters/sort never
+   reloads the page or refetches, and selections naturally persist across
+   each other since they all read/write the same `filters`/`sortBy` state.
+
+   NOTE — Subcategory: there is no subcategory field or model anywhere in
+   the schema (ProductCategory is flat: id/key/name/icon/sortOrder/isActive;
+   Product has no subCategoryId). A Category → Subcategory control is
+   therefore not implemented — it would need a real schema/data change, not
+   a frontend one. Category → Brand (and → Price/Discount/Availability
+   counts) IS implemented as a dependent narrowing, which is the closest
+   real-data equivalent available today.
+
+   NOTE — Rating: Product.rating/reviewCount are real fields and the "Rating"
+   sort option is wired to them, but every product in the live catalog
+   currently has rating=0/reviewCount=0 (no reviews exist yet) — so a Rating
+   *filter* would only ever produce a single, meaningless bucket. It is
+   deliberately left out of the filter bar (see sectionRatingHTML below,
+   unused) until real ratings exist; re-enabling it later is a one-line
+   change once hasAnyRealRating() returns true for live data.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -4294,9 +4444,10 @@
     return [];
   }
 
+  // Real fields only — every value here comes straight off the Product row the API
+  // already returns (see the schema note above for what does NOT exist: subcategory).
   function toItem(p) {
     if (p.isActive === false) return null;
-    if (p.stock != null && Number(p.stock) <= 0) return null;
     var price = Number(p.price), mrp = Number(p.mrp);
     var cat = p.category || {};
     var hasDiscount = mrp > price;
@@ -4309,7 +4460,15 @@
       img: (p.images && p.images[0]) || null,
       catName: cat.name || 'Other',
       catKey: cat.key || 'OTHER',
-      emoji: cat.icon || CAT_EMOJI[cat.key] || '🏠'
+      emoji: cat.icon || CAT_EMOJI[cat.key] || '🏠',
+      brand: (p.brand || '').trim() || null,
+      rating: Number(p.rating) || 0,
+      reviewCount: Number(p.reviewCount) || 0,
+      // Availability filter needs BOTH states present in allItems — unlike the previous
+      // version of this section, out-of-stock products are no longer dropped here; they're
+      // shown with a badge and a disabled add-to-cart instead (see cardHTML/addItemToCart).
+      inStock: p.stock == null || Number(p.stock) > 0,
+      createdAt: p.createdAt ? new Date(p.createdAt).getTime() : 0
     };
   }
 
@@ -4319,14 +4478,16 @@
       : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
   }
 
+  // Category label removed per redesign (redundant with the active Category filter);
+  // brand shown subtly in its place only when the product actually has one.
   function cardHTML(d) {
     return '' +
-      '<div class="deal-card" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
-           '" data-ap-price="' + d.price + '" data-ap-cat="' + esc(d.catKey) + '">' +
-        (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '') +
+      '<div class="deal-card' + (!d.inStock ? ' ap-oos' : '') + '" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
+           '" data-ap-price="' + d.price + '" data-ap-instock="' + (d.inStock ? '1' : '0') + '">' +
+        (!d.inStock ? '<span class="ap-oos-badge">Out of Stock</span>' : (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '')) +
         imgMarkup(d) +
         '<div class="deal-card-body">' +
-          '<div class="deal-card-cat">' + esc(d.catName) + '</div>' +
+          (d.brand ? '<div class="ap-card-brand">' + esc(d.brand) + '</div>' : '') +
           '<div class="deal-card-name">' + esc(d.name) + '</div>' +
           '<div class="deal-card-price">' +
             '<span class="now">' + inr(d.price) + '</span>' +
@@ -4334,37 +4495,358 @@
             (d.off > 0 ? '<span class="off">' + d.off + '% off</span>' : '') +
           '</div>' +
         '</div>' +
-        '<button type="button" class="dc-add" aria-label="Add to cart">+</button>' +
+        '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>' +
       '</div>';
   }
 
   var allItems = [];
-  var activeCat = 'ALL';
+  var filters = { category: 'ALL', brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false };
+  var sortBy = 'relevance';
+  var openPopoverType = null;
 
-  function renderTabs() {
-    var tabsEl = document.getElementById('ap-tabs');
-    var seen = {}; var cats = [];
-    allItems.forEach(function (d) { if (!seen[d.catKey]) { seen[d.catKey] = d.catName; cats.push(d.catKey); } });
-    var html = '<button type="button" class="ap-tab' + (activeCat === 'ALL' ? ' active' : '') + '" data-cat="ALL">All</button>';
-    html += cats.map(function (key) {
-      return '<button type="button" class="ap-tab' + (activeCat === key ? ' active' : '') + '" data-cat="' + esc(key) + '">' + esc(seen[key]) + '</button>';
+  function itemsInCategory(catKey) {
+    return catKey === 'ALL' ? allItems : allItems.filter(function (d) { return d.catKey === catKey; });
+  }
+  function distinctCategories() {
+    var seen = {}; var list = [];
+    allItems.forEach(function (d) { if (!seen[d.catKey]) { seen[d.catKey] = d.catName; list.push({ key: d.catKey, name: d.catName }); } });
+    return list;
+  }
+  // Brand (and every other facet below) narrows to the currently selected category, the
+  // closest real-data equivalent to "Category → Subcategory" available without a schema change.
+  function distinctBrands() {
+    var pool = itemsInCategory(filters.category);
+    var seen = {};
+    pool.forEach(function (d) { if (d.brand) seen[d.brand] = (seen[d.brand] || 0) + 1; });
+    return Object.keys(seen).sort().map(function (b) { return { name: b, count: seen[b] }; });
+  }
+  function maxDiscount(pool) { var m = 0; pool.forEach(function (d) { if (d.off > m) m = d.off; }); return m; }
+  function priceBounds(pool) {
+    var min = Infinity, max = 0;
+    pool.forEach(function (d) { if (d.price < min) min = d.price; if (d.price > max) max = d.price; });
+    if (min === Infinity) min = 0;
+    return { min: min, max: max };
+  }
+  function hasAnyRealRating() { return allItems.some(function (d) { return d.rating > 0; }); } // see header note — unused today
+
+  function applyFilters(list) {
+    return list.filter(function (d) {
+      if (filters.category !== 'ALL' && d.catKey !== filters.category) return false;
+      if (filters.brands.length && (!d.brand || filters.brands.indexOf(d.brand) === -1)) return false;
+      if (filters.priceMin != null && d.price < filters.priceMin) return false;
+      if (filters.priceMax != null && d.price > filters.priceMax) return false;
+      if (filters.discountMin > 0 && d.off < filters.discountMin) return false;
+      if (filters.onSale && d.off <= 0) return false;
+      var avail = d.inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
+      if (filters.availability.indexOf(avail) === -1) return false;
+      return true;
+    });
+  }
+  function applySort(list) {
+    var sorted = list.slice(); // 'relevance' = original API order, untouched
+    if (sortBy === 'price_low') sorted.sort(function (a, b) { return a.price - b.price; });
+    else if (sortBy === 'price_high') sorted.sort(function (a, b) { return b.price - a.price; });
+    else if (sortBy === 'discount') sorted.sort(function (a, b) { return b.off - a.off; });
+    else if (sortBy === 'rating') sorted.sort(function (a, b) { return b.rating - a.rating; }); // real field; no-op today, see header note
+    else if (sortBy === 'newest') sorted.sort(function (a, b) { return b.createdAt - a.createdAt; });
+    return sorted;
+  }
+  function getResult() { return applySort(applyFilters(allItems)); }
+
+  function activeFilterCount() {
+    var n = 0;
+    if (filters.category !== 'ALL') n++;
+    n += filters.brands.length;
+    if (filters.priceMin != null || filters.priceMax != null) n++;
+    if (filters.discountMin > 0) n++;
+    if (filters.onSale) n++;
+    if (!(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK')) n++;
+    return n;
+  }
+
+  function renderCount() {
+    document.getElementById('ap-count').textContent = 'Showing ' + getResult().length + ' of ' + allItems.length + ' products';
+  }
+
+  function renderChips() {
+    var chips = [];
+    if (filters.category !== 'ALL') {
+      var cat = distinctCategories().filter(function (c) { return c.key === filters.category; })[0];
+      chips.push({ label: cat ? cat.name : filters.category, clear: function () { filters.category = 'ALL'; filters.brands = []; } });
+    }
+    filters.brands.forEach(function (b) {
+      chips.push({ label: b, clear: function () { filters.brands = filters.brands.filter(function (x) { return x !== b; }); } });
+    });
+    if (filters.priceMin != null || filters.priceMax != null) {
+      var lbl = 'Price: ' + (filters.priceMin != null ? inr(filters.priceMin) : '₹0') + ' – ' + (filters.priceMax != null ? inr(filters.priceMax) : 'Any');
+      chips.push({ label: lbl, clear: function () { filters.priceMin = null; filters.priceMax = null; } });
+    }
+    if (filters.discountMin > 0) chips.push({ label: filters.discountMin + '% or more off', clear: function () { filters.discountMin = 0; } });
+    if (filters.onSale) chips.push({ label: 'On Sale', clear: function () { filters.onSale = false; } });
+    if (!(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK')) {
+      var lbl2 = filters.availability.length === 2 ? 'All Availability' : (filters.availability[0] === 'OUT_OF_STOCK' ? 'Out of Stock Only' : 'In Stock');
+      chips.push({ label: lbl2, clear: function () { filters.availability = ['IN_STOCK']; } });
+    }
+    var chipsEl = document.getElementById('ap-chips');
+    chipsEl.innerHTML = chips.map(function (c, i) {
+      return '<span class="ap-chip" data-chip-i="' + i + '">' + esc(c.label) + '<button type="button" aria-label="Remove">×</button></span>';
     }).join('');
-    tabsEl.innerHTML = html;
+    chipsEl._clears = chips.map(function (c) { return c.clear; });
+    document.getElementById('ap-clearall').hidden = chips.length === 0;
   }
 
   function renderGrid() {
     var grid = document.getElementById('ap-grid');
-    var filtered = activeCat === 'ALL' ? allItems : allItems.filter(function (d) { return d.catKey === activeCat; });
-    if (!filtered.length) { grid.innerHTML = '<div class="ap-empty">No products in this category yet.</div>'; return; }
-    grid.innerHTML = filtered.map(cardHTML).join('');
+    var result = getResult();
+    if (!result.length) {
+      grid.innerHTML = '<div class="ap-empty">No products match these filters.<br><button type="button" id="ap-empty-clear" style="margin-top:8px;border:none;background:none;color:var(--sienna);font-weight:700;cursor:pointer;text-decoration:underline;font-family:inherit;">Clear filters</button></div>';
+      return;
+    }
+    grid.innerHTML = result.map(cardHTML).join('');
+  }
+
+  function syncFilterButtonStates() {
+    document.querySelectorAll('.ap-fbtn[data-filter]').forEach(function (btn) {
+      var type = btn.getAttribute('data-filter'); var active = false;
+      if (type === 'category') active = filters.category !== 'ALL';
+      else if (type === 'brand') active = filters.brands.length > 0;
+      else if (type === 'price') active = filters.priceMin != null || filters.priceMax != null;
+      else if (type === 'discount') active = filters.discountMin > 0;
+      else if (type === 'availability') active = !(filters.availability.length === 1 && filters.availability[0] === 'IN_STOCK');
+      btn.classList.toggle('active-filter', active);
+    });
+    var onSaleBtn = document.getElementById('ap-onsale-btn');
+    if (onSaleBtn) onSaleBtn.classList.toggle('on', filters.onSale);
+    var sortLabelMap = { relevance: 'Relevance', price_low: 'Price: Low to High', price_high: 'Price: High to Low', discount: 'Discount', rating: 'Rating', newest: 'Newest' };
+    var sortLabelEl = document.getElementById('ap-sort-label');
+    if (sortLabelEl) sortLabelEl.textContent = sortLabelMap[sortBy] || 'Relevance';
+    var fcountEl = document.getElementById('ap-fcount'); var n = activeFilterCount();
+    if (fcountEl) { fcountEl.hidden = n === 0; fcountEl.textContent = n; }
+  }
+
+  function renderAll() { renderCount(); renderChips(); renderGrid(); syncFilterButtonStates(); }
+
+  // ── Section builders — shared verbatim between the desktop popover (one at a time) and
+  // the mobile drawer (all sections at once), just given a different `prefix` for unique
+  // radio/checkbox `name` grouping per surface. ──
+  function sectionCategoryHTML(prefix) {
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'cat" value="ALL"' + (filters.category === 'ALL' ? ' checked' : '') + '> All Categories (' + allItems.length + ')</label>';
+    distinctCategories().forEach(function (c) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'cat" value="' + esc(c.key) + '"' + (filters.category === c.key ? ' checked' : '') + '> ' + esc(c.name) + ' (' + itemsInCategory(c.key).length + ')</label>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function sectionBrandHTML(prefix) {
+    var brands = distinctBrands();
+    if (!brands.length) return '<div class="ap-filter-section"><p class="ap-filter-note">No brand data for this category.</p></div>';
+    var html = '<div class="ap-filter-section"><input type="text" class="ap-brand-search" placeholder="Search brand…"><div class="ap-checklist">';
+    html += brands.map(function (b) {
+      var checked = filters.brands.indexOf(b.name) !== -1;
+      return '<label class="ap-check" data-brand-name="' + esc(b.name.toLowerCase()) + '"><input type="checkbox" value="' + esc(b.name) + '"' + (checked ? ' checked' : '') + '> ' + esc(b.name) + ' (' + b.count + ')</label>';
+    }).join('');
+    html += '</div></div>';
+    return html;
+  }
+  function sectionPriceHTML(prefix) {
+    var pool = itemsInCategory(filters.category);
+    var b = priceBounds(pool);
+    if (!pool.length || b.max <= 0) return '<div class="ap-filter-section"><p class="ap-filter-note">No priced products in this category.</p></div>';
+    var step = b.max > 20000 ? 5000 : (b.max > 5000 ? 1000 : 500);
+    var breakpoints = []; var cur = 0;
+    while (cur < b.max && breakpoints.length < 4) { cur += step; breakpoints.push(cur); }
+    var ranges = []; var prev = 0;
+    breakpoints.forEach(function (bp, i) {
+      if (i === breakpoints.length - 1) ranges.push({ min: prev, max: null, label: 'Above ' + inr(prev) });
+      else ranges.push({ min: prev, max: bp, label: inr(prev) + ' – ' + inr(bp) });
+      prev = bp;
+    });
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'price" value=""' + (filters.priceMin == null && filters.priceMax == null ? ' checked' : '') + '> Any Price</label>';
+    ranges.forEach(function (r) {
+      var val = r.min + '-' + (r.max == null ? '' : r.max);
+      var checked = filters.priceMin === r.min && filters.priceMax === (r.max == null ? null : r.max);
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'price" value="' + val + '"' + (checked ? ' checked' : '') + '> ' + esc(r.label) + '</label>';
+    });
+    html += '<div class="ap-price-custom">' +
+      '<input type="number" class="ap-price-min" placeholder="Min" value="' + (filters.priceMin != null ? filters.priceMin : '') + '" min="0">' +
+      '<span>–</span>' +
+      '<input type="number" class="ap-price-max" placeholder="Max" value="' + (filters.priceMax != null ? filters.priceMax : '') + '" min="0">' +
+      '<button type="button" class="ap-price-go">Go</button>' +
+      '</div></div>';
+    return html;
+  }
+  function sectionDiscountHTML(prefix) {
+    var maxD = maxDiscount(itemsInCategory(filters.category));
+    var tiers = [10, 20, 30].filter(function (t) { return t <= maxD; });
+    if (!tiers.length && maxD > 0) tiers = [maxD >= 5 ? Math.floor(maxD / 2) : maxD];
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'disc" value="0"' + (filters.discountMin === 0 ? ' checked' : '') + '> Any Discount</label>';
+    tiers.forEach(function (t) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'disc" value="' + t + '"' + (filters.discountMin === t ? ' checked' : '') + '> ' + t + '% or more</label>';
+    });
+    if (!maxD) html += '<p class="ap-filter-note">No discounted products in this category right now.</p>';
+    html += '</div>';
+    return html;
+  }
+  function sectionAvailabilityHTML(prefix) {
+    var pool = itemsInCategory(filters.category);
+    var inStockCount = pool.filter(function (d) { return d.inStock; }).length;
+    var oosCount = pool.length - inStockCount;
+    var html = '<div class="ap-filter-section">';
+    html += '<label class="ap-check"><input type="checkbox" class="ap-avail" value="IN_STOCK"' + (filters.availability.indexOf('IN_STOCK') !== -1 ? ' checked' : '') + '> In Stock (' + inStockCount + ')</label>';
+    html += '<label class="ap-check"><input type="checkbox" class="ap-avail" value="OUT_OF_STOCK"' + (filters.availability.indexOf('OUT_OF_STOCK') !== -1 ? ' checked' : '') + '> Out of Stock (' + oosCount + ')</label>';
+    html += '</div>';
+    return html;
+  }
+  // Real field, currently flat data (see header note) — kept for future use, not wired into
+  // the filter bar today since it would only ever produce one bucket.
+  function sectionRatingHTML(prefix) {
+    var html = '<div class="ap-filter-section">';
+    [4, 3, 2].forEach(function (r) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'rating" value="' + r + '"> ' + r + '★ & above</label>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function sectionSortHTML(prefix) {
+    var opts = [['relevance', 'Relevance'], ['price_low', 'Price: Low to High'], ['price_high', 'Price: High to Low'], ['discount', 'Discount: High to Low'], ['rating', 'Rating'], ['newest', 'Newest']];
+    var html = '<div class="ap-filter-section">';
+    opts.forEach(function (o) {
+      html += '<label class="ap-radio"><input type="radio" name="' + prefix + 'sort" value="' + o[0] + '"' + (sortBy === o[0] ? ' checked' : '') + '> ' + o[1] + '</label>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function onFiltersChanged(categoryChanged) {
+    renderAll();
+    // Category drives Brand/Price/Discount/Availability narrowing — if the brand section is
+    // currently visible in the mobile drawer, refresh it in place so it never shows stale
+    // (now out-of-category) brands.
+    if (categoryChanged) {
+      var drawerBrandHost = document.querySelector('#ap-drawer-body [data-drawer-section="brand"] .ap-filter-section-mount');
+      if (drawerBrandHost) { drawerBrandHost.innerHTML = sectionBrandHTML('dw-'); wireSectionEvents(drawerBrandHost, 'dw-', false); }
+    }
+  }
+
+  // ── Wiring shared by both the desktop popover body and the mobile drawer body ──
+  function wireSectionEvents(container, prefix, isPopover) {
+    container.querySelectorAll('input[name="' + prefix + 'cat"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        filters.category = r.value; filters.brands = [];
+        onFiltersChanged(true);
+        if (isPopover) closePopover();
+      });
+    });
+    container.querySelectorAll('.ap-check input[type="checkbox"]:not(.ap-avail)').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var name = cb.value;
+        if (cb.checked) { if (filters.brands.indexOf(name) === -1) filters.brands.push(name); }
+        else { filters.brands = filters.brands.filter(function (b) { return b !== name; }); }
+        onFiltersChanged(false);
+      });
+    });
+    var brandSearch = container.querySelector('.ap-brand-search');
+    if (brandSearch) {
+      brandSearch.addEventListener('input', function () {
+        var q = brandSearch.value.trim().toLowerCase();
+        container.querySelectorAll('.ap-check[data-brand-name]').forEach(function (lab) {
+          lab.style.display = lab.getAttribute('data-brand-name').indexOf(q) !== -1 ? '' : 'none';
+        });
+      });
+    }
+    container.querySelectorAll('input[name="' + prefix + 'price"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        if (!r.value) { filters.priceMin = null; filters.priceMax = null; }
+        else { var parts = r.value.split('-'); filters.priceMin = Number(parts[0]); filters.priceMax = parts[1] ? Number(parts[1]) : null; }
+        onFiltersChanged(false);
+        if (isPopover) closePopover();
+      });
+    });
+    var priceGo = container.querySelector('.ap-price-go');
+    if (priceGo) {
+      priceGo.addEventListener('click', function () {
+        var minEl = container.querySelector('.ap-price-min'), maxEl = container.querySelector('.ap-price-max');
+        filters.priceMin = minEl.value !== '' ? Number(minEl.value) : null;
+        filters.priceMax = maxEl.value !== '' ? Number(maxEl.value) : null;
+        onFiltersChanged(false);
+        if (isPopover) closePopover();
+      });
+    }
+    container.querySelectorAll('input[name="' + prefix + 'disc"]').forEach(function (r) {
+      r.addEventListener('change', function () { filters.discountMin = Number(r.value); onFiltersChanged(false); if (isPopover) closePopover(); });
+    });
+    container.querySelectorAll('.ap-avail').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var checked = Array.prototype.filter.call(container.querySelectorAll('.ap-avail'), function (x) { return x.checked; }).map(function (x) { return x.value; });
+        filters.availability = checked.length ? checked : ['IN_STOCK'];
+        onFiltersChanged(false);
+      });
+    });
+    container.querySelectorAll('input[name="' + prefix + 'sort"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        sortBy = r.value; onFiltersChanged(false);
+        if (isPopover) closePopover(); else closeDrawer();
+      });
+    });
+  }
+
+  // ── Desktop popover ──
+  function openPopover(type, btn) {
+    var builders = { category: sectionCategoryHTML, brand: sectionBrandHTML, price: sectionPriceHTML, discount: sectionDiscountHTML, availability: sectionAvailabilityHTML, sort: sectionSortHTML };
+    if (!builders[type]) return;
+    var pop = document.getElementById('ap-popover'), body = document.getElementById('ap-popover-body');
+    openPopoverType = type;
+    body.innerHTML = builders[type]('pop-');
+    wireSectionEvents(body, 'pop-', true);
+    pop.hidden = false;
+    var rect = btn.getBoundingClientRect();
+    var parentRect = document.getElementById('all-products').getBoundingClientRect();
+    pop.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+    pop.style.left = Math.max(0, Math.min(rect.left - parentRect.left, parentRect.width - 280)) + 'px';
+  }
+  function closePopover() { document.getElementById('ap-popover').hidden = true; openPopoverType = null; }
+
+  // ── Mobile drawer (Filter = all sections; Sort = just the sort section) ──
+  function openDrawer() {
+    document.getElementById('ap-drawer-title').textContent = 'Filters';
+    var body = document.getElementById('ap-drawer-body');
+    body.innerHTML =
+      '<div><div class="ap-drawer-section-title">Category</div>' + sectionCategoryHTML('dw-') + '</div>' +
+      '<div data-drawer-section="brand"><div class="ap-drawer-section-title">Brand</div><div class="ap-filter-section-mount">' + sectionBrandHTML('dw-') + '</div></div>' +
+      '<div><div class="ap-drawer-section-title">Price</div>' + sectionPriceHTML('dw-') + '</div>' +
+      '<div><div class="ap-drawer-section-title">Discount</div>' + sectionDiscountHTML('dw-') + '</div>' +
+      '<div><div class="ap-drawer-section-title">Availability</div>' + sectionAvailabilityHTML('dw-') + '</div>';
+    wireSectionEvents(body, 'dw-', false);
+    document.getElementById('ap-drawer-backdrop').hidden = false;
+    document.getElementById('ap-drawer').hidden = false;
+  }
+  function openSortDrawer() {
+    document.getElementById('ap-drawer-title').textContent = 'Sort By';
+    var body = document.getElementById('ap-drawer-body');
+    body.innerHTML = sectionSortHTML('dw-');
+    wireSectionEvents(body, 'dw-', false);
+    document.getElementById('ap-drawer-backdrop').hidden = false;
+    document.getElementById('ap-drawer').hidden = false;
+  }
+  function closeDrawer() {
+    document.getElementById('ap-drawer-backdrop').hidden = true;
+    document.getElementById('ap-drawer').hidden = true;
+  }
+
+  function clearAll() {
+    filters = { category: 'ALL', brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false };
+    renderAll();
+    closePopover();
   }
 
   function load() {
     get('/api/v1/products?limit=' + PRODUCT_POOL)
       .then(function (json) {
         allItems = extractList(json).map(toItem).filter(Boolean);
-        renderTabs();
-        renderGrid();
+        renderAll();
       })
       .catch(function () {
         document.getElementById('ap-grid').innerHTML = '<div class="ap-empty">Couldn\'t load products right now — please refresh.</div>';
@@ -4372,8 +4854,9 @@
   }
 
   function addItemToCart(el) {
-    var id    = el.getAttribute('data-ap-id');
-    var name  = el.getAttribute('data-ap-name');
+    if (el.getAttribute('data-ap-instock') === '0') return; // out-of-stock — never addable
+    var id = el.getAttribute('data-ap-id');
+    var name = el.getAttribute('data-ap-name');
     var price = Number(el.getAttribute('data-ap-price')) || 0;
     if (!id || typeof window.addToCart !== 'function') return;
     window.addToCart({ id: id, name: name, price: price, type: 'product', unit: 'piece' });
@@ -4381,13 +4864,34 @@
 
   function bind() {
     document.addEventListener('click', function (e) {
-      var tab = e.target.closest('#ap-tabs .ap-tab');
-      if (tab) { activeCat = tab.getAttribute('data-cat'); renderTabs(); renderGrid(); return; }
+      var fbtn = e.target.closest('#ap-filterbar .ap-fbtn[data-filter]');
+      if (fbtn) {
+        var type = fbtn.getAttribute('data-filter');
+        if (openPopoverType === type) closePopover(); else openPopover(type, fbtn);
+        return;
+      }
+      if (e.target.closest('#ap-onsale-btn')) { filters.onSale = !filters.onSale; onFiltersChanged(false); return; }
+      if (e.target.closest('#ap-clearall')) { clearAll(); return; }
+      if (e.target.id === 'ap-empty-clear') { clearAll(); return; }
+      if (e.target.closest('#ap-mobile-filter-btn')) { openDrawer(); return; }
+      if (e.target.closest('#ap-mobile-sort-btn')) { openSortDrawer(); return; }
+      if (e.target.closest('#ap-drawer-close') || e.target.closest('#ap-drawer-backdrop') || e.target.closest('#ap-drawer-apply')) { closeDrawer(); return; }
+      if (e.target.closest('#ap-drawer-clear')) { clearAll(); closeDrawer(); return; }
+      var chipX = e.target.closest('.ap-chip button');
+      if (chipX) {
+        var chip = chipX.closest('.ap-chip');
+        var i = Number(chip.getAttribute('data-chip-i'));
+        var chipsEl = document.getElementById('ap-chips');
+        if (chipsEl._clears && chipsEl._clears[i]) { chipsEl._clears[i](); renderAll(); }
+        return;
+      }
+      if (!e.target.closest('#ap-popover') && !e.target.closest('#ap-filterbar')) closePopover();
       var card = e.target.closest('#all-products .deal-card');
       if (!card) return;
       e.preventDefault();
       addItemToCart(card);
     });
+    window.addEventListener('resize', function () { closePopover(); closeDrawer(); });
   }
 
   function init() {
