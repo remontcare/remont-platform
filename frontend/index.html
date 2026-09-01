@@ -3940,6 +3940,282 @@
   </div>
 </section>
 
+<!-- ═══ HOT DEALS ═══ -->
+<style>
+  /* ── New styles for the working deals section (everything else reuses existing CSS) ── */
+  .deal-card-img.dc-fallback {
+    display: grid;
+    place-items: center;
+    font-size: 40px;
+    background: linear-gradient(135deg, #F5F0E8 0%, #E8E3DA 100%);
+  }
+  .deal-skel {
+    background: linear-gradient(90deg, #EFEAE2 25%, #F7F3EC 50%, #EFEAE2 75%);
+    background-size: 200% 100%;
+    animation: dealShimmer 1.3s linear infinite;
+    border-radius: var(--radius-lg);
+    min-height: 230px;
+  }
+  @keyframes dealShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .deal-card { position: relative; }
+  .deal-card .dc-add {
+    position: absolute; right: 12px; bottom: 12px;
+    width: 34px; height: 34px; border-radius: 50%;
+    border: none; cursor: pointer;
+    background: var(--sienna); color: #fff;
+    font-size: 18px; line-height: 1;
+    display: grid; place-items: center;
+    opacity: 0; transform: translateY(6px); transition: .22s;
+    box-shadow: 0 4px 14px rgba(196,96,26,.35);
+  }
+  .deal-card:hover .dc-add { opacity: 1; transform: translateY(0); }
+  .deal-card .dc-off-badge {
+    position: absolute; left: 12px; top: 12px;
+    background: var(--sienna); color: #fff;
+    font-size: 11px; font-weight: 700; letter-spacing: .3px;
+    padding: 4px 9px; border-radius: 100px;
+  }
+  .df-cta { border: none; cursor: pointer; font-family: inherit; }
+  #deals-countdown { font-variant-numeric: tabular-nums; }
+  @media (max-width: 900px) { .deal-card .dc-add { opacity: 1; transform: none; } }
+</style>
+
+<section id="deals" class="std">
+  <div class="inner">
+
+    <div class="std-header reveal visible">
+      <div>
+        <div class="section-label" data-en="Trending Now" data-hi="अभी ट्रेंडिंग">Trending Now</div>
+        <h2 class="section-title"
+            data-en="Hot Deals on &lt;strong&gt;Home Essentials&lt;/strong&gt;"
+            data-hi="होम एसेंशियल्स पर &lt;strong&gt;बेहतरीन डील्स&lt;/strong&gt;">
+          Hot Deals on <strong>Home Essentials</strong>
+        </h2>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--txt-muted);">
+          <span data-en="Resets in:" data-hi="रीसेट होने में:">Resets in:</span>
+          <strong id="deals-countdown" style="color:var(--sienna);">—</strong>
+        </span>
+        <button type="button" class="btn-primary" id="deals-shop-all"
+                data-en="Shop All Deals" data-hi="सभी डील्स देखें">Shop All Deals</button>
+      </div>
+    </div>
+
+    <div class="deals-grid reveal visible" id="deals-grid">
+      <div class="deal-skel" style="min-height:300px;"></div>
+      <div class="deal-skel"></div>
+      <div class="deal-skel"></div>
+      <div class="deal-skel"></div>
+    </div>
+
+  </div>
+</section>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   HOT DEALS — live product data, real countdown, working add-to-cart
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var DEALS_LIMIT       = 6;    // cards shown next to the feature tile
+  var MIN_DEALS_TO_SHOW  = 3;   // below this the whole section hides itself
+  var PRODUCT_POOL       = 100; // how many products to scan for discounts
+
+  var CAT_EMOJI = {
+    'PLUMBING_PRODUCTS': '🚰', 'ELECTRICAL_PRODUCTS': '💡', 'AC_PRODUCTS': '❄️',
+    'KITCHEN_PRODUCTS': '🍳',  'FURNITURE': '🪑',           'TILES': '🧱',
+    'PAINT_PRODUCTS': '🎨',    'LIGHTING': '💡',            'HARDWARE': '🔧',
+    'CLEANING_PRODUCTS': '🧽', 'APPLIANCE_PRODUCTS': '🏠'
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function inr(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
+  function isHi() { return (typeof window.siteLang !== 'undefined' && window.siteLang === 'HI'); }
+
+  function get(path) {
+    if (typeof window.apiGet === 'function') return window.apiGet(path);
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    return fetch(base + path).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    });
+  }
+
+  /* ── Countdown: deals rotate at local midnight ──────────────────────────── */
+  function startCountdown() {
+    var el = document.getElementById('deals-countdown');
+    if (!el) return;
+    function tick() {
+      var now  = new Date();
+      var end  = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+      var diff = Math.max(0, end - now);
+      var h = Math.floor(diff / 3600000);
+      var m = Math.floor((diff % 3600000) / 60000);
+      var s = Math.floor((diff % 60000) / 1000);
+      el.textContent = isHi()
+        ? (h + 'घं ' + m + 'मि ' + s + 'से')
+        : (h + 'h ' + m + 'm ' + s + 's');
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  /* ── Normalise whatever shape the products API returns ──────────────────── */
+  function extractList(json) {
+    var d = (json && json.data) ? json.data : json;
+    if (Array.isArray(d)) return d;
+    if (d && Array.isArray(d.products)) return d.products;
+    if (d && Array.isArray(d.items))    return d.items;
+    return [];
+  }
+
+  function toDeal(p) {
+    var price = Number(p.price), mrp = Number(p.mrp);
+    if (!price || !mrp || mrp <= price) return null;
+    if (p.isActive === false) return null;
+    if (p.stock != null && Number(p.stock) <= 0) return null;
+    var cat = p.category || {};
+    return {
+      id:      p.id,
+      name:    p.name || 'Product',
+      price:   price,
+      mrp:     mrp,
+      off:     Math.round((1 - price / mrp) * 100),
+      saving:  mrp - price,
+      img:     (p.images && p.images[0]) || null,
+      catName: cat.name || 'Home Essentials',
+      catKey:  cat.key || '',
+      emoji:   cat.icon || CAT_EMOJI[cat.key] || '🏠',
+      brand:   p.brand || ''
+    };
+  }
+
+  function imgMarkup(d) {
+    return d.img
+      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
+      : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
+  }
+
+  function cardHTML(d) {
+    return '' +
+      '<div class="deal-card" data-deal-id="' + esc(d.id) + '" data-deal-name="' + esc(d.name) +
+           '" data-deal-price="' + d.price + '">' +
+        '<span class="dc-off-badge">' + d.off + '% OFF</span>' +
+        imgMarkup(d) +
+        '<div class="deal-card-body">' +
+          '<div class="deal-card-cat">' + esc(d.catName) + '</div>' +
+          '<div class="deal-card-name">' + esc(d.name) + '</div>' +
+          '<div class="deal-card-price">' +
+            '<span class="now">' + inr(d.price) + '</span>' +
+            '<span class="was">' + inr(d.mrp) + '</span>' +
+            '<span class="off">' + d.off + '% off</span>' +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="dc-add" aria-label="Add to cart">+</button>' +
+      '</div>';
+  }
+
+  function featureHTML(d) {
+    var line = isHi()
+      ? ('इस डील पर ' + inr(d.saving) + ' की बचत — प्रमाणित Remont वेंडर्स द्वारा इंस्टॉलेशन उपलब्ध।')
+      : ('Save ' + inr(d.saving) + ' on this deal — installation available through certified Remont vendors.');
+    return '' +
+      '<div class="deal-feature" data-deal-id="' + esc(d.id) + '" data-deal-name="' + esc(d.name) +
+           '" data-deal-price="' + d.price + '">' +
+        '<div class="df-tag">' + (isHi() ? 'सबसे बड़ी बचत' : 'Biggest Saving') + ' · ' + d.off + '% OFF</div>' +
+        '<h3>' + esc(d.name.length > 52 ? d.name.slice(0, 52) + '…' : d.name) + '</h3>' +
+        '<p>' + esc(line) + '</p>' +
+        '<button type="button" class="df-cta">' +
+          (isHi() ? 'अभी खरीदें' : 'Shop Now') + ' – ' + inr(d.price) + ' →' +
+        '</button>' +
+      '</div>';
+  }
+
+  function render(deals) {
+    var grid    = document.getElementById('deals-grid');
+    var section = document.getElementById('deals');
+    if (!grid || !section) return;
+
+    if (deals.length < MIN_DEALS_TO_SHOW) { section.style.display = 'none'; return; }
+    section.style.display = '';
+
+    var byValue = deals.slice().sort(function (a, b) { return b.saving - a.saving; });
+    var feature = byValue[0];
+    var rest    = deals.filter(function (d) { return d.id !== feature.id; }).slice(0, DEALS_LIMIT);
+
+    grid.innerHTML = featureHTML(feature) + rest.map(cardHTML).join('');
+  }
+
+  /* ── Static fallback so the section never renders empty/broken ──────────── */
+  function fallback() {
+    return [
+      { id: 'fb-1', name: 'Premium Single-Lever Mixer Tap', price: 2499, mrp: 3999, off: 37, saving: 1500, img: null, catName: 'Bathroom',  emoji: '🚰', brand: '' },
+      { id: 'fb-2', name: 'Auto-Clean Kitchen Chimney 90cm', price: 14999, mrp: 22000, off: 32, saving: 7001, img: null, catName: 'Kitchen',  emoji: '🍳', brand: '' },
+      { id: 'fb-3', name: 'Modern LED Pendant Light (Set of 3)', price: 4799, mrp: 6999, off: 31, saving: 2200, img: null, catName: 'Lighting', emoji: '💡', brand: '' },
+      { id: 'fb-4', name: 'Italian Marble-Finish Tiles (per sqft)', price: 89, mrp: 140, off: 36, saving: 51, img: null, catName: 'Tiles',    emoji: '🧱', brand: '' }
+    ];
+  }
+
+  function load() {
+    get('/api/v1/products?limit=' + PRODUCT_POOL)
+      .then(function (json) {
+        var deals = extractList(json).map(toDeal).filter(Boolean);
+        deals.sort(function (a, b) { return b.off - a.off; });
+        render(deals.slice(0, DEALS_LIMIT + 1));
+      })
+      .catch(function () { render(fallback()); });
+  }
+
+  /* ── Interactions ─────────────────────────────────────────────────────── */
+  function addDealToCart(el) {
+    var id    = el.getAttribute('data-deal-id');
+    var name  = el.getAttribute('data-deal-name');
+    var price = Number(el.getAttribute('data-deal-price')) || 0;
+    if (!id || typeof window.addToCart !== 'function') return;
+    window.addToCart({ id: id, name: name, price: price, type: 'product', unit: 'piece' });
+  }
+
+  function bind() {
+    document.addEventListener('click', function (e) {
+      if (e.target.closest('#deals-shop-all')) {
+        var shop = document.getElementById('shop');
+        if (shop) {
+          var hdr = document.getElementById('header');
+          var off = (hdr ? hdr.offsetHeight : 70) + 10;
+          var y   = shop.getBoundingClientRect().top + document.documentElement.scrollTop - off;
+          window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+        return;
+      }
+      var host = e.target.closest('#deals .deal-card, #deals .deal-feature');
+      if (!host) return;
+      e.preventDefault();
+      addDealToCart(host);
+    });
+  }
+
+  function init() {
+    startCountdown();
+    bind();
+    load();
+    window.refreshHotDeals = load;   // callable after a city / catalogue change
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
 <!-- ═══ PREMIUM SHOWCASE (Interior · Renovation · Construction) ═══ -->
 <section id="premium" class="std">
   <div class="inner">
@@ -4250,104 +4526,6 @@
           <div class="est-result-note" data-en="* Indicative range. Final quote provided by assigned vendor after site visit." data-hi="* अनुमानित रेंज। फाइनल कोटेशन असाइन किए गए वेंडर द्वारा साइट विज़िट के बाद दिया जाएगा।">* Indicative range. Final quote provided by assigned vendor after site visit.</div>
         </div>
         <button class="est-btn" data-en="Book Free Site Visit →" data-hi="मुफ्त साइट विज़िट बुक करें →">Book Free Site Visit →</button>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ HOT DEALS ═══ -->
-<section id="deals" class="std">
-  <div class="inner">
-    <div class="std-header reveal">
-      <div>
-        <div class="section-label" data-en="Trending Now" data-hi="अभी ट्रेंडिंग">Trending Now</div>
-        <h2 class="section-title" data-en="Hot Deals on &lt;strong&gt;Home Essentials&lt;/strong&gt;" data-hi="होम एसेंशियल्स पर &lt;strong&gt;बेहतरीन डील्स&lt;/strong&gt;">Hot Deals on <strong>Home Essentials</strong></h2>
-      </div>
-      <div style="display:flex;align-items:center;gap:16px;">
-        <span style="font-size:13px;color:var(--txt-muted)" data-en="Ends in: &lt;strong style=&quot;color:var(--sienna)&quot;&gt;23h 14m&lt;/strong&gt;" data-hi="समाप्त होने में: &lt;strong style=&quot;color:var(--sienna)&quot;&gt;23घं 14मि&lt;/strong&gt;">Ends in: <strong style="color:var(--sienna)">23h 14m</strong></span>
-        <a href="#" class="btn-primary" data-en="Shop All Deals" data-hi="सभी डील्स देखें">Shop All Deals</a>
-      </div>
-    </div>
-    <div class="deals-grid reveal">
-      <div class="deal-feature">
-        <div>
-          <div class="df-tag" data-en="Best Seller" data-hi="बेस्ट सेलर">Best Seller</div>
-          <h3 data-en="Split AC&lt;br&gt;1.5 Ton Inverter" data-hi="स्प्लिट AC&lt;br&gt;1.5 टन इन्वर्टर">Split AC<br>1.5 Ton Inverter</h3>
-          <p data-en="Daikin 5-star energy rating with free installation by certified Remont vendors." data-hi="Daikin 5-स्टार एनर्जी रेटिंग, सर्टिफाइड Remont वेंडर द्वारा मुफ्त इंस्टॉलेशन के साथ।">Daikin 5-star energy rating with free installation by certified Remont vendors.</p>
-        </div>
-        <button class="df-cta" data-en="Shop Now – ₹34,990 →" data-hi="अभी खरीदें – ₹34,990 →">Shop Now – ₹34,990 →</button>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1620626011761-996317b8d101?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Bathroom" data-hi="बाथरूम">Bathroom</div>
-          <div class="deal-card-name">Premium Single-Lever Mixer Tap</div>
-          <div class="deal-card-price">
-            <span class="now">₹2,499</span>
-            <span class="was">₹3,999</span>
-            <span class="off">37% off</span>
-          </div>
-        </div>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Kitchen" data-hi="किचन">Kitchen</div>
-          <div class="deal-card-name">Auto-Clean Kitchen Chimney 90cm</div>
-          <div class="deal-card-price">
-            <span class="now">₹14,999</span>
-            <span class="was">₹22,000</span>
-            <span class="off">32% off</span>
-          </div>
-        </div>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Furniture" data-hi="फर्नीचर">Furniture</div>
-          <div class="deal-card-name">Premium Modular Wardrobe — 4 Door</div>
-          <div class="deal-card-price">
-            <span class="now">₹38,990</span>
-            <span class="was">₹54,000</span>
-            <span class="off">28% off</span>
-          </div>
-        </div>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Tiles" data-hi="टाइल्स">Tiles</div>
-          <div class="deal-card-name">Italian Marble-Finish Tiles (per sqft)</div>
-          <div class="deal-card-price">
-            <span class="now">₹89</span>
-            <span class="was">₹140</span>
-            <span class="off">36% off</span>
-          </div>
-        </div>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Lighting" data-hi="लाइटिंग">Lighting</div>
-          <div class="deal-card-name">Modern LED Pendant Light Set of 3</div>
-          <div class="deal-card-price">
-            <span class="now">₹4,799</span>
-            <span class="was">₹6,999</span>
-            <span class="off">31% off</span>
-          </div>
-        </div>
-      </div>
-      <div class="deal-card">
-        <div class="deal-card-img" style="background-image:url('https://images.unsplash.com/photo-1562259929-b4e1fd3aef09?w=400&q=80');"></div>
-        <div class="deal-card-body">
-          <div class="deal-card-cat" data-en="Paint" data-hi="पेंट">Paint</div>
-          <div class="deal-card-name">Asian Paints Royale Aspira (4L)</div>
-          <div class="deal-card-price">
-            <span class="now">₹1,899</span>
-            <span class="was">₹2,650</span>
-            <span class="off">28% off</span>
-          </div>
-        </div>
       </div>
     </div>
   </div>
