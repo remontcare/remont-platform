@@ -5006,7 +5006,7 @@
         <h4 data-en="Not sure where to start?" data-hi="शुरुआत कहां से करें, समझ नहीं आ रहा?">Not sure where to start?</h4>
         <p data-en="Talk to our senior project consultant — 30-minute free consultation, no obligation." data-hi="हमारे सीनियर प्रोजेक्ट कंसल्टेंट से बात करें — 30-मिनट की फ्री कंसल्टेशन, कोई बाध्यता नहीं।">Talk to our senior project consultant — 30-minute free consultation, no obligation.</p>
       </div>
-      <a href="#" class="ps-btn" data-en="Book Free Consultation →" data-hi="फ्री कंसल्टेशन बुक करें →">Book Free Consultation →</a>
+      <a href="#" class="ps-btn" onclick="event.preventDefault();openPremiumLeadModal('Free Project Consultation')" data-en="Book Free Consultation →" data-hi="फ्री कंसल्टेशन बुक करें →">Book Free Consultation →</a>
     </div>
   </div>
 </section>
@@ -5041,7 +5041,7 @@
       <div class="tc-step cta-step reveal reveal-d4">
         <div class="tc-step-num">✓</div>
         <h4 data-en="That's It!" data-hi="बस इतना ही!">That's It!</h4>
-        <button data-en="Try It Now →" data-hi="अभी आज़माएं →">Try It Now →</button>
+        <button type="button" onclick="openRemiChat()" data-en="Try It Now →" data-hi="अभी आज़माएं →">Try It Now →</button>
       </div>
     </div>
   </div>
