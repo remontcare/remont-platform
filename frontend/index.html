@@ -1056,6 +1056,7 @@
     box-shadow: 0 6px 18px rgba(196,96,26,0.10);
   }
   .sub-svc-card .icn { font-size: 24px; margin-bottom: 8px; display: block; }
+  .sub-svc-card .icn img { width: 24px; height: 24px; object-fit: contain; display: block; margin: 0 auto; }
   .sub-svc-card .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); margin-bottom: 4px; line-height: 1.2; }
   .sub-svc-card .pr { font-size: 11px; color: var(--sienna); font-weight: 600; }
   .sub-svc-card .pr small { color: var(--txt-muted); font-weight: 400; text-decoration: line-through; margin-right: 4px; }
@@ -1087,6 +1088,7 @@
   }
   .subcat-tile:hover { border-color: var(--sienna); background: #fff; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(196,96,26,0.10); }
   .subcat-tile .icn { font-size: 30px; margin-bottom: 8px; display: block; }
+  .subcat-tile .icn img { width: 30px; height: 30px; object-fit: contain; display: block; margin: 0 auto; }
   .subcat-tile .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); line-height: 1.2; }
   .subcat-back-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; color: var(--sienna); font-size: 13px; font-weight: 600; }
   @media (max-width: 768px) { .subcat-tile-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -5988,10 +5990,28 @@
   // Escape value for safe use inside inline JS string attributes
   function escJs(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
+  // Renders an uploaded logo/image when set, falling back to the emoji icon —
+  // a category/service/subcategory with a blank/missing emoji otherwise shows
+  // nothing at all. Accepts either .logoUrl (ServiceCategory) or .imageUrl
+  // (SubCategory, Service) — same field priority, just a different admin-side
+  // column name — so this one helper covers all three without duplicating it.
+  // The onerror handler also covers uploads wiped by a backend redeploy (see
+  // uploads.module.ts) — without it a dead url shows a broken image icon.
+  // Defined here (rather than alongside buildServicePanel further down) because
+  // renderService('ac') runs synchronously at page init, before that later
+  // script block executes — this needs to exist before its first real call.
+  function catIconHtml(cat) {
+    var url = cat.logoUrl || cat.imageUrl;
+    if (!url) return '<span>'+(cat.icon||'🔧')+'</span>';
+    url = String(url).replace(/"/g,'&quot;');
+    return '<img src="'+url+'" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\';">'+
+      '<span style="display:none">'+(cat.icon||'🔧')+'</span>';
+  }
+
   function svcCardsHtml(services) {
     return services.map(s => `
       <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''}>
-        <span class="icn">${s.ic}</span>
+        <span class="icn">${catIconHtml({ imageUrl: s.imageUrl || (s.images && s.images[0]), icon: s.ic })}</span>
         <div class="nm">${escHtml(s.n)}</div>
         <div class="pr">${s.o !== '—' ? `<small>${escHtml(s.o)}</small> ` : ''}${escHtml(s.p)} <span class="svc-unit">${escHtml(s.unit || 'per visit')}</span></div>
         ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).map(escHtml).join(' · ')}</div>` : ''}
@@ -6072,7 +6092,7 @@
         <div class="subcat-tile-grid">
           ${d.subCategories.map(sc => `
             <div class="subcat-tile" onclick="renderSubCategoryServices('${key}','${escJs(sc.key)}','${targetId}')">
-              <span class="icn">${sc.icon}</span>
+              <span class="icn">${catIconHtml(sc)}</span>
               <div class="nm">${escHtml(sc.name)}</div>
             </div>
           `).join('')}
@@ -6133,9 +6153,10 @@
     if (!keys.length) return false;
     var tiles = keys.map(function(k) {
       var d = serviceData[k];
-      var icon = (d.subServices[0] || {}).ic || (d.subCategories[0] || {}).icon || '🔧';
+      var fallbackEmoji = (d.subServices[0] || {}).ic || (d.subCategories[0] || {}).icon || '🔧';
+      var iconHtml = catIconHtml({ logoUrl: d.logoUrl, icon: fallbackEmoji });
       return '<div class="subcat-tile" onclick="renderService(\'' + k + '\',\'mobileCatalogPanel\')">' +
-        '<span class="icn">' + icon + '</span><div class="nm">' + d.title + '</div></div>';
+        '<span class="icn">' + iconHtml + '</span><div class="nm">' + d.title + '</div></div>';
     }).join('');
     document.getElementById('mobileCatalogPanel').innerHTML =
       '<div class="sub-row-title">All Service Categories</div><div class="subcat-tile-grid">' + tiles + '</div>';
@@ -8271,17 +8292,6 @@
     applyCityFilter();
   }
 
-  // Renders a category's logo image when set, falling back to the emoji icon —
-  // a category with a blank/missing emoji otherwise shows nothing at all.
-  // The onerror handler also covers uploads wiped by a backend redeploy (see
-  // uploads.module.ts) — without it a dead logoUrl shows a broken image icon.
-  function catIconHtml(cat) {
-    if (!cat.logoUrl) return '<span>'+(cat.icon||'🔧')+'</span>';
-    var url = String(cat.logoUrl).replace(/"/g,'&quot;');
-    return '<img src="'+url+'" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\';">'+
-      '<span style="display:none">'+(cat.icon||'🔧')+'</span>';
-  }
-
   // ── Service categories — load from API ────────────────────────────
   function buildServicePanel(categories) {
     if (!categories || categories.length === 0) return;
@@ -8333,12 +8343,15 @@
         key: cat.key,
         title: cat.name,
         subtitle: cat.description || 'Professional ' + cat.name + ' services',
+        icon: cat.icon || '🔧',
+        logoUrl: cat.logoUrl || null,
         subServices: services.map(function(s){ return mapSvc(s, cat); }),
         subCategories: (cat.subCategories || []).filter(function(sc){ return (sc.services||[]).length; }).map(function(sc){
           return {
             key: sc.key,
             name: sc.name,
             icon: sc.icon || cat.icon || '🔧',
+            imageUrl: sc.imageUrl || null,
             services: sc.services.map(function(s){ return mapSvc(s, cat); }),
           };
         }),
