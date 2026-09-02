@@ -8095,12 +8095,13 @@
     if (!entry) return;
     closeSearchDrop();
     if (entry.type === 'service') {
-      if (entry.id) { openBookingModal(entry.id, entry.name, entry.priceLabel || ''); }
-      else {
-        var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/interior', renovation:'/services/renovation', construction:'/services/construction' };
-        if (svcSubpages[entry.categoryKey]) window.location.href = svcSubpages[entry.categoryKey];
-        else openBookingModal('', entry.name, '');
-      }
+      // Clicking a search result must never jump straight into booking (same principle
+      // as products never adding straight to cart) — navigate to that service's real
+      // section/page instead, whether the match was the category itself or one specific
+      // line item (e.g. "Gas Refill") within it. Booking itself stays a deliberate,
+      // separate action the customer takes from that page/section.
+      var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/interior', renovation:'/services/renovation', construction:'/services/construction' };
+      window.location.href = svcSubpages[entry.categoryKey] || '/';
     } else if (entry.type === 'product') {
       // Clicking a search result must never add to cart (only the +/Add to Cart button
       // does that) — navigate to the real Product Detail page instead. Legacy hardcoded
@@ -8186,22 +8187,6 @@
   _indexProductsFromServiceData();
   _indexServicesFromData();
   _fetchProductsForSearch();
-
-  // /shop's own header search has no booking modal (it's homepage-only), so a
-  // bookable service result clicked there redirects here with ?book=<svcId> and
-  // auto-opens the same modal a homepage search click would — same convention as
-  // the ?openLead=1 redirect used elsewhere for the Premium Interior lead modal.
-  // Deferred to DOMContentLoaded because #bm-svc-id/#bm-service (the booking
-  // modal markup) sit later in the document than this inline script and don't
-  // exist in the DOM yet at this point during initial parsing.
-  (function () {
-    var qp = new URLSearchParams(window.location.search);
-    var bookId = qp.get('book');
-    if (!bookId) return;
-    var openIt = function () { openBookingModal(bookId, qp.get('bookName') || '', qp.get('bookPrice') || ''); };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openIt);
-    else openIt();
-  })();
 
   // ── Voice search (Web Speech API) ──────────────────────────────────
   (function() {

@@ -891,10 +891,9 @@ footer.site a{color:var(--amber)}
    nothing about the existing filters/sort/pagination is touched.
 
    Result clicks: Product → real /product/:slug page (never adds to cart —
-   only the catalog's own +/Add to Cart button does that). Service → the
-   category's real subpage when one exists, otherwise redirects to "/" with
-   ?book=<id> so the homepage (which owns the booking modal) auto-opens the
-   same booking flow a homepage search click would.
+   only the catalog's own +/Add to Cart button does that). Service → that
+   category's real subpage (never opens a booking flow directly — booking
+   stays a deliberate, separate action taken from that page).
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -1231,13 +1230,10 @@ footer.site a{color:var(--amber)}
     if (!entry) return;
     closeSearchDrop();
     if (entry.type === 'service') {
-      if (entry.id) {
-        // No booking modal on this page — hand off to the homepage, which owns
-        // it, using the same ?param redirect convention as ?openLead=1.
-        window.location.href = '/?book=' + encodeURIComponent(entry.id) + '&bookName=' + encodeURIComponent(entry.name) + '&bookPrice=' + encodeURIComponent(entry.priceLabel || '');
-      } else {
-        window.location.href = SVC_SUBPAGES[entry.categoryKey] || '/';
-      }
+      // Never jumps straight into booking (same principle as products never adding
+      // straight to cart) — navigates to that service's real section/page instead,
+      // matching the homepage's own _activateSearchResult behaviour exactly.
+      window.location.href = SVC_SUBPAGES[entry.categoryKey] || '/';
     } else if (entry.type === 'product') {
       // Never adds to cart — only the catalog's own +/Add to Cart button does that.
       window.location.href = '/product/' + encodeURIComponent(entry.slug);
