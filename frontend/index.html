@@ -3502,8 +3502,8 @@
   </div>
 
   <div class="header-search">
-    <div class="cat-select" onclick="toggleSearchScope(this)" title="Switch between services and products">
-      <span id="searchScope" data-en="All Services" data-hi="सभी सेवाएं">All Services</span>
+    <div class="cat-select" onclick="toggleSearchScope(this)" title="Switch search scope: All / Services / Products">
+      <span id="searchScope" data-en="All" data-hi="सभी">All</span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <input type="text" id="headerSearchInput" placeholder='Try "AC not cooling" or browse "modular kitchen"...' data-en-ph='Try "AC not cooling" or browse "modular kitchen"...' data-hi-ph='जैसे "AC ठंडा नहीं हो रहा" या "मॉड्यूलर किचन" खोजें...' />
@@ -6850,24 +6850,17 @@
   // HEADER SEARCH SCOPE TOGGLE: Services ↔ Products
   // Lets customer browse directly for products from the header search.
   // ═══════════════════════════════════════════════════════════════════
+  // Cycles the header's type-selector pill through All → Services → Products → All
+  // and delegates entirely to setSearchScope() (defined below, in the search block)
+  // so the visible label and the ACTUAL result filtering (_searchScope) never drift
+  // apart again — previously this only changed text/placeholder and never touched
+  // the variable _runUnifiedSearch() reads, so the selector looked functional but
+  // did nothing.
   function toggleSearchScope(el) {
-    const scope = document.getElementById('searchScope');
-    const input = document.getElementById('headerSearchInput');
-    const toProducts = scope.dataset.scope !== 'products';
-    scope.dataset.scope = toProducts ? 'products' : 'services';
-    if (toProducts) {
-      scope.setAttribute('data-en', 'All Products');
-      scope.setAttribute('data-hi', 'सभी प्रोडक्ट्स');
-      input.setAttribute('data-en-ph', 'Search products — "Daikin AC", "modular kitchen"...');
-      input.setAttribute('data-hi-ph', 'जैसे "Daikin AC" या "मॉड्यूलर किचन" खोजें...');
-    } else {
-      scope.setAttribute('data-en', 'All Services');
-      scope.setAttribute('data-hi', 'सभी सेवाएं');
-      input.setAttribute('data-en-ph', 'Try "AC not cooling" or "tap leaking"...');
-      input.setAttribute('data-hi-ph', 'जैसे "AC ठंडा नहीं हो रहा" या "टोंटी लीक हो रही" खोजें...');
-    }
-    scope.textContent = (typeof siteLang !== 'undefined' && siteLang === 'HI') ? scope.getAttribute('data-hi') : scope.getAttribute('data-en');
-    input.placeholder = (typeof siteLang !== 'undefined' && siteLang === 'HI') ? input.getAttribute('data-hi-ph') : input.getAttribute('data-en-ph');
+    var order = ['all', 'service', 'product'];
+    var current = (typeof _searchScope !== 'undefined') ? _searchScope : 'all';
+    var next = order[(order.indexOf(current) + 1) % order.length];
+    if (typeof setSearchScope === 'function') setSearchScope(next);
   }
 </script>
 
@@ -8030,10 +8023,33 @@
       }).join('') + '</div>';
   }
 
+  // Single source of truth for the search scope — used by BOTH the header
+  // type-selector pill (toggleSearchScope, above) and the in-dropdown scope tabs
+  // (_scopeTabsHtml's onclick). Updates _searchScope (what _runUnifiedSearch
+  // actually filters on), the pill's label, and the input's placeholder — all in
+  // one place, and keeps their data-en/data-hi attributes in sync so the EN/HI
+  // language toggle (applySiteLang) doesn't stomp them back to a stale value.
+  var SEARCH_SCOPE_LABELS = { all: ['All', 'सभी'], service: ['All Services', 'सभी सेवाएं'], product: ['All Products', 'सभी प्रोडक्ट्स'] };
+  var SEARCH_SCOPE_PLACEHOLDERS = {
+    all:     ['Try "AC not cooling" or browse "modular kitchen"...', 'जैसे "AC ठंडा नहीं हो रहा" या "मॉड्यूलर किचन" खोजें...'],
+    service: ['Try "AC not cooling" or "tap leaking"...', 'जैसे "AC ठंडा नहीं हो रहा" या "टोंटी लीक हो रही" खोजें...'],
+    product: ['Search products — "Daikin AC", "modular kitchen"...', 'जैसे "Daikin AC" या "मॉड्यूलर किचन" खोजें...']
+  };
   function setSearchScope(scope) {
+    if (!SEARCH_SCOPE_LABELS[scope]) scope = 'all';
     _searchScope = scope;
+    var isHiNow = (typeof siteLang !== 'undefined' && siteLang === 'HI');
     var pill = document.getElementById('searchScope');
-    if (pill) pill.textContent = scope === 'service' ? 'All Services' : (scope === 'product' ? 'All Products' : 'All');
+    if (pill) {
+      pill.setAttribute('data-en', SEARCH_SCOPE_LABELS[scope][0]);
+      pill.setAttribute('data-hi', SEARCH_SCOPE_LABELS[scope][1]);
+      pill.textContent = isHiNow ? SEARCH_SCOPE_LABELS[scope][1] : SEARCH_SCOPE_LABELS[scope][0];
+    }
+    if (headerInput) {
+      headerInput.setAttribute('data-en-ph', SEARCH_SCOPE_PLACEHOLDERS[scope][0]);
+      headerInput.setAttribute('data-hi-ph', SEARCH_SCOPE_PLACEHOLDERS[scope][1]);
+      headerInput.placeholder = isHiNow ? SEARCH_SCOPE_PLACEHOLDERS[scope][1] : SEARCH_SCOPE_PLACEHOLDERS[scope][0];
+    }
     runSearch(headerInput.value);
   }
 
@@ -8086,9 +8102,13 @@
         else openBookingModal('', entry.name, '');
       }
     } else if (entry.type === 'product') {
+      // Clicking a search result must never add to cart (only the +/Add to Cart button
+      // does that) — navigate to the real Product Detail page instead. Legacy hardcoded
+      // placeholder products (seeded from serviceData before the real catalog loads) have
+      // no real slug/DB row, so they fall back to the full catalog rather than a dead link.
       var p = entry._productMeta || {};
-      addToCart({ id: p.id || entry.id, name: entry.name, price: parseFloat((p.price || '0').toString().replace(/,/g, '')) || 0, type: 'product' });
-      openCart();
+      var slug = p.slug || entry.slug || null;
+      window.location.href = slug ? ('/product/' + encodeURIComponent(slug)) : '/shop';
     } else if (entry.type === 'plan' || entry.type === 'page' || entry.type === 'city') {
       if (entry.url) window.location.href = entry.url;
     }
@@ -8166,6 +8186,22 @@
   _indexProductsFromServiceData();
   _indexServicesFromData();
   _fetchProductsForSearch();
+
+  // /shop's own header search has no booking modal (it's homepage-only), so a
+  // bookable service result clicked there redirects here with ?book=<svcId> and
+  // auto-opens the same modal a homepage search click would — same convention as
+  // the ?openLead=1 redirect used elsewhere for the Premium Interior lead modal.
+  // Deferred to DOMContentLoaded because #bm-svc-id/#bm-service (the booking
+  // modal markup) sit later in the document than this inline script and don't
+  // exist in the DOM yet at this point during initial parsing.
+  (function () {
+    var qp = new URLSearchParams(window.location.search);
+    var bookId = qp.get('book');
+    if (!bookId) return;
+    var openIt = function () { openBookingModal(bookId, qp.get('bookName') || '', qp.get('bookPrice') || ''); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openIt);
+    else openIt();
+  })();
 
   // ── Voice search (Web Speech API) ──────────────────────────────────
   (function() {
