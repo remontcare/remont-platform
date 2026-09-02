@@ -3755,12 +3755,12 @@
 <!-- ═══ CATEGORY NAV ═══ -->
 <div class="cat-nav">
   <div class="cat-nav-inner">
-    <a href="/shop" class="cat-link active"><span class="ic">⚡</span> <span data-en="Quick Repair" data-hi="त्वरित रिपेयर">Quick Repair</span></a>
-    <a href="/shop?category=AC-HVAC" class="cat-link"><span class="ic">❄️</span> <span data-en="AC Service" data-hi="AC सर्विस">AC Service</span></a>
-    <a href="/shop?category=PLUMBING" class="cat-link"><span class="ic">🔧</span> <span data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</span></a>
-    <a href="/shop?category=ELECTRICAL" class="cat-link"><span class="ic">💡</span> <span data-en="Electrical" data-hi="इलेक्ट्रिकल">Electrical</span></a>
-    <a href="/shop?category=KITCHEN" class="cat-link"><span class="ic">📺</span> <span data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</span></a>
-    <a href="/shop?category=CLEANING_SUPPLIES" class="cat-link"><span class="ic">🧹</span> <span data-en="Cleaning" data-hi="सफाई">Cleaning</span></a>
+    <a href="#shop" class="cat-link active"><span class="ic">⚡</span> <span data-en="Quick Repair" data-hi="त्वरित रिपेयर">Quick Repair</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">❄️</span> <span data-en="AC Service" data-hi="AC सर्विस">AC Service</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">🔧</span> <span data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">💡</span> <span data-en="Electrical" data-hi="इलेक्ट्रिकल">Electrical</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">📺</span> <span data-en="Appliance Repair" data-hi="अप्लायंस रिपेयर">Appliance Repair</span></a>
+    <a href="#shop" class="cat-link"><span class="ic">🧹</span> <span data-en="Cleaning" data-hi="सफाई">Cleaning</span></a>
     <a href="#premium" class="cat-link premium-link"><span class="ic">✨</span> <span data-en="Interior · Renovation · Construction" data-hi="इंटीरियर · रेनोवेशन · कंस्ट्रक्शन">Interior · Renovation · Construction</span></a>
     <a href="#all-products" class="cat-link"><span class="ic">🛍️</span> <span data-en="Shop Products" data-hi="प्रोडक्ट्स खरीदें">Shop Products</span></a>
     <a href="#amc" class="cat-link amc"><span class="ic">📅</span> <span data-en="AMC Plans" data-hi="AMC प्लान">AMC Plans</span></a>
@@ -8368,24 +8368,12 @@
 
     // Update cat-nav — each chip actually selects its matching category in the #shop
     // panel (was: every chip pointed at the same generic href="#shop" with no filtering).
-    // Six of these chips (AC/Plumbing/Electrical/Appliance/Cleaning/Quick Repair) instead
-    // deep-link to the real /shop PRODUCT catalog with its matching product category
-    // pre-applied (see shop.html's load(), which reads ?category= into the existing
-    // filters.category state) — Quick Repair has no corresponding product category, so
-    // it opens /shop unfiltered rather than to an always-empty result set. Every other
-    // chip (Interior, Renovation, Construction, Pest Control, ...) keeps its existing
-    // #shop + selectCategoryChip() behaviour unchanged.
-    var PRODUCT_CAT_FOR_CHIP = { ac: 'AC-HVAC', plumbing: 'PLUMBING', electrical: 'ELECTRICAL', appliance: 'KITCHEN', cleaning: 'CLEANING_SUPPLIES' };
     var catNav = document.querySelector('.cat-nav-inner');
     if (catNav) {
-      var navLinks = ['<a href="/shop" class="cat-link active"><span class="ic">⚡</span> Quick Repair</a>'];
+      var navLinks = ['<a href="#shop" class="cat-link active" onclick="selectCategoryChip(this,\'ac\')"><span class="ic">⚡</span> Quick Repair</a>'];
       categories.forEach(function(cat){
         var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
-        if (PRODUCT_CAT_FOR_CHIP[fkey]) {
-          navLinks.push('<a href="/shop?category='+encodeURIComponent(PRODUCT_CAT_FOR_CHIP[fkey])+'" class="cat-link'+(cat.isPremium?' premium-link':'')+'"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
-        } else {
-          navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
-        }
+        navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
       });
       navLinks.push('<a href="#all-products" class="cat-link"><span class="ic">🛍️</span> Shop Products</a>');
       navLinks.push('<a href="#amc" class="cat-link amc"><span class="ic">📅</span> AMC Plans</a>');
