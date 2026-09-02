@@ -459,8 +459,15 @@ footer.site a{color:var(--amber)}
       '</div>';
   }
 
+  // A category chip elsewhere on the site (e.g. the homepage's AC/Plumbing/Electrical/
+  // Appliance/Cleaning nav chips) can deep-link here as /shop?category=<key> to arrive
+  // with that category already applied — reuses this exact same filters.category state
+  // the Category popover/chips/Clear-All already read and write, so nothing about the
+  // filtering mechanism itself changes; it's just seeded from the URL once, up front.
+  var INITIAL_CATEGORY = (new URLSearchParams(window.location.search).get('category') || 'ALL').trim() || 'ALL';
+
   var allItems = [];
-  var filters = { category: 'ALL', brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false };
+  var filters = { category: INITIAL_CATEGORY, brands: [], priceMin: null, priceMax: null, discountMin: 0, availability: ['IN_STOCK'], onSale: false };
   var sortBy = 'relevance';
   var openPopoverType = null;
 
