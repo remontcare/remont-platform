@@ -3,8 +3,9 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
-import { JwtAuthGuard, RolesGuard, Roles, Public } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles } from '../../common';
 import { UserRole } from '@prisma/client';
+import { UploadSecurityInterceptor } from './upload-security.interceptor';
 
 // Task 3 — one-click image/video upload, stored on Cloudinary (not local disk). Category,
 // sub-category, service and product images/videos all flow through this one module, so this
@@ -43,20 +44,47 @@ export function assertCloudinaryConfigured(): void {
 // Exported so other modules (e.g. ai-enrichment.module.ts, which fetches AI-found/generated
 // images as raw bytes, not multipart form uploads) can reuse the same Cloudinary pipeline
 // instead of duplicating it.
+//
+// Web-optimized delivery, whatever the input size — a 20MB DSLR photo or a 50MB phone
+// panorama must never sit around at full size:
+//  - `transformation` is the MAIN upload transformation, applied before Cloudinary stores
+//    anything — this caps what's actually STORED (the "master"), not just what's served on
+//    delivery. Images: capped at 2000px on the longest side (w_2000,h_2000,c_limit only
+//    scales down when a dimension exceeds it, so it never upscales a smaller original).
+//    Video: quality:'auto' so the stored master itself isn't full-bitrate raw (kept to this
+//    minimum rather than a streaming_profile HLS transcode, which needs a Cloudinary
+//    add-on that may not be enabled on every plan and could otherwise break uploads).
+//  - `eager` (images only) pre-generates and caches the three named delivery variants at
+//    upload time — not on each one's first delivery request — every one f_auto,q_auto
+//    (auto format + auto quality, i.e. WebP/AVIF served automatically per-browser) rather
+//    than the previous hardcoded f_webp,q_auto:good.
 export function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video'): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
+    const options: Record<string, any> = { folder: 'remont', resource_type: resourceType };
+    if (resourceType === 'image') {
+      options.transformation = [{ width: 2000, height: 2000, crop: 'limit' }];
+      options.eager = [
+        { width: 200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
+        { width: 600, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
+        { width: 1200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
+      ];
+      options.eager_async = false; // the response needs all three variant URLs synchronously
+    } else {
+      options.transformation = [{ quality: 'auto' }];
+    }
     const stream = cloudinary.uploader.upload_stream(
-      { folder: 'remont', resource_type: resourceType },
+      options,
       (err, result) => (err || !result) ? reject(err || new Error('Cloudinary upload failed')) : resolve(result),
     );
     stream.end(buffer);
   });
 }
 
-// Cloudinary serves resized/re-encoded variants on the fly by inserting a transformation
-// segment into the delivery URL — no need to pre-generate and store separate files per size.
+// Fallback only — used if Cloudinary's eager array ever comes back short (should not happen
+// in normal operation). f_auto,q_auto to match the eager variants, not the old
+// f_webp,q_auto:good.
 function cloudinaryResize(secureUrl: string, width: number): string {
-  return secureUrl.replace('/upload/', `/upload/w_${width},c_limit,f_webp,q_auto:good/`);
+  return secureUrl.replace('/upload/', `/upload/w_${width},c_limit,f_auto,q_auto/`);
 }
 
 @Injectable()
@@ -67,11 +95,14 @@ export class UploadsService {
     assertCloudinaryConfigured();
 
     const result = await uploadBuffer(file.buffer, 'image');
+    const eager = result.eager || [];
     return {
-      thumb: cloudinaryResize(result.secure_url, 200),
-      card: cloudinaryResize(result.secure_url, 600),
-      full: cloudinaryResize(result.secure_url, 1200),
-      url: cloudinaryResize(result.secure_url, 1200),
+      thumb: eager[0]?.secure_url || cloudinaryResize(result.secure_url, 200),
+      card: eager[1]?.secure_url || cloudinaryResize(result.secure_url, 600),
+      full: eager[2]?.secure_url || cloudinaryResize(result.secure_url, 1200),
+      // The 2000px-capped master (the `transformation` above already applied it on upload —
+      // this is never the raw, unbounded-resolution original).
+      url: result.secure_url,
       publicId: result.public_id,
     };
   }
@@ -94,23 +125,28 @@ export class UploadsService {
 export class UploadsController {
   constructor(private uploads: UploadsService) {}
 
-  // @Roles is per-route here (not controller-level) specifically so the public
-  // lead-photo route below can have no role requirement at all — RolesGuard reads
-  // @Roles via getAllAndOverride(handler, then class), so a controller-level @Roles
-  // would still apply to every route including ones marked @Public(), and then throw
-  // ("User not authenticated") since @Public() only skips JwtAuthGuard, never RolesGuard.
+  // @Roles is per-route here (not controller-level) specifically so lead-photo below can
+  // have no role requirement at all — RolesGuard reads @Roles via getAllAndOverride
+  // (handler, then class), so a controller-level @Roles would still apply to every route,
+  // including a @Public() one, and then throw ("User not authenticated") since @Public()
+  // only skips JwtAuthGuard, never RolesGuard.
   // PRODUCT_VENDOR included so sellers can upload real product images (incl. ones
   // found/generated via the paid ai-enrichment flow) as hosted Cloudinary URLs instead of
   // only the pre-existing client-side base64 fallback in seller.html.
   // Phase 6 — CUSTOMER included so a customer can attach evidence photos (damaged/wrong
   // product, warranty claim) to a support/return/warranty case. The handler has no admin-only
   // side effect (returns Cloudinary URLs only), so this is a safe, minimal widening.
+  // UploadSecurityInterceptor MUST come after FileInterceptor in this list — it reads
+  // req.file, which only exists once FileInterceptor has parsed the multipart body. One
+  // shared implementation covers content-type validation, dangerous-signature blocking, the
+  // image megapixel ceiling, and malware scanning identically for all three routes; see
+  // upload-security.interceptor.ts — nothing route-specific is duplicated here.
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.PRODUCT_VENDOR, UserRole.CUSTOMER)
   @Post('image')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
     limits: { fileSize: 8 * 1024 * 1024 }, // 8MB — generous for a single photo, matches the existing 5MB client-side check with headroom
-  }))
+  }), UploadSecurityInterceptor)
   uploadImage(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.processAndStore(file);
   }
@@ -120,25 +156,25 @@ export class UploadsController {
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
     limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — generous for a short promo clip
-  }))
+  }), UploadSecurityInterceptor)
   uploadVideo(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.storeVideo(file);
   }
 
-  // Public — the only unauthenticated route on this controller (@Public() overrides the
-  // controller-level admin guard for this one route, same pattern already used for
-  // POST /crm/leads/capture). Lets a customer attach a reference photo to a quotation
-  // request (Renovation/Construction premium lead forms) without an account. Reuses the
-  // exact same processAndStore() pipeline as the admin image upload — same WebP/size
-  // limits, same Cloudinary storage — just reachable without a JWT. A smaller size cap
-  // than the admin route (5MB, matching the client-side check the lead forms already do)
-  // plus the app-wide rate limiter (ThrottlerModule, 200 req/min) are the abuse guards.
-  @Public()
+  // SECURITY — this route used to be @Public() (no login required at all), so anyone could
+  // upload arbitrary files to Cloudinary through the lead-capture form with zero
+  // authentication. It now requires the same OTP-issued JwtAuthGuard as the other two
+  // routes; no @Roles() restriction is declared (RolesGuard no-ops when no roles are set —
+  // see uploads.module.spec.ts), so ANY authenticated user — customer, vendor, or admin, not
+  // one specific role — can attach a reference photo to a quotation request. The frontend
+  // lead-capture flow (frontend/index.html submitQuotation()) only prompts for a quick
+  // phone+OTP login when a photo is actually attached (openAuthModal(), same pattern as
+  // subscribeAmc()) — submitting the quote request itself stays fully anonymous.
   @Post('lead-photo')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
-  }))
+  }), UploadSecurityInterceptor)
   uploadLeadPhoto(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.processAndStore(file);
   }
@@ -146,6 +182,6 @@ export class UploadsController {
 
 @Module({
   controllers: [UploadsController],
-  providers: [UploadsService],
+  providers: [UploadsService, UploadSecurityInterceptor],
 })
 export class UploadsModule {}

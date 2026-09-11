@@ -5597,9 +5597,11 @@
 <!-- ═══ RENOVATION / CONSTRUCTION QUOTATION MODAL ═══
      One modal, two modes (renovation | construction) — see openQuotationModal().
      Same backdrop/panel pattern as the City Selector and Premium Interior modals.
-     Posts to the same real, already-live public CRM lead-capture endpoint; an
-     optional reference photo goes through the new public lead-photo upload route
-     first (backend/src/modules/uploads/uploads.module.ts: POST /uploads/lead-photo). -->
+     Posts to the same real, already-live public CRM lead-capture endpoint. An optional
+     reference photo goes through POST /uploads/lead-photo first
+     (backend/src/modules/uploads/uploads.module.ts), which requires login — attaching a
+     photo prompts a quick OTP login if the visitor isn't already signed in (see
+     submitQuotation()); submitting without a photo stays fully anonymous. -->
 <div class="city-modal-backdrop" id="quoteBackdrop" onclick="closeQuotationModal()"></div>
 <div class="city-modal" id="quoteModal" role="dialog" aria-label="Get a quotation">
   <div class="cm-head">
@@ -6660,10 +6662,10 @@
   // ═══════════════════════════════════════════════════════════════════
   // RENOVATION / CONSTRUCTION QUOTATION — one modal, two field sets. Same
   // real, already-live public CRM endpoint as the Premium Interior modal
-  // above; the optional photo goes through the new public lead-photo
-  // upload route first (backend/src/modules/uploads: POST
-  // /api/v1/uploads/lead-photo — @Public(), separate from the admin-only
-  // image/video upload routes on the same controller).
+  // above; the optional photo goes through POST /api/v1/uploads/lead-photo
+  // (backend/src/modules/uploads), which now requires a logged-in user
+  // (any role) — see submitQuotation()'s auth gate below. The quote
+  // request itself stays fully anonymous when no photo is attached.
   // ═══════════════════════════════════════════════════════════════════
   let _quoteMode = 'renovation';
   let _quotePhotoFile = null;
@@ -6725,6 +6727,20 @@
 
   function submitQuotation(event) {
     event.preventDefault();
+
+    // SECURITY — /uploads/lead-photo now requires a logged-in user (was previously
+    // reachable with no auth at all). Only gate on login when a photo is actually
+    // attached; submitting the quote request itself stays fully anonymous, exactly as
+    // before. Mirrors subscribeAmc()'s check-then-resume pattern: an already-logged-in
+    // visitor (a token already in localStorage) sees no prompt at all and this check is a
+    // no-op; otherwise openAuthModal() shows a quick phone+OTP step and, on successful
+    // verification, automatically re-runs this exact call (same captured `event` —
+    // calling preventDefault() on it again is harmless) to continue the upload+submit.
+    if (_quotePhotoFile && !localStorage.getItem('remont_token')) {
+      openAuthModal(function () { submitQuotation(event); });
+      return;
+    }
+
     const name = document.getElementById('qName').value.trim();
     const phone = document.getElementById('qPhone').value.trim();
     const city = document.getElementById('qCity').value.trim();
@@ -6772,7 +6788,14 @@
       ? (function () {
           const fd = new FormData();
           fd.append('file', _quotePhotoFile);
-          return fetch('/api/v1/uploads/lead-photo', { method: 'POST', body: fd })
+          // The auth gate above guarantees a token is present whenever _quotePhotoFile is
+          // set — this endpoint now requires it (401 without it).
+          const token = localStorage.getItem('remont_token');
+          return fetch('/api/v1/uploads/lead-photo', {
+            method: 'POST',
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+            body: fd,
+          })
             .then(function (res) { if (!res.ok) throw new Error('Photo upload failed'); return res.json(); })
             .then(function (d) { return capture((d && d.data ? d.data.url : d.url)); });
         })()
