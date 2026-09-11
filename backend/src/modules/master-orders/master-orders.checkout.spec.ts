@@ -63,7 +63,7 @@ function makeService() {
         return { ...mo, childOrders };
       }),
     },
-    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID' })) },
+    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })) },
     walletTransaction: { create: jest.fn() },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
@@ -101,7 +101,14 @@ function makeService() {
   const memberships: any = { getActiveDiscount: jest.fn(async () => 0) };
   const coupons: any = { validate: jest.fn(), recordUsage: jest.fn() };
   const cities: any = { getByName: jest.fn(), getServicePrice: jest.fn() };
-  const payments: any = { initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })) };
+  const payments: any = {
+    initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
+    // These specs test checkout/grouping/idempotency, not payment-amount verification — a
+    // large "always sufficient" captured amount keeps confirmPayment()'s new trusted-amount
+    // check (see master-orders.confirmPayment.spec.ts for the dedicated coverage of that)
+    // out of their way.
+    getVerifiedCapturedAmount: jest.fn(async () => 1e9),
+  };
   const dispatch: any = { dispatch: jest.fn(async () => []) };
   const routing: any = { route: jest.fn(async () => {}) };
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };

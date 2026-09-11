@@ -796,7 +796,31 @@ export class OrdersService {
     return order;
   }
 
-  async confirmPayment(orderId: string, paymentId: string, gatewayOrderId?: string, signature?: string) {
+  async confirmPayment(orderId: string, paymentId: string, gatewayOrderId?: string, signature?: string, callerUserId?: string) {
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!existing) throw new NotFoundException('Order not found');
+
+    // PAYMENT SECURITY — authorization: only applies when called from the JWT-authenticated
+    // controller (callerUserId passed in). The public/guest confirm-payment route has no
+    // login to check against and is unaffected — same "guest-safe" design as retryPayment().
+    if (callerUserId && existing.customerId !== callerUserId) {
+      throw new ForbiddenException();
+    }
+
+    if (existing.paymentStatus === 'PAID') return existing; // Idempotent
+
+    // Allowed up to VENDOR_EN_ROUTE (not just the initial PENDING_PAYMENT confirmation) so
+    // a COD order can convert to Online any time before work actually starts, per the
+    // "convert COD to Online anytime before work starts" requirement — without this, calling
+    // confirm-payment on an already-CONFIRMED/assigned COD order would be rejected outright.
+    const confirmableStatuses: OrderStatus[] = [
+      OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED, OrderStatus.VENDOR_ASSIGNED, OrderStatus.VENDOR_EN_ROUTE,
+    ];
+    if (!confirmableStatuses.includes(existing.status)) {
+      throw new BadRequestException('Order cannot be confirmed in its current state');
+    }
+
+    let verifiedGatewayOrderId: string;
     if (gatewayOrderId && signature) {
       // Re-verify HMAC on every confirm call — cannot be faked without RAZORPAY_KEY_SECRET
       if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
@@ -811,25 +835,25 @@ export class OrdersService {
         where: { gatewayOrderId, orderId },
       });
       if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
+      verifiedGatewayOrderId = gatewayOrderId;
     } else {
       // Fallback: require a pre-verified PaymentTransaction (set by webhook or /payments/verify)
-      const tx = await this.prisma.paymentTransaction.findFirst({ where: { orderId, status: 'PAID' } });
-      if (!tx) throw new BadRequestException('Payment not verified. Contact support.');
+      // for this EXACT paymentId, linked to this order — not just any PAID row on the order.
+      const tx = await this.prisma.paymentTransaction.findFirst({
+        where: { orderId, status: 'PAID', gatewayPaymentId: paymentId },
+      });
+      if (!tx || !tx.gatewayOrderId) throw new BadRequestException('Payment not verified. Contact support.');
+      verifiedGatewayOrderId = tx.gatewayOrderId;
     }
 
-    const existing = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!existing) throw new NotFoundException('Order not found');
-    if (existing.paymentStatus === 'PAID') return existing; // Idempotent
-
-    // Allowed up to VENDOR_EN_ROUTE (not just the initial PENDING_PAYMENT confirmation) so
-    // a COD order can convert to Online any time before work actually starts, per the
-    // "convert COD to Online anytime before work starts" requirement — without this, calling
-    // confirm-payment on an already-CONFIRMED/assigned COD order would be rejected outright.
-    const confirmableStatuses: OrderStatus[] = [
-      OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED, OrderStatus.VENDOR_ASSIGNED, OrderStatus.VENDOR_EN_ROUTE,
-    ];
-    if (!confirmableStatuses.includes(existing.status)) {
-      throw new BadRequestException('Order cannot be confirmed in its current state');
+    // PAYMENT SECURITY — a valid signature only proves *a* payment happened; it never proves
+    // it covers this order's real price. Re-derive what Razorpay actually captured for this
+    // exact payment (never the client-supplied amount, never our own locally-stored
+    // PaymentTransaction.amount) and compare against the order's server-side total before
+    // trusting it as "paid". Overpayment is allowed through unchanged; underpayment is not.
+    const capturedAmount = await this.payments.getVerifiedCapturedAmount(verifiedGatewayOrderId, paymentId);
+    if (capturedAmount + 0.01 < Number(existing.totalAmount)) {
+      throw new BadRequestException('Payment amount does not cover the order total. Please contact support.');
     }
 
     const wasPendingPayment = existing.status === OrderStatus.PENDING_PAYMENT;
@@ -1900,7 +1924,7 @@ export class OrdersController {
   constructor(private orders: OrdersService, private extras: ExtraWorkService) {}
 
   @Post() create(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.create(u.sub, dto); }
-  @Post(':id/confirm-payment') pay(@Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature); }
+  @Post(':id/confirm-payment') pay(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
   @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
   @Patch(':id/cancel') cancel(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) {

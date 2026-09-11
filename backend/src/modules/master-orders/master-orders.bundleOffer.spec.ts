@@ -50,7 +50,7 @@ function makeService(bundlePercentSetting: string | null = null) {
         return { ...mo, childOrders };
       }),
     },
-    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID' })) },
+    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })) },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
         product: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -88,7 +88,10 @@ function makeService(bundlePercentSetting: string | null = null) {
   const memberships: any = { getActiveDiscount: jest.fn(async () => 0) };
   const coupons: any = { validate: jest.fn(), recordUsage: jest.fn() };
   const cities: any = { getByName: jest.fn(), getServicePrice: jest.fn() };
-  const payments: any = { initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })) };
+  const payments: any = {
+    initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
+    getVerifiedCapturedAmount: jest.fn(async () => 1e9),
+  };
   const dispatch: any = { dispatch: jest.fn(async () => []) };
   const routing: any = { route: jest.fn(async () => {}) };
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };

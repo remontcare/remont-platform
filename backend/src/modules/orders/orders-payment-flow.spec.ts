@@ -29,6 +29,7 @@ function makeService() {
   const payments: any = {
     initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
     createPaymentLink: jest.fn(async () => null),
+    getVerifiedCapturedAmount: jest.fn(),
   };
   const dispatch: any = { dispatch: jest.fn(async () => {}) };
   const routing: any = { route: jest.fn(async () => {}) };
@@ -336,6 +337,169 @@ describe('OrdersService.collectBalance — Section 6/7 "Collect Payment" at comp
 
     expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-a', 'COD_COLLECTION', -300, expect.objectContaining({ orderId: 'o1' }));
     expect(prisma.serviceVendor.update).toHaveBeenCalledWith({ where: { id: 'vendor-a' }, data: { pendingPayout: { decrement: 300 } } });
+  });
+});
+
+describe('OrdersService.confirmPayment — PAYMENT SECURITY: a valid signature must never be enough on its own', () => {
+  const SECRET = 'test-razorpay-secret';
+  function sign(gatewayOrderId: string, paymentId: string) {
+    return require('crypto').createHmac('sha256', SECRET).update(`${gatewayOrderId}|${paymentId}`).digest('hex');
+  }
+  const gatewayOrderId = 'rzp_order_1';
+  const paymentId = 'pay_1';
+
+  beforeEach(() => { process.env.RAZORPAY_KEY_SECRET = SECRET; });
+
+  function pendingOrder(overrides: any = {}) {
+    return {
+      id: 'o1', orderNumber: 'REM-1', customerId: 'cust-1', totalAmount: 5000,
+      status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', serviceId: 'svc-1',
+      ...overrides,
+    };
+  }
+
+  // A. Correct full payment → SUCCESS
+  it('A. confirms and dispatches when the Razorpay-verified captured amount exactly covers the order total', async () => {
+    const { svc, prisma, routing, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' }); // linkedTx
+    payments.getVerifiedCapturedAmount.mockResolvedValue(5000);
+    // The real Prisma update() returns the full row; this shared mock only echoes back the
+    // update payload (no serviceId), so mirror switchToCod()'s test pattern above and supply
+    // it explicitly — otherwise the dispatch guard (order.serviceId && wasPendingPayment)
+    // would see serviceId as undefined regardless of what confirmPayment() actually did.
+    prisma.order.update.mockImplementation(async (args: any) => ({ id: 'o1', serviceId: 'svc-1', ...args.data }));
+
+    const sig = sign(gatewayOrderId, paymentId);
+    const result = await svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1');
+
+    expect(payments.getVerifiedCapturedAmount).toHaveBeenCalledWith(gatewayOrderId, paymentId);
+    expect(prisma.order.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'o1' },
+      data: expect.objectContaining({ paymentStatus: 'PAID', status: 'CONFIRMED' }),
+    }));
+    expect(result.paymentStatus).toBe('PAID');
+    expect(routing.route).toHaveBeenCalledWith('o1');
+  });
+
+  // B. Lower payment amount → REJECTED
+  it('B. rejects — and never marks the order PAID or dispatches — when the captured amount is less than the order total', async () => {
+    const { svc, prisma, routing, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' });
+    payments.getVerifiedCapturedAmount.mockResolvedValue(1); // attacker paid ₹1 against a ₹5,000 order
+
+    const sig = sign(gatewayOrderId, paymentId);
+    await expect(svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1')).rejects.toThrow(BadRequestException);
+
+    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(routing.route).not.toHaveBeenCalled();
+  });
+
+  // C. Higher payment amount → handled per existing business rules, no underpayment bypass created
+  it('C. accepts an overpayment exactly like a full payment — no special-cased bypass either way', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' });
+    payments.getVerifiedCapturedAmount.mockResolvedValue(6000); // overpaid
+
+    const sig = sign(gatewayOrderId, paymentId);
+    const result = await svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1');
+    expect(result.paymentStatus).toBe('PAID');
+  });
+
+  // D. Invalid signature → REJECTED
+  it('D. rejects an invalid signature before ever checking the captured amount', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+
+    await expect(svc.confirmPayment('o1', paymentId, gatewayOrderId, 'not-a-real-signature', 'cust-1'))
+      .rejects.toThrow(BadRequestException);
+    expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  // E. Payment belonging to a different Razorpay order → REJECTED
+  it('E. rejects when the gateway itself reports the payment belongs to a different order (surfaced via getVerifiedCapturedAmount)', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' });
+    payments.getVerifiedCapturedAmount.mockRejectedValue(new BadRequestException('Payment does not match the expected gateway order'));
+
+    const sig = sign(gatewayOrderId, paymentId);
+    await expect(svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1')).rejects.toThrow(BadRequestException);
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  // F. Payment transaction not linked to the target order → REJECTED
+  it('F. rejects when no PaymentTransaction links this gatewayOrderId to this order', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue(null); // not linked
+
+    const sig = sign(gatewayOrderId, paymentId);
+    await expect(svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1')).rejects.toThrow(BadRequestException);
+    expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+  });
+
+  // G. Unauthorized user attempting another user's order → REJECTED
+  it('G. rejects a caller who is not the order\'s own customer, without ever contacting the gateway', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder({ customerId: 'cust-1' }));
+
+    const sig = sign(gatewayOrderId, paymentId);
+    await expect(svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'someone-else')).rejects.toThrow(ForbiddenException);
+    expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+    expect(prisma.order.update).not.toHaveBeenCalled();
+  });
+
+  it('G2. the public/guest confirm-payment path (no callerUserId) is unaffected — still works with no login', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' });
+    payments.getVerifiedCapturedAmount.mockResolvedValue(5000);
+
+    const sig = sign(gatewayOrderId, paymentId);
+    // No 5th argument — mirrors PublicBookingController's call site, unchanged.
+    const result = await svc.confirmPayment('o1', paymentId, gatewayOrderId, sig);
+    expect(result.paymentStatus).toBe('PAID');
+  });
+
+  // H. Already PAID order → remains idempotent
+  it('H. is idempotent for an already-PAID order — no re-verification, no duplicate dispatch', async () => {
+    const { svc, prisma, routing, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder({ paymentStatus: 'PAID', status: 'CONFIRMED' }));
+
+    const sig = sign(gatewayOrderId, paymentId);
+    const result = await svc.confirmPayment('o1', paymentId, gatewayOrderId, sig, 'cust-1');
+
+    expect(result.paymentStatus).toBe('PAID');
+    expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(routing.route).not.toHaveBeenCalled();
+  });
+
+  // Fallback branch (no gatewayOrderId/signature — relies on a pre-verified PaymentTransaction
+  // set by the webhook or /payments/verify) gets the exact same amount reconciliation.
+  it('rejects the fallback (no-signature) path when no PAID PaymentTransaction matches this exact paymentId', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue(null);
+
+    await expect(svc.confirmPayment('o1', paymentId, undefined, undefined, 'cust-1')).rejects.toThrow(BadRequestException);
+    expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+  });
+
+  it('fallback path still re-verifies the captured amount via the gateway, not the locally-stored PaymentTransaction.amount', async () => {
+    const { svc, prisma, payments } = makeService();
+    prisma.order.findUnique.mockResolvedValue(pendingOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({
+      id: 'tx-1', status: 'PAID', gatewayOrderId, gatewayPaymentId: paymentId, amount: 1, // stale/attacker-set local amount
+    });
+    payments.getVerifiedCapturedAmount.mockResolvedValue(1); // gateway confirms only ₹1 was really captured
+
+    await expect(svc.confirmPayment('o1', paymentId, undefined, undefined, 'cust-1')).rejects.toThrow(BadRequestException);
+    expect(payments.getVerifiedCapturedAmount).toHaveBeenCalledWith(gatewayOrderId, paymentId);
   });
 });
 

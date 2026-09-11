@@ -190,6 +190,37 @@ export class PaymentsService implements OnModuleInit {
   }
 
   /**
+   * PAYMENT SECURITY — re-derives the amount Razorpay actually captured for one specific
+   * payment, straight from Razorpay's own record, rather than trusting anything stored
+   * locally. A valid HMAC signature only proves *a* payment happened for the given
+   * (gatewayOrderId, paymentId) pair — it says nothing about whether that payment covers
+   * what a particular order/master-order actually costs. Callers (OrdersService /
+   * MasterOrdersService confirmPayment) must compare this return value against their own
+   * trusted, server-side required amount before marking anything paid.
+   *
+   * Deliberately does NOT read PaymentTransaction.amount (set at create-order time, and
+   * historically the thing that made the underpayment bypass possible) — this always goes
+   * back to the gateway itself.
+   */
+  async getVerifiedCapturedAmount(gatewayOrderId: string, paymentId: string): Promise<number> {
+    if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
+    let payment: any;
+    try {
+      payment = await this.razorpay.payments.fetch(paymentId);
+    } catch (e) {
+      this.logger.warn(`Razorpay payment fetch failed for verification: ${e.message}`);
+      throw new BadRequestException('Unable to verify payment with the gateway');
+    }
+    if (!payment || payment.order_id !== gatewayOrderId) {
+      throw new BadRequestException('Payment does not match the expected gateway order');
+    }
+    if (payment.status !== 'captured') {
+      throw new BadRequestException('Payment has not been captured by the gateway');
+    }
+    return Number(payment.amount) / 100;
+  }
+
+  /**
    * Real gateway money movement — previously refunds only ever flipped a status flag
    * (AdminService.refundOrder()) with nothing actually sent back to the customer's original
    * payment method. Called only from the admin-approved refund-decision pipeline
@@ -357,13 +388,24 @@ export class PaymentsService implements OnModuleInit {
             // only flip status to CONFIRMED when it's still awaiting its first confirmation.
             const existing = await this.prisma.order.findUnique({ where: { id: tx.orderId } });
             if (existing && existing.paymentStatus !== 'PAID') {
-              await this.prisma.order.update({
-                where: { id: tx.orderId },
-                data: {
-                  paymentId: payment.id, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
-                  status: existing.status === 'PENDING_PAYMENT' ? 'CONFIRMED' : existing.status,
-                },
-              });
+              // PAYMENT SECURITY — the webhook is Razorpay's own guaranteed-delivery,
+              // HMAC-verified channel, so `payment.amount` here is authoritative (never the
+              // client, never our own PaymentTransaction.amount). A captured payment that
+              // doesn't cover the order's real total must never mark it PAID/CONFIRMED just
+              // because *some* linked transaction captured — this is the same reconciliation
+              // OrdersService.confirmPayment() now performs, applied to the webhook trigger too.
+              const capturedAmount = Number(payment.amount) / 100;
+              if (capturedAmount + 0.01 >= Number(existing.totalAmount)) {
+                await this.prisma.order.update({
+                  where: { id: tx.orderId },
+                  data: {
+                    paymentId: payment.id, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
+                    status: existing.status === 'PENDING_PAYMENT' ? 'CONFIRMED' : existing.status,
+                  },
+                });
+              } else {
+                this.logger.warn(`Webhook: captured amount ₹${capturedAmount} is less than order ${tx.orderId}'s total ₹${existing.totalAmount} — not marking paid`);
+              }
             }
           } catch (e) {
             this.logger.warn(`Webhook: no single Order row for orderId=${tx.orderId} (${e.message})`);
