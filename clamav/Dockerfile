@@ -6,10 +6,10 @@
 # (through the `clamscan` npm package) — no file this scans is ever written to disk on
 # either side, and this service must never be given a public domain.
 #
-# Pin an exact version — verify the tag against the current tags list at
-# https://hub.docker.com/r/clamav/clamav/tags before first deploy, and update deliberately,
-# not by tracking `latest`.
-FROM clamav/clamav:1.3
+# Pinned to the real, current stable release (verified directly against Docker Hub's tag
+# list at deploy time — 1.3 never existed; earlier drafts of this file guessed wrong).
+# Update deliberately when a new version is verified, never by tracking `latest`.
+FROM clamav/clamav:1.5.4
 
 # The base image's own entrypoint already runs freshclam then clamd — see
 # https://docs.clamav.net/manual/Installing/Docker.html. We only override config here, not
