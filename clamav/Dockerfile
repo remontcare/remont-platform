@@ -1,9 +1,10 @@
 # Standalone ClamAV scanning service for the Remont India upload pipeline.
 #
-# Deployed as its OWN Railway service, built from Git via the RAILWAY_DOCKERFILE_PATH=
-# clamav/Dockerfile service variable (NOT a Root Directory setting, which the Railway CLI
-# cannot set). Because of that, the Docker build context is the REPO ROOT, so every COPY
-# below must be repo-root-relative (clamav/...), not bare filenames.
+# Deployed as its OWN Railway service, built from Git by a plain `git push` — no manual
+# `railway up` required. Railway picks this Dockerfile via the service variable
+# RAILWAY_DOCKERFILE_PATH=clamav/Dockerfile. That variable is repo-root-relative and this
+# service has no Root Directory, so the build context is the REPO ROOT — every COPY below
+# must therefore be repo-root-relative (clamav/...), NOT a bare filename.
 #
 # Never part of the backend container. The backend (backend/src/modules/uploads/upload-security.interceptor.ts)
 # reaches this over Railway's private network only, via clamd's TCP INSTREAM protocol
