@@ -3433,6 +3433,141 @@
 <link rel="manifest" href="/manifest.json">
 <script src="/shared/remont-auth.js"></script>
 <script src="/shared/remont-notifications.js"></script>
+<!-- ════════════════════════════════════════════════════════════════════════
+     PRODUCT CARD MEDIA — product cards ONLY.
+     Every selector below is scoped to a product-card class. Services,
+     categories, header, nav, sidebar and global CSS are untouched.
+     The photo comes from the product data the API already returns
+     (images[] / imageUrl). No endpoint, response shape, id, price, stock,
+     cart or wishlist logic is involved here — presentation only.
+     ════════════════════════════════════════════════════════════════════════ -->
+<style>
+  /* 4:3 media area sized from the card's own width — no fixed pixel height, so it
+     keeps the existing grid at every breakpoint. 4:3 matches the approved product
+     reference. aspect-ratio sits on the BOX, so the space is reserved before the
+     photo arrives: no layout shift. */
+  .pm-slot {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  /* Fallback, underneath. Only ever visible when the product has no usable
+     photo or the photo 404s — kept deliberately small so it never reads as
+     the product itself. */
+  .pm-fallback {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 52px; line-height: 1;   /* scaled to the tile, so an image-less card reads as a placeholder, not a void */
+    background: linear-gradient(135deg, #F7F4EF 0%, #ECE7DF 100%);
+  }
+
+  /* The real photo, on top. contain = never cropped; the tight 5% padding is
+     what keeps the product large instead of floating in empty white. */
+  .pm-photo {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    padding: 5%;
+    background: #fff;
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+  .pm-photo.pm-on { opacity: 1; }
+  .pm-slot.pm-nophoto .pm-photo { display: none; }
+  @media (prefers-reduced-motion: reduce) { .pm-photo { transition: none; } }
+
+  /* ── Related-products card (.product-card) ──────────────────────────────
+     Vertical rhythm only. Card width, grid, border, radius, shadow, hover,
+     badge, ♡ and Add-to-Cart button are all left exactly as they were. */
+  .product-img   { height: auto; background-image: none; } /* the slot owns the photo now */
+  .product-body  { padding: 8px 10px 10px; }
+  .product-brand { font-size: 9.5px; margin-bottom: 2px; }  /* small, secondary */
+  .product-name  { margin-bottom: 3px; min-height: 30px; }
+  .product-price { margin-bottom: 5px; }
+  .product-price .now { font-size: 16px; }                  /* the loudest line */
+  .product-cta   { margin-top: 0; padding: 6px; }
+
+  /* ── Deals + Shop-all-products card (.deal-card) ───────────────────────── */
+  .deal-card-body { padding: 9px 11px 11px; }
+  .deal-card-name { margin-bottom: 5px; min-height: 32px; }
+  .ap-card-brand  { margin-bottom: 2px; }
+
+  /* ── Mobile product card — same breakpoint the rest of .m-prod-* uses ──── */
+  @media (max-width: 768px) {
+    .m-prod-card .pm-fallback { font-size: 38px; }
+    .m-prod-body { padding: 7px 9px 9px; }
+  }
+</style>
+<script>
+/* RemontMedia — builds the product card's media area. Global because the
+   product renderers live in several separate <script> blocks further down.
+   Reads only fields the product API already returns; writes nothing. */
+window.RemontMedia = (function () {
+  'use strict';
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function slugify(s) {
+    return String(s == null ? '' : s).toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  /* Optional local product photos shipped with the site, for products that have
+     nothing in the API yet. Always LOWER priority than real API data — see
+     pickSrc below. Keys are auto-slugs of the product name; assets/products/README.md
+     lists the expected file names. */
+  var assets = {
+    // '1-5-ton-3-star-split-ac': 'assets/products/split-ac.webp',
+  };
+
+  /* Photo source, highest priority first — API data always wins:
+       1. images[0] / img   — what the product API (Cloudinary) already returns
+       2. imageUrl          — same data under the other column name
+       3. assets/products/  — local file, only if the API has nothing
+       4. (none)            — caller shows the small fallback tile             */
+  function pickSrc(item) {
+    if (!item) return '';
+    var candidates = [
+      (item.images && item.images[0]),
+      item.img,
+      item.imageUrl,
+      assets[item.assetKey || ''] || assets[slugify(item.name || item.n || '')]
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var v = candidates[i];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return '';
+  }
+
+  /* One product media area. `emoji` is the card's existing fallback glyph. */
+  function productSlot(item, emoji) {
+    item = item || {};
+    var src  = pickSrc(item);
+    var name = item.name || item.n || '';
+    var tile = emoji || item.emoji || item.icon || '📦';
+
+    return '<div class="pm-slot">' +
+             '<div class="pm-fallback" aria-hidden="true">' + esc(tile) + '</div>' +
+             (src
+               ? '<img class="pm-photo" src="' + esc(src) + '" alt="' + esc(name) + '"' +
+                 ' loading="lazy" decoding="async"' +
+                 ' onload="this.classList.add(\'pm-on\')"' +
+                 ' onerror="this.closest(\'.pm-slot\').classList.add(\'pm-nophoto\')">'
+               : '') +
+           '</div>';
+  }
+
+  return { productSlot: productSlot, pickSrc: pickSrc, slugify: slugify, assets: assets };
+})();
+</script>
 </head>
 <body>
 
@@ -4100,9 +4235,8 @@
   }
 
   function imgMarkup(d) {
-    return d.img
-      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
-      : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
+    // Photo slot: real photo on top, existing emoji tile underneath as the fallback.
+    return RemontMedia.productSlot(d, d.emoji);
   }
 
   function cardHTML(d) {
@@ -4327,9 +4461,8 @@
   }
 
   function imgMarkup(d) {
-    return d.img
-      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
-      : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
+    // Photo slot: real photo on top, existing emoji tile underneath as the fallback.
+    return RemontMedia.productSlot(d, d.emoji);
   }
 
   function cardHTML(d) {
@@ -6043,7 +6176,8 @@
       <div class="product-grid">
         ${d.products.map(p => `
           <div class="product-card" data-product-id="${p.id || ''}" onclick="if(!event.target.closest('.product-cta')&&!event.target.closest('.product-info-btn')&&!event.target.closest('.product-fav'))showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${escHtml(JSON.stringify(p.specs||{}))})">
-            <div class="product-img" style="background-image:url('${escHtml(p.img)}');position:relative">
+            <div class="product-img" style="position:relative">
+              ${RemontMedia.productSlot(p, p.emoji)}
               ${p.badge ? `<div class="product-badge${p.badgeGreen ? ' green' : ''}">${escHtml(p.badge)}</div>` : ''}
               <div class="product-fav">♡</div>
               ${(p.desc || p.unit) ? `<button class="product-info-btn" onclick="showProductInfo(event,'${escJs(p.name)}','${escJs(p.desc||'')}','${escJs(p.unit||'piece')}',${escHtml(JSON.stringify(p.specs||{}))})">ℹ</button>` : ''}
@@ -12484,7 +12618,7 @@ document.getElementById('support-case-modal').addEventListener('click', function
     var el = document.createElement('div');
     el.className = 'm-prod-card' + (isGrid ? ' grid-card' : '');
     el.innerHTML =
-      '<div class="m-prod-img">' + p.icon + '</div>' +
+      RemontMedia.productSlot(p, p.icon) +
       '<div class="m-prod-body">' +
         '<div class="m-prod-name">' + p.name + '</div>' +
         '<div class="m-prod-stars">' + p.rating + '</div>' +
@@ -12527,10 +12661,7 @@ document.getElementById('support-case-modal').addEventListener('click', function
       if (!container) return;
       container.innerHTML = '';
       list.slice(0,6).forEach(function(p) {
-        var icon = p.images && p.images[0] ? '' : '📦';
-        var imgHtml = (p.images && p.images[0])
-          ? '<img src="' + p.images[0] + '" alt="' + (p.name||'Remont India product') + '" loading="lazy" style="width:100%;height:112px;object-fit:cover">'
-          : '<div class="m-prod-img">' + icon + '</div>';
+        var imgHtml = RemontMedia.productSlot(p);
         var card = document.createElement('div');
         card.className = 'm-prod-card' + (isGrid ? ' grid-card' : '');
         card.innerHTML = imgHtml +
