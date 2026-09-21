@@ -13,9 +13,11 @@ jest.mock('cloudinary', () => ({
 }));
 
 import { v2 as cloudinaryMock } from 'cloudinary';
+import { randomFillSync } from 'crypto';
 import sharp from 'sharp';
-import { uploadBuffer, UploadsService } from './uploads.module';
-import { assertWithinMegapixelCap } from './upload-security.interceptor';
+
+sharp.concurrency(1);
+import { uploadBuffer, UploadsService, optimizeImage, IMAGE_MAX_DIMENSION } from './uploads.module';
 
 /**
  * Requirement 1 — automatic web-optimized delivery. Covers the rebuilt Cloudinary upload
@@ -31,10 +33,18 @@ function mockUploadStream(fakeResult: any, err: any = null) {
   });
 }
 
+/** A real (tiny) JPEG — processAndStore now actually decodes its input, so a placeholder
+ *  string buffer would be rejected as undecodable rather than exercising the pipeline. */
+async function tinyJpeg(): Promise<Buffer> {
+  return sharp({ create: { width: 40, height: 30, channels: 3, background: { r: 90, g: 140, b: 200 } } })
+    .jpeg()
+    .toBuffer();
+}
+
 describe('uploadBuffer — Cloudinary options built per resource type', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('images: caps the stored master at 2000px (longest side) and requests thumb/card/full as eager, f_auto q_auto', async () => {
+  it('raw (not pre-optimized) images: still capped at 2000px on the way in, plus eager f_auto q_auto variants', async () => {
     mockUploadStream({ secure_url: 'https://res.cloudinary.com/x/image/upload/master.jpg', public_id: 'remont/abc', eager: [] });
     await uploadBuffer(Buffer.from('fake'), 'image');
 
@@ -46,6 +56,15 @@ describe('uploadBuffer — Cloudinary options built per resource type', () => {
       { width: 1200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
     ]);
     expect(options.eager_async).toBe(false);
+  });
+
+  it('pre-optimized images: NO incoming transformation, so Cloudinary never re-encodes what sharp already produced', async () => {
+    mockUploadStream({ secure_url: 'https://res.cloudinary.com/x/image/upload/master.webp', public_id: 'remont/abc', eager: [] });
+    await uploadBuffer(Buffer.from('fake'), 'image', true);
+
+    const options = (mockUploadStream as any).lastOptions;
+    expect(options.transformation).toBeUndefined();
+    expect(options.eager).toHaveLength(3); // delivery variants still pre-generated
   });
 
   it('video: applies quality:auto as the main (stored) transformation, no eager array', async () => {
@@ -72,7 +91,7 @@ describe('UploadsService.processAndStore — response shape preserved, URLs now 
       ],
     });
     const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any);
+    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: await tinyJpeg() } as any);
 
     expect(result).toEqual({
       thumb: 'https://res.cloudinary.com/x/image/upload/w_200/remont/master.jpg',
@@ -90,7 +109,7 @@ describe('UploadsService.processAndStore — response shape preserved, URLs now 
       eager: [], // simulate Cloudinary not returning eager results
     });
     const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any);
+    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: await tinyJpeg() } as any);
 
     expect(result.thumb).toBe('https://res.cloudinary.com/x/image/upload/w_200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
     expect(result.full).toBe('https://res.cloudinary.com/x/image/upload/w_1200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
@@ -110,74 +129,136 @@ describe('UploadsService.processAndStore — response shape preserved, URLs now 
   });
 });
 
+
 /**
- * GAP CHECK — every test above (and in upload-security.interceptor.spec.ts) exercised the
- * pipeline with a trivial 10x10 or literal string fixture, never anything resembling a real
- * "20MB+ DSLR photo." This closes that gap: a genuinely large, high-entropy, legitimately
- * decodable JPEG (high resolution + random-noise pixel data, so it can't trivially
- * compress away to nothing) is built for real via sharp, then run through the actual
- * megapixel-cap function and the actual processAndStore() request-building logic.
- *
- * What this DOES prove: a real large photo survives the 25-megapixel ceiling, and the exact
- * same correct Cloudinary parameters (2000px master cap, 200/600/1200 eager variants,
- * f_auto, q_auto) are requested for it as for the tiny fixtures used elsewhere.
- *
- * What this CANNOT prove without a live Cloudinary account: the literal "<300KB per
- * variant" output size. That number is Cloudinary's own encoding result, produced by their
- * `q_auto` algorithm — a mocked `upload_stream()` only returns whatever this test tells it
- * to return, so no unit test can honestly assert a real output byte count. Cloudinary's own
- * documentation describes q_auto as targeting the smallest file size at an acceptable
- * perceptual quality for the given format/width, which is why this pipeline requests it
- * instead of a fixed quality percentage — but confirming the actual resulting file sizes
- * requires either a live-account integration test or a manual check once this is deployed
- * with real credentials.
+ * IMAGE OPTIMIZATION PIPELINE — the stored asset must be the optimized WebP, never the
+ * original upload. These tests run the REAL sharp pipeline (only Cloudinary is mocked), so
+ * the byte counts below are genuine measurements, not fixtures.
  */
-describe('GAP CHECK — a realistic large (20MB-class) image survives validation and requests correct Cloudinary sizing', () => {
+describe('optimizeImage — server-side optimization before anything reaches Cloudinary', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('a real ~12-megapixel, multi-MB, high-entropy JPEG passes the megapixel cap and triggers the same 2000px/eager/f_auto,q_auto request as the trivial fixtures', async () => {
-    // 4000x3000 = 12 megapixels — comfortably under the 25MP ceiling, but large enough
-    // (with random noise, not a flat color, so it can't trivially compress) to be a
-    // realistic multi-megabyte stand-in for a "20MB+ DSLR photo."
-    const width = 4000;
-    const height = 3000;
+  it('a ~20MP multi-MB JPEG is downscaled to the 2000px cap and re-encoded far smaller as WebP', async () => {
+    const width = 5000, height = 4000; // 20MP, under the 25MP policy cap
     const noise = Buffer.alloc(width * height * 3);
-    for (let i = 0; i < noise.length; i++) noise[i] = Math.floor(Math.random() * 256);
-    const largeBuf = await sharp(noise, { raw: { width, height, channels: 3 } })
-      .jpeg({ quality: 95 })
+    randomFillSync(noise); // native fill — same incompressible noise, ~20x faster than a per-byte JS loop
+    const original = await sharp(noise, { raw: { width, height, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+
+    const out = await optimizeImage(original);
+    expect(out).not.toBeNull();
+    expect(out!.format).toBe('webp');
+    expect(Math.max(out!.width, out!.height)).toBe(IMAGE_MAX_DIMENSION); // downscaled to the cap
+    expect(out!.width / out!.height).toBeCloseTo(width / height, 2);     // aspect ratio preserved
+    expect(out!.optimizedBytes).toBeLessThan(out!.originalBytes);
+    // eslint-disable-next-line no-console
+    console.log(`    [20MP JPEG] ${(out!.originalBytes / 1048576).toFixed(2)}MB -> ${(out!.optimizedBytes / 1048576).toFixed(2)}MB WebP ${out!.width}x${out!.height}`);
+  }, 120000); // ~2s on an idle machine; the headroom is for a fully parallel suite run
+
+  it('a small image is re-encoded but never upscaled', async () => {
+    const original = await sharp({ create: { width: 320, height: 240, channels: 3, background: { r: 10, g: 90, b: 60 } } }).jpeg().toBuffer();
+    const out = await optimizeImage(original);
+    expect(out!.width).toBe(320);
+    expect(out!.height).toBe(240);
+    expect(out!.format).toBe('webp');
+  }, 20000);
+
+  it('PNG transparency survives the conversion to WebP', async () => {
+    const original = await sharp({
+      create: { width: 200, height: 200, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 0 } },
+    }).png().toBuffer();
+
+    const out = await optimizeImage(original);
+    expect(out!.format).toBe('webp');
+    const meta = await sharp(out!.buffer).metadata();
+    expect(meta.hasAlpha).toBe(true); // not flattened onto a black/white matte
+    // The fully-transparent corner pixel must still be transparent.
+    const raw = await sharp(out!.buffer).ensureAlpha().raw().toBuffer();
+    expect(raw[3]).toBe(0);
+  }, 20000);
+
+  it('strips EXIF metadata (e.g. GPS) from the stored asset', async () => {
+    const withExif = await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 1, g: 2, b: 3 } } })
+      .withMetadata({ exif: { IFD0: { Copyright: 'test', Software: 'test' } } })
+      .jpeg()
       .toBuffer();
+    expect((await sharp(withExif).metadata()).exif).toBeDefined(); // fixture really has EXIF
 
-    // Sanity-check the fixture itself is genuinely large before trusting the rest of the
-    // test — this is standing in for a "20MB+" upload; a multi-MB high-entropy JPEG at this
-    // resolution/quality is a realistic proxy without needing an actual 20MB file on disk.
-    expect(largeBuf.length).toBeGreaterThan(2 * 1024 * 1024); // > 2MB
+    const out = await optimizeImage(withExif);
+    expect((await sharp(out!.buffer).metadata()).exif).toBeUndefined();
+  }, 20000);
 
-    // 1. Survives the real megapixel-cap function (not mocked).
-    await expect(assertWithinMegapixelCap(largeBuf)).resolves.toBeUndefined();
+  it('refuses to decode a declared-enormous image (decompression-bomb guard)', async () => {
+    // 12000x12000 = 144MP, far above MAX_DECODE_PIXELS.
+    const bomb = await sharp({ create: { width: 12000, height: 12000, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+    await expect(optimizeImage(bomb)).rejects.toThrow(BadRequestException);
+  }, 120000);
 
-    // 2. processAndStore() requests the correct capped-master + eager variants for this
-    //    specific large buffer, exactly as it does for the trivial fixtures above.
-    mockUploadStream({
-      secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/large.jpg',
-      public_id: 'remont/large',
-      eager: [
-        { secure_url: 'https://res.cloudinary.com/x/image/upload/w_200/remont/large.jpg' },
-        { secure_url: 'https://res.cloudinary.com/x/image/upload/w_600/remont/large.jpg' },
-        { secure_url: 'https://res.cloudinary.com/x/image/upload/w_1200/remont/large.jpg' },
-      ],
+  it('REJECTS an animated GIF rather than flattening it to a single frame', async () => {
+    // A genuinely animated GIF. sharp builds one from a single TALL raw image plus
+    // `pageHeight` INSIDE the raw options — that is what tells libvips where one frame
+    // ends and the next begins. (`pageHeight`/`animated` at the top level of the
+    // constructor options is silently ignored and yields a 1-page GIF.)
+    const W = 20, frameH = 20, frameCount = 3;
+    const stacked = Buffer.alloc(W * frameH * frameCount * 3);
+    for (let f = 0; f < frameCount; f++) {
+      stacked.fill(0x30 + f * 0x60, f * W * frameH * 3, (f + 1) * W * frameH * 3); // visibly distinct frames
+    }
+    const animated = await sharp(stacked, {
+      raw: { width: W, height: frameH * frameCount, channels: 3, pageHeight: frameH },
+    }).gif({ loop: 0 }).toBuffer();
+
+    const meta = await sharp(animated).metadata();
+    expect(meta.pages).toBeGreaterThan(1); // fixture really is animated
+
+    await expect(optimizeImage(animated)).rejects.toThrow(BadRequestException);
+    await expect(optimizeImage(animated)).rejects.toThrow(/Animated GIFs are not supported/);
+  }, 30000);
+
+  it('a STATIC (single-frame) GIF is optimized to WebP like any other image — nothing is destroyed', async () => {
+    const still = await sharp({ create: { width: 120, height: 90, channels: 3, background: { r: 5, g: 120, b: 5 } } }).gif().toBuffer();
+    expect((await sharp(still).metadata()).pages ?? 1).toBe(1);
+
+    const out = await optimizeImage(still);
+    expect(out.format).toBe('webp');
+    expect(out.width).toBe(120);
+    expect(out.height).toBe(90);
+  }, 20000);
+
+  it('rejects a non-image payload', async () => {
+    await expect(optimizeImage(Buffer.from('this is definitely not an image'))).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('processAndStore — what Cloudinary permanently stores is the optimized WebP', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('uploads the optimized bytes, not the original, and skips Cloudinary re-transformation', async () => {
+    const width = 3000, height = 2000;
+    const noise = Buffer.alloc(width * height * 3);
+    randomFillSync(noise); // native fill — same incompressible noise, ~20x faster than a per-byte JS loop
+    const original = await sharp(noise, { raw: { width, height, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+
+    let uploadedBytes: Buffer | null = null;
+    (cloudinaryMock.uploader.upload_stream as jest.Mock).mockImplementation((options: any, cb: any) => {
+      (mockUploadStream as any).lastOptions = options;
+      return { end: (b: Buffer) => { uploadedBytes = b; cb(null, { secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/o.webp', public_id: 'remont/o', eager: [] }); } };
     });
-    const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: largeBuf } as any);
 
-    const options = (mockUploadStream as any).lastOptions;
-    expect(options.transformation).toEqual([{ width: 2000, height: 2000, crop: 'limit' }]);
-    expect(options.eager).toEqual([
-      { width: 200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
-      { width: 600, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
-      { width: 1200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
-    ]);
-    expect(result.thumb).toContain('w_200');
-    expect(result.card).toContain('w_600');
-    expect(result.full).toContain('w_1200');
-  }, 20000); // real image generation/encoding — longer than the default 5s test timeout
+    const svc = new UploadsService();
+    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: original } as any);
+
+    expect(uploadedBytes).not.toBeNull();
+    // The uploaded payload is the optimized WebP — strictly smaller than, and not equal to,
+    // the original upload.
+    expect(uploadedBytes!.length).toBeLessThan(original.length);
+    expect(uploadedBytes!.equals(original)).toBe(false);
+    expect((await sharp(uploadedBytes!).metadata()).format).toBe('webp');
+    // No incoming transformation: sharp already did the resizing.
+    expect((mockUploadStream as any).lastOptions.transformation).toBeUndefined();
+    expect(result.url).toContain('/upload/');
+    // eslint-disable-next-line no-console
+    console.log(`    [stored asset] original ${(original.length / 1048576).toFixed(2)}MB -> uploaded ${(uploadedBytes!.length / 1048576).toFixed(2)}MB WebP`);
+  }, 120000); // ~2s on an idle machine; the headroom is for a fully parallel suite run
 });

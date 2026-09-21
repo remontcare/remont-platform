@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
+import sharp from 'sharp';
 import { JwtAuthGuard, RolesGuard, Roles } from '../../common';
 import { UserRole } from '@prisma/client';
 import { UploadSecurityInterceptor } from './upload-security.interceptor';
@@ -41,28 +42,117 @@ export function assertCloudinaryConfigured(): void {
   }
 }
 
+// ─── Server-side image optimization ──────────────────────────────────────────
+// Runs AFTER authentication, content validation and the ClamAV scan, and BEFORE anything
+// reaches Cloudinary — so the bytes that become the permanent asset are the optimized ones.
+// The original upload only ever exists as the in-memory Multer buffer for the life of the
+// request: it is never written to disk and never stored, so there is no temporary original
+// to clean up afterwards.
+
+/** Largest image accepted at the route boundary (Multer rejects anything bigger with 413). */
+export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+/** Longest-side cap for the stored master. Smaller images keep their own dimensions. */
+export const IMAGE_MAX_DIMENSION = 2000;
+
+/** WebP quality — the usual "visually indistinguishable at normal viewing size" point for
+ *  photographic content, while cutting file size dramatically. */
+export const IMAGE_WEBP_QUALITY = 82;
+
+/** Decompression-bomb guard: refuse to decode beyond this pixel count at all, so a crafted
+ *  file declaring enormous dimensions fails fast instead of exhausting server memory. */
+export const MAX_DECODE_PIXELS = 40_000_000;
+
+/** Formats converted to WebP. GIF is included, but only single-frame GIFs — an ANIMATED GIF
+ *  is rejected outright rather than converted, because a still-WebP conversion would
+ *  silently destroy the animation. Nothing in the product accepts animated GIFs: no upload
+ *  control offers them (the explicit accept lists are image/jpeg,image/png[,image/webp]) and
+ *  nothing reads them, so rejecting is the honest outcome rather than storing an
+ *  un-optimized original that would violate the "stored asset is always optimized" policy. */
+const CONVERTIBLE_FORMATS = new Set(['jpeg', 'jpg', 'png', 'webp', 'gif']);
+
+export interface OptimizedImage {
+  buffer: Buffer;
+  format: string;
+  width: number;
+  height: number;
+  originalBytes: number;
+  optimizedBytes: number;
+}
+
+/**
+ * Decode -> auto-orient -> downscale -> strip metadata -> re-encode as WebP.
+ *
+ * Transparency survives: WebP has a native alpha channel and sharp carries a PNG's alpha
+ * through, so a transparent PNG stays transparent instead of gaining a black/white matte.
+ *
+ * Always returns an optimized image or throws — it never hands back the original bytes, so
+ * the asset that reaches permanent storage is guaranteed to be the optimized one.
+ */
+export async function optimizeImage(input: Buffer): Promise<OptimizedImage> {
+  let meta: Awaited<ReturnType<ReturnType<typeof sharp>['metadata']>>;
+  try {
+    meta = await sharp(input, { limitInputPixels: MAX_DECODE_PIXELS }).metadata();
+  } catch {
+    throw new BadRequestException('Image could not be decoded for optimization');
+  }
+  const format = (meta.format || '').toLowerCase();
+  if (!CONVERTIBLE_FORMATS.has(format)) {
+    throw new BadRequestException('This image format is not supported for upload.');
+  }
+  // `pages` is the frame count; > 1 means an animated GIF. Converting it to WebP here would
+  // keep only the first frame, so reject instead of silently destroying the animation.
+  if (format === 'gif' && (meta.pages ?? 1) > 1) {
+    throw new BadRequestException('Animated GIFs are not supported — please upload a JPG, PNG or WebP image.');
+  }
+
+  const { data, info } = await sharp(input, {
+    limitInputPixels: MAX_DECODE_PIXELS,
+    sequentialRead: true, // decode in a streaming fashion rather than materializing the full raster up front
+  })
+    // .rotate() with no argument applies the EXIF orientation and drops the tag. It must run
+    // BEFORE metadata is stripped, or a phone photo would end up stored sideways.
+    .rotate()
+    .resize({
+      width: IMAGE_MAX_DIMENSION,
+      height: IMAGE_MAX_DIMENSION,
+      fit: 'inside',            // preserves aspect ratio
+      withoutEnlargement: true, // never upscales a smaller image
+    })
+    // sharp drops EXIF/GPS/camera metadata unless withMetadata() is called — so NOT calling
+    // it is what strips location and device data from the stored asset.
+    .webp({ quality: IMAGE_WEBP_QUALITY, effort: 4 })
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    buffer: data,
+    format: info.format,
+    width: info.width,
+    height: info.height,
+    originalBytes: input.length,
+    optimizedBytes: data.length,
+  };
+}
+
 // Exported so other modules (e.g. ai-enrichment.module.ts, which fetches AI-found/generated
 // images as raw bytes, not multipart form uploads) can reuse the same Cloudinary pipeline
 // instead of duplicating it.
 //
-// Web-optimized delivery, whatever the input size — a 20MB DSLR photo or a 50MB phone
-// panorama must never sit around at full size:
-//  - `transformation` is the MAIN upload transformation, applied before Cloudinary stores
-//    anything — this caps what's actually STORED (the "master"), not just what's served on
-//    delivery. Images: capped at 2000px on the longest side (w_2000,h_2000,c_limit only
-//    scales down when a dimension exceeds it, so it never upscales a smaller original).
-//    Video: quality:'auto' so the stored master itself isn't full-bitrate raw (kept to this
-//    minimum rather than a streaming_profile HLS transcode, which needs a Cloudinary
-//    add-on that may not be enabled on every plan and could otherwise break uploads).
-//  - `eager` (images only) pre-generates and caches the three named delivery variants at
-//    upload time — not on each one's first delivery request — every one f_auto,q_auto
-//    (auto format + auto quality, i.e. WebP/AVIF served automatically per-browser) rather
-//    than the previous hardcoded f_webp,q_auto:good.
-export function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video'): Promise<UploadApiResponse> {
+// `preOptimized` is set by processAndStore(), which has already resized and re-encoded the
+// bytes with sharp — Cloudinary must then NOT re-transform on the way in, since that would
+// decode and re-encode a second time for no benefit. Callers passing raw bytes
+// (ai-enrichment, animated GIFs) keep the incoming dimension cap, so an oversized original
+// is still never stored at full resolution.
+//
+// `eager` (images only) pre-generates and caches the three named delivery variants at upload
+// time rather than on each one's first request, all f_auto,q_auto — so a browser that
+// supports AVIF is served AVIF derived from the WebP master, without AVIF being the stored
+// format (which keeps delivery compatible with the existing Cloudinary pipeline).
+export function uploadBuffer(buffer: Buffer, resourceType: 'image' | 'video', preOptimized = false): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
     const options: Record<string, any> = { folder: 'remont', resource_type: resourceType };
     if (resourceType === 'image') {
-      options.transformation = [{ width: 2000, height: 2000, crop: 'limit' }];
+      if (!preOptimized) options.transformation = [{ width: IMAGE_MAX_DIMENSION, height: IMAGE_MAX_DIMENSION, crop: 'limit' }];
       options.eager = [
         { width: 200, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
         { width: 600, crop: 'limit', fetch_format: 'auto', quality: 'auto' },
@@ -94,14 +184,18 @@ export class UploadsService {
     if (!file.mimetype?.startsWith('image/')) throw new BadRequestException('File must be an image');
     assertCloudinaryConfigured();
 
-    const result = await uploadBuffer(file.buffer, 'image');
+    // Optimize first — the bytes Cloudinary stores permanently are the optimized ones. The
+    // original buffer becomes garbage as soon as this method returns: never written to disk,
+    // never uploaded, so nothing temporary is left behind to clean up.
+    const optimized = await optimizeImage(file.buffer);
+    const result = await uploadBuffer(optimized.buffer, 'image', true);
     const eager = result.eager || [];
     return {
       thumb: eager[0]?.secure_url || cloudinaryResize(result.secure_url, 200),
       card: eager[1]?.secure_url || cloudinaryResize(result.secure_url, 600),
       full: eager[2]?.secure_url || cloudinaryResize(result.secure_url, 1200),
-      // The 2000px-capped master (the `transformation` above already applied it on upload —
-      // this is never the raw, unbounded-resolution original).
+      // The optimized WebP master produced above — never the raw full-size original, which
+      // is discarded when this request ends.
       url: result.secure_url,
       publicId: result.public_id,
     };
@@ -145,7 +239,7 @@ export class UploadsController {
   @Post('image')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
-    limits: { fileSize: 8 * 1024 * 1024 }, // 8MB — generous for a single photo, matches the existing 5MB client-side check with headroom
+    limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES }, // 20MB input ceiling — what gets STORED is the much smaller optimized WebP, not this
   }), UploadSecurityInterceptor)
   uploadImage(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.processAndStore(file);
@@ -173,7 +267,7 @@ export class UploadsController {
   @Post('lead-photo')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES }, // same 20MB policy as /uploads/image — the stored asset is the optimized WebP either way
   }), UploadSecurityInterceptor)
   uploadLeadPhoto(@UploadedFile() file: Express.Multer.File) {
     return this.uploads.processAndStore(file);
