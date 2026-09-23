@@ -1,10 +1,10 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, BadRequestException, Logger,
+  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional, InternalServerErrorException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AgencyStatus, Language, OrderStatus, UserRole, VendorStatus } from '@prisma/client';
+import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -16,6 +16,8 @@ import { ShipmentService, LogisticsModule } from '../logistics/logistics.module'
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
+import { MediaModule } from '../media/media.module';
+import { MediaService } from '../media/media.service';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -81,6 +83,7 @@ export class ServiceVendorsService {
     private wa: WhatsappService,
     private events: EventEmitter2,
     private ledger: PartnerLedgerService,
+    @Optional() private media?: MediaService,
   ) {}
 
   async register(userId: string, data: ServiceVendorRegistrationDto) {
@@ -152,14 +155,25 @@ export class ServiceVendorsService {
     return v;
   }
 
+  // The request contract stays `{ photoBase64 }` (the partner web portal and app both send
+  // it), but the base64 is no longer what gets stored: it goes through the central media
+  // pipeline (ClamAV, re-encode, Cloudinary) and only the Cloudinary URL is saved.
   async updatePhoto(userId: string, photoBase64: string) {
     validatePhotoDataUrl(photoBase64);
     const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!vendor) throw new NotFoundException('Vendor profile not found');
-    return this.prisma.serviceVendor.update({
-      where: { id: vendor.id },
-      data: { photoUrl: photoBase64 },
+    if (!this.media) throw new InternalServerErrorException('Media storage is not available');
+    const actor = { id: userId, role: UserRole.SERVICE_VENDOR };
+    const media = await this.media.ingestDataUrl(photoBase64, {
+      originalName: 'profile-photo', entityType: MediaEntityType.PARTNER_PROFILE, entityId: vendor.id, actor,
     });
+    const photoUrl = media.variants?.card ?? media.deliveryUrl!; // 600px — plenty for an avatar
+    const updated = await this.prisma.serviceVendor.update({
+      where: { id: vendor.id },
+      data: { photoUrl },
+    });
+    await this.media.linkByUrls({ entityType: MediaEntityType.PARTNER_PROFILE, entityId: vendor.id, urls: [photoUrl], actor });
+    return updated;
   }
 
   async upsertDocument(userId: string, type: string, imageBase64: string) {
@@ -998,7 +1012,7 @@ export class AgencyController {
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule, MediaModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],

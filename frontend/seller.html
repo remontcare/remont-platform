@@ -839,7 +839,8 @@ function renderProducts(){
 }
 
 /* ── PRODUCT FORM ── */
-var pfImageDataUrl = null;
+var pfImageUrl = null; // hosted URL from the central media pipeline (legacy products may still hold a base64 value)
+var pfImageUploading = false;
 var pfAiImages = []; // extra image URLs picked from AI search/generation results
 function resetAiEnrichmentUi(){
   document.querySelectorAll('.ai-feat-chk').forEach(function(c){ c.checked = false; });
@@ -852,7 +853,7 @@ function resetAiEnrichmentUi(){
 function openProductForm(productId){
   document.getElementById('pf-err').textContent = '';
   document.getElementById('pf-image-preview').style.display = 'none';
-  pfImageDataUrl = null;
+  pfImageUrl = null;
   resetAiEnrichmentUi();
   if (productId) {
     var p = myProducts.filter(function(x){ return x.id === productId; })[0];
@@ -880,7 +881,7 @@ function openProductForm(productId){
     document.getElementById('pf-gst-inclusive').value = p.gstInclusive != null ? String(p.gstInclusive) : '';
     document.getElementById('pf-active').checked = !!p.isActive;
     if (p.images && p.images[0]) {
-      pfImageDataUrl = p.images[0];
+      pfImageUrl = p.images[0];
       var prev = document.getElementById('pf-image-preview');
       prev.src = p.images[0]; prev.style.display = 'block';
     }
@@ -920,25 +921,52 @@ function openProductForm(productId){
 }
 function closeProductForm(){ document.getElementById('product-form-overlay').classList.remove('show'); }
 
+// Uploads the product photo through the central media API (security checks, virus scan,
+// optimized WebP stored in R2 + Cloudinary, Media Library record) and keeps only the
+// returned URL — the photo is never embedded in the product as base64 any more. The
+// Media record is linked to the product by the backend when the product is saved.
+function uploadProductPhoto(file, _isRetry){
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('entityType', 'PRODUCT');
+  return fetch(API_BASE + '/api/v1/media/image', {
+    method: 'POST',
+    headers: accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {},
+    body: fd,
+  }).then(function(res){
+    if (res.status === 401 && !_isRetry && refreshTok) {
+      return RemontAuth.refresh().then(function(){
+        accessToken = RemontAuth.getToken(); refreshTok = RemontAuth.getRefreshToken();
+        return uploadProductPhoto(file, true);
+      });
+    }
+    return res.json().catch(function(){ return {}; }).then(function(data){
+      if (!res.ok) {
+        var msg = (data && (data.message || data.error)) || ('Upload failed (' + res.status + ')');
+        throw new Error(Array.isArray(msg) ? msg.join(', ') : msg);
+      }
+      return data && data.data !== undefined ? data.data : data;
+    });
+  });
+}
 function handleImageUpload(input){
   var file = input.files[0]; if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e){
-    var img = new Image();
-    img.onload = function(){
-      var maxDim = 1200;
-      var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-      var w = Math.round(img.width*scale), h = Math.round(img.height*scale);
-      var canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      pfImageDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      var prev = document.getElementById('pf-image-preview');
-      prev.src = pfImageDataUrl; prev.style.display = 'block';
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  var err = document.getElementById('pf-err'); err.textContent = '';
+  var prev = document.getElementById('pf-image-preview');
+  pfImageUploading = true;
+  input.disabled = true;
+  prev.style.opacity = '0.4';
+  uploadProductPhoto(file).then(function(media){
+    pfImageUrl = (media.variants && media.variants.full) || media.deliveryUrl;
+    prev.src = pfImageUrl; prev.style.display = 'block';
+  }).catch(function(e){
+    err.textContent = 'Photo upload failed: ' + e.message;
+  }).then(function(){
+    pfImageUploading = false;
+    input.disabled = false;
+    input.value = '';
+    prev.style.opacity = '';
+  });
 }
 
 function saveProduct(){
@@ -952,10 +980,11 @@ function saveProduct(){
   if (!categoryId) { err.textContent = 'Select a category'; return; }
   if (!name) { err.textContent = 'Enter a product name'; return; }
   if (isNaN(price) || price <= 0) { err.textContent = 'Enter a valid price'; return; }
+  if (pfImageUploading) { err.textContent = 'Please wait for the photo to finish uploading'; return; }
 
   function optFloat(id){ var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? undefined : v; }
   function optStr(id){ var v = document.getElementById(id).value.trim(); return v || undefined; }
-  var images = (pfImageDataUrl ? [pfImageDataUrl] : []).concat(pfAiImages || []);
+  var images = (pfImageUrl ? [pfImageUrl] : []).concat(pfAiImages || []);
 
   var data = {
     categoryId: categoryId,

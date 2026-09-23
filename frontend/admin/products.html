@@ -1140,7 +1140,33 @@ function importProducts() {
 
 // ── INIT ────────────────────────────────────────────────────────────
 
-attachGalleryUpload('prod-img-input', addProdImg, { maxDim: 1200 });
+attachGalleryUpload('prod-img-input', addProdImg, { maxDim: 1200, entityType: 'PRODUCT', variant: 'full' }); // product detail pages need the 1200px image; cards derive their 600px size
+
+// ── AI image generation (shared modal in common.js) ──────────────────
+// Sits inside the product's own Images section, next to Add/Upload. The four modes map onto
+// the backend presets; "Catalog set" generates several views (main/front/lifestyle/detail)
+// in one go. Approved images are appended to the existing images array — no schema change.
+attachAiImageGenerator('prod-img-input', {
+  modes: [
+    { key: 'PRODUCT', label: 'Product image', entity: 'PRODUCT', styles: ['PREMIUM_PRODUCT', 'STUDIO', 'CATALOG'] },
+    { key: 'WHITE', label: 'Premium white background', entity: 'PRODUCT', styles: ['PREMIUM_PRODUCT', 'WHITE_BACKGROUND', 'CATALOG'] },
+    { key: 'CATALOG', label: 'Catalog set (multiple views)', entity: 'CATALOG', styles: ['PREMIUM_PRODUCT', 'WHITE_BACKGROUND', 'CATALOG'] },
+    { key: 'LIFESTYLE', label: 'Lifestyle image', entity: 'PRODUCT', styles: ['LIFESTYLE', 'PREMIUM_PRODUCT'] },
+  ],
+  // The product's existing images are offered as AI references (Cloudinary image_to_image),
+  // so a real branded product keeps its actual shape and details.
+  references: function() { return (prodImages || []).filter(function(u) { return /^https:\/\/res\.cloudinary\.com\//.test(u); }); },
+  confirmReplace: false, context: function() {
+  var cat = document.getElementById('prod-cat');
+  return {
+    name: (document.getElementById('prod-name') || {}).value ? document.getElementById('prod-name').value.trim() : '',
+    category: cat && cat.selectedIndex > 0 ? cat.options[cat.selectedIndex].text.trim() : '',
+    brand: (document.getElementById('prod-brand') || {}).value ? document.getElementById('prod-brand').value.trim() : '',
+  };
+}, onUse: function(url) {
+  document.getElementById('prod-img-input').value = url;
+  addProdImg();
+} });
 loadCategories();
 loadProducts();
 </script>

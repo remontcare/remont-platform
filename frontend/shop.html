@@ -431,9 +431,20 @@ footer.site a{color:var(--amber)}
     };
   }
 
+  // Cards use the 600px Cloudinary "card" variant, not the 1200px detail image products
+  // store (same rule as RemontMedia.cardSrc in index.html). Non-Cloudinary values — legacy
+  // base64, external URLs — are returned unchanged.
+  var CLD_SIZED = /\/upload\/w_\d+,c_limit,f_auto,q_auto\//;
+  function cardSrc(url) {
+    if (typeof url !== 'string' || url.indexOf('://res.cloudinary.com/') === -1) return url;
+    if (CLD_SIZED.test(url)) return url.replace(CLD_SIZED, '/upload/w_600,c_limit,f_auto,q_auto/');
+    if (/\/upload\/v\d+\//.test(url)) return url.replace('/upload/', '/upload/w_600,c_limit,f_auto,q_auto/');
+    return url;
+  }
+
   function imgMarkup(d) {
     return d.img
-      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(d.img) + '\');"></div>'
+      ? '<div class="deal-card-img" style="background-image:url(\'' + esc(cardSrc(d.img)) + '\');"></div>'
       : '<div class="deal-card-img dc-fallback">' + esc(d.emoji) + '</div>';
   }
 

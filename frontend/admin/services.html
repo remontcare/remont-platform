@@ -1253,14 +1253,39 @@ function exportServices() {
 
 // ── INIT ──────────────────────────────────────────────────────────────
 
-attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100 });
-attachImageUpload('cat-logo', { maxDim: 300, previewW: 80, previewH: 80 });
-attachImageUpload('cat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
-attachImageUpload('subcat-img', { maxDim: 1200, previewW: 140, previewH: 100 });
+attachImageUpload('svc-img', { maxDim: 1200, previewW: 140, previewH: 100, entityType: 'SERVICE' });
+attachImageUpload('cat-logo', { maxDim: 300, previewW: 80, previewH: 80, entityType: 'CATEGORY' });
+attachImageUpload('cat-img', { maxDim: 1200, previewW: 140, previewH: 100, entityType: 'CATEGORY' });
+attachImageUpload('subcat-img', { maxDim: 1200, previewW: 140, previewH: 100, entityType: 'SUBCATEGORY' });
 attachVideoUpload('svc-video');
 attachVideoUpload('cat-video');
 attachVideoUpload('subcat-video');
-attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200 });
+attachGalleryUpload('svc-gallery-input', addGalleryImg, { maxDim: 1200, entityType: 'SERVICE' });
+
+// ── AI image generation (shared modal in common.js) ──────────────────
+// Each field gets a "Generate with AI" button next to its Upload button. The context
+// functions feed the backend's Remont presets so the admin doesn't have to write a prompt.
+function aiVal(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function aiSelText(id) {
+  var el = document.getElementById(id);
+  return el && el.selectedIndex > 0 ? el.options[el.selectedIndex].text.trim() : '';
+}
+attachAiImageGenerator('svc-img', { entity: 'SERVICE', context: function() {
+  return { name: aiVal('svc-name'), category: aiSelText('svc-cat'), subCategory: aiSelText('svc-subcat') };
+} });
+attachAiImageGenerator('cat-logo', { entity: 'CATEGORY', context: function() { return { name: aiVal('cat-name') }; } });
+attachAiImageGenerator('cat-img', { entity: 'CATEGORY', context: function() { return { name: aiVal('cat-name') }; } });
+attachAiImageGenerator('subcat-img', { entity: 'SUBCATEGORY', context: function() {
+  return { name: aiVal('subcat-name'), category: aiSelText('subcat-cat') };
+} });
+// Gallery: adds to the list instead of replacing a single field, so no replace confirmation.
+attachAiImageGenerator('svc-gallery-input', { entity: 'SERVICE', confirmReplace: false, context: function() {
+  return { name: aiVal('svc-name'), category: aiSelText('svc-cat'), subCategory: aiSelText('svc-subcat') };
+}, onUse: function(url) {
+  document.getElementById('svc-gallery-input').value = url;
+  addGalleryImg();
+} });
+
 loadCategories();
 loadSubCategories();
 loadCitiesForFilter();

@@ -17,7 +17,7 @@ import { randomFillSync } from 'crypto';
 import sharp from 'sharp';
 
 sharp.concurrency(1);
-import { uploadBuffer, UploadsService, optimizeImage, IMAGE_MAX_DIMENSION } from './uploads.module';
+import { uploadBuffer, UploadsService, optimizeImage, deliveryVariantsFrom, IMAGE_MAX_DIMENSION } from './uploads.module';
 
 /**
  * Requirement 1 — automatic web-optimized delivery. Covers the rebuilt Cloudinary upload
@@ -31,14 +31,6 @@ function mockUploadStream(fakeResult: any, err: any = null) {
     (mockUploadStream as any).lastOptions = options;
     return { end: () => callback(err, err ? null : fakeResult) };
   });
-}
-
-/** A real (tiny) JPEG — processAndStore now actually decodes its input, so a placeholder
- *  string buffer would be rejected as undecodable rather than exercising the pipeline. */
-async function tinyJpeg(): Promise<Buffer> {
-  return sharp({ create: { width: 40, height: 30, channels: 3, background: { r: 90, g: 140, b: 200 } } })
-    .jpeg()
-    .toBuffer();
 }
 
 describe('uploadBuffer — Cloudinary options built per resource type', () => {
@@ -77,47 +69,52 @@ describe('uploadBuffer — Cloudinary options built per resource type', () => {
   });
 });
 
-describe('UploadsService.processAndStore — response shape preserved, URLs now come from eager', () => {
+// Image uploads moved into the central media pipeline (media/media.service.ts, covered by
+// media.service.spec.ts — including the end-to-end "stored bytes are the optimized WebP"
+// check that used to live here). What stays here is the Cloudinary adapter itself.
+describe('deliveryVariantsFrom / uploadBuffer publicId — the Cloudinary delivery adapter', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('returns thumb/card/full from the eager array and url as the capped master — same field names as before', async () => {
-    mockUploadStream({
+  it('returns thumb/card/full from the eager array', () => {
+    expect(deliveryVariantsFrom({
       secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/master.jpg',
-      public_id: 'remont/master',
       eager: [
         { secure_url: 'https://res.cloudinary.com/x/image/upload/w_200/remont/master.jpg' },
         { secure_url: 'https://res.cloudinary.com/x/image/upload/w_600/remont/master.jpg' },
         { secure_url: 'https://res.cloudinary.com/x/image/upload/w_1200/remont/master.jpg' },
       ],
-    });
-    const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: await tinyJpeg() } as any);
-
-    expect(result).toEqual({
+    } as any)).toEqual({
       thumb: 'https://res.cloudinary.com/x/image/upload/w_200/remont/master.jpg',
       card: 'https://res.cloudinary.com/x/image/upload/w_600/remont/master.jpg',
       full: 'https://res.cloudinary.com/x/image/upload/w_1200/remont/master.jpg',
-      url: 'https://res.cloudinary.com/x/image/upload/v1/remont/master.jpg',
-      publicId: 'remont/master',
     });
   });
 
-  it('falls back to f_auto,q_auto delivery-time resizing (not the old f_webp,q_auto:good) if eager ever comes back short', async () => {
-    mockUploadStream({
-      secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/master.jpg',
-      public_id: 'remont/master',
-      eager: [], // simulate Cloudinary not returning eager results
-    });
-    const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: await tinyJpeg() } as any);
-
-    expect(result.thumb).toBe('https://res.cloudinary.com/x/image/upload/w_200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
-    expect(result.full).toBe('https://res.cloudinary.com/x/image/upload/w_1200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
+  it('falls back to f_auto,q_auto delivery-time resizing (not the old f_webp,q_auto:good) if eager ever comes back short', () => {
+    const v = deliveryVariantsFrom({ secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/master.jpg', eager: [] } as any);
+    expect(v.thumb).toBe('https://res.cloudinary.com/x/image/upload/w_200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
+    expect(v.full).toBe('https://res.cloudinary.com/x/image/upload/w_1200,c_limit,f_auto,q_auto/v1/remont/master.jpg');
   });
 
-  it('rejects a non-image mimetype before ever calling Cloudinary', async () => {
+  it('a server-generated publicId is used verbatim, with overwrite disabled and no random folder id', async () => {
+    mockUploadStream({ secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/products/2026/09/u.webp', public_id: 'remont/products/2026/09/u', eager: [] });
+    await uploadBuffer(Buffer.from('fake'), 'image', true, { publicId: 'remont/products/2026/09/u' });
+    const options = (mockUploadStream as any).lastOptions;
+    expect(options.public_id).toBe('remont/products/2026/09/u');
+    expect(options.overwrite).toBe(false);
+    expect(options.folder).toBeUndefined();
+  });
+
+  it('without a publicId the legacy behavior is unchanged (random id under the remont folder)', async () => {
+    mockUploadStream({ secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/abc.jpg', public_id: 'remont/abc', eager: [] });
+    await uploadBuffer(Buffer.from('fake'), 'image');
+    expect((mockUploadStream as any).lastOptions.folder).toBe('remont');
+    expect((mockUploadStream as any).lastOptions.public_id).toBeUndefined();
+  });
+
+  it('storeVideo rejects a non-video mimetype before ever calling Cloudinary', async () => {
     const svc = new UploadsService();
-    await expect(svc.processAndStore({ mimetype: 'video/mp4', buffer: Buffer.from('x') } as any)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.storeVideo({ mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any)).rejects.toBeInstanceOf(BadRequestException);
     expect(cloudinaryMock.uploader.upload_stream).not.toHaveBeenCalled();
   });
 
@@ -229,36 +226,4 @@ describe('optimizeImage — server-side optimization before anything reaches Clo
   it('rejects a non-image payload', async () => {
     await expect(optimizeImage(Buffer.from('this is definitely not an image'))).rejects.toThrow(BadRequestException);
   });
-});
-
-describe('processAndStore — what Cloudinary permanently stores is the optimized WebP', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('uploads the optimized bytes, not the original, and skips Cloudinary re-transformation', async () => {
-    const width = 3000, height = 2000;
-    const noise = Buffer.alloc(width * height * 3);
-    randomFillSync(noise); // native fill — same incompressible noise, ~20x faster than a per-byte JS loop
-    const original = await sharp(noise, { raw: { width, height, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
-
-    let uploadedBytes: Buffer | null = null;
-    (cloudinaryMock.uploader.upload_stream as jest.Mock).mockImplementation((options: any, cb: any) => {
-      (mockUploadStream as any).lastOptions = options;
-      return { end: (b: Buffer) => { uploadedBytes = b; cb(null, { secure_url: 'https://res.cloudinary.com/x/image/upload/v1/remont/o.webp', public_id: 'remont/o', eager: [] }); } };
-    });
-
-    const svc = new UploadsService();
-    const result = await svc.processAndStore({ mimetype: 'image/jpeg', buffer: original } as any);
-
-    expect(uploadedBytes).not.toBeNull();
-    // The uploaded payload is the optimized WebP — strictly smaller than, and not equal to,
-    // the original upload.
-    expect(uploadedBytes!.length).toBeLessThan(original.length);
-    expect(uploadedBytes!.equals(original)).toBe(false);
-    expect((await sharp(uploadedBytes!).metadata()).format).toBe('webp');
-    // No incoming transformation: sharp already did the resizing.
-    expect((mockUploadStream as any).lastOptions.transformation).toBeUndefined();
-    expect(result.url).toContain('/upload/');
-    // eslint-disable-next-line no-console
-    console.log(`    [stored asset] original ${(original.length / 1048576).toFixed(2)}MB -> uploaded ${(uploadedBytes!.length / 1048576).toFixed(2)}MB WebP`);
-  }, 120000); // ~2s on an idle machine; the headroom is for a fully parallel suite run
 });

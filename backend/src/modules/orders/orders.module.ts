@@ -1,11 +1,11 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, BadRequestException, ForbiddenException, Logger,
+  NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, InternalServerErrorException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode } from '@prisma/client';
+import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode, MediaEntityType } from '@prisma/client';
 import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
@@ -21,6 +21,12 @@ import { PaymentNotificationsService, PaymentNotificationsModule } from '../paym
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
+import { MediaModule } from '../media/media.module';
+import { MediaService, PublicMedia } from '../media/media.service';
+import { isInlineImage } from '../media/media.policy';
+
+/** Upper bound on completion photos per job — each one is virus-scanned and uploaded. */
+const MAX_COMPLETION_PHOTOS = 20;
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -495,6 +501,7 @@ export class OrdersService {
     private ledger: PartnerLedgerService,
     private invoices: InvoicesService,
     private returns: ReturnsService,
+    @Optional() private media?: MediaService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -1200,6 +1207,12 @@ export class OrdersService {
     // those rather than permanently locking them out of completion.
     if (order.endOtp && order.endOtp !== otp) throw new BadRequestException('Invalid completion OTP');
 
+    // Completion proof photos arrive as data: URIs (partner portal + app contract). They go
+    // through the central media pipeline only now that the request is known to be valid, and
+    // only their Cloudinary URLs are stored on the order — never the base64 itself.
+    const vendorActor = { id: vendorUserId, role: UserRole.SERVICE_VENDOR };
+    const photos = await this.storeCompletionPhotos(photosAfter, vendorActor);
+
     // Vendor Wallet true-up: Lead Cost was already deducted in full at accept time as an
     // advance against this job's commission (see ServiceVendorsService.acceptJob) — only the
     // remainder of the commission is collected here. Reconstructing the gross amount from
@@ -1233,7 +1246,7 @@ export class OrdersService {
     const completed = await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
         where: { id: orderId, status: { in: ['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } },
-        data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter, videoUrl, endOtpVerified: !!order.endOtp },
+        data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter: photos.urls, videoUrl, endOtpVerified: !!order.endOtp },
       });
       if (claimed.count !== 1) {
         throw new BadRequestException('Order cannot be completed at this stage');
@@ -1255,7 +1268,14 @@ export class OrdersService {
         await this.ledger.postHold(tx, v.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
       }
       return updated;
+    }).catch(async (e) => {
+      // Completion lost (e.g. a concurrent double-submit won) — don't leave its photos behind.
+      await Promise.all(photos.ingested.map((m) => this.media?.remove(m.id, vendorActor).catch(() => undefined)));
+      throw e;
     });
+    if (photos.ingested.length) {
+      await this.media?.linkByUrls({ entityType: MediaEntityType.PROJECT, entityId: orderId, urls: photos.urls, actor: vendorActor });
+    }
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     if (order.endOtp) {
       await writeOtpLog(this.prisma, { orderId, otpType: 'END', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
@@ -1265,7 +1285,36 @@ export class OrdersService {
     return completed;
   }
 
-  private async notifyWorkCompleted(order: { id: string; customerId: string; guestPhone: string | null; orderNumber: string }) {
+  /**
+   * Converts inline (data: URI) completion photos into Cloudinary media through the central
+   * pipeline; entries that are already URLs pass through unchanged. All-or-nothing: if any
+   * photo is rejected, the ones already stored are removed and the completion fails with the
+   * pipeline's error (e.g. a virus-scan rejection), so the partner can retry.
+   */
+  private async storeCompletionPhotos(photos: unknown, actor: { id: string; role: UserRole }): Promise<{ urls: string[]; ingested: PublicMedia[] }> {
+    if (photos === undefined || photos === null) return { urls: [], ingested: [] };
+    if (!Array.isArray(photos) || photos.some((p) => typeof p !== 'string')) throw new BadRequestException('photosAfter must be a list of images');
+    if (photos.length > MAX_COMPLETION_PHOTOS) throw new BadRequestException(`At most ${MAX_COMPLETION_PHOTOS} completion photos are allowed`);
+    if (!photos.some(isInlineImage)) return { urls: photos as string[], ingested: [] };
+    if (!this.media) throw new InternalServerErrorException('Media storage is not available');
+
+    const urls: string[] = [];
+    const ingested: PublicMedia[] = [];
+    try {
+      for (const [i, p] of (photos as string[]).entries()) {
+        if (!isInlineImage(p)) { urls.push(p); continue; }
+        const m = await this.media.ingestDataUrl(p, { originalName: `job-photo-${i + 1}`, entityType: MediaEntityType.PROJECT, actor });
+        ingested.push(m);
+        urls.push(m.variants?.full ?? m.deliveryUrl!);
+      }
+    } catch (e) {
+      await Promise.all(ingested.map((m) => this.media!.remove(m.id, actor).catch(() => undefined)));
+      throw e;
+    }
+    return { urls, ingested };
+  }
+
+  private async notifyWorkCompleted(order:{ id: string; customerId: string; guestPhone: string | null; orderNumber: string }) {
     const phone = order.guestPhone || (await this.prisma.user.findUnique({ where: { id: order.customerId }, select: { phone: true } }))?.phone;
     if (!phone) return;
     await this.paymentNotify.workCompleted(order.customerId, phone, order.orderNumber, order.id);
@@ -2026,7 +2075,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule, ReturnsModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule, ReturnsModule, MediaModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService, DispatchRetryService],
   exports: [OrdersService, DispatchService, RoutingService],

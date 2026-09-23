@@ -3,12 +3,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { UserRole, TransactionReason, AiFeatureType, AiFeatureStatus } from '@prisma/client';
+import { UserRole, TransactionReason, AiFeatureType, AiFeatureStatus, MediaEntityType, MediaSource } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
 import { WalletService, WalletModule } from '../wallet/wallet.module';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
-import { uploadBuffer } from '../uploads/uploads.module';
+import { MediaModule } from '../media/media.module';
+import { MediaService } from '../media/media.service';
+import { generateImages } from '../ai-images/openai-images';
 
 // Seller-facing, wallet-gated, optional paid AI features for the Add Product form
 // (frontend/seller.html) — see plan doc "Seller-Facing Paid AI Product Enrichment".
@@ -48,7 +50,7 @@ export class AiEnrichmentService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private wallet: WalletService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private wallet: WalletService, private media: MediaService) {
     this.tavilyKey = config.get('TAVILY_API_KEY', '');
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
@@ -132,7 +134,7 @@ export class AiEnrichmentService {
         let resultJson: any;
         if (feature === 'WEB_SEARCH') resultJson = await this.runWebSearch(body.name, body.category, body.brand);
         else if (feature === 'IMAGE_SEARCH') resultJson = await this.runImageSearch(body.name, body.category, body.brand);
-        else resultJson = await this.runImageGeneration(body.name, body.category, body.brand);
+        else resultJson = await this.runImageGeneration(userId, body.name, body.category, body.brand);
 
         await this.prisma.aiFeatureUsage.update({ where: { id: usage.id }, data: { resultJson } });
         result[feature] = resultJson;
@@ -193,24 +195,37 @@ Return JSON with: brand, manufacturer, modelNumber, weightKg (number or null), l
     return { images };
   }
 
-  private async runImageGeneration(name: string, category?: string, brand?: string) {
+  private async runImageGeneration(userId: string, name: string, category?: string, brand?: string) {
     if (!this.openaiKey) throw new Error('OPENAI_API_KEY not configured');
     const prompt = `Professional e-commerce product photograph of ${[brand, name].filter(Boolean).join(' ')}${category ? ` (${category})` : ''}, clean white background, studio lighting, multiple angle mockup, high detail. Illustrative — not a photo of the seller's actual unit.`;
-    const res = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.openaiKey}` },
-      body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 2, size: '1024x1024' }),
-    });
-    if (!res.ok) throw new Error(`OpenAI image generation ${res.status}: ${await res.text().catch(() => res.statusText)}`);
-    const data: any = await res.json();
-    const b64Images: string[] = (data.data || []).map((d: any) => d.b64_json).filter(Boolean);
-    if (!b64Images.length) throw new Error('Image generation returned no results');
+    // Same request as before (gpt-image-1, 2 images, 1024x1024) — the HTTP call itself now
+    // lives in ai-images/openai-images.ts so the admin generator shares one implementation.
+    const b64Images = await generateImages({ apiKey: this.openaiKey, prompt, count: 2, size: '1024x1024' });
 
-    const uploaded = await Promise.all(b64Images.map(async (b64) => {
-      const result = await uploadBuffer(Buffer.from(b64, 'base64'), 'image');
-      return result.secure_url;
-    }));
-    return { images: uploaded };
+    // AI-generated images are ordinary media: same central pipeline as a seller upload
+    // (signature check, ClamAV, sharp re-encode, Cloudinary under remont/products/generated/,
+    // Media row). Filed as unattached PRODUCT media owned by the seller — the link to a product is made
+    // (with an ownership check) when the seller saves the product with one of these URLs,
+    // never from the client-supplied productId here. A pipeline failure throws, which the
+    // caller turns into an automatic refund for this feature — so it is all-or-nothing: if any
+    // image fails, the ones already stored are removed rather than left behind unpaid-for.
+    const actor = { id: userId, role: UserRole.PRODUCT_VENDOR };
+    const settled = await Promise.allSettled(b64Images.map((b64, i) => this.media.ingestImage({
+      buffer: Buffer.from(b64, 'base64'),
+      originalName: `ai-generated-${i + 1}.png`,
+      entityType: MediaEntityType.PRODUCT,
+      source: MediaSource.AI_GENERATED,
+      actor,
+    })));
+    const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    const stored = settled.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<MediaService['ingestImage']>>> => r.status === 'fulfilled').map((r) => r.value);
+    if (failed) {
+      await Promise.all(stored.map((m) => this.media.remove(m.id, actor).catch(() => undefined)));
+      throw failed.reason;
+    }
+    // The 1200px "full" variant — the same size a seller-uploaded product photo is saved at, so
+    // product detail pages get a consistent high-resolution Cloudinary image.
+    return { images: stored.map((m) => m.variants?.full ?? m.deliveryUrl), mediaIds: stored.map((m) => m.id) };
   }
 }
 
@@ -238,7 +253,7 @@ export class AiEnrichmentController {
 }
 
 @Module({
-  imports: [WalletModule],
+  imports: [WalletModule, MediaModule],
   controllers: [AiEnrichmentController],
   providers: [AiEnrichmentService],
   exports: [AiEnrichmentService],

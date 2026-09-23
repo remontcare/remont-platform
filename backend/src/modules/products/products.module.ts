@@ -1,16 +1,19 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, Logger,
+  NotFoundException, ForbiddenException, Logger, Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
+import { MediaEntityType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload, slugify } from '../../common';
+import { MediaModule } from '../media/media.module';
+import { MediaService } from '../media/media.service';
+import { assertNoNewInlineImages } from '../media/media.policy';
 
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, @Optional() private media?: MediaService) {}
 
   async list(opts: { category?: string; vendor?: string; q?: string; city?: string; limit?: number }) {
     const products = await this.prisma.product.findMany({
@@ -142,6 +145,9 @@ export class ProductsService {
       throw new ForbiddenException('Your seller account is not approved to publish products');
     }
 
+    // New product images must be uploaded through the media pipeline and referenced by URL.
+    assertNoNewInlineImages(data.images);
+
     const slug = slugify(`${data.name}-${Date.now()}`);
     const sku = data.sku || `RMNT-${Date.now()}`;
     // cityIds isn't a Product column — it drives CityProduct rows via syncCityCoverage below.
@@ -153,6 +159,9 @@ export class ProductsService {
 
     if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
       await this.syncCityCoverage(product.id, cityIds);
+    }
+    if (Array.isArray(data.images)) {
+      await this.media?.linkByUrls({ entityType: MediaEntityType.PRODUCT, entityId: product.id, urls: product.images, actor: { id: userId, role: UserRole.PRODUCT_VENDOR } });
     }
 
     // Background AI enhancement
@@ -170,6 +179,8 @@ export class ProductsService {
     }
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing || existing.vendorId !== vendor.id) throw new ForbiddenException();
+    // Legacy base64 images already on the product may be sent back unchanged; new ones may not.
+    if (data.images !== undefined) assertNoNewInlineImages(data.images, existing.images);
     // Strip vendorId (a seller must never reassign their own product to a different vendor
     // via PATCH) and cityIds (not a Product column — see syncCityCoverage below).
     const { vendorId, cityIds, ...safeData } = data;
@@ -177,6 +188,9 @@ export class ProductsService {
 
     if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
       await this.syncCityCoverage(id, cityIds);
+    }
+    if (data.images !== undefined) {
+      await this.media?.linkByUrls({ entityType: MediaEntityType.PRODUCT, entityId: id, urls: updated.images, actor: { id: userId, role: UserRole.PRODUCT_VENDOR } });
     }
     return updated;
   }
@@ -251,6 +265,7 @@ export class ProductsController {
 }
 
 @Module({
+  imports: [MediaModule],
   controllers: [ProductsController],
   providers: [ProductsService],
   exports: [ProductsService],

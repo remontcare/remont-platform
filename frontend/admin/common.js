@@ -300,12 +300,15 @@ function renderSidebar(page) {
 
 // ── IMAGE COMPRESSION ─────────────────────────────────────────────
 // Task 3 — one click, real server-side WebP + responsive sizes (thumb/card/full), via
-// the new POST /api/v1/uploads/image endpoint (backend/src/modules/uploads). Falls back
-// to the original client-side compressImage() below if the request fails for any reason
-// (e.g. offline, endpoint down) so upload never just breaks.
-function uploadImageToServer(file, onDone, onError) {
+// POST /api/v1/uploads/image, which runs the central media pipeline (security checks,
+// virus scan, R2 master, Cloudinary delivery, Media Library record — see
+// backend/src/modules/media). entityType (PRODUCT, SERVICE, BANNER, …) files the image in
+// the right Media Library folder. There is deliberately NO client-side base64 fallback any
+// more: a failed upload is reported, never silently saved as an inline data: image.
+function uploadImageToServer(file, onDone, onError, entityType) {
   var fd = new FormData();
   fd.append('file', file);
+  if (entityType) fd.append('entityType', entityType);
   fetch(API_BASE + '/api/v1/uploads/image', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + getToken() },
@@ -318,33 +321,10 @@ function uploadImageToServer(file, onDone, onError) {
   }).then(onDone).catch(function(e) { if (onError) onError(e); });
 }
 
-function compressImage(file, cb, maxDim, quality) {
-  maxDim = maxDim || 1600;
-  quality = quality || 0.88;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    var img = new Image();
-    img.onload = function() {
-      var w = img.width, h = img.height;
-      var scale = Math.min(1, maxDim / Math.max(w, h));
-      w = Math.round(w * scale); h = Math.round(h * scale);
-      var canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      var out = canvas.toDataURL('image/jpeg', quality);
-      cb(out, Math.round(file.size / 1024), Math.round(out.length * 0.75 / 1024));
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
 function attachImageUpload(inputId, opts) {
   var input = document.getElementById(inputId);
   if (!input) return;
   opts = opts || {};
-  var maxDim = opts.maxDim || 1600;
-  var quality = opts.quality || 0.88;
   var previewW = opts.previewW || 130;
   var previewH = opts.previewH || 78;
 
@@ -377,14 +357,12 @@ function attachImageUpload(inputId, opts) {
     btn.disabled = true; btn.innerHTML = '⏳ Uploading…';
     uploadImageToServer(file, function(urls) {
       applyUploadedUrl(urls.full, '✓ Optimized (WebP)');
-    }, function() {
-      // Upload endpoint unreachable — fall back to the original client-side path so
-      // this never just breaks; result is a data: URI, not a real hosted file.
-      btn.innerHTML = '⏳ Compressing…';
-      compressImage(file, function(dataUrl, origKB, compKB) {
-        applyUploadedUrl(dataUrl, '✓ ' + compKB + ' KB (was ' + origKB + ' KB)');
-      }, maxDim, quality);
-    });
+    }, function(e) {
+      // No base64 fallback — the field keeps its previous value and the admin can retry.
+      btn.disabled = false; btn.innerHTML = '📷 Upload Image';
+      fileInp.value = '';
+      if (typeof toast === 'function') toast('Image upload failed: ' + e.message, 'error');
+    }, opts.entityType);
   };
 
   input.addEventListener('input', function() {
@@ -473,8 +451,6 @@ function attachGalleryUpload(inputId, addFn, opts) {
   var input = document.getElementById(inputId);
   if (!input) return;
   opts = opts || {};
-  var maxDim = opts.maxDim || 1200;
-  var quality = opts.quality || 0.88;
 
   var fileInp = document.createElement('input');
   fileInp.type = 'file'; fileInp.accept = 'image/*'; fileInp.style.display = 'none';
@@ -489,25 +465,338 @@ function attachGalleryUpload(inputId, addFn, opts) {
     var file = fileInp.files[0]; if (!file) return;
     btn.disabled = true; btn.innerHTML = '⏳';
     uploadImageToServer(file, function(urls) {
-      input.value = urls.card; // gallery thumbnails don't need full-size
+      // Default: the 600px card variant (gallery thumbnails). opts.variant: 'full' stores the
+      // 1200px image instead, for galleries that feed a detail page (products).
+      input.value = opts.variant === 'full' ? urls.full : urls.card;
       addFn();
       btn.disabled = false; btn.innerHTML = '📷 Upload';
       fileInp.value = '';
       if (typeof toast === 'function') toast('Image uploaded and optimized (WebP)');
-    }, function() {
-      // Fall back to client-side compression if the upload endpoint is unreachable.
-      compressImage(file, function(dataUrl, origKB, compKB) {
-        input.value = dataUrl;
-        addFn();
-        btn.disabled = false; btn.innerHTML = '📷 Upload';
-        fileInp.value = '';
-        if (typeof toast === 'function') toast('Image compressed: ' + compKB + 'KB (was ' + origKB + 'KB)');
-      }, maxDim, quality);
-    });
+    }, function(e) {
+      // No base64 fallback — nothing is added and the admin can retry.
+      btn.disabled = false; btn.innerHTML = '📷 Upload';
+      fileInp.value = '';
+      if (typeof toast === 'function') toast('Image upload failed: ' + e.message, 'error');
+    }, opts.entityType);
   };
 
   var addBtn = input.nextElementSibling;
   var ref = addBtn ? addBtn.nextSibling : input.nextSibling;
   input.parentNode.insertBefore(fileInp, ref);
   input.parentNode.insertBefore(btn, fileInp.nextSibling);
+}
+
+// ── AI IMAGE GENERATION ───────────────────────────────────────────────
+// "Generate with AI" next to any image field. The whole flow lives here so an admin never
+// opens Cloudinary: the backend builds the prompt from Remont's presets, generates the
+// image, runs it through the SAME media pipeline as an upload (validation, virus scan,
+// sharp, Cloudinary) and returns hosted URLs. Nothing is attached to the record until the
+// admin picks an image — and replacing an existing image always asks first.
+var _aiPresets = null;
+function loadAiImagePresets() {
+  if (_aiPresets) return Promise.resolve(_aiPresets);
+  return api('GET', '/admin/ai/image-presets').then(function(r) { _aiPresets = r; return r; });
+}
+
+function _aiModal() {
+  var el = document.getElementById('ai-img-overlay');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'ai-img-overlay'; el.className = 'overlay'; el.style.display = 'none';
+  el.innerHTML =
+    '<div class="modal" style="max-width:720px">' +
+      '<div class="modal-header">' +
+        '<span class="modal-title" id="ai-img-title">Generate with AI</span>' +
+        '<button class="modal-close" type="button" onclick="closeAiImageModal()">&times;</button>' +
+      '</div>' +
+      '<div id="ai-img-body">' +
+        '<div class="form-group" id="ai-img-mode-wrap" style="display:none"><label class="form-label">What to generate</label>' +
+          '<select id="ai-img-mode" class="form-control"></select></div>' +
+        '<div class="form-group"><label class="form-label">Subject</label>' +
+          '<input id="ai-img-name" class="form-control" placeholder="e.g. AC Repair"></div>' +
+        '<div class="form-group" id="ai-img-context" style="font-size:12px;color:#6b7280"></div>' +
+        '<div class="form-group" id="ai-img-ref-wrap" style="display:none">' +
+          '<label class="form-label">Reference image <small style="color:#9ca3af">(optional — keeps the real product\'s shape, colour and details)</small></label>' +
+          '<div id="ai-img-refs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px"></div>' +
+          '<input type="file" accept="image/*" id="ai-img-ref-file" style="display:none">' +
+          '<button type="button" class="btn btn-outline btn-xs" id="ai-img-ref-upload">⬆ Upload reference image</button>' +
+        '</div>' +
+        '<div class="form-group"><label class="form-label">Image style</label>' +
+          '<div id="ai-img-styles" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>' +
+        '<div class="form-row" style="gap:12px">' +
+          '<div class="form-group" id="ai-img-count-wrap" style="flex:0 0 150px"><label class="form-label">How many</label>' +
+            '<select id="ai-img-count" class="form-control"></select></div>' +
+          '<div class="form-group" style="flex:1"><label class="form-label">Aspect ratio</label>' +
+            '<input id="ai-img-aspect" class="form-control" readonly style="background:#f9fafb"></div>' +
+        '</div>' +
+        '<div class="form-group"><label class="form-label">Prompt <small style="color:#9ca3af">(edit if you want — the Remont style and quality rules are always applied)</small></label>' +
+          '<textarea id="ai-img-prompt" class="form-control" rows="4" style="resize:vertical"></textarea>' +
+          '<button type="button" class="btn btn-outline btn-xs" style="margin-top:6px" onclick="resetAiPrompt()">↺ Reset prompt</button></div>' +
+        '<div id="ai-img-status" style="display:none;font-size:13px;color:#6b7280;padding:10px 0"></div>' +
+        '<div id="ai-img-error" style="display:none;font-size:13px;color:#dc2626;padding:8px 0"></div>' +
+        '<div id="ai-img-results" style="display:none;gap:12px;flex-wrap:wrap;margin-top:6px"></div>' +
+      '</div>' +
+      '<div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button type="button" class="btn btn-outline" onclick="closeAiImageModal()">Cancel</button>' +
+        '<button type="button" class="btn btn-primary" id="ai-img-go" onclick="runAiImageGeneration()">✨ Generate</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(el);
+  return el;
+}
+
+var _aiState = { opts: null, preset: null, busy: false };
+
+function closeAiImageModal() {
+  if (_aiState.busy) return; // never cancel mid-generation — the image is already being paid for
+  var el = document.getElementById('ai-img-overlay');
+  if (el) el.style.display = 'none';
+}
+
+function _aiSelectedStyles() {
+  return Array.prototype.slice.call(document.querySelectorAll('#ai-img-styles input:checked')).map(function(c) { return c.value; });
+}
+
+function _aiSelectedRefs() {
+  return Array.prototype.slice.call(document.querySelectorAll('#ai-img-refs .ai-ref.on')).map(function(el) { return el.getAttribute('data-url'); });
+}
+
+/** Reference thumbnails: the entity's existing images plus any the admin uploads now.
+ *  Click to toggle; Cloudinary accepts up to 4. Uploading goes through the normal media
+ *  endpoint, so a reference is itself a validated, virus-scanned, stored image. */
+function _aiRenderRefs(urls, selectFirst) {
+  var wrap = document.getElementById('ai-img-refs');
+  wrap.innerHTML = '';
+  (urls || []).forEach(function(url, i) {
+    var t = document.createElement('img');
+    t.className = 'ai-ref' + (selectFirst && i === 0 ? ' on' : '');
+    t.setAttribute('data-url', url);
+    t.src = url;
+    t.style.cssText = 'width:64px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid ' + (selectFirst && i === 0 ? '#f97316' : '#e5e7eb');
+    t.onclick = function() {
+      var on = t.className.indexOf('on') !== -1;
+      if (!on && _aiSelectedRefs().length >= 4) { _aiError('At most 4 reference images'); return; }
+      t.className = on ? 'ai-ref' : 'ai-ref on';
+      t.style.borderColor = on ? '#e5e7eb' : '#f97316';
+      _aiError('');
+    };
+    wrap.appendChild(t);
+  });
+  if (!wrap.children.length) wrap.innerHTML = '<small style="color:#9ca3af">No existing image — upload one to guide the generation.</small>';
+}
+
+function resetAiPrompt() {
+  var ctx = _aiState.opts.context ? (_aiState.opts.context() || {}) : {};
+  ctx.name = document.getElementById('ai-img-name').value.trim();
+  var box = document.getElementById('ai-img-prompt');
+  box.value = 'Loading suggested prompt…';
+  api('POST', '/admin/ai/image-prompt', {
+    entity: _aiState.entity, name: ctx.name, category: ctx.category, subCategory: ctx.subCategory,
+    brand: ctx.brand, styles: _aiSelectedStyles(),
+  }).then(function(r) { box.value = r.prompt; })
+    .catch(function(e) { box.value = ''; _aiError(e.message); });
+}
+
+function _aiError(msg) {
+  var el = document.getElementById('ai-img-error');
+  el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none';
+}
+function _aiStatus(msg) {
+  var el = document.getElementById('ai-img-status');
+  el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none';
+}
+
+/** Renders the style chips + count for whichever preset the current mode selects. */
+function _aiRenderPreset(preselect) {
+  var preset = _aiState.preset;
+  var wanted = preselect && preselect.length ? preselect : preset.defaultStyles;
+  document.getElementById('ai-img-aspect').value = preset.aspect + '  (website standard)';
+
+  var styles = document.getElementById('ai-img-styles');
+  styles.innerHTML = '';
+  preset.styles.forEach(function(s) {
+    var on = wanted.indexOf(s.key) !== -1;
+    var lbl = document.createElement('label');
+    lbl.className = 'badge ' + (on ? 'badge-orange' : 'badge-gray');
+    lbl.style.cssText = 'cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:6px 10px;font-size:12px';
+    lbl.innerHTML = '<input type="checkbox" value="' + escape(s.key) + '"' + (on ? ' checked' : '') + ' style="margin:0">' + escape(s.label);
+    lbl.querySelector('input').onchange = function() {
+      lbl.className = 'badge ' + (this.checked ? 'badge-orange' : 'badge-gray');
+      resetAiPrompt();
+    };
+    styles.appendChild(lbl);
+  });
+
+  var count = document.getElementById('ai-img-count');
+  count.innerHTML = '';
+  for (var i = 1; i <= preset.maxCount; i++) count.innerHTML += '<option value="' + i + '">' + i + (i === 1 ? ' image' : ' images') + '</option>';
+  document.getElementById('ai-img-count-wrap').style.display = preset.maxCount > 1 ? '' : 'none';
+}
+
+function openAiImageModal(opts) {
+  _aiModal();
+  _aiState.opts = opts;
+  loadAiImagePresets().then(function(res) {
+    if (!res.available) { toast('AI image generation is not configured on the server', 'error'); return; }
+    var modes = opts.modes || null;
+    var startEntity = modes ? modes[0].entity : opts.entity;
+    var presetFor = function(entity) { return res.presets.filter(function(p) { return p.entity === entity; })[0]; };
+    if (!presetFor(startEntity)) { toast('No AI preset for ' + startEntity, 'error'); return; }
+
+    var ctx = opts.context ? (opts.context() || {}) : {};
+    document.getElementById('ai-img-name').value = ctx.name || '';
+    // The entity's own record supplies the rest of the context automatically — the admin
+    // never re-types the category/sub-category/brand it is already editing.
+    var known = [ctx.category ? 'Category: ' + ctx.category : '', ctx.subCategory ? 'Sub-category: ' + ctx.subCategory : '', ctx.brand ? 'Brand: ' + ctx.brand : ''].filter(Boolean);
+    document.getElementById('ai-img-context').textContent = known.length ? 'Using ' + known.join('  ·  ') : '';
+
+    // Reference images (products): the entity's existing images are offered straight away,
+    // and the admin can upload another one without leaving the modal.
+    var refWrap = document.getElementById('ai-img-ref-wrap');
+    if (opts.references) {
+      refWrap.style.display = '';
+      _aiRenderRefs(opts.references() || [], false);
+      var refFile = document.getElementById('ai-img-ref-file');
+      var refBtn = document.getElementById('ai-img-ref-upload');
+      refBtn.onclick = function() { refFile.click(); };
+      refFile.onchange = function() {
+        var file = refFile.files[0]; if (!file) return;
+        refBtn.disabled = true; refBtn.textContent = '⏳ Uploading…';
+        uploadImageToServer(file, function(urls) {
+          var current = _aiSelectedRefs().concat([urls.full]);
+          _aiRenderRefs((opts.references() || []).concat([urls.full]), false);
+          Array.prototype.slice.call(document.querySelectorAll('#ai-img-refs .ai-ref')).forEach(function(el) {
+            if (current.indexOf(el.getAttribute('data-url')) !== -1) { el.className = 'ai-ref on'; el.style.borderColor = '#f97316'; }
+          });
+          refBtn.disabled = false; refBtn.textContent = '⬆ Upload reference image'; refFile.value = '';
+        }, function(e) {
+          refBtn.disabled = false; refBtn.textContent = '⬆ Upload reference image'; refFile.value = '';
+          _aiError('Reference upload failed: ' + e.message);
+        }, 'PRODUCT');
+      };
+    } else {
+      refWrap.style.display = 'none';
+    }
+
+    var modeWrap = document.getElementById('ai-img-mode-wrap');
+    var modeSel = document.getElementById('ai-img-mode');
+    if (modes) {
+      modeSel.innerHTML = modes.map(function(m, i) { return '<option value="' + i + '">' + escape(m.label) + '</option>'; }).join('');
+      modeWrap.style.display = '';
+      modeSel.onchange = function() {
+        var m = modes[Number(this.value)];
+        _aiState.entity = m.entity; _aiState.preset = presetFor(m.entity);
+        document.getElementById('ai-img-title').textContent = 'Generate ' + m.label + ' with AI';
+        _aiRenderPreset(m.styles);
+        resetAiPrompt();
+      };
+      modeSel.value = '0';
+    } else {
+      modeWrap.style.display = 'none';
+    }
+
+    var mode = modes ? modes[0] : null;
+    _aiState.entity = startEntity;
+    _aiState.preset = presetFor(startEntity);
+    document.getElementById('ai-img-title').textContent = 'Generate ' + (mode ? mode.label : _aiState.preset.label + ' image') + ' with AI';
+    _aiRenderPreset(mode && mode.styles);
+
+    document.getElementById('ai-img-results').style.display = 'none';
+    document.getElementById('ai-img-results').innerHTML = '';
+    _aiError(''); _aiStatus('');
+    document.getElementById('ai-img-go').textContent = '✨ Generate';
+    document.getElementById('ai-img-overlay').style.display = 'flex';
+    resetAiPrompt();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function runAiImageGeneration() {
+  if (_aiState.busy) return; // guards double clicks; the server also rejects parallel runs
+  var opts = _aiState.opts;
+  var ctx = opts.context ? (opts.context() || {}) : {};
+  var name = document.getElementById('ai-img-name').value.trim();
+  var prompt = document.getElementById('ai-img-prompt').value.trim();
+  if (!name && !prompt) { _aiError('Enter a subject, or write a prompt'); return; }
+
+  var go = document.getElementById('ai-img-go');
+  _aiState.busy = true; go.disabled = true; go.textContent = '⏳ Generating…';
+  _aiError(''); _aiStatus('Generating your professional image… this usually takes 15–40 seconds.');
+
+  api('POST', '/admin/ai/image', {
+    entity: _aiState.entity, name: name, category: ctx.category, subCategory: ctx.subCategory, brand: ctx.brand,
+    styles: _aiSelectedStyles(), prompt: prompt, count: Number(document.getElementById('ai-img-count').value || 1),
+    referenceImages: _aiSelectedRefs(),
+  }).then(function(res) {
+    _aiStatus(''); go.textContent = '↻ Regenerate';
+    var wrap = document.getElementById('ai-img-results');
+    wrap.style.display = 'flex'; wrap.innerHTML = '';
+    res.images.forEach(function(img) {
+      var card = document.createElement('div');
+      card.style.cssText = 'border:1px solid #e5e7eb;border-radius:10px;padding:8px;width:210px;max-width:100%';
+      card.innerHTML =
+        '<img src="' + escape(img.thumb || img.url) + '" style="width:100%;border-radius:6px;display:block">' +
+        '<div style="font-size:11px;color:#9ca3af;margin:6px 0 8px">' + escape(img.width + '×' + img.height) + '</div>';
+      var use = document.createElement('button');
+      use.type = 'button'; use.className = 'btn btn-primary btn-sm'; use.style.width = '100%';
+      use.textContent = 'Use this image';
+      use.onclick = function() { _aiUseImage(img); };
+      card.appendChild(use);
+      wrap.appendChild(card);
+    });
+  }).catch(function(e) {
+    _aiStatus(''); _aiError(e.message || 'Generation failed');
+    go.textContent = '✨ Generate';
+  }).then(function() {
+    _aiState.busy = false; go.disabled = false;
+  });
+}
+
+function _aiUseImage(img) {
+  var opts = _aiState.opts;
+  if (opts.confirmReplace !== false) {
+    var current = opts.currentValue ? opts.currentValue() : '';
+    if (current && !confirm('Replace the existing image with this AI-generated one?')) return;
+  }
+  opts.onUse(img.url, img);
+  toast('Image added — remember to save the record', 'success');
+  _aiState.busy = false;
+  closeAiImageModal();
+}
+
+/**
+ * Adds a "Generate with AI" button next to an image field.
+ *   attachAiImageGenerator('svc-img', { entity: 'SERVICE', context: function(){...} })
+ * opts.onUse defaults to writing the URL into the input (same as a manual upload).
+ */
+function attachAiImageGenerator(inputId, opts) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  opts = opts || {};
+
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-outline btn-sm';
+  btn.style.cssText = 'font-size:12px;white-space:nowrap;margin-left:6px;';
+  btn.innerHTML = '✨ Generate with AI';
+  btn.onclick = function() {
+    openAiImageModal({
+      entity: opts.entity,
+      modes: opts.modes,
+      context: opts.context,
+      references: opts.references,
+      currentValue: opts.currentValue || function() { return input.value; },
+      confirmReplace: opts.confirmReplace,
+      onUse: opts.onUse || function(url) {
+        input.value = url;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+    });
+  };
+
+  // Sits AFTER the field's existing Upload button (the last small outline button in the
+  // group), so the media row reads "… Upload | ✨ Generate with AI" in the admin's normal
+  // button style — no separate page, no duplicate upload control.
+  var groupBtns = input.parentNode.querySelectorAll('.btn-outline.btn-sm');
+  var lastBtn = groupBtns.length ? groupBtns[groupBtns.length - 1] : null;
+  if (lastBtn && lastBtn.parentNode) lastBtn.parentNode.insertBefore(btn, lastBtn.nextSibling);
+  else input.parentNode.insertBefore(btn, input.nextSibling);
 }

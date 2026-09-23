@@ -492,6 +492,7 @@ model User {
   loginHistory           LoginHistory[]
   refreshSessions        RefreshSession[]
   auditLogs              AuditLog[]
+  mediaUploads           Media[]
 
   @@index([phone])
   @@index([role])
@@ -3774,4 +3775,108 @@ model DeleteRequest {
 
   @@index([status])
   @@index([targetType, targetId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CENTRAL MEDIA LIBRARY
+// One row per stored media asset, written only by MediaService.ingestImage()
+// (backend/src/modules/media) — the single upload pipeline every product, service,
+// seller, marketing, CMS, AI-generated and customer image goes through.
+//
+// Metadata and stable references ONLY — the bytes never live in PostgreSQL. Cloudinary is
+// the single source of truth for storage and delivery (storageKey = cloudinaryPublicId). A
+// database migration therefore only has to move these rows; the files stay where they are.
+// storageProvider keeps the model open to another provider later without changing callers.
+//
+// Existing URL columns (Product.images, Service.imageUrl, HomeBanner.imageUrl, …) are
+// kept as-is for backward compatibility; entityType/entityId link a Media row back to
+// the record that uses it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum MediaStorageProvider {
+  R2 // reserved for a possible future object store — not used by any active code path
+  CLOUDINARY // the only active provider
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
+// A row is only ever READ back as usable when READY. PROCESSING rows exist only for the
+// duration of one upload (storage writes in flight) — a stale one means the process died
+// mid-upload, and MediaService's cleanup sweep removes it together with its objects.
+enum MediaStatus {
+  UPLOADING
+  SCANNING
+  PROCESSING
+  READY
+  REJECTED
+  DELETED
+}
+
+// Server-controlled — decides the storage folder and which roles may upload it. Never a
+// client-supplied path.
+enum MediaEntityType {
+  PRODUCT
+  SELLER_PROFILE
+  SERVICE
+  CATEGORY
+  SUBCATEGORY
+  BRAND
+  BANNER
+  MARKETING
+  PROJECT
+  BLOG
+  CMS
+  PARTNER_PROFILE
+  CUSTOMER_UPLOAD
+  LEAD
+  GENERAL
+}
+
+enum MediaSource {
+  UPLOAD
+  AI_GENERATED
+  MIGRATION
+}
+
+model Media {
+  id                 String               @id
+  storageProvider    MediaStorageProvider
+  storageKey         String               @unique // Cloudinary public_id, e.g. remont/products/original/<uuid> — server-generated, never the original filename
+  originalName       String? // sanitized, metadata only
+  originalFormat     String? // format detected from the uploaded bytes (jpeg/png/webp/gif)
+  originalSize       Int?
+  mimeType           String // of the stored master (always an image/webp re-encode for images)
+  extension          String
+  size               Int // bytes of the stored master
+  width              Int?
+  height             Int?
+  checksum           String // SHA-256 (hex) of the stored master
+  mediaType          MediaType            @default(IMAGE)
+  source             MediaSource          @default(UPLOAD)
+  entityType         MediaEntityType
+  entityId           String?
+  isPrimary          Boolean              @default(false)
+  sortOrder          Int                  @default(0)
+  cloudinaryPublicId String?
+  deliveryUrl        String? // optimized master delivery URL
+  variants           Json? // { thumb, card, full } delivery URLs
+  // Every URL this asset is delivered under (master + variants) — lets a save of any
+  // legacy URL column (Product.images etc.) find and link the Media row it came from.
+  variantUrls        String[]
+  status             MediaStatus          @default(PROCESSING)
+  uploadedBy         String?
+  uploader           User?                @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  deletedAt          DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([uploadedBy])
+  @@index([status, createdAt])
+  @@index([checksum])
+  @@index([variantUrls], type: Gin)
 }

@@ -1,13 +1,14 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, UseGuards,
-  NotFoundException, BadRequestException, ForbiddenException, Logger,
+  NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, Req,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
-import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode } from '@prisma/client';
+import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
@@ -22,6 +23,19 @@ import { CrmService, CrmModule } from '../crm/crm.module';
 import { ShipmentService, LogisticsModule } from '../logistics/logistics.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
+import { MediaModule } from '../media/media.module';
+import { MediaService } from '../media/media.service';
+import { assertNoNewInlineImages, containsInlineImage, requestIp } from '../media/media.policy';
+import { AiImagesModule } from '../ai-images/ai-images.module';
+import { AiImageRequest, AiImageService } from '../ai-images/ai-image.service';
+
+/** Actor for linking admin-saved records to their media — admins may link any READY media. */
+const ADMIN_MEDIA_ACTOR = { role: UserRole.ADMIN };
+
+/** True when a create/update payload carries at least one of the given image fields. */
+function touchesAny(data: any, fields: string[]): boolean {
+  return !!data && fields.some((f) => data[f] !== undefined);
+}
 
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
@@ -50,9 +64,25 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService, @Optional() private media?: MediaService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
+  }
+
+  // ─── Central media (backward-compatible URL columns) ────────────────
+  // Image columns keep holding URLs, but those URLs now come from the central media pipeline
+  // (backend/src/modules/media). A NEW base64 value is refused; a legacy one already on the
+  // record may be re-sent unchanged (loadExisting is only queried when a data: URI is present,
+  // so the normal path costs nothing). After a save that touched an image field, the record's
+  // image URLs are linked to their Media rows — best-effort, never failing the save.
+
+  private async guardInlineImages(incoming: unknown[], loadExisting: () => Promise<unknown>) {
+    if (!containsInlineImage(...incoming)) return;
+    assertNoNewInlineImages(incoming, await loadExisting());
+  }
+
+  private async linkMedia(entityType: MediaEntityType, entityId: string, ...urls: unknown[]) {
+    await this.media?.linkByUrls({ entityType, entityId, urls, actor: ADMIN_MEDIA_ACTOR });
   }
 
   // ─── Dashboard stats ────────────────────────────────────────────────
@@ -1215,15 +1245,21 @@ export class AdminService {
   }
 
   async createCategory(data: any) {
+    assertNoNewInlineImages([data.logoUrl, data.imageUrl]);
     const slug = data.slug || slugify(data.name);
-    return this.prisma.serviceCategory.create({ data: { ...data, slug, seoKeywords: data.seoKeywords || [] } });
+    const created = await this.prisma.serviceCategory.create({ data: { ...data, slug, seoKeywords: data.seoKeywords || [] } });
+    if (touchesAny(data, ['logoUrl', 'imageUrl'])) await this.linkMedia(MediaEntityType.CATEGORY, created.id, created.logoUrl, created.imageUrl);
+    return created;
   }
 
   async updateCategory(id: string, data: any) {
     const existing = await this.prisma.serviceCategory.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Category not found');
+    assertNoNewInlineImages([data.logoUrl, data.imageUrl], [existing.logoUrl, existing.imageUrl]);
     if (data.name && !data.slug) data.slug = slugify(data.name);
-    return this.prisma.serviceCategory.update({ where: { id }, data });
+    const updated = await this.prisma.serviceCategory.update({ where: { id }, data });
+    if (touchesAny(data, ['logoUrl', 'imageUrl'])) await this.linkMedia(MediaEntityType.CATEGORY, id, updated.logoUrl, updated.imageUrl);
+    return updated;
   }
 
   async deleteCategory(id: string) {
@@ -1261,15 +1297,21 @@ export class AdminService {
   }
 
   async createSubCategory(data: any) {
+    assertNoNewInlineImages(data.imageUrl);
     const slug = data.slug || slugify(data.name);
-    return this.prisma.subCategory.create({ data: { ...data, slug }, include: { category: true } });
+    const created = await this.prisma.subCategory.create({ data: { ...data, slug }, include: { category: true } });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.SUBCATEGORY, created.id, created.imageUrl);
+    return created;
   }
 
   async updateSubCategory(id: string, data: any) {
     const existing = await this.prisma.subCategory.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Sub-category not found');
+    assertNoNewInlineImages(data.imageUrl, existing.imageUrl);
     if (data.name && !data.slug) data.slug = slugify(data.name);
-    return this.prisma.subCategory.update({ where: { id }, data, include: { category: true } });
+    const updated = await this.prisma.subCategory.update({ where: { id }, data, include: { category: true } });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.SUBCATEGORY, id, updated.imageUrl);
+    return updated;
   }
 
   async deleteSubCategory(id: string) {
@@ -1301,17 +1343,23 @@ export class AdminService {
   async createService(data: any) {
     const slug = slugify(data.name) + '-' + Date.now();
     const { cities, ...rest } = data;
-    return this.prisma.service.create({
+    assertNoNewInlineImages([rest.imageUrl, rest.images]);
+    const created = await this.prisma.service.create({
       data: { ...rest, slug, requiredSkills: rest.requiredSkills || [], images: rest.images || [], seoKeywords: rest.seoKeywords || [] },
       include: { category: true, subCategory: true },
     });
+    if (touchesAny(rest, ['imageUrl', 'images'])) await this.linkMedia(MediaEntityType.SERVICE, created.id, created.imageUrl, created.images);
+    return created;
   }
 
   async updateService(id: string, data: any) {
     const existing = await this.prisma.service.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service not found');
     const { cities, ...rest } = data;
-    return this.prisma.service.update({ where: { id }, data: rest, include: { category: true, subCategory: true } });
+    assertNoNewInlineImages([rest.imageUrl, rest.images], [existing.imageUrl, existing.images]);
+    const updated = await this.prisma.service.update({ where: { id }, data: rest, include: { category: true, subCategory: true } });
+    if (touchesAny(rest, ['imageUrl', 'images'])) await this.linkMedia(MediaEntityType.SERVICE, id, updated.imageUrl, updated.images);
+    return updated;
   }
 
   async deleteService(id: string) {
@@ -1612,6 +1660,7 @@ export class AdminService {
     // cityIds isn't a Product column — it drives CityProduct rows via the products module's
     // syncCityCoverage (same helper the seller-facing create/update endpoints use).
     const { cityIds, ...productData } = data;
+    assertNoNewInlineImages(data.images);
     const product = await this.prisma.product.create({
       data: { ...productData, slug, sku, images: data.images || [], seoKeywords: data.seoKeywords || [], aiEnhancedImgs: [] },
       include: { category: { select: { name: true } } },
@@ -1619,6 +1668,7 @@ export class AdminService {
     if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
       await this.syncProductCityCoverage(product.id, cityIds);
     }
+    if (touchesAny(data, ['images'])) await this.linkMedia(MediaEntityType.PRODUCT, product.id, product.images);
     return product;
   }
 
@@ -1626,10 +1676,12 @@ export class AdminService {
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product not found');
     const { cityIds, ...productData } = data;
+    assertNoNewInlineImages(data.images, existing.images);
     const updated = await this.prisma.product.update({ where: { id }, data: productData, include: { category: { select: { name: true } } } });
     if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {
       await this.syncProductCityCoverage(id, cityIds);
     }
+    if (touchesAny(data, ['images'])) await this.linkMedia(MediaEntityType.PRODUCT, id, updated.images);
     return updated;
   }
 
@@ -1800,11 +1852,17 @@ Return JSON with:
   }
 
   async createBanner(data: { title: string; subtitle?: string; ctaText?: string; ctaUrl?: string; imageUrl?: string; bgColor?: string; tag?: string; sortOrder?: number; cityFilter?: string[] }) {
-    return this.prisma.homeBanner.create({ data: { ...data, cityFilter: data.cityFilter || [] } });
+    assertNoNewInlineImages(data.imageUrl);
+    const created = await this.prisma.homeBanner.create({ data: { ...data, cityFilter: data.cityFilter || [] } });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.BANNER, created.id, created.imageUrl);
+    return created;
   }
 
   async updateBanner(id: string, data: { title?: string; subtitle?: string; ctaText?: string; ctaUrl?: string; imageUrl?: string; bgColor?: string; tag?: string; sortOrder?: number; isActive?: boolean; cityFilter?: string[] }) {
-    return this.prisma.homeBanner.update({ where: { id }, data });
+    await this.guardInlineImages([data.imageUrl], () => this.prisma.homeBanner.findUnique({ where: { id } }).then((b) => b?.imageUrl));
+    const updated = await this.prisma.homeBanner.update({ where: { id }, data });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.BANNER, id, updated.imageUrl);
+    return updated;
   }
 
   async deleteBanner(id: string) {
@@ -2456,15 +2514,21 @@ Return JSON with:
   }
 
   async createBlog(data: { title: string; content: string; summary?: string; imageUrl?: string; author?: string; tags?: string[]; isPublished?: boolean }) {
+    assertNoNewInlineImages(data.imageUrl);
     const slug = slugify(data.title) + '-' + Date.now();
-    return this.prisma.blogPost.create({
+    const created = await this.prisma.blogPost.create({
       data: { ...data, slug, tags: data.tags || [], publishedAt: data.isPublished ? new Date() : null },
-    }).catch((e) => { throw e; });
+    });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.BLOG, created.id, created.imageUrl);
+    return created;
   }
 
   async updateBlog(id: string, data: any) {
+    await this.guardInlineImages([data.imageUrl], () => this.prisma.blogPost.findUnique({ where: { id } }).then((b) => b?.imageUrl));
     if (data.isPublished && !data.publishedAt) data.publishedAt = new Date();
-    return this.prisma.blogPost.update({ where: { id }, data }).catch((e) => { throw e; });
+    const updated = await this.prisma.blogPost.update({ where: { id }, data });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.BLOG, id, updated.imageUrl);
+    return updated;
   }
 
   async deleteBlog(id: string) {
@@ -2541,11 +2605,17 @@ Return JSON with:
   }
 
   async createAd(data: any) {
-    return this.prisma.seasonalAd.create({ data: { ...data, cityFilter: data.cityFilter || [] } }).catch((e) => { throw e; });
+    assertNoNewInlineImages(data.imageUrl);
+    const created = await this.prisma.seasonalAd.create({ data: { ...data, cityFilter: data.cityFilter || [] } });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.MARKETING, created.id, created.imageUrl);
+    return created;
   }
 
   async updateAd(id: string, data: any) {
-    return this.prisma.seasonalAd.update({ where: { id }, data }).catch((e) => { throw e; });
+    await this.guardInlineImages([data.imageUrl], () => this.prisma.seasonalAd.findUnique({ where: { id } }).then((a) => a?.imageUrl));
+    const updated = await this.prisma.seasonalAd.update({ where: { id }, data });
+    if (touchesAny(data, ['imageUrl'])) await this.linkMedia(MediaEntityType.MARKETING, id, updated.imageUrl);
+    return updated;
   }
 
   async deleteAd(id: string) {
@@ -3233,7 +3303,7 @@ Return JSON with:
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController {
-  constructor(private admin: AdminService, private masterOrders: MasterOrdersService, private invoices: InvoicesService) {}
+  constructor(private admin: AdminService, private masterOrders: MasterOrdersService, private invoices: InvoicesService, private aiImages: AiImageService) {}
 
   // Dashboard
   @Get('stats') stats() { return this.admin.globalStats(); }
@@ -3506,6 +3576,20 @@ export class AdminController {
     return this.admin.bulkGenerateAiContent(b.limit);
   }
 
+  // AI Image Generation (categories, sub-categories, services, products, catalog sets).
+  // Admin-only via this controller's class-level @Roles; generated images go through the
+  // central media pipeline and stay unattached until the admin saves the record with one.
+  @Get('ai/image-presets') aiImagePresets() { return this.aiImages.presets(); }
+
+  @Post('ai/image-prompt') aiImagePrompt(@Body() b: AiImageRequest) { return this.aiImages.suggest(b); }
+
+  // Cost control: a hard cap per admin per minute, on top of the service's per-admin
+  // single-flight lock and its per-request image limit.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('ai/image') aiImageGenerate(@CurrentUser() u: JwtPayload, @Body() b: AiImageRequest, @Req() req: any) {
+    return this.aiImages.generate(b, { id: u.sub, role: u.role }, requestIp(req));
+  }
+
   // Banners (CMS)
   @Get('banners') listBanners() { return this.admin.listBanners(); }
   @Post('banners') createBanner(@Body() b: any) { return this.admin.createBanner(b); }
@@ -3720,7 +3804,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule, MediaModule, AiImagesModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

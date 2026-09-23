@@ -37,6 +37,7 @@ import { SellerRegistrationModule } from './modules/seller-registration/seller-r
 import { SettlementsModule } from './modules/settlements/settlements.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { MediaModule } from './modules/media/media.module';
 import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
 import { EstimatesModule } from './modules/estimates/estimates.module';
 import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
@@ -81,6 +82,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
     PartnerLedgerModule,
     RefundsModule,
     SupportModule,
+    MediaModule, // central media storage — every image upload goes through MediaService
     UploadsModule,
     AiEnrichmentModule,
     LogisticsModule,

@@ -89,6 +89,11 @@ export async function assertWithinMegapixelCap(buf: Buffer, maxMegapixels = MAX_
 
 export interface ScanResult { clean: boolean; reason?: string; skipped?: boolean }
 
+/** Reasons meaning "the scan itself could not complete" (as opposed to a detected threat) —
+ *  still a rejection (fail-closed), but audited differently by the media pipeline. */
+export const SCAN_INCONCLUSIVE_REASON = 'Scan result inconclusive';
+export const SCAN_UNAVAILABLE_REASON = 'Virus scan unavailable';
+
 // Lazily initialized, cached across calls (re-initializing per scan would add avoidable
 // latency) — but cleared back to null on ANY failure (init or scan) so the very next upload
 // attempt tries a fresh connection instead of permanently replaying a stale failure. There is
@@ -139,7 +144,7 @@ export async function scanForMalware(buf: Buffer, filename: string, logger: Logg
     if (isInfected === null || isInfected === undefined) {
       // An inconclusive result must never be treated as "clean".
       logger.warn('ClamAV returned an inconclusive scan result — rejecting upload (fail-closed)');
-      return { clean: false, reason: 'Scan result inconclusive' };
+      return { clean: false, reason: SCAN_INCONCLUSIVE_REASON };
     }
     if (isInfected) {
       const found = Array.isArray(viruses) && viruses.length ? viruses.join(', ') : 'unrecognized threat';
@@ -149,7 +154,7 @@ export async function scanForMalware(buf: Buffer, filename: string, logger: Logg
   } catch (e: any) {
     clamscanClientPromise = null; // scanStream() can fail after a previously-successful init (e.g. the daemon went down mid-session) — always allow a fresh retry next time
     logger.warn(`ClamAV scan failed for ${filename || 'upload'}: ${e.message} — rejecting upload (fail-closed)`);
-    return { clean: false, reason: 'Virus scan unavailable' };
+    return { clean: false, reason: SCAN_UNAVAILABLE_REASON };
   }
 }
 
