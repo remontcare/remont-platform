@@ -47,8 +47,13 @@ function mediaStub() {
 /**
  * Stands in for both HTTP hops: the generate call (api.cloudinary.com) and the download of
  * the returned short-lived image (res.cloudinary.com).
+ *
+ * The success body is Cloudinary's REAL documented shape — the generated URL sits at
+ * data.assets[].storage.secure_url, and one call returns exactly one image. An earlier
+ * version of this mock invented a flatter shape, which let a response-parsing bug reach
+ * production ("returned no image"), so this must mirror the documentation.
  */
-function mockCloudinary(opts: { width?: number; height?: number; generateStatus?: number; generateBody?: string } = {}) {
+function mockCloudinary(opts: { width?: number; height?: number; generateStatus?: number; generateBody?: string; asyncTask?: boolean } = {}) {
   const calls: any[] = [];
   const fn = jest.fn(async (url: string, init?: any) => {
     if (String(url).startsWith(GEN_URL)) {
@@ -56,8 +61,35 @@ function mockCloudinary(opts: { width?: number; height?: number; generateStatus?
       if (opts.generateStatus) {
         return { ok: false, status: opts.generateStatus, statusText: 'err', text: async () => opts.generateBody || 'error' };
       }
-      const n = JSON.parse(init.body).number_of_images || 1;
-      return { ok: true, status: 200, json: async () => ({ assets: Array.from({ length: n }, () => ({ secure_url: TEMP_URL, width: opts.width ?? 1536, height: opts.height ?? 1152 })) }) };
+      if (opts.asyncTask) {
+        return { ok: true, status: 202, json: async () => ({ data: { result: null, status: 'pending', task_id: 'abc123' }, request_id: 'r1' }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            assets: [{
+              bytes: 168374,
+              format: 'png',
+              width: opts.width ?? 1536,
+              height: opts.height ?? 1152,
+              model: { family: 'flux', id: 'flux-2', tier: 'premium' },
+              storage: {
+                asset_id: 'e282fa1731dd75ab18386bda6abf4457',
+                public_id: 'susggqvm0h41ewohtdsr',
+                resource_type: 'image',
+                secure_url: TEMP_URL,
+                storage_type: 'temporary',
+                type: 'upload',
+                version: 1784645746,
+              },
+            }],
+          },
+          limits: { addons_quota: [] },
+          request_id: '15c8373fbfae88ee1c3ec34783b76ef6',
+        }),
+      };
     }
     // Download of the generated image.
     const png = await sharp({ create: { width: opts.width ?? 1536, height: opts.height ?? 1152, channels: 3, background: '#ccc' } }).png().toBuffer();
@@ -176,6 +208,33 @@ describe('generation per entity — Cloudinary add-on → media pipeline', () =>
     expect(meta.width! / meta.height!).toBeCloseTo(4 / 3, 2);
     expect(res.aspect).toBe('4:3');
     expect(res.images[0].url).toContain('res.cloudinary.com');
+  }, 30000);
+
+  it("reads the URL from Cloudinary's real nesting (data.assets[].storage.secure_url)", async () => {
+    mockCloudinary();
+    const media = mediaStub();
+    const res = await new AiImageService(config(), media as any).generate({ entity: 'SERVICE', name: 'AC Service' }, ADMIN);
+    // The short-lived asset was downloaded and stored through the pipeline...
+    expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u) === TEMP_URL)).toBe(true);
+    expect(media.ingestImage).toHaveBeenCalledTimes(1);
+    expect(res.images).toHaveLength(1);
+  }, 30000);
+
+  it('asks for one image per call — the API has no number-of-images parameter', async () => {
+    const fetchMock = mockCloudinary();
+    const media = mediaStub();
+    const res = await new AiImageService(config(), media as any).generate({ entity: 'SERVICE', name: 'AC Service', count: 2 }, ADMIN);
+    expect(fetchMock.calls).toHaveLength(2);                       // two images => two calls
+    for (const c of fetchMock.calls) expect(c.body.number_of_images).toBeUndefined();
+    expect(res.images).toHaveLength(2);
+    expect(media.ingestImage).toHaveBeenCalledTimes(2);
+  }, 45000);
+
+  it('an asynchronous task response is reported clearly instead of "no image"', async () => {
+    mockCloudinary({ asyncTask: true });
+    const err = await new AiImageService(config(), mediaStub() as any).generate({ entity: 'SERVICE', name: 'AC Service' }, ADMIN).catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.message).toMatch(/asynchronous generation task/);
   }, 30000);
 
   it('catalog mode generates several distinct views in one request', async () => {

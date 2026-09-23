@@ -214,10 +214,14 @@ export class AiImageService {
    */
   private async callModel(prompt: string, preset: AiImagePreset, n: number, referenceImages: string[]): Promise<Buffer[]> {
     try {
-      const generated = await generateWithCloudinary({
-        prompt, width: preset.width, height: preset.height, count: n,
-        model: this.model, referenceImages, logger: this.logger,
-      });
+      // Cloudinary generates one image per call, so n images means n calls.
+      const generated: { url: string }[] = [];
+      for (let i = 0; i < n; i++) {
+        generated.push(...await generateWithCloudinary({
+          prompt, width: preset.width, height: preset.height,
+          model: this.model, referenceImages, logger: this.logger,
+        }));
+      }
       const buffers = await Promise.all(generated.slice(0, n).map((g) => fetchGeneratedImage(g.url)));
       return await Promise.all(buffers.map((b) => this.cropToAspect(b, preset)));
     } catch (e: any) {

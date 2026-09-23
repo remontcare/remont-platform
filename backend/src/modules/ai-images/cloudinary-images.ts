@@ -38,7 +38,6 @@ export interface CloudinaryGenerateOptions {
   prompt: string;
   width: number;
   height: number;
-  count: number;
   model: CloudinaryModel;
   /** Reference images (image_to_image). Cloudinary accepts up to 4. */
   referenceImages?: string[];
@@ -61,11 +60,12 @@ export async function generateWithCloudinary(opts: CloudinaryGenerateOptions): P
   }
 
   const endpoint = refs.length ? 'image_to_image' : 'text_to_image';
+  // One call generates ONE image — the API has no "number of images" parameter, so callers
+  // asking for several issue several calls.
   const body: Record<string, any> = {
     prompt: opts.prompt,
     model: { family: opts.model.family, tier: opts.model.tier },
     image_size: { width: opts.width, height: opts.height },
-    number_of_images: opts.count,
     // Short-lived output: the permanent copy is the one our media pipeline stores.
     target: { target_type: 'temporary' },
   };
@@ -108,15 +108,35 @@ export async function generateWithCloudinary(opts: CloudinaryGenerateOptions): P
   }
 
   const data: any = await res.json().catch(() => ({}));
-  // The API returns one asset per generated image; shapes seen: { assets: [...] } or a single
-  // asset object. Both are accepted so a minor response change doesn't break generation.
-  const assets: any[] = Array.isArray(data?.assets) ? data.assets
-    : Array.isArray(data?.data) ? data.data
-      : data?.secure_url || data?.url ? [data] : [];
+
+  // Documented success shape:
+  //   { data: { assets: [ { width, height, storage: { secure_url, public_id, … } } ] },
+  //     limits: {…}, request_id: "…" }
+  // The generated URL is at data.assets[].storage.secure_url. Flatter variants are still
+  // accepted so a minor response change doesn't break generation.
+  const assets: any[] = Array.isArray(data?.data?.assets) ? data.data.assets
+    : Array.isArray(data?.assets) ? data.assets
+      : Array.isArray(data?.data) ? data.data
+        : data?.secure_url || data?.url ? [data] : [];
   const images = assets
-    .map((a) => ({ url: a?.secure_url || a?.url, width: a?.width, height: a?.height }))
+    .map((a) => ({
+      url: a?.storage?.secure_url || a?.storage?.url || a?.secure_url || a?.url,
+      width: a?.width,
+      height: a?.height,
+    }))
     .filter((a) => typeof a.url === 'string' && a.url);
-  if (!images.length) throw new ServiceUnavailableException('Cloudinary image generation returned no image. Please try again.');
+
+  if (!images.length) {
+    // Asynchronous generation (HTTP 202) returns a task to poll instead of an image; we
+    // always request synchronous generation, so this means the request was not what we think.
+    const pending = res.status === 202 || data?.data?.status === 'pending' || data?.data?.task_id;
+    opts.logger?.error(
+      `Cloudinary image generation returned no usable image (HTTP ${res.status}, pending=${!!pending}); `
+      + `response keys: ${Object.keys(data || {}).join(',') || 'none'}; data keys: ${Object.keys(data?.data || {}).join(',') || 'none'}`,
+    );
+    if (pending) throw new ServiceUnavailableException('Cloudinary returned an asynchronous generation task, which is not supported here. Please try again.');
+    throw new ServiceUnavailableException('Cloudinary image generation returned no image. Please try again.');
+  }
   return images;
 }
 
