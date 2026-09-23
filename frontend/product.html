@@ -44,7 +44,10 @@ section.block h2{font-family:var(--ff-display);font-size:24px;font-weight:600;ma
 
 .pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding:36px 0}
 @media(max-width:760px){.pd-grid{grid-template-columns:1fr;gap:24px}}
-.pd-image{width:100%;aspect-ratio:1/1;border-radius:var(--radius-lg);background:linear-gradient(135deg,var(--cream),var(--mist));display:grid;place-items:center;font-size:90px;background-size:cover;background-position:center}
+/* 4:3 like the cards, and contain-on-white so the whole product is visible instead of
+   being cropped to a square. The gradient placeholder (shown only when there is no photo)
+   still fills the box, so the empty state is unchanged. */
+.pd-image{width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background-color:#fff;background-image:linear-gradient(135deg,var(--cream),var(--mist));display:grid;place-items:center;font-size:90px;background-size:contain;background-repeat:no-repeat;background-position:center}
 .pd-brand{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sienna);margin-bottom:6px}
 .pd-info h1{font-family:var(--ff-display);font-size:clamp(24px,3vw,34px);font-weight:600;line-height:1.2;margin-bottom:14px}
 .pd-price-row{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}

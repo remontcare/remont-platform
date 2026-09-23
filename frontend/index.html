@@ -971,7 +971,7 @@
   .svc-item:hover { background: rgba(196,96,26,0.06); }
   .svc-item.active { background: #fff; border-left-color: var(--sienna); box-shadow: inset 0 0 0 1px var(--mist); }
   .svc-icon-box {
-    width: 40px; height: 40px;
+    width: 56px; height: 56px;   /* category thumbnail — larger, still 1:1 */
     border-radius: 10px;
     background: rgba(196,96,26,0.10);
     display: grid; place-items: center;
@@ -980,7 +980,8 @@
     transition: background 0.2s;
     overflow: hidden;
   }
-  .svc-icon-box img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+  /* contain + white = the whole category image is visible, never cropped. */
+  .svc-icon-box img { width: 100%; height: 100%; object-fit: contain; border-radius: 10px; background: #fff; padding: 3px; }
   .svc-item.active .svc-icon-box { background: var(--sienna); }
   .svc-item.active .svc-icon-box span { filter: brightness(0) invert(1); }
   .svc-text { flex: 1; min-width: 0; }
@@ -1056,7 +1057,14 @@
     box-shadow: 0 6px 18px rgba(196,96,26,0.10);
   }
   .sub-svc-card .icn { font-size: 24px; margin-bottom: 8px; display: block; }
-  .sub-svc-card .icn img { width: 24px; height: 24px; object-fit: contain; display: block; margin: 0 auto; }
+  /* Service-type image: 4:3 area filling the card width, so the subject is actually
+     readable. contain on white = complete image, no cropping. The emoji fallback above
+     is unchanged. */
+  .sub-svc-card .icn img {
+    width: 100%; height: auto; aspect-ratio: 4 / 3;
+    object-fit: contain; background: #fff; border-radius: 8px;
+    display: block; margin: 0 auto 2px;
+  }
   .sub-svc-card .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); margin-bottom: 4px; line-height: 1.2; }
   .sub-svc-card .pr { font-size: 11px; color: var(--sienna); font-weight: 600; }
   .sub-svc-card .pr small { color: var(--txt-muted); font-weight: 400; text-decoration: line-through; margin-right: 4px; }
@@ -1088,7 +1096,12 @@
   }
   .subcat-tile:hover { border-color: var(--sienna); background: #fff; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(196,96,26,0.10); }
   .subcat-tile .icn { font-size: 30px; margin-bottom: 8px; display: block; }
-  .subcat-tile .icn img { width: 30px; height: 30px; object-fit: contain; display: block; margin: 0 auto; }
+  /* Sub-category image: same 4:3 treatment as the service-type cards. */
+  .subcat-tile .icn img {
+    width: 100%; height: auto; aspect-ratio: 4 / 3;
+    object-fit: contain; background: #fff; border-radius: 8px;
+    display: block; margin: 0 auto 2px;
+  }
   .subcat-tile .nm { font-size: 12px; font-weight: 600; color: var(--charcoal); line-height: 1.2; }
   .subcat-back-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; color: var(--sienna); font-size: 13px; font-weight: 600; }
   @media (max-width: 768px) { .subcat-tile-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -1155,9 +1168,10 @@
   #svc-detail-modal .sdm-cart { flex: 1; padding: 13px; border: 2px solid var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--sienna); background: #fff; }
   #svc-detail-modal .sdm-book { flex: 1.5; padding: 13px; background: var(--sienna); border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; }
   #svc-detail-modal .sdm-close { position: absolute; top: 16px; right: 18px; font-size: 22px; color: #9ca3af; background: none; border: none; cursor: pointer; }
-  #svc-detail-modal .sdm-cover { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 12px; background: #f3f4f6; }
+  /* Individual service: larger 4:3 image area, complete image on white — no cropping. */
+  #svc-detail-modal .sdm-cover { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 12px; margin-bottom: 12px; background: #fff; }
   #svc-detail-modal .sdm-gallery { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; }
-  #svc-detail-modal .sdm-gallery img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: #f3f4f6; }
+  #svc-detail-modal .sdm-gallery img { width: 72px; height: 54px; object-fit: contain; border-radius: 8px; flex-shrink: 0; background: #fff; border: 1px solid #f3f4f6; }
   #svc-detail-modal .sdm-meta-row { display: flex; gap: 14px; font-size: 12px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
   #svc-detail-modal .sdm-faq-item { border-bottom: 1px solid #f3f4f6; padding: 10px 0; }
   #svc-detail-modal .sdm-faq-q { font-size: 13px; font-weight: 600; color: #111; margin-bottom: 3px; }
