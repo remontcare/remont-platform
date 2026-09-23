@@ -201,7 +201,12 @@ export function resolveStyles(preset: AiImagePreset, raw: unknown): string[] {
   });
 }
 
+/** Cap on the admin-written subject (the only text the UI lets them edit). */
 export const MAX_CUSTOM_PROMPT_CHARS = 1200;
+
+/** Ceiling for the assembled prompt actually sent to the provider. The Remont rules are
+ *  always kept; only the editable half is trimmed to fit. */
+export const MAX_FINAL_PROMPT_CHARS = 3000;
 
 /**
  * Builds the final prompt. The house style, negative guards and brand guard are ALWAYS
@@ -214,22 +219,37 @@ export const REFERENCE_GUARD =
   + 'composition may change — never redesign the product or alter its identity.';
 
 export function buildPrompt(preset: AiImagePreset, styleKeys: string[], ctx: AiImageContext, opts: { customSubject?: string; viewKey?: string; hasReference?: boolean } = {}): string {
-  const subject = (opts.customSubject || '').trim() || preset.subject(ctx);
   const styleFragments = styleKeys
     .map((k) => preset.styles.find((o) => o.key === k)?.fragment)
     .filter(Boolean);
   const view = opts.viewKey ? preset.views?.find((v) => v.key === opts.viewKey)?.fragment : undefined;
   const details = (ctx.details || '').trim();
-  return [
-    subject,
+  // The admin-controlled half (what the subject/style boxes produce)…
+  const editable = [
+    describeSubject(preset, ctx, opts.customSubject),
     view ? `Shot: ${view}.` : '',
     styleFragments.length ? `Style: ${styleFragments.join(', ')}.` : '',
     details ? `Additional details: ${details}.` : '',
+  ].filter(Boolean).join(' ');
+  // …and the Remont rules, always appended server-side and never shown as editable text.
+  const rules = [
     HOUSE_STYLE,
     opts.hasReference ? REFERENCE_GUARD : '',
     BRAND_GUARD,
     NEGATIVE_GUARDS,
   ].filter(Boolean).join(' ');
+
+  // Keep the whole thing inside the provider's prompt budget by trimming only the editable
+  // half — the quality rules are never dropped.
+  const budget = MAX_FINAL_PROMPT_CHARS - rules.length - 1;
+  const trimmed = editable.length > budget ? `${editable.slice(0, Math.max(0, budget - 1)).trimEnd()}…` : editable;
+  return `${trimmed} ${rules}`.trim();
+}
+
+/** The editable sentence only — what the admin sees in the optional "Edit prompt" box.
+ *  The Remont style/quality rules are deliberately NOT part of this. */
+export function describeSubject(preset: AiImagePreset, ctx: AiImageContext, customSubject?: string): string {
+  return (customSubject || '').trim() || preset.subject(ctx);
 }
 
 /** The prompt an admin sees pre-filled in the modal (before any edits). */

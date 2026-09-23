@@ -529,9 +529,19 @@ function _aiModal() {
           '<div class="form-group" style="flex:1"><label class="form-label">Aspect ratio</label>' +
             '<input id="ai-img-aspect" class="form-control" readonly style="background:#f9fafb"></div>' +
         '</div>' +
-        '<div class="form-group"><label class="form-label">Prompt <small style="color:#9ca3af">(edit if you want — the Remont style and quality rules are always applied)</small></label>' +
-          '<textarea id="ai-img-prompt" class="form-control" rows="4" style="resize:vertical"></textarea>' +
-          '<button type="button" class="btn btn-outline btn-xs" style="margin-top:6px" onclick="resetAiPrompt()">↺ Reset prompt</button></div>' +
+        // Advanced, collapsed by default: the admin normally only sets Subject / Style /
+        // How many. The Remont house style, brand and negative-quality rules are applied
+        // server-side and are deliberately NOT shown here as editable text.
+        '<details id="ai-img-advanced" style="margin-bottom:12px">' +
+          '<summary style="cursor:pointer;font-size:12px;color:#6b7280">Advanced — edit prompt</summary>' +
+          '<div class="form-group" style="margin-top:8px">' +
+            '<textarea id="ai-img-prompt" class="form-control" rows="3" maxlength="1200" style="resize:vertical"></textarea>' +
+            '<div style="display:flex;align-items:center;gap:10px;margin-top:6px">' +
+              '<button type="button" class="btn btn-outline btn-xs" onclick="resetAiPrompt()">↺ Reset</button>' +
+              '<small style="color:#9ca3af">Remont style &amp; quality rules are added automatically.</small>' +
+            '</div>' +
+          '</div>' +
+        '</details>' +
         '<div id="ai-img-status" style="display:none;font-size:13px;color:#6b7280;padding:10px 0"></div>' +
         '<div id="ai-img-error" style="display:none;font-size:13px;color:#dc2626;padding:8px 0"></div>' +
         '<div id="ai-img-results" style="display:none;gap:12px;flex-wrap:wrap;margin-top:6px"></div>' +
@@ -585,16 +595,20 @@ function _aiRenderRefs(urls, selectFirst) {
   if (!wrap.children.length) wrap.innerHTML = '<small style="color:#9ca3af">No existing image — upload one to guide the generation.</small>';
 }
 
+/** Loads the short, editable SUBJECT sentence (never the internal style/quality rules —
+ *  those stay server-side and are appended when the image is generated). */
 function resetAiPrompt() {
   var ctx = _aiState.opts.context ? (_aiState.opts.context() || {}) : {};
   ctx.name = document.getElementById('ai-img-name').value.trim();
   var box = document.getElementById('ai-img-prompt');
-  box.value = 'Loading suggested prompt…';
+  box.value = 'Loading…';
   api('POST', '/admin/ai/image-prompt', {
     entity: _aiState.entity, name: ctx.name, category: ctx.category, subCategory: ctx.subCategory,
     brand: ctx.brand, styles: _aiSelectedStyles(),
-  }).then(function(r) { box.value = r.prompt; })
-    .catch(function(e) { box.value = ''; _aiError(e.message); });
+  }).then(function(r) {
+    box.value = r.subject || '';
+    _aiState.suggestedSubject = box.value; // used to tell "untouched" from "admin edited"
+  }).catch(function(e) { box.value = ''; _aiError(e.message); });
 }
 
 function _aiError(msg) {
@@ -715,7 +729,10 @@ function runAiImageGeneration() {
   var opts = _aiState.opts;
   var ctx = opts.context ? (opts.context() || {}) : {};
   var name = document.getElementById('ai-img-name').value.trim();
-  var prompt = document.getElementById('ai-img-prompt').value.trim();
+  // Only send the prompt when the admin actually edited it under Advanced; otherwise the
+  // server builds it from the subject + styles, so nothing internal round-trips.
+  var typed = document.getElementById('ai-img-prompt').value.trim();
+  var prompt = (typed && typed !== (_aiState.suggestedSubject || '').trim()) ? typed : undefined;
   if (!name && !prompt) { _aiError('Enter a subject, or write a prompt'); return; }
 
   var go = document.getElementById('ai-img-go');

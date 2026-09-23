@@ -15,7 +15,7 @@ import { Reflector } from '@nestjs/core';
 import sharp from 'sharp';
 import { MediaEntityType, MediaSource, UserRole } from '@prisma/client';
 import { AiImageService } from './ai-image.service';
-import { AI_IMAGE_PRESETS, HOUSE_STYLE, NEGATIVE_GUARDS, BRAND_GUARD, REFERENCE_GUARD, suggestPrompt } from './image-presets';
+import { AI_IMAGE_PRESETS, HOUSE_STYLE, NEGATIVE_GUARDS, BRAND_GUARD, REFERENCE_GUARD, MAX_FINAL_PROMPT_CHARS, suggestPrompt } from './image-presets';
 import { ADDON_NOT_ENABLED, isCloudinaryUrl } from './cloudinary-images';
 import { AdminController } from '../admin/admin.module';
 
@@ -99,6 +99,48 @@ describe('presets — one shared Remont visual identity at the website 4:3 stand
     expect(p).toContain(HOUSE_STYLE);
     expect(p).toContain(BRAND_GUARD);
     expect(p).toContain(NEGATIVE_GUARDS);
+  });
+
+  it('the modal gets a SHORT editable subject, with the internal rules kept out of it', () => {
+    const out = new AiImageService(config(), mediaStub() as any).suggest({ entity: 'SERVICE', name: 'AC Repair', category: 'Home Maintenance', subCategory: 'AC Services' });
+    // What the admin sees and may edit: just the subject sentence.
+    expect(out.subject).toContain('AC Repair');
+    expect(out.subject).not.toContain(HOUSE_STYLE);
+    expect(out.subject).not.toContain(NEGATIVE_GUARDS);
+    expect(out.subject).not.toContain(BRAND_GUARD);
+    // Comfortably inside the admin's own character limit (the old modal pre-filled the whole
+    // assembled prompt here, which overflowed it).
+    expect(out.subject.length).toBeLessThan(out.maxSubjectChars / 2);
+    expect(out.maxSubjectChars).toBe(1200);
+    // The rules still exist — they are just applied server-side.
+    expect(out.prompt).toContain(NEGATIVE_GUARDS);
+  });
+
+  it('an edited subject still gets the Remont rules appended server-side', async () => {
+    const fetchMock = mockCloudinary();
+    await new AiImageService(config(), mediaStub() as any).generate(
+      { entity: 'SERVICE', name: 'AC Repair', prompt: 'Technician servicing a wall-mounted AC in a Mumbai flat.' }, ADMIN,
+    );
+    const sent = fetchMock.calls[0].body.prompt;
+    expect(sent).toContain('Technician servicing a wall-mounted AC in a Mumbai flat.');
+    expect(sent).toContain(HOUSE_STYLE);
+    expect(sent).toContain(BRAND_GUARD);
+    expect(sent).toContain(NEGATIVE_GUARDS);
+  }, 30000);
+
+  it('an over-long subject is trimmed to fit the provider budget, never the quality rules', async () => {
+    const fetchMock = mockCloudinary();
+    const longSubject = 'A very detailed product scene. '.repeat(40).slice(0, 1200); // at the admin cap
+    await new AiImageService(config(), mediaStub() as any).generate({ entity: 'PRODUCT', name: 'Fan', prompt: longSubject }, ADMIN);
+    const sent = fetchMock.calls[0].body.prompt;
+    expect(sent.length).toBeLessThanOrEqual(MAX_FINAL_PROMPT_CHARS);
+    expect(sent).toContain(NEGATIVE_GUARDS); // rules survive
+    expect(sent).toContain(HOUSE_STYLE);
+  }, 30000);
+
+  it('a subject beyond the admin cap is rejected with a clear message', () => {
+    const svc = new AiImageService(config(), mediaStub() as any);
+    expect(() => svc.suggest({ entity: 'PRODUCT', name: 'Fan', prompt: 'x'.repeat(1201) })).toThrow(/under 1200 characters/);
   });
 
   it('rejects unknown entities and styles instead of silently guessing', () => {

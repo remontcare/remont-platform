@@ -9,7 +9,7 @@ import { MediaService, PublicMedia } from '../media/media.service';
 import { fetchGeneratedImage, generateWithCloudinary, isCloudinaryUrl } from './cloudinary-images';
 import {
   AI_IMAGE_PRESETS, AiImageContext, AiImageEntity, AiImagePreset, MAX_CUSTOM_PROMPT_CHARS,
-  buildPrompt, parseAiImageEntity, presetCatalogue, resolveStyles, suggestPrompt,
+  buildPrompt, describeSubject, parseAiImageEntity, presetCatalogue, resolveStyles, suggestPrompt,
 } from './image-presets';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -82,13 +82,27 @@ export class AiImageService {
     return { available: this.isConfigured(), model: this.model, presets: presetCatalogue() };
   }
 
-  /** The pre-filled, editable prompt shown in the modal. Costs nothing. */
+  /**
+   * What the modal pre-fills. `subject` is the short, human-readable sentence the admin may
+   * edit under "Advanced"; `prompt` is the full text that will actually be sent (subject +
+   * Remont style and quality rules) and is for reference only — the UI never puts it in the
+   * editable box, so those internal rules are neither shown as editable text nor counted
+   * against the admin's character limit. Costs nothing.
+   */
   suggest(body: AiImageRequest) {
     const entity = parseAiImageEntity(body.entity);
     const ctx = this.context(body);
     const preset = AI_IMAGE_PRESETS[entity];
     const styles = resolveStyles(preset, body.styles);
-    return { entity, styles, prompt: suggestPrompt(entity, ctx, styles), aspect: `${preset.aspect.w}:${preset.aspect.h}`, maxCount: preset.maxCount };
+    return {
+      entity,
+      styles,
+      subject: describeSubject(preset, ctx, this.customPrompt(body.prompt)),
+      prompt: suggestPrompt(entity, ctx, styles),
+      aspect: `${preset.aspect.w}:${preset.aspect.h}`,
+      maxCount: preset.maxCount,
+      maxSubjectChars: MAX_CUSTOM_PROMPT_CHARS,
+    };
   }
 
   async generate(body: AiImageRequest, actor: AiImageActor, ip?: string) {
