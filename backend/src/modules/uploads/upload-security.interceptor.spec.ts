@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { of } from 'rxjs';
 import sharp from 'sharp';
+import { crc32 } from 'zlib';
 
 // jest.mock is hoisted above all imports below, including the transitive
 // `import NodeClam from 'clamscan'` inside upload-security.interceptor.ts. The mock's
@@ -68,7 +69,53 @@ describe('detectFileSignature — reads real magic bytes, never trusts extension
     expect(detectFileSignature(Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])).kind).toBe('unknown');
     expect(detectFileSignature(Buffer.alloc(0)).kind).toBe('unknown');
   });
+
+  // REGRESSION: every AI-generated PNG (ChatGPT, Gemini, Adobe) carries a C2PA "content
+  // credentials" manifest in its header, and that manifest embeds an image/svg+xml icon. The
+  // SVG scan used to run before the raster checks and matched '<svg' ANYWHERE in the first
+  // 512 bytes, so these valid PNGs were classified as SVG and rejected with "Only JPEG, PNG,
+  // WebP or GIF images are allowed."
+  it('accepts a valid PNG whose C2PA metadata embeds an SVG icon (the real upload failure)', async () => {
+    const png = await pngWithC2paSvgIcon();
+    // The scenario is genuine: the bytes really do contain SVG markup in the header area…
+    expect(png.subarray(0, 512).toString('utf8')).toContain('<svg');
+    // …and it is still a decodable PNG, not a polyglot trick.
+    expect((await sharp(png).metadata()).format).toBe('png');
+    expect(detectFileSignature(png)).toEqual({ kind: 'image', format: 'png' });
+  });
+
+  it('still rejects real SVG, including with a BOM, leading whitespace or an XML prolog', () => {
+    expect(detectFileSignature(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')).kind).toBe('svg');
+    expect(detectFileSignature(Buffer.from('﻿<svg width="10"></svg>')).kind).toBe('svg');
+    expect(detectFileSignature(Buffer.from('\n\n   <svg width="10"></svg>')).kind).toBe('svg');
+    expect(detectFileSignature(Buffer.from('<?xml version="1.0"?>\n<svg></svg>')).kind).toBe('svg');
+  });
+
+  it('a text file that merely mentions <svg> later is unknown — not a raster image, still refused', () => {
+    const html = Buffer.from('<!doctype html><body>look: <svg></svg></body>');
+    expect(detectFileSignature(html).kind).toBe('unknown'); // callers reject unknown just as firmly
+  });
 });
+
+/**
+ * A real, decodable PNG carrying a C2PA-style chunk whose payload embeds an SVG icon —
+ * byte-for-byte the shape produced by ChatGPT/Gemini exports. Built as a proper ancillary
+ * chunk (length + type + data + CRC32) inserted after IHDR, so sharp still decodes it.
+ */
+async function pngWithC2paSvgIcon(): Promise<Buffer> {
+  const base = await sharp({ create: { width: 32, height: 24, channels: 3, background: '#4488cc' } }).png().toBuffer();
+  const payload = Buffer.from(
+    'Comment\0\0\0\0\0c2pa.icon\0image/svg+xml\0<svg width="716" height="716" viewBox="0 0 716 716"></svg>',
+    'latin1',
+  );
+  const type = Buffer.from('iTXt');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(payload.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([type, payload])) >>> 0);
+  const afterIhdr = 8 + 4 + 4 + 13 + 4; // signature + IHDR (length, type, 13-byte data, CRC)
+  return Buffer.concat([base.subarray(0, afterIhdr), length, type, payload, crc, base.subarray(afterIhdr)]);
+}
 
 describe('assertWithinMegapixelCap — rejects unparseable buffers and images over the ceiling', () => {
   it('resolves for a real, valid image within the cap', async () => {

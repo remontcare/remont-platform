@@ -43,15 +43,24 @@ export function detectFileSignature(buf: Buffer): FileSignature {
     return { kind: 'dangerous', dangerLabel: 'a ZIP-family archive (this also covers APK/JAR/Office files)' };
   }
 
-  const head = buf.subarray(0, Math.min(buf.length, 512)).toString('utf8').trimStart().toLowerCase();
-  if (head.startsWith('<?xml') || head.startsWith('<svg') || head.includes('<svg')) {
-    return { kind: 'svg' };
-  }
-
+  // Raster signatures are checked BEFORE the text scan below: a file whose first bytes are a
+  // real image magic number IS that image, even when its metadata happens to contain SVG
+  // markup. AI image tools (ChatGPT, Gemini, Adobe) embed a C2PA "content credentials"
+  // manifest — including an image/svg+xml icon — in the PNG header area, so scanning for
+  // '<svg' first misread every such PNG as an SVG and rejected it.
   if (matchesHex(buf, 0, 'ffd8ff')) return { kind: 'image', format: 'jpeg' };
   if (matchesHex(buf, 0, '89504e470d0a1a0a')) return { kind: 'image', format: 'png' };
   if (matchesHex(buf, 0, '47494638')) return { kind: 'image', format: 'gif' };
   if (matchesHex(buf, 0, '52494646') && matchesHex(buf, 8, '57454250')) return { kind: 'image', format: 'webp' };
+
+  // Text formats. Only content that actually BEGINS with XML/SVG markup (after an optional
+  // BOM and whitespace) counts as SVG — never a substring match anywhere in the header.
+  // Anything else that is not a recognized binary type still falls through to 'unknown',
+  // which every caller rejects, so this stays fail-closed.
+  const head = buf.subarray(0, Math.min(buf.length, 512)).toString('utf8').replace(/^\ufeff/, '').trimStart().toLowerCase();
+  if (head.startsWith('<?xml') || head.startsWith('<svg')) {
+    return { kind: 'svg' };
+  }
 
   if (matchesHex(buf, 4, '66747970')) return { kind: 'video', format: 'mp4/mov' }; // ISO-BMFF 'ftyp' box
   if (matchesHex(buf, 0, '1a45dfa3')) return { kind: 'video', format: 'webm/mkv' }; // EBML header

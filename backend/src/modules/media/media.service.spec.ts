@@ -34,6 +34,7 @@ jest.mock('cloudinary', () => ({
 }));
 
 import * as fs from 'fs';
+import { crc32 } from 'zlib';
 import NodeClamMocked from 'clamscan';
 import { v2 as cloudinaryMock } from 'cloudinary';
 import sharp from 'sharp';
@@ -74,6 +75,20 @@ const fakeZip = () => Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buff
 /** Starts with a JPEG signature but is not a decodable image. */
 const jpegHeaderGarbage = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2048, 7)]);
 const dataUrl = (buf: Buffer, mime: string) => `data:${mime};base64,${buf.toString('base64')}`;
+
+/** A valid PNG carrying a C2PA-style chunk whose payload embeds an SVG icon — the shape
+ *  ChatGPT/Gemini exports have, which used to be misread as an SVG and refused. */
+async function pngWithC2paSvgIcon(): Promise<Buffer> {
+  const base = await solid(64, 48).png().toBuffer();
+  const payload = Buffer.from('Comment\0\0\0\0\0c2pa.icon\0image/svg+xml\0<svg width="716" height="716"></svg>', 'latin1');
+  const type = Buffer.from('iTXt');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(payload.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([type, payload])) >>> 0);
+  const afterIhdr = 8 + 4 + 4 + 13 + 4; // signature + IHDR chunk
+  return Buffer.concat([base.subarray(0, afterIhdr), length, type, payload, crc, base.subarray(afterIhdr)]);
+}
 
 // ─── In-memory stand-in for Prisma ─────────────────────────────────────────────
 function makePrisma() {
@@ -173,6 +188,28 @@ describe('valid images → accepted, stored in Cloudinary as a sanitized WebP', 
     expect(row.originalFormat).toBe(format);
     expect(row.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  // REGRESSION (production): admins could not upload ChatGPT/Gemini PNGs — their C2PA
+  // "content credentials" metadata embeds an image/svg+xml icon, which the signature scan
+  // mistook for an actual SVG, so a valid PNG was refused with "Only JPEG, PNG, WebP or GIF
+  // images are allowed." The whole pipeline must accept it and store the usual WebP.
+  it('accepts a PNG whose C2PA metadata embeds an SVG icon, and stores it as optimized WebP', async () => {
+    const png = await pngWithC2paSvgIcon();
+    expect(png.subarray(0, 512).toString('utf8')).toContain('<svg'); // the real-world shape
+    const { svc } = setup();
+
+    const result = await svc.ingestImage({
+      buffer: png, declaredMimeType: 'image/png', originalName: 'ChatGPT Image.png',
+      entityType: MediaEntityType.CATEGORY, actor: ADMIN,
+    });
+
+    expect(result.status).toBe(MediaStatus.READY);
+    expect(result.mimeType).toBe('image/webp');
+    const stored = (cloudinaryOk as any).last.body;
+    expect((await sharp(stored).metadata()).format).toBe('webp');
+    // The embedded SVG markup is gone from what actually gets stored and served.
+    expect(stored.toString('latin1')).not.toContain('<svg');
+  }, 30000);
 
   it('works with no R2 configuration at all — the service has no R2 dependency', async () => {
     const { svc } = setup();
