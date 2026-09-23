@@ -516,10 +516,17 @@ function _aiModal() {
           '<input id="ai-img-name" class="form-control" placeholder="e.g. AC Repair"></div>' +
         '<div class="form-group" id="ai-img-context" style="font-size:12px;color:#6b7280"></div>' +
         '<div class="form-group" id="ai-img-ref-wrap" style="display:none">' +
-          '<label class="form-label">Reference image <small style="color:#9ca3af">(optional — keeps the real product\'s shape, colour and details)</small></label>' +
+          '<label class="form-label">Reference image <small style="color:#9ca3af">(keeps the real product\'s shape, colour and details)</small></label>' +
           '<div id="ai-img-refs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px"></div>' +
           '<input type="file" accept="image/*" id="ai-img-ref-file" style="display:none">' +
-          '<button type="button" class="btn btn-outline btn-xs" id="ai-img-ref-upload">⬆ Upload reference image</button>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+            '<button type="button" class="btn btn-outline btn-xs" id="ai-img-find">🔎 Find product photo</button>' +
+            '<button type="button" class="btn btn-outline btn-xs" id="ai-img-ref-upload">⬆ Upload reference image</button>' +
+          '</div>' +
+          '<div id="ai-img-found" style="display:none;margin-top:8px">' +
+            '<div style="font-size:12px;color:#6b7280;margin-bottom:6px">Pick the correct product — it is imported into Remont media and used as the reference:</div>' +
+            '<div id="ai-img-found-list" style="display:flex;gap:8px;flex-wrap:wrap"></div>' +
+          '</div>' +
         '</div>' +
         '<div class="form-group"><label class="form-label">Image style</label>' +
           '<div id="ai-img-styles" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>' +
@@ -569,6 +576,28 @@ function _aiSelectedStyles() {
 
 function _aiSelectedRefs() {
   return Array.prototype.slice.call(document.querySelectorAll('#ai-img-refs .ai-ref.on')).map(function(el) { return el.getAttribute('data-url'); });
+}
+
+/** Imports a found web photo through the media pipeline (validation, virus scan, Cloudinary)
+ *  and adds the stored asset as the selected reference. The raw web URL is never used
+ *  directly for generation. */
+function _aiImportReference(url, thumbEl) {
+  if (thumbEl) { thumbEl.style.opacity = '0.4'; thumbEl.style.borderColor = '#f97316'; }
+  _aiError(''); _aiStatus('Importing the selected product photo…');
+  api('POST', '/admin/ai/product-photos/import', { url: url })
+    .then(function(media) {
+      var stored = (media.variants && media.variants.full) || media.deliveryUrl;
+      var existing = _aiSelectedRefs();
+      var opts = _aiState.opts;
+      _aiRenderRefs(((opts.references && opts.references()) || []).concat(existing).concat([stored]), false);
+      Array.prototype.slice.call(document.querySelectorAll('#ai-img-refs .ai-ref')).forEach(function(el) {
+        if (el.getAttribute('data-url') === stored) { el.className = 'ai-ref on'; el.style.borderColor = '#f97316'; }
+      });
+      _aiStatus('');
+      if (typeof toast === 'function') toast('Product photo imported — it will guide the generation', 'success');
+    })
+    .catch(function(e) { _aiStatus(''); _aiError(e.message); })
+    .then(function() { if (thumbEl) thumbEl.style.opacity = ''; });
 }
 
 /** Reference thumbnails: the entity's existing images plus any the admin uploads now.
@@ -670,6 +699,34 @@ function openAiImageModal(opts) {
     if (opts.references) {
       refWrap.style.display = '';
       _aiRenderRefs(opts.references() || [], false);
+      // "Find product photo": Tavily search for the REAL product, then the picked candidate
+      // is imported through the media pipeline and becomes the generation reference.
+      var findBtn = document.getElementById('ai-img-find');
+      var foundWrap = document.getElementById('ai-img-found');
+      var foundList = document.getElementById('ai-img-found-list');
+      findBtn.style.display = (res.search && res.search.available) ? '' : 'none';
+      foundWrap.style.display = 'none'; foundList.innerHTML = '';
+      findBtn.onclick = function() {
+        var c = opts.context ? (opts.context() || {}) : {};
+        var subject = document.getElementById('ai-img-name').value.trim();
+        if (!subject) { _aiError('Enter the product name first'); return; }
+        findBtn.disabled = true; findBtn.textContent = '🔎 Searching…'; _aiError('');
+        api('POST', '/admin/ai/product-photos', {
+          entity: _aiState.entity, name: subject, brand: c.brand, model: c.model, category: c.category, subCategory: c.subCategory,
+        }).then(function(r) {
+          foundWrap.style.display = ''; foundList.innerHTML = '';
+          r.images.forEach(function(url) {
+            var t = document.createElement('img');
+            t.src = url; t.title = 'Use this product photo as the reference';
+            t.style.cssText = 'width:76px;height:57px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid #e5e7eb;background:#f9fafb';
+            t.onerror = function() { t.remove(); };
+            t.onclick = function() { _aiImportReference(url, t); };
+            foundList.appendChild(t);
+          });
+        }).catch(function(e) { _aiError(e.message); })
+          .then(function() { findBtn.disabled = false; findBtn.textContent = '🔎 Find product photo'; });
+      };
+
       var refFile = document.getElementById('ai-img-ref-file');
       var refBtn = document.getElementById('ai-img-ref-upload');
       refBtn.onclick = function() { refFile.click(); };

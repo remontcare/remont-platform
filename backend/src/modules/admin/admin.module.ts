@@ -3590,6 +3590,19 @@ export class AdminController {
     return this.aiImages.generate(b, { id: u.sub, role: u.role }, requestIp(req));
   }
 
+  // Real-product flow: find candidate photos of the actual product on the web (same Tavily
+  // search the seller enrichment uses), then import the chosen one through MediaService so
+  // it can be used as an image_to_image reference. Neither charges any wallet.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('ai/product-photos') aiFindProductPhotos(@CurrentUser() u: JwtPayload, @Body() b: AiImageRequest) {
+    return this.aiImages.findProductPhotos(b, { id: u.sub, role: u.role });
+  }
+
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('ai/product-photos/import') aiImportProductPhoto(@CurrentUser() u: JwtPayload, @Body() b: { url?: string }, @Req() req: any) {
+    return this.aiImages.importProductPhoto(b?.url, { id: u.sub, role: u.role }, requestIp(req));
+  }
+
   // Banners (CMS)
   @Get('banners') listBanners() { return this.admin.listBanners(); }
   @Post('banners') createBanner(@Body() b: any) { return this.admin.createBanner(b); }

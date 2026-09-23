@@ -1158,10 +1158,12 @@ attachAiImageGenerator('prod-img-input', {
   references: function() { return (prodImages || []).filter(function(u) { return /^https:\/\/res\.cloudinary\.com\//.test(u); }); },
   confirmReplace: false, context: function() {
   var cat = document.getElementById('prod-cat');
+  var val = function(id) { var el = document.getElementById(id); return el && el.value ? el.value.trim() : ''; };
   return {
-    name: (document.getElementById('prod-name') || {}).value ? document.getElementById('prod-name').value.trim() : '',
+    name: val('prod-name'),
     category: cat && cat.selectedIndex > 0 ? cat.options[cat.selectedIndex].text.trim() : '',
-    brand: (document.getElementById('prod-brand') || {}).value ? document.getElementById('prod-brand').value.trim() : '',
+    brand: val('prod-brand'),
+    model: val('prod-sku'), // model/SKU pins down the right unit when searching for the real product
   };
 }, onUse: function(url) {
   document.getElementById('prod-img-input').value = url;

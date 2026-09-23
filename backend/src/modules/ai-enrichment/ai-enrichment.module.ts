@@ -11,6 +11,7 @@ import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { generateImages } from '../ai-images/openai-images';
+import { tavilySearch } from '../ai-images/product-search';
 
 // Seller-facing, wallet-gated, optional paid AI features for the Add Product form
 // (frontend/seller.html) — see plan doc "Seller-Facing Paid AI Product Enrichment".
@@ -153,17 +154,11 @@ export class AiEnrichmentService {
 
   // ─── Providers ───────────────────────────────────────────────────────
 
+  // Same Tavily request as before (advanced depth, 5 results); the HTTP call itself now
+  // lives in ai-images/product-search.ts so the admin product generator reuses this exact
+  // search instead of having its own.
   private async tavilySearch(query: string, includeImages: boolean) {
-    const res = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: this.tavilyKey, query, search_depth: 'advanced',
-        include_images: includeImages, max_results: 5,
-      }),
-    });
-    if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text().catch(() => res.statusText)}`);
-    return res.json();
+    return tavilySearch({ apiKey: this.tavilyKey, query, includeImages });
   }
 
   private async runWebSearch(name: string, category?: string, brand?: string) {

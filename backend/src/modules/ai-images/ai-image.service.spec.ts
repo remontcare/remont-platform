@@ -10,6 +10,9 @@ jest.mock('cloudinary', () => ({
     uploader: { upload_stream: jest.fn(), destroy: jest.fn() },
   },
 }));
+// The reference-photo downloader resolves DNS before connecting (private-address guard);
+// the guard itself is covered in product-search.spec.ts, so here a public address is stubbed.
+jest.mock('dns/promises', () => ({ lookup: jest.fn(async () => [{ address: '93.184.216.34', family: 4 }]) }));
 
 import { Reflector } from '@nestjs/core';
 import sharp from 'sharp';
@@ -346,6 +349,88 @@ describe('failures — clear admin-facing messages, never a silent provider swit
     release!();
     await first;
   }, 30000);
+});
+
+describe('admin product flow: find real product photo → import → generate from it', () => {
+  const FOUND = 'https://cdn.example.com/acme-ceiling-fan.jpg';
+
+  /** Tavily + the candidate download + Cloudinary, in one stub. */
+  function mockFullFlow() {
+    const gen = mockCloudinary();
+    const realPng = sharp({ create: { width: 800, height: 600, channels: 3, background: '#abc' } }).png().toBuffer();
+    const inner = global.fetch as jest.Mock;
+    global.fetch = jest.fn(async (url: string, init?: any) => {
+      if (String(url).startsWith('https://api.tavily.com/')) {
+        (global.fetch as any).tavilyBody = JSON.parse(init.body);
+        return { ok: true, json: async () => ({ images: [FOUND, 'https://cdn.example.com/other.jpg'] }) };
+      }
+      if (String(url) === FOUND) {
+        const b = await realPng;
+        return { ok: true, status: 200, headers: { get: (k: string) => (k === 'content-type' ? 'image/jpeg' : null) }, body: null, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) };
+      }
+      return inner(url, init);
+    }) as any;
+    (global.fetch as any).calls = gen.calls;
+    return global.fetch as any;
+  }
+
+  it('searches with brand + model, imports the chosen photo through the media pipeline, then generates with it as the reference', async () => {
+    const fetchMock = mockFullFlow();
+    const media = mediaStub();
+    const svc = new AiImageService(config({ TAVILY_API_KEY: 'tvly-test' }), media as any);
+
+    // 1. Find the real product.
+    const found = await svc.findProductPhotos({ entity: 'PRODUCT', name: 'Ceiling Fan', brand: 'Acme', model: 'AC-1200X', category: 'Fans' }, ADMIN);
+    expect(found.images).toContain(FOUND);
+    expect(fetchMock.tavilyBody.query).toContain('AC-1200X');
+    expect(fetchMock.tavilyBody.include_images).toBe(true);
+
+    // 2. Import the chosen candidate — it goes through MediaService, not straight to the model.
+    const imported = await svc.importProductPhoto(FOUND, ADMIN);
+    const importInput = media.ingestImage.mock.calls[0][0] as any;
+    expect(importInput.entityType).toBe(MediaEntityType.PRODUCT);
+    expect(importInput.source).toBe(MediaSource.UPLOAD);
+    expect((await sharp(importInput.buffer).metadata()).format).toBe('png'); // real downloaded bytes
+    expect(imported.variants!.full).toContain('res.cloudinary.com');
+
+    // 3. Generate using the stored asset as the reference.
+    const res = await svc.generate(
+      { entity: 'PRODUCT', name: 'Ceiling Fan', brand: 'Acme', referenceImages: [imported.variants!.full] }, ADMIN,
+    );
+    const genCall = fetchMock.calls[0];
+    expect(genCall.url).toBe(`${GEN_URL}image_to_image`);
+    expect(genCall.body.reference_images).toEqual([{ source_type: 'url', url: imported.variants!.full }]);
+    expect(genCall.body.prompt).toContain(REFERENCE_GUARD); // preserve the real product's identity
+    expect(genCall.body.image_size).toEqual({ width: 1536, height: 1152 }); // 4:3 kept
+    expect(res.images[0].url).toContain('res.cloudinary.com');
+    expect(media.ingestImage).toHaveBeenCalledTimes(2); // imported reference + generated image
+  }, 60000);
+
+  it('prompt-only generation stays available when no real product is found', async () => {
+    const fetchMock = mockCloudinary();
+    const svc = new AiImageService(config({ TAVILY_API_KEY: 'tvly-test' }), mediaStub() as any);
+    const res = await svc.generate({ entity: 'PRODUCT', name: 'Generic Bucket' }, ADMIN);
+    expect(fetchMock.calls[0].url).toBe(`${GEN_URL}text_to_image`); // no reference => prompt-only
+    expect(res.images).toHaveLength(1);
+  }, 30000);
+
+  it('reports a clear message when the search key is missing, and when nothing is found', async () => {
+    const noKey = new AiImageService(config(), mediaStub() as any);
+    expect(noKey.presets().search).toEqual({ available: false });
+    await expect(noKey.findProductPhotos({ entity: 'PRODUCT', name: 'Fan' }, ADMIN)).rejects.toThrow(/TAVILY_API_KEY is missing/);
+
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ images: [] }) })) as any;
+    const svc = new AiImageService(config({ TAVILY_API_KEY: 'tvly-test' }), mediaStub() as any);
+    expect(svc.presets().search).toEqual({ available: true });
+    await expect(svc.findProductPhotos({ entity: 'PRODUCT', name: 'Fan' }, ADMIN)).rejects.toThrow(/No product photos found/);
+  });
+
+  it('importing is subject to the same download guards (no internal addresses)', async () => {
+    const svc = new AiImageService(config({ TAVILY_API_KEY: 'tvly-test' }), mediaStub() as any);
+    await expect(svc.importProductPhoto('http://cdn.example.com/x.png', ADMIN)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.importProductPhoto('https://localhost/x.png', ADMIN)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.importProductPhoto('', ADMIN)).rejects.toBeInstanceOf(BadRequestException);
+  });
 });
 
 describe('admin generation is free — no wallet, no charge', () => {

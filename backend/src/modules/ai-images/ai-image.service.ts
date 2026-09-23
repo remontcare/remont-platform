@@ -1,12 +1,13 @@
 import {
-  BadRequestException, ConflictException, GatewayTimeoutException, HttpException, Injectable, Logger, ServiceUnavailableException,
+  BadRequestException, ConflictException, GatewayTimeoutException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import { v2 as cloudinary } from 'cloudinary';
-import { MediaSource, UserRole } from '@prisma/client';
+import { MediaEntityType, MediaSource, UserRole } from '@prisma/client';
 import { MediaService, PublicMedia } from '../media/media.service';
 import { fetchGeneratedImage, generateWithCloudinary, isCloudinaryUrl } from './cloudinary-images';
+import { ProductSearchContext, buildProductQuery, fetchExternalImage, searchProductImages } from './product-search';
 import {
   AI_IMAGE_PRESETS, AiImageContext, AiImageEntity, AiImagePreset, MAX_CUSTOM_PROMPT_CHARS,
   buildPrompt, describeSubject, parseAiImageEntity, presetCatalogue, resolveStyles, suggestPrompt,
@@ -48,6 +49,8 @@ export interface AiImageRequest {
   prompt?: unknown;
   count?: unknown;
   views?: unknown;
+  /** Model / SKU — what actually pins down the right unit when searching for a real product. */
+  model?: unknown;
   /** Existing Remont image URLs to guide generation (Cloudinary image_to_image). */
   referenceImages?: unknown;
 }
@@ -63,11 +66,15 @@ export class AiImageService {
   /** One generation at a time per admin — a double-clicked button can't spend twice. */
   private readonly inFlight = new Set<string>();
 
+  /** Product photo discovery (Tavily) — the same search the seller enrichment flow uses. */
+  private readonly tavilyKey: string;
+
   constructor(config: ConfigService, private media: MediaService) {
     this.model = {
       family: config.get('CLOUDINARY_AI_MODEL_FAMILY', 'flux'),
       tier: config.get('CLOUDINARY_AI_MODEL_TIER', 'premium'),
     };
+    this.tavilyKey = config.get('TAVILY_API_KEY', '');
   }
 
   /** Cloudinary is already configured platform-wide (uploads depend on it); whether the
@@ -77,9 +84,61 @@ export class AiImageService {
     return !!cloudinary.config().cloud_name;
   }
 
-  /** Options for the admin UI — styles, defaults, ratios and per-request limits. */
+  /** Options for the admin UI — styles, defaults, ratios and per-request limits.
+   *  `search.available` tells the UI whether "Find product photo" can be offered. */
   presets() {
-    return { available: this.isConfigured(), model: this.model, presets: presetCatalogue() };
+    return {
+      available: this.isConfigured(),
+      model: this.model,
+      search: { available: !!this.tavilyKey },
+      presets: presetCatalogue(),
+    };
+  }
+
+  /**
+   * Step 1 of the real-product flow: find candidate photos of the ACTUAL product from the
+   * open web, using the same Tavily search the seller enrichment flow uses. Returns URLs
+   * only — nothing is downloaded or stored until the admin picks one. No wallet charge.
+   */
+  async findProductPhotos(body: AiImageRequest, actor: AiImageActor): Promise<{ images: string[]; query: string }> {
+    if (!this.tavilyKey) {
+      throw new ServiceUnavailableException('Product photo search is not configured on this server (TAVILY_API_KEY is missing).');
+    }
+    const ctx = this.context(body);
+    const model = typeof body.model === 'string' ? body.model.trim().slice(0, 100) : undefined;
+    if (!ctx.name) throw new BadRequestException('Enter the product name first');
+
+    const search: ProductSearchContext = { name: ctx.name, brand: ctx.brand, model, category: ctx.category, subCategory: ctx.subCategory };
+    try {
+      const images = await searchProductImages(this.tavilyKey, search);
+      this.logger.log(`Admin product photo search: user=${actor.id} results=${images.length}`);
+      if (!images.length) throw new NotFoundException('No product photos found. Try adding the brand or model number, or generate from the description instead.');
+      return { images, query: buildProductQuery(search) };
+    } catch (e: any) {
+      if (e instanceof HttpException) throw e;
+      this.logger.error(`Admin product photo search failed: ${e?.message}`);
+      throw new ServiceUnavailableException('Product photo search failed. Please try again, or generate from the description instead.');
+    }
+  }
+
+  /**
+   * Step 2: the admin picked a candidate. It is downloaded under strict rules (HTTPS only,
+   * no internal addresses, size capped) and then goes through the SAME MediaService pipeline
+   * as any upload — signature check, ClamAV, sharp/WebP, Cloudinary, Media row — so the
+   * reference we hand to image_to_image is a validated asset we own, never a hotlink.
+   */
+  async importProductPhoto(rawUrl: unknown, actor: AiImageActor, ip?: string): Promise<PublicMedia> {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) throw new BadRequestException('Pick an image to use as the reference');
+    const buffer = await fetchExternalImage(rawUrl.trim(), this.logger);
+    this.logger.log(`Admin reference import: user=${actor.id} bytes=${buffer.length}`);
+    return this.media.ingestImage({
+      buffer,
+      originalName: 'reference-photo',
+      entityType: MediaEntityType.PRODUCT,
+      source: MediaSource.UPLOAD, // a real photo we imported, not an AI generation
+      actor,
+      ip,
+    });
   }
 
   /**
