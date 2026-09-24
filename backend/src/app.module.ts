@@ -29,6 +29,7 @@ import { AmcModule } from './modules/amc/amc.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CmsModule } from './modules/cms/cms.module';
+import { AiCatalogModule } from './modules/ai-catalog/ai-catalog.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthModule } from './modules/health/health.module';
 import { LocationModule } from './modules/location/location.module';
@@ -104,6 +105,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
 
     AdminModule,
     CmsModule,
+    AiCatalogModule,
     ReviewsModule,
     HealthModule,
     LocationModule,
