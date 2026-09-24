@@ -14,6 +14,12 @@ class NewsletterDto {
   @IsOptional() @IsString() source?: string;
 }
 
+// Setting groups the public website reads (index.html / admin login page):
+// brand + contact + social links + stats counters + OTP UI limits.
+export const PUBLIC_SETTING_GROUPS = ['general', 'contact', 'social', 'stats', 'operations'];
+// Defence in depth: never serve a secret-looking key, whatever its group.
+export const SECRET_SETTING_KEY = /(secret|password|passwd|token|api[_-]?key|private|webhook|credential)/i;
+
 @Injectable()
 export class CmsService {
   constructor(private prisma: PrismaService) {}
@@ -27,12 +33,23 @@ export class CmsService {
     return banners.filter((b) => b.cityFilter.length === 0 || b.cityFilter.includes(city));
   }
 
+  /**
+   * PUBLIC settings — served unauthenticated to the website. Only groups the
+   * public site actually reads are returned, and any secret-looking key is
+   * dropped even inside them. Previously every row was returned, which served
+   * the Razorpay key secret and webhook secret (group "payment") to anyone.
+   * Server-side readers (payments, admin) query prisma.siteSetting directly and
+   * are unaffected; the admin UI uses the authenticated GET /admin/settings.
+   */
   async getSettings(group?: string) {
+    if (group && !PUBLIC_SETTING_GROUPS.includes(group)) return {};
     const settings = await this.prisma.siteSetting.findMany({
-      where: group ? { group } : {},
+      where: { group: group ? group : { in: PUBLIC_SETTING_GROUPS } },
     });
     const map: Record<string, string> = {};
-    settings.forEach((s) => { map[s.key] = s.value; });
+    settings.forEach((s) => {
+      if (!SECRET_SETTING_KEY.test(s.key)) map[s.key] = s.value;
+    });
     return map;
   }
 
