@@ -45,7 +45,7 @@ footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 
 footer.site a{color:var(--amber)}
 </style>
 </head>
-<body>
+<body data-policy="refund-policy" data-fallback="static">
 <header class="site">
   <div class="wrap">
     <a href="/" class="brand">Remont <span>India</span></a>
@@ -74,7 +74,7 @@ footer.site a{color:var(--amber)}
     <div class="outcome-card"><h3>💰 Wallet Credit</h3><p>The default outcome for most approved refunds — credited to your Remont Wallet for use on a future order.</p></div>
     <div class="outcome-card"><h3>🔀 Partial Wallet + Gateway</h3><p>Used when part of the order is retained (e.g. materials already used) and part is refunded.</p></div>
     <div class="outcome-card"><h3>🏦 Full Gateway Refund</h3><p>Reserved for exceptional cases — only available where the original payment was made online through our payment gateway, not for cash-collected orders.</p></div>
-    <div class="outcome-card"><h3>🔧 Free Rework</h3><p>The same professional (or another Partner) redoes the job at no extra cost — common for workmanship-quality issues, covered by our 30-day warranty.</p></div>
+    <div class="outcome-card"><h3>🔧 Free Rework</h3><p>The same professional (or another Partner) redoes the job at no extra cost — common for workmanship-quality issues, covered by the workmanship warranty shown on your invoice, where one applies.</p></div>
     <div class="outcome-card"><h3>🎟️ Discount Coupon</h3><p>A coupon toward a future booking, used in cases where a partial goodwill gesture is appropriate.</p></div>
     <div class="outcome-card"><h3>🚫 No Refund</h3><p>Used where the request doesn't meet the policy — for example, the service was completed as agreed and no issue is substantiated.</p></div>
   </div>
@@ -94,8 +94,10 @@ footer.site a{color:var(--amber)}
 
 <footer class="site">
   <div class="wrap">
-    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/contact">Contact</a></p>
+    <p data-legal-footer="dot">© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/contact">Contact</a></p>
   </div>
 </footer>
+<script src="/shared/legal-page.js" defer></script>
+<script src="/shared/legal-footer.js" defer></script>
 </body>
 </html>

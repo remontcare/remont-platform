@@ -5,9 +5,20 @@
   "trailingSlash": false,
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://remont-platform-production.up.railway.app/api/:path*" },
-    { "source": "/product/:slug", "destination": "/product" }
+    { "source": "/product/:slug", "destination": "/product" },
+    { "source": "/policy/:slug", "destination": "/policy" },
+    { "source": "/admin/settings/legal-policies", "destination": "/admin/legal-policies" },
+    { "source": "/admin/settings/legal-policies/:slug", "destination": "/admin/legal-policies" },
+    { "source": "/admin/settings/legal-information", "destination": "/admin/legal-policies" }
+  ],
+  "redirects": [
+    { "source": "/cancellation-policy", "destination": "/refund-policy", "permanent": false }
   ],
   "headers": [
+    {
+      "source": "/admin/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
     {
       "source": "/(.*)",
       "headers": [

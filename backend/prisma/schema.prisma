@@ -3880,3 +3880,120 @@ model Media {
   @@index([checksum])
   @@index([variantUrls], type: Gin)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEGAL & POLICIES CMS
+// LegalPolicy (main document, e.g. "Privacy Policy") → LegalPolicyVersion
+// (v0.1 draft, v1.0 published, …) → LegalPolicySection (the sub-policies).
+// A published version is immutable: edits always happen on a DRAFT version,
+// publishing archives the previous one, restore copies an old version into a
+// new draft. Admin actions are recorded in the shared AuditLog
+// (targetType "LegalPolicy"). The platform is single-tenant, so there is no
+// tenantId column.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum LegalPolicyStatus {
+  DRAFT // never published
+  PUBLISHED
+  UNPUBLISHED // was published, hidden from the public site
+  ARCHIVED
+}
+
+enum LegalPolicyVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model LegalPolicy {
+  id               String            @id @default(cuid())
+  slug             String            @unique // admin URL key, e.g. "privacy-policy"
+  publicPath       String            @unique // public route, e.g. "/privacy" or "/policy/<slug>"
+  policyType       String // PRIVACY, TERMS, … or CUSTOM
+  category         String            @default("General")
+  title            String
+  description      String?
+  status           LegalPolicyStatus @default(DRAFT)
+  isSystem         Boolean           @default(false) // one of the built-in main policies
+  currentVersionId String? // the PUBLISHED version (null until first publish)
+  currentVersion   String? // its label, e.g. "1.2"
+  effectiveDate    DateTime?
+  publishedAt      DateTime?
+  publishedById    String?
+  publishedByName  String?
+  createdById      String?
+  seoTitle         String?
+  seoDescription   String?
+  showInFooter     Boolean           @default(true)
+  sortOrder        Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  versions    LegalPolicyVersion[]
+  acceptances PolicyAcceptance[]
+
+  @@index([status, sortOrder])
+}
+
+model LegalPolicyVersion {
+  id                    String                   @id @default(cuid())
+  policyId              String
+  version               String // "0.1", "1.0", "1.1", …
+  major                 Int
+  minor                 Int
+  status                LegalPolicyVersionStatus @default(DRAFT)
+  changeNote            String?
+  effectiveDate         DateTime?
+  restoredFromVersionId String?
+  createdById           String?
+  publishedById         String?
+  publishedByName       String?
+  publishedAt           DateTime?
+  archivedAt            DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  policy   LegalPolicy          @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  sections LegalPolicySection[]
+
+  @@unique([policyId, version])
+  @@index([policyId, status])
+}
+
+model LegalPolicySection {
+  id        String   @id @default(cuid())
+  versionId String
+  title     String
+  slug      String
+  content   String   @db.Text // sanitised HTML; may contain {{VARIABLES}}
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version LegalPolicyVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, sortOrder])
+}
+
+// Who accepted which exact published version (e.g. a partner accepting Terms v1.2
+// at registration). userId is nullable because some flows (registrations) accept
+// before/independently of an account; subjectType/subjectId then identify the flow.
+model PolicyAcceptance {
+  id          String   @id @default(cuid())
+  policyId    String
+  versionId   String
+  version     String
+  userId      String?
+  subjectType String // CUSTOMER | PARTNER_REGISTRATION | SELLER_REGISTRATION | USER
+  subjectId   String?
+  ip          String?
+  userAgent   String?
+  acceptedAt  DateTime @default(now())
+
+  policy LegalPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId, versionId])
+  @@index([userId])
+  @@index([subjectType, subjectId])
+}

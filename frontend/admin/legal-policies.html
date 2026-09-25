@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Remont Admin — Legal &amp; Policies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/style.css">
+<style>
+.lp-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.lp-chip{border:1px solid #e5e7eb;background:#fff;border-radius:20px;padding:6px 14px;font-size:12.5px;cursor:pointer;color:#374151}
+.lp-chip.active{background:#f97316;border-color:#f97316;color:#fff;font-weight:600}
+.lp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.lp-card{background:#fff;border:1px solid #e8edf2;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.lp-card h3{font-size:15px;margin:0;color:#111827}
+.lp-card .meta{font-size:12px;color:#6b7280;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.lp-card .actions{display:flex;gap:6px;margin-top:auto;padding-top:6px;flex-wrap:wrap}
+.lp-card .path{font-family:ui-monospace,monospace;font-size:11.5px;color:#9ca3af}
+.lp-head{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;font-size:13px}
+.lp-head .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#9ca3af}
+.lp-head .v{font-weight:600;color:#111827;word-break:break-word}
+.lp-bar{display:flex;gap:6px;flex-wrap:wrap}
+.lp-notice{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px}
+.lp-notice.info{background:#eff6ff;border-color:#bfdbfe;color:#1e40af}
+.sec-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f1f5f9;background:#fff}
+.sec-row.dragging{opacity:.4}
+.sec-row.drop-before{box-shadow:inset 0 3px 0 #f97316}
+.sec-row .handle{cursor:grab;color:#9ca3af;font-size:16px;user-select:none;padding:0 4px}
+.sec-row .t{flex:1;min-width:0}
+.sec-row .t strong{font-size:13.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sec-row .t small{color:#9ca3af;font-size:11.5px}
+.sec-row.inactive .t strong{color:#9ca3af;text-decoration:line-through}
+.sec-row .ops{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.rte-toolbar{display:flex;gap:4px;flex-wrap:wrap;border:1px solid #e5e7eb;border-bottom:none;border-radius:8px 8px 0 0;padding:6px;background:#f8fafc}
+.rte-toolbar button,.rte-toolbar select{border:1px solid #e5e7eb;background:#fff;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer}
+.rte{min-height:260px;max-height:50vh;overflow:auto;border:1px solid #e5e7eb;border-radius:0 0 8px 8px;padding:12px 14px;font-size:14px;line-height:1.6;outline:none}
+.rte:focus{border-color:#f97316}
+.rte-src{width:100%;min-height:260px;font-family:ui-monospace,monospace;font-size:12px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px;padding:10px}
+.doc{font-size:14.5px;line-height:1.7;color:#1f2937}
+.doc h1{font-size:24px;margin:0 0 4px}
+.doc h2{font-size:18px;margin:22px 0 8px}
+.doc h3{font-size:15px;margin:14px 0 6px}
+.doc p{margin:0 0 10px}
+.doc ul,.doc ol{padding-left:22px;margin:0 0 10px}
+.doc mark{background:#fef08a;padding:0 2px;border-radius:3px}
+.doc .toc{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px 16px;margin:12px 0 18px;font-size:13px}
+.ver-row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;align-items:center;flex-wrap:wrap}
+.hidden{display:none!important}
+@media (max-width:600px){
+  .sec-row{flex-wrap:wrap} .sec-row .ops{width:100%;justify-content:flex-start}
+  .topbar-right{flex-wrap:wrap;justify-content:flex-end;gap:6px} .topbar-left p{display:none}
+}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1 id="page-title">Legal &amp; Policies</h1><p id="page-sub">Settings → Legal &amp; Policies — main policy documents, their sections and versions</p></div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" id="btn-add-policy">+ Add Policy</button>
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="policies">Legal &amp; Policies</button>
+      <button class="tab-btn" data-tab="info">Legal Information</button>
+    </div>
+
+    <!-- LIST VIEW -->
+    <div id="view-list">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header" style="flex-wrap:wrap;gap:10px">
+          <input id="lp-search" class="form-control" placeholder="Search policies…" style="max-width:260px">
+          <div class="lp-filters" id="lp-filters">
+            <button class="lp-chip active" data-status="">All</button>
+            <button class="lp-chip" data-status="PUBLISHED">Published</button>
+            <button class="lp-chip" data-status="DRAFT">Draft</button>
+            <button class="lp-chip" data-status="UNPUBLISHED">Unpublished</button>
+            <button class="lp-chip" data-status="ARCHIVED">Archived</button>
+          </div>
+        </div>
+      </div>
+      <div class="lp-notice info">Each card is one main policy document; its sub-policies are sections inside it. Published versions are never edited in place — editing creates a new draft version, and nothing goes live until you publish it. Default templates are a starting point and should be reviewed by a lawyer before publishing.</div>
+      <div id="lp-grid" class="lp-grid"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- EDITOR VIEW -->
+    <div id="view-editor" class="hidden">
+      <div style="margin-bottom:12px"><a href="#" id="back-link">← All policies</a></div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header" style="flex-wrap:wrap;gap:10px">
+          <span class="card-title" id="ed-title">Policy</span>
+          <div class="lp-bar" id="ed-actions"></div>
+        </div>
+        <div class="card-body"><div class="lp-head" id="ed-head"></div></div>
+      </div>
+      <div id="ed-notice"></div>
+      <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">Sections <small id="ed-sec-count" style="color:#9ca3af;font-weight:400"></small></span>
+          <div class="lp-bar">
+            <button class="btn btn-outline btn-sm" id="btn-version-settings">Draft details</button>
+            <button class="btn btn-primary btn-sm" id="btn-add-section">+ Add Section</button>
+          </div>
+        </div>
+        <div id="ed-sections"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- LEGAL INFORMATION -->
+    <div id="view-info" class="hidden">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Legal Information</span></div>
+        <div class="card-body">
+          <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Configured once and inserted into every policy wherever the matching <code>{{VARIABLE}}</code> appears. Support email/phone fall back to Website Settings → Contact when left empty. <code>{{CURRENT_DATE}}</code>, <code>{{LAST_UPDATED}}</code> and <code>{{POLICY_VERSION}}</code> are filled automatically.</p>
+          <div id="info-form"><div class="loading">Loading…</div></div>
+          <div style="margin-top:12px"><button class="btn btn-primary" id="btn-save-info">Save Legal Information</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add policy -->
+<div id="add-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><span class="modal-title">Add Policy</span><button class="modal-close" onclick="closeModal('add-overlay')">×</button></div>
+    <div class="form-group"><label class="form-label">Policy Name *</label><input id="np-title" class="form-control" maxlength="120" placeholder="e.g. Shipping Policy"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Category</label><input id="np-category" class="form-control" maxlength="60" placeholder="General" list="np-cats"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Slug</label><input id="np-slug" class="form-control" maxlength="80" placeholder="shipping-policy"></div>
+    </div>
+    <datalist id="np-cats"><option>Privacy</option><option>Terms</option><option>Users</option><option>Partners</option><option>Sellers</option><option>Payments</option><option>Services</option><option>Marketplace</option><option>Legal</option><option>Communication</option><option>General</option></datalist>
+    <div class="form-group"><label class="form-label">Description</label><textarea id="np-desc" class="form-control" rows="2" maxlength="500"></textarea></div>
+    <p style="font-size:12px;color:#6b7280">Created as a v0.1 draft with recommended sections. Public URL: <code id="np-url">/policy/…</code></p>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('add-overlay')">Cancel</button><button class="btn btn-primary" id="np-create">Create</button></div>
+  </div>
+</div>
+
+<!-- Section editor -->
+<div id="sec-overlay" class="overlay" style="display:none">
+  <div class="modal modal-lg" style="width:860px">
+    <div class="modal-header"><span class="modal-title" id="sec-modal-title">Edit Section</span><button class="modal-close" onclick="closeModal('sec-overlay')">×</button></div>
+    <input type="hidden" id="sec-id">
+    <div class="form-group"><label class="form-label">Section Title *</label><input id="sec-title" class="form-control" maxlength="160"></div>
+    <div class="form-group">
+      <label class="form-label">Content</label>
+      <div class="rte-toolbar" id="rte-toolbar">
+        <button type="button" data-cmd="bold"><b>B</b></button>
+        <button type="button" data-cmd="italic"><i>I</i></button>
+        <button type="button" data-cmd="underline"><u>U</u></button>
+        <button type="button" data-block="h3">H3</button>
+        <button type="button" data-block="h4">H4</button>
+        <button type="button" data-block="p">¶</button>
+        <button type="button" data-cmd="insertUnorderedList">• List</button>
+        <button type="button" data-cmd="insertOrderedList">1. List</button>
+        <button type="button" data-link="1">🔗 Link</button>
+        <button type="button" data-cmd="unlink">Unlink</button>
+        <button type="button" data-cmd="removeFormat">Clear</button>
+        <select id="rte-var"><option value="">Insert variable…</option></select>
+        <button type="button" id="rte-src-toggle" style="margin-left:auto">&lt;/&gt; HTML</button>
+      </div>
+      <div id="rte" class="rte doc" contenteditable="true"></div>
+      <textarea id="rte-src" class="rte-src hidden"></textarea>
+      <small style="color:#6b7280">Allowed: headings, paragraphs, bold/italic/underline, lists, links, tables. Scripts, styles, images and unsafe links are removed on save. Text in <mark>[[double brackets]]</mark> marks information still to be confirmed.</small>
+    </div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="sec-active" checked><label for="sec-active" style="margin-left:6px">Active (shown publicly)</label></div>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('sec-overlay')">Cancel</button><button class="btn btn-primary" id="sec-save">Save Section</button></div>
+  </div>
+</div>
+
+<!-- Preview -->
+<div id="pv-overlay" class="overlay" style="display:none">
+  <div class="modal modal-lg" style="width:900px">
+    <div class="modal-header"><span class="modal-title" id="pv-title">Preview</span><button class="modal-close" onclick="closeModal('pv-overlay')">×</button></div>
+    <div id="pv-body" class="doc"></div>
+  </div>
+</div>
+
+<!-- Versions / history -->
+<div id="ver-overlay" class="overlay" style="display:none">
+  <div class="modal modal-lg" style="width:760px">
+    <div class="modal-header"><span class="modal-title">Versions &amp; History</span><button class="modal-close" onclick="closeModal('ver-overlay')">×</button></div>
+    <div class="tab-bar" id="ver-tabs">
+      <button class="tab-btn active" data-vt="versions">Versions</button>
+      <button class="tab-btn" data-vt="audit">Audit Log</button>
+      <button class="tab-btn" data-vt="acceptances">Acceptances</button>
+    </div>
+    <div id="ver-body"></div>
+  </div>
+</div>
+
+<!-- Policy settings -->
+<div id="set-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header"><span class="modal-title">Policy Settings</span><button class="modal-close" onclick="closeModal('set-overlay')">×</button></div>
+    <div class="form-group"><label class="form-label">Policy Name</label><input id="ps-title" class="form-control" maxlength="120"></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Category</label><input id="ps-category" class="form-control" maxlength="60" list="np-cats"></div>
+      <div class="form-group" style="flex:1"><label class="form-label">Sort Order</label><input id="ps-sort" class="form-control" type="number" min="0"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Description</label><textarea id="ps-desc" class="form-control" rows="2" maxlength="500"></textarea></div>
+    <div class="form-group"><label class="form-label">SEO Title</label><input id="ps-seo-title" class="form-control" maxlength="160"></div>
+    <div class="form-group"><label class="form-label">SEO Description</label><textarea id="ps-seo-desc" class="form-control" rows="2" maxlength="320"></textarea></div>
+    <div class="form-check" style="margin-bottom:12px"><input type="checkbox" id="ps-footer"><label for="ps-footer" style="margin-left:6px">Show in website footer when published</label></div>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('set-overlay')">Cancel</button><button class="btn btn-primary" id="ps-save">Save</button></div>
+  </div>
+</div>
+
+<!-- Draft details -->
+<div id="vs-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header"><span class="modal-title">Draft Details</span><button class="modal-close" onclick="closeModal('vs-overlay')">×</button></div>
+    <div class="form-group"><label class="form-label">Effective Date</label><input id="vs-effective" class="form-control" type="date"><small style="color:#6b7280">Defaults to the publish date if left empty.</small></div>
+    <div class="form-group"><label class="form-label">Change Note (internal)</label><textarea id="vs-note" class="form-control" rows="3" maxlength="500" placeholder="What changed in this version?"></textarea></div>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('vs-overlay')">Cancel</button><button class="btn btn-primary" id="vs-save">Save</button></div>
+  </div>
+</div>
+
+<script src="/admin/common.js"></script>
+<script>
+renderSidebar('legal-policies');
+requireAuth();
+(function(){ var u = getAdminUser(); var el = document.getElementById('admin-name'); if (el) el.textContent = u.name || 'Admin'; })();
+
+var BASE_PATH = '/admin/settings/legal-policies';
+var IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+var VARIABLES = ['COMPANY_NAME','COMPANY_LEGAL_NAME','COMPANY_ADDRESS','SUPPORT_EMAIL','SUPPORT_PHONE','GRIEVANCE_EMAIL','GRIEVANCE_OFFICER','WEBSITE_URL','CURRENT_DATE','LAST_UPDATED','POLICY_VERSION'];
+var STATUS_COLOR = { PUBLISHED:'green', DRAFT:'yellow', UNPUBLISHED:'gray', ARCHIVED:'red' };
+var state = { status:'', q:'', policies:[], detail:null, working:null, sourceMode:false };
+
+function $(id) { return document.getElementById(id); }
+function policyUrl(slug) { return IS_LOCAL ? '/admin/legal-policies.html?policy=' + encodeURIComponent(slug) : BASE_PATH + '/' + encodeURIComponent(slug); }
+function listUrl() { return IS_LOCAL ? '/admin/legal-policies.html' : BASE_PATH; }
+function infoUrl() { return IS_LOCAL ? '/admin/legal-policies.html?tab=info' : '/admin/settings/legal-information'; }
+function currentRoute() {
+  var qs = new URLSearchParams(location.search);
+  if (qs.get('policy')) return { view:'editor', slug: qs.get('policy') };
+  if (qs.get('tab') === 'info' || /\/legal-information\/?$/.test(location.pathname)) return { view:'info' };
+  var m = location.pathname.match(/\/admin\/settings\/legal-policies\/([a-z0-9-]+)\/?$/);
+  if (m) return { view:'editor', slug: m[1] };
+  return { view:'list' };
+}
+function go(url) { history.pushState({}, '', url); route(); }
+window.addEventListener('popstate', route);
+function openOverlay(id) { $(id).style.display = 'flex'; }
+function fmtD(d) { return d ? fmtDateShort(d) : '—'; }
+function markPlaceholders(html) { return String(html).replace(/\[\[([^\]]{1,300})\]\]/g, '<mark>[[$1]]</mark>'); }
+
+// ── Routing / tabs ──
+document.querySelectorAll('.tab-bar .tab-btn[data-tab]').forEach(function(b) {
+  b.addEventListener('click', function() { go(b.dataset.tab === 'info' ? infoUrl() : listUrl()); });
+});
+$('back-link').addEventListener('click', function(e) { e.preventDefault(); go(listUrl()); });
+
+function route() {
+  var r = currentRoute();
+  document.querySelectorAll('.tab-bar .tab-btn[data-tab]').forEach(function(b) { b.classList.toggle('active', (b.dataset.tab === 'info') === (r.view === 'info')); });
+  $('view-list').classList.toggle('hidden', r.view !== 'list');
+  $('view-editor').classList.toggle('hidden', r.view !== 'editor');
+  $('view-info').classList.toggle('hidden', r.view !== 'info');
+  $('btn-add-policy').classList.toggle('hidden', r.view !== 'list');
+  if (r.view === 'list') { $('page-title').textContent = 'Legal & Policies'; loadList(); }
+  else if (r.view === 'info') { $('page-title').textContent = 'Legal Information'; loadInfo(); }
+  else loadPolicy(r.slug);
+}
+
+// ── List ──
+$('lp-filters').addEventListener('click', function(e) {
+  var b = e.target.closest('.lp-chip'); if (!b) return;
+  document.querySelectorAll('.lp-chip').forEach(function(c) { c.classList.toggle('active', c === b); });
+  state.status = b.dataset.status; loadList();
+});
+var searchTimer;
+$('lp-search').addEventListener('input', function(e) { clearTimeout(searchTimer); searchTimer = setTimeout(function() { state.q = e.target.value.trim(); loadList(); }, 250); });
+
+function loadList() {
+  var qs = [];
+  if (state.status) qs.push('status=' + state.status);
+  if (state.q) qs.push('q=' + encodeURIComponent(state.q));
+  api('GET', '/admin/legal/policies' + (qs.length ? '?' + qs.join('&') : '')).then(function(list) {
+    state.policies = list || [];
+    if (!state.policies.length) {
+      $('lp-grid').innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📜</div><h3>No policies found</h3>' +
+        (state.status || state.q ? '' : '<p><button class="btn btn-primary btn-sm" id="btn-seed">Create default policies</button></p>') + '</div>';
+      var seed = $('btn-seed');
+      if (seed) seed.onclick = function() { api('POST', '/admin/legal/policies/ensure-defaults').then(function(r) { toast((r.created || []).length + ' default policies created', 'success'); loadList(); }).catch(function(e) { toast(e.message, 'error'); }); };
+      return;
+    }
+    $('lp-grid').innerHTML = state.policies.map(function(p) {
+      var ver = p.publishedVersion ? 'v' + p.publishedVersion.version : (p.draftVersion ? 'v' + p.draftVersion.version : '—');
+      var draftNote = p.publishedVersion && p.draftVersion ? ' · draft v' + escape(p.draftVersion.version) : '';
+      return '<div class="lp-card">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><h3>' + escape(p.title) + '</h3>' + badge(p.status, STATUS_COLOR[p.status]) + '</div>' +
+        '<div class="meta"><span>' + p.sectionCount + ' Sections</span><span>' + escape(ver) + draftNote + '</span><span>' + escape(p.category) + '</span></div>' +
+        '<div class="meta">Last updated: ' + fmtD(p.lastUpdated) + '</div>' +
+        '<div class="path">' + escape(p.publicPath) + '</div>' +
+        '<div class="actions">' +
+          '<a class="btn btn-xs btn-primary" href="' + policyUrl(p.slug) + '" data-nav>Edit</a>' +
+          '<button class="btn btn-xs btn-outline" data-preview="' + escape(p.slug) + '">Preview</button>' +
+          '<button class="btn btn-xs btn-outline" data-versions="' + escape(p.slug) + '">Versions</button>' +
+          (p.status === 'PUBLISHED' ? '<a class="btn btn-xs btn-outline" target="_blank" rel="noopener" href="' + escape(p.publicPath) + '">View live ↗</a>' : '') +
+        '</div></div>';
+    }).join('');
+  }).catch(function(e) { $('lp-grid').innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+$('lp-grid').addEventListener('click', function(e) {
+  var a = e.target.closest('[data-nav]'); if (a) { e.preventDefault(); go(a.getAttribute('href')); return; }
+  var pv = e.target.closest('[data-preview]'); if (pv) { api('GET', '/admin/legal/policies/' + encodeURIComponent(pv.dataset.preview)).then(function(d) { state.detail = d; previewWorking(); }).catch(function(err) { toast(err.message, 'error'); }); return; }
+  var vs = e.target.closest('[data-versions]'); if (vs) { api('GET', '/admin/legal/policies/' + encodeURIComponent(vs.dataset.versions)).then(function(d) { state.detail = d; openVersions(); }).catch(function(err) { toast(err.message, 'error'); }); }
+});
+
+// ── Add policy ──
+$('btn-add-policy').onclick = function() { ['np-title','np-category','np-slug','np-desc'].forEach(function(i) { $(i).value = ''; }); $('np-url').textContent = '/policy/…'; openOverlay('add-overlay'); };
+function slugifyClient(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
+$('np-title').addEventListener('input', function() { if (!$('np-slug').dataset.touched) $('np-slug').value = slugifyClient(this.value); $('np-url').textContent = '/policy/' + ($('np-slug').value || '…'); });
+$('np-slug').addEventListener('input', function() { this.dataset.touched = '1'; $('np-url').textContent = '/policy/' + (this.value || '…'); });
+$('np-create').onclick = function() {
+  var body = { title: $('np-title').value.trim(), category: $('np-category').value.trim() || undefined, slug: $('np-slug').value.trim() || undefined, description: $('np-desc').value.trim() || undefined };
+  if (!body.title) { toast('Policy name is required', 'error'); return; }
+  api('POST', '/admin/legal/policies', body).then(function(d) { toast('Policy created as draft', 'success'); closeModal('add-overlay'); go(policyUrl(d.policy.slug)); }).catch(function(e) { toast(e.message, 'error'); });
+};
+
+// ── Editor ──
+function loadPolicy(slug) {
+  $('ed-sections').innerHTML = '<div class="loading">Loading…</div>';
+  return api('GET', '/admin/legal/policies/' + encodeURIComponent(slug)).then(function(d) {
+    state.detail = d; state.working = d.working; renderEditor();
+  }).catch(function(e) { $('ed-sections').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+function reloadPolicy() { return loadPolicy(state.detail.policy.slug); }
+function isDraft() { return state.working && state.working.status === 'DRAFT'; }
+
+function renderEditor() {
+  var p = state.detail.policy, w = state.working;
+  $('page-title').textContent = p.title;
+  $('ed-title').innerHTML = escape(p.title) + ' ' + badge(p.status, STATUS_COLOR[p.status]);
+  var draft = state.detail.versions.filter(function(v) { return v.status === 'DRAFT'; })[0];
+  $('ed-head').innerHTML = [
+    ['Policy Name', escape(p.title)], ['Status', escape(p.status)],
+    ['Live Version', p.currentVersion ? 'v' + escape(p.currentVersion) : '—'], ['Draft Version', draft ? 'v' + escape(draft.version) : '—'],
+    ['Effective Date', fmtD(p.effectiveDate)], ['Last Updated', fmtD(w && w.updatedAt > p.updatedAt ? w.updatedAt : p.updatedAt)],
+    ['Published By', escape(p.publishedByName || '—')], ['Public URL', '<a href="' + escape(p.publicPath) + '" target="_blank" rel="noopener">' + escape(p.publicPath) + '</a>'],
+  ].map(function(kv) { return '<div><div class="k">' + kv[0] + '</div><div class="v">' + kv[1] + '</div></div>'; }).join('');
+
+  var acts = [];
+  acts.push('<button class="btn btn-sm btn-outline" data-act="preview">Preview</button>');
+  acts.push('<button class="btn btn-sm btn-outline" data-act="versions">Versions</button>');
+  acts.push('<button class="btn btn-sm btn-outline" data-act="settings">Settings / SEO</button>');
+  if (p.status !== 'ARCHIVED') {
+    // A never-published 0.x draft goes live as v1.0 (see LegalService.publish).
+    if (draft) acts.push('<button class="btn btn-sm btn-success" data-act="publish">Publish ' + (draft.major === 0 ? 'as v1.0' : 'v' + escape(draft.version)) + '</button>');
+    else if (p.status === 'UNPUBLISHED') acts.push('<button class="btn btn-sm btn-success" data-act="publish">Re-publish v' + escape(p.currentVersion) + '</button>');
+    if (p.status === 'PUBLISHED') acts.push('<button class="btn btn-sm btn-warning" data-act="unpublish">Unpublish</button>');
+    if (draft) acts.push('<button class="btn btn-sm btn-outline" data-act="discard">Discard draft</button>');
+    acts.push('<button class="btn btn-sm btn-danger" data-act="archive">Archive</button>');
+  } else {
+    acts.push('<button class="btn btn-sm btn-outline" data-act="unarchive">Restore from archive</button>');
+  }
+  $('ed-actions').innerHTML = acts.join('');
+
+  var notice = '';
+  if (!w) notice = '<div class="lp-notice">This policy has no versions yet.</div>';
+  else if (!isDraft()) notice = '<div class="lp-notice info">You are viewing the <strong>published v' + escape(w.version) + '</strong>, which cannot be changed. <button class="btn btn-xs btn-primary" data-act="start-draft">Start editing</button> creates a new draft version from it; the live page stays unchanged until you publish.</div>';
+  else if (p.status === 'PUBLISHED') notice = '<div class="lp-notice">Editing <strong>draft v' + escape(w.version) + '</strong>. The public page still shows v' + escape(p.currentVersion) + ' until you publish.</div>';
+  else notice = '<div class="lp-notice">Editing <strong>draft v' + escape(w.version) + '</strong> — not public. Fill in the <mark>[[highlighted]]</mark> placeholders and Legal Information, then publish.</div>';
+  $('ed-notice').innerHTML = notice;
+  $('btn-add-section').classList.toggle('hidden', !isDraft());
+  $('btn-version-settings').classList.toggle('hidden', !isDraft());
+  renderSections();
+}
+
+function renderSections() {
+  var w = state.working; var editable = isDraft();
+  if (!w || !w.sections.length) { $('ed-sections').innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div><h3>No sections</h3></div>'; $('ed-sec-count').textContent = ''; return; }
+  var active = w.sections.filter(function(s) { return s.isActive; }).length;
+  $('ed-sec-count').textContent = '(' + w.sections.length + ' · ' + active + ' active)';
+  $('ed-sections').innerHTML = w.sections.map(function(s, i) {
+    var hasPh = /\[\[[^\]]+\]\]/.test(s.content);
+    return '<div class="sec-row' + (s.isActive ? '' : ' inactive') + '" data-id="' + escape(s.id) + '"' + (editable ? ' draggable="true"' : '') + '>' +
+      (editable ? '<span class="handle" title="Drag to reorder">☰</span>' : '<span class="handle" style="cursor:default">·</span>') +
+      '<div class="t"><strong>' + escape(s.title) + '</strong><small>' + (s.isActive ? 'Active' : 'Inactive — hidden publicly') + (hasPh ? ' · <span style="color:#b45309">needs input</span>' : '') + '</small></div>' +
+      '<div class="ops">' + (editable
+        ? '<button class="btn btn-xs btn-outline" data-sec="up" ' + (i === 0 ? 'disabled' : '') + ' title="Move up">↑</button>' +
+          '<button class="btn btn-xs btn-outline" data-sec="down" ' + (i === w.sections.length - 1 ? 'disabled' : '') + ' title="Move down">↓</button>' +
+          '<button class="btn btn-xs btn-primary" data-sec="edit">Edit</button>' +
+          '<button class="btn btn-xs btn-outline" data-sec="dup">Duplicate</button>' +
+          '<button class="btn btn-xs btn-warning" data-sec="toggle">' + (s.isActive ? 'Disable' : 'Enable') + '</button>' +
+          '<button class="btn btn-xs btn-danger" data-sec="del">Delete</button>'
+        : '<button class="btn btn-xs btn-outline" data-sec="view">View</button>') +
+      '</div></div>';
+  }).join('');
+}
+
+function sectionById(id) { return state.working.sections.filter(function(s) { return s.id === id; })[0]; }
+function sendOrder(ids) {
+  return api('POST', '/admin/legal/versions/' + state.working.id + '/reorder', { sectionIds: ids }).then(function(v) { state.working = v; renderSections(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+$('ed-sections').addEventListener('click', function(e) {
+  var b = e.target.closest('[data-sec]'); if (!b) return;
+  var row = b.closest('.sec-row'); var id = row.dataset.id; var s = sectionById(id); var op = b.dataset.sec;
+  var ids = state.working.sections.map(function(x) { return x.id; }); var i = ids.indexOf(id);
+  if (op === 'up' || op === 'down') { var j = op === 'up' ? i - 1 : i + 1; ids.splice(i, 1); ids.splice(j, 0, id); sendOrder(ids); }
+  else if (op === 'edit') openSectionEditor(s);
+  else if (op === 'view') { $('pv-title').textContent = s.title; $('pv-body').innerHTML = '<h2>' + escape(s.title) + '</h2>' + markPlaceholders(s.content); openOverlay('pv-overlay'); }
+  else if (op === 'dup') api('POST', '/admin/legal/sections/' + id + '/duplicate').then(function() { toast('Section duplicated', 'success'); reloadPolicy(); }).catch(function(err) { toast(err.message, 'error'); });
+  else if (op === 'toggle') api('PATCH', '/admin/legal/sections/' + id, { isActive: !s.isActive }).then(function() { reloadPolicy(); }).catch(function(err) { toast(err.message, 'error'); });
+  else if (op === 'del') { if (!confirm('Delete section "' + s.title + '" from this draft?')) return; api('DELETE', '/admin/legal/sections/' + id).then(function() { toast('Section deleted', 'warning'); reloadPolicy(); }).catch(function(err) { toast(err.message, 'error'); }); }
+});
+
+// Drag & drop reorder
+var dragId = null;
+$('ed-sections').addEventListener('dragstart', function(e) { var r = e.target.closest('.sec-row'); if (!r) return; dragId = r.dataset.id; r.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', dragId); } catch (x) {} });
+$('ed-sections').addEventListener('dragend', function() { dragId = null; document.querySelectorAll('.sec-row').forEach(function(r) { r.classList.remove('dragging', 'drop-before'); }); });
+$('ed-sections').addEventListener('dragover', function(e) { if (!dragId) return; e.preventDefault(); var r = e.target.closest('.sec-row'); document.querySelectorAll('.sec-row').forEach(function(x) { x.classList.toggle('drop-before', x === r && x.dataset.id !== dragId); }); });
+$('ed-sections').addEventListener('drop', function(e) {
+  if (!dragId) return; e.preventDefault();
+  var r = e.target.closest('.sec-row'); if (!r || r.dataset.id === dragId) return;
+  var ids = state.working.sections.map(function(x) { return x.id; }).filter(function(x) { return x !== dragId; });
+  ids.splice(ids.indexOf(r.dataset.id), 0, dragId); sendOrder(ids);
+});
+
+// Policy-level actions
+document.addEventListener('click', function(e) {
+  var b = e.target.closest('[data-act]'); if (!b) return;
+  var p = state.detail && state.detail.policy; if (!p) return;
+  var act = b.dataset.act;
+  if (act === 'preview') previewWorking();
+  else if (act === 'versions') openVersions();
+  else if (act === 'settings') openSettings();
+  else if (act === 'start-draft') api('POST', '/admin/legal/policies/' + p.id + '/draft').then(function(v) { toast('Draft v' + v.version + ' created', 'success'); reloadPolicy(); }).catch(function(err) { toast(err.message, 'error'); });
+  else if (act === 'publish') doPublish(false);
+  else if (act === 'unpublish') { if (confirm('Unpublish "' + p.title + '"? The public page will stop showing it.')) simpleAction('unpublish', 'Unpublished'); }
+  else if (act === 'archive') { if (confirm('Archive "' + p.title + '"? It will be hidden publicly and from the default list. Versions are kept.')) simpleAction('archive', 'Archived'); }
+  else if (act === 'unarchive') simpleAction('unarchive', 'Restored from archive');
+  else if (act === 'discard') { var d = state.detail.draftVersionId; if (d && confirm('Discard this draft? It is kept in version history as archived.')) api('POST', '/admin/legal/versions/' + d + '/discard').then(function() { toast('Draft discarded', 'warning'); reloadPolicy(); }).catch(function(err) { toast(err.message, 'error'); }); }
+});
+function simpleAction(path, msg) { api('POST', '/admin/legal/policies/' + state.detail.policy.id + '/' + path).then(function() { toast(msg, 'success'); reloadPolicy(); }).catch(function(e) { toast(e.message, 'error'); }); }
+
+function doPublish(force) {
+  var p = state.detail.policy;
+  api('POST', '/admin/legal/policies/' + p.id + '/publish', { force: force }).then(function(r) {
+    if (r.requiresConfirmation) {
+      var msg = 'This version still has information that has not been filled in:\n\n';
+      if (r.placeholders.length) msg += 'Placeholders:\n- ' + r.placeholders.slice(0, 15).join('\n- ') + (r.placeholders.length > 15 ? '\n…and ' + (r.placeholders.length - 15) + ' more' : '') + '\n\n';
+      if (r.missingVariables.length) msg += 'Legal Information not set: ' + r.missingVariables.join(', ') + '\n\n';
+      msg += 'These will appear on the public page as written. Publish anyway?';
+      if (confirm(msg)) doPublish(true);
+      return;
+    }
+    toast('Published v' + r.version, 'success'); reloadPolicy();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+// ── Section editor ──
+VARIABLES.forEach(function(v) { var o = document.createElement('option'); o.value = v; o.textContent = '{{' + v + '}}'; $('rte-var').appendChild(o); });
+function setSourceMode(on) {
+  if (on) $('rte-src').value = $('rte').innerHTML; else $('rte').innerHTML = $('rte-src').value;
+  state.sourceMode = on; $('rte').classList.toggle('hidden', on); $('rte-src').classList.toggle('hidden', !on);
+  $('rte-src-toggle').textContent = on ? '✎ Visual' : '</> HTML';
+}
+$('rte-src-toggle').onclick = function() { setSourceMode(!state.sourceMode); };
+$('rte-toolbar').addEventListener('mousedown', function(e) { if (e.target.closest('button')) e.preventDefault(); });
+$('rte-toolbar').addEventListener('click', function(e) {
+  var b = e.target.closest('button'); if (!b || state.sourceMode || b.id === 'rte-src-toggle') return;
+  $('rte').focus();
+  if (b.dataset.cmd) document.execCommand(b.dataset.cmd, false, null);
+  else if (b.dataset.block) document.execCommand('formatBlock', false, b.dataset.block);
+  else if (b.dataset.link) { var url = prompt('Link URL (https://…, mailto:, tel: or /page):'); if (url) document.execCommand('createLink', false, url.trim()); }
+});
+$('rte-var').onchange = function() {
+  var v = this.value; if (!v) return; this.value = '';
+  var token = '{{' + v + '}}';
+  if (state.sourceMode) { var t = $('rte-src'); var s = t.selectionStart; t.value = t.value.slice(0, s) + token + t.value.slice(t.selectionEnd); }
+  else { $('rte').focus(); document.execCommand('insertText', false, token); }
+};
+function openSectionEditor(s) {
+  setSourceMode(false);
+  $('sec-modal-title').textContent = s ? 'Edit Section' : 'Add Section';
+  $('sec-id').value = s ? s.id : '';
+  $('sec-title').value = s ? s.title : '';
+  $('rte').innerHTML = s ? s.content : '<p></p>';
+  $('sec-active').checked = s ? s.isActive : true;
+  openOverlay('sec-overlay');
+}
+$('btn-add-section').onclick = function() { openSectionEditor(null); };
+$('sec-save').onclick = function() {
+  var id = $('sec-id').value;
+  var body = { title: $('sec-title').value.trim(), content: state.sourceMode ? $('rte-src').value : $('rte').innerHTML, isActive: $('sec-active').checked };
+  if (!body.title) { toast('Section title is required', 'error'); return; }
+  var req = id ? api('PATCH', '/admin/legal/sections/' + id, body) : api('POST', '/admin/legal/versions/' + state.working.id + '/sections', body);
+  req.then(function() { toast('Section saved', 'success'); closeModal('sec-overlay'); reloadPolicy(); }).catch(function(e) { toast(e.message, 'error'); });
+};
+
+// ── Draft details ──
+$('btn-version-settings').onclick = function() {
+  var w = state.working; $('vs-effective').value = w.effectiveDate ? String(w.effectiveDate).slice(0, 10) : ''; $('vs-note').value = w.changeNote || ''; openOverlay('vs-overlay');
+};
+$('vs-save').onclick = function() {
+  var eff = $('vs-effective').value;
+  api('PATCH', '/admin/legal/versions/' + state.working.id, { effectiveDate: eff ? new Date(eff + 'T00:00:00+05:30').toISOString() : undefined, changeNote: $('vs-note').value }).then(function() { toast('Saved', 'success'); closeModal('vs-overlay'); reloadPolicy(); }).catch(function(e) { toast(e.message, 'error'); });
+};
+
+// ── Settings ──
+function openSettings() {
+  var p = state.detail.policy;
+  $('ps-title').value = p.title; $('ps-category').value = p.category; $('ps-sort').value = p.sortOrder; $('ps-desc').value = p.description || '';
+  $('ps-seo-title').value = p.seoTitle || ''; $('ps-seo-desc').value = p.seoDescription || ''; $('ps-footer').checked = !!p.showInFooter;
+  openOverlay('set-overlay');
+}
+$('ps-save').onclick = function() {
+  var body = { title: $('ps-title').value.trim(), category: $('ps-category').value.trim(), sortOrder: parseInt($('ps-sort').value, 10) || 0, description: $('ps-desc').value, seoTitle: $('ps-seo-title').value, seoDescription: $('ps-seo-desc').value, showInFooter: $('ps-footer').checked };
+  api('PATCH', '/admin/legal/policies/' + state.detail.policy.id, body).then(function() { toast('Settings saved', 'success'); closeModal('set-overlay'); reloadPolicy(); }).catch(function(e) { toast(e.message, 'error'); });
+};
+
+// ── Preview ──
+function renderDoc(r) {
+  var warn = '';
+  if ((r.placeholders && r.placeholders.length) || (r.missingVariables && r.missingVariables.length)) {
+    warn = '<div class="lp-notice">' + (r.placeholders.length ? r.placeholders.length + ' placeholder(s) still to fill in (highlighted). ' : '') + (r.missingVariables.length ? 'Legal Information not set: ' + escape(r.missingVariables.join(', ')) + '.' : '') + '</div>';
+  }
+  var toc = r.sections.length > 3 ? '<div class="toc"><strong>Contents</strong><ol>' + r.sections.map(function(s) { return '<li>' + escape(s.title) + '</li>'; }).join('') + '</ol></div>' : '';
+  return warn + '<h1>' + escape(r.title) + '</h1><div style="color:#6b7280;font-size:12.5px">Version ' + escape(r.version) + ' (' + escape(r.status) + ') · Last updated ' + escape(r.lastUpdatedLabel || '—') + '</div>' + toc +
+    r.sections.map(function(s, i) { return '<h2>' + (i + 1) + '. ' + escape(s.title) + '</h2>' + markPlaceholders(s.html); }).join('');
+}
+function previewVersion(versionId) {
+  $('pv-body').innerHTML = '<div class="loading">Loading…</div>'; openOverlay('pv-overlay');
+  api('GET', '/admin/legal/versions/' + versionId + '/preview').then(function(r) { $('pv-title').textContent = 'Preview — ' + r.title + ' v' + r.version; $('pv-body').innerHTML = renderDoc(r); }).catch(function(e) { $('pv-body').innerHTML = escape(e.message); });
+}
+function previewWorking() { var d = state.detail; var vid = d.draftVersionId || d.policy.currentVersionId || (d.working && d.working.id); if (vid) previewVersion(vid); else toast('Nothing to preview', 'warning'); }
+
+// ── Versions / audit / acceptances ──
+var verTab = 'versions';
+$('ver-tabs').addEventListener('click', function(e) { var b = e.target.closest('[data-vt]'); if (!b) return; verTab = b.dataset.vt; document.querySelectorAll('#ver-tabs .tab-btn').forEach(function(x) { x.classList.toggle('active', x === b); }); renderVerTab(); });
+function openVersions() { verTab = 'versions'; document.querySelectorAll('#ver-tabs .tab-btn').forEach(function(x) { x.classList.toggle('active', x.dataset.vt === 'versions'); }); openOverlay('ver-overlay'); renderVerTab(); }
+function renderVerTab() {
+  var d = state.detail, body = $('ver-body');
+  if (verTab === 'versions') {
+    body.innerHTML = d.versions.map(function(v) {
+      var vc = { PUBLISHED:'green', DRAFT:'yellow', ARCHIVED:'gray' }[v.status];
+      return '<div class="ver-row"><div><strong>v' + escape(v.version) + '</strong> ' + badge(v.status, vc) + (v.id === d.policy.currentVersionId && d.policy.status !== 'PUBLISHED' ? ' ' + badge('last published', 'gray') : '') +
+        '<div style="font-size:12px;color:#6b7280">' + v.sectionCount + ' sections · created ' + fmtD(v.createdAt) + (v.publishedAt ? ' · published ' + fmtD(v.publishedAt) + ' by ' + escape(v.publishedByName || '—') : '') + (v.restoredFromVersionId ? ' · restored copy' : '') + (v.changeNote ? '<br>' + escape(v.changeNote) : '') + '</div></div>' +
+        '<div class="lp-bar"><button class="btn btn-xs btn-outline" data-vview="' + v.id + '">View</button>' + (v.status !== 'DRAFT' ? '<button class="btn btn-xs btn-primary" data-vrestore="' + v.id + '" data-vlabel="' + escape(v.version) + '">Restore</button>' : '') + '</div></div>';
+    }).join('') || '<p>No versions.</p>';
+  } else if (verTab === 'audit') {
+    body.innerHTML = '<div class="loading">Loading…</div>';
+    api('GET', '/admin/legal/policies/' + d.policy.id + '/audit').then(function(rows) {
+      body.innerHTML = rows.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Action</th><th>By</th><th>Details</th></tr></thead><tbody>' + rows.map(function(a) {
+        return '<tr><td>' + fmtDate(a.createdAt) + '</td><td>' + escape(a.action.replace(/^LEGAL_/, '').replace(/_/g, ' ').toLowerCase()) + '</td><td>' + escape((a.actor && a.actor.name) || a.actorRole) + '</td><td style="font-size:11.5px;color:#6b7280">' + escape(JSON.stringify(a.metadata || {})).slice(0, 200) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p>No audit entries yet.</p>';
+    }).catch(function(e) { body.innerHTML = escape(e.message); });
+  } else {
+    body.innerHTML = '<div class="loading">Loading…</div>';
+    api('GET', '/admin/legal/policies/' + d.policy.id + '/acceptances').then(function(r) {
+      body.innerHTML = '<p style="font-size:13px;color:#6b7280">Recorded when a partner/seller submits registration (Terms, Privacy and their role policy) or a signed-in user accepts via the API. Only published versions can be accepted.</p>' +
+        (r.byVersion.length ? '<p>' + r.byVersion.map(function(b) { return 'v' + escape(b.version) + ': <strong>' + b.count + '</strong>'; }).join(' · ') + '</p>' : '') +
+        (r.rows.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Version</th><th>Subject</th><th>User</th></tr></thead><tbody>' + r.rows.map(function(a) {
+          return '<tr><td>' + fmtDate(a.acceptedAt) + '</td><td>v' + escape(a.version) + '</td><td>' + escape(a.subjectType) + (a.subjectId ? ' · ' + escape(a.subjectId) : '') + '</td><td>' + escape(a.userId || '—') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p>No acceptances recorded yet.</p>');
+    }).catch(function(e) { body.innerHTML = escape(e.message); });
+  }
+}
+$('ver-body').addEventListener('click', function(e) {
+  var v = e.target.closest('[data-vview]'); if (v) { closeModal('ver-overlay'); previewVersion(v.dataset.vview); return; }
+  var r = e.target.closest('[data-vrestore]'); if (!r) return;
+  var hasDraft = !!state.detail.draftVersionId;
+  if (!confirm('Restore v' + r.dataset.vlabel + '? This creates a NEW draft with its content' + (hasDraft ? ' and discards the current draft' : '') + '. Nothing goes live until you publish.')) return;
+  api('POST', '/admin/legal/versions/' + r.dataset.vrestore + '/restore', { replaceDraft: hasDraft }).then(function(nv) {
+    toast('Restored as draft v' + nv.version, 'success'); closeModal('ver-overlay');
+    if (currentRoute().view === 'editor') reloadPolicy(); else go(policyUrl(state.detail.policy.slug));
+  }).catch(function(err) { toast(err.message, 'error'); });
+});
+
+// ── Legal information ──
+function loadInfo() {
+  api('GET', '/admin/legal/legal-info').then(function(rows) {
+    $('info-form').innerHTML = rows.map(function(r) {
+      var multi = r.name === 'COMPANY_ADDRESS';
+      return '<div class="form-group"><label class="form-label">' + escape(r.label) + ' <code style="font-weight:400;color:#9ca3af">{{' + escape(r.name) + '}}</code></label>' +
+        (multi ? '<textarea class="form-control" rows="2" data-var="' + escape(r.name) + '">' + escape(r.value) + '</textarea>' : '<input class="form-control" data-var="' + escape(r.name) + '" value="' + escape(r.value) + '">') + '</div>';
+    }).join('');
+  }).catch(function(e) { $('info-form').innerHTML = escape(e.message); });
+}
+$('btn-save-info').onclick = function() {
+  var values = {}; document.querySelectorAll('[data-var]').forEach(function(i) { values[i.dataset.var] = i.value; });
+  api('PUT', '/admin/legal/legal-info', { values: values }).then(function() { toast('Legal information saved', 'success'); loadInfo(); }).catch(function(e) { toast(e.message, 'error'); });
+};
+
+route();
+</script>
+</body>
+</html>

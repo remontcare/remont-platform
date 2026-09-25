@@ -41,7 +41,7 @@ footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 
 footer.site a{color:var(--amber)}
 </style>
 </head>
-<body>
+<body data-policy="terms" data-fallback="static">
 <header class="site">
   <div class="wrap">
     <a href="/" class="brand">Remont <span>India</span></a>
@@ -56,7 +56,7 @@ footer.site a{color:var(--amber)}
 
 <section class="legal-body"><div class="wrap">
   <h2>1. Who We Are</h2>
-  <p>Remont India (operated by Remont India Technologies Pvt. Ltd., GSTIN 27AABCT1234L1Z5) is a marketplace platform that connects customers with independent, background-verified service professionals ("Partners") and third-party sellers ("Vendors") for home services, home/appliance products, and Annual Maintenance Contracts (AMC) across our listed service cities. Remont India facilitates the booking, payment, and support for these orders; the work itself is carried out by the assigned Partner or Vendor, not by Remont India directly.</p>
+  <p>Remont India (operated by Remont India Technologies Pvt. Ltd.) is a technology and service-facilitation platform that connects customers with independent service professionals ("Partners") and third-party sellers ("Vendors"). Partners and Vendors are independent businesses or individuals, not employees of Remont India. We connect them with customers for home services, home/appliance products, and Annual Maintenance Contracts (AMC) across our listed service cities. Remont India facilitates the booking, payment, and support for these orders; the work itself is carried out by the assigned Partner or Vendor, not by Remont India directly.</p>
 
   <h2>2. Booking & Acceptance</h2>
   <p>A booking may be made through the website, AI chat assistant, WhatsApp, or a phone call. By placing a booking you confirm the details provided (address, contact number, service/product requested) are accurate. Bookings are subject to Partner/Vendor and slot availability in your city.</p>
@@ -77,15 +77,16 @@ footer.site a{color:var(--amber)}
   <h2>6. Your Responsibilities</h2>
   <ul>
     <li>Provide a safe, accessible environment for the assigned professional to carry out the work</li>
-    <li>Share the OTP shown in your order only with the verified professional assigned to your job, at the point of arrival or completion — this protects you from impersonation</li>
+    <li>Share the OTP shown in your order only with the professional assigned to your job, at the point of arrival or completion — this protects you from impersonation</li>
     <li>Use products and services booked through Remont India for lawful, personal, or business purposes consistent with their intended use</li>
   </ul>
 
   <h2>7. Professional & Vendor Conduct</h2>
-  <p>Every Partner undergoes background verification and a skill assessment before being allowed to accept jobs. Every completed service carries a 30-day workmanship warranty — if the same issue recurs within that period, it is redone at no extra charge. If you experience conduct that falls short of this standard, report it through "My Orders" or by contacting support directly.</p>
+  <p>Partner applications are reviewed and approved by our team before a Partner can accept jobs. An "approved" or "verified" status means only that the specific checks we carried out were completed; it is not a guarantee of a person's character, criminal history, future conduct or workmanship. Where a service carries a workmanship warranty, its period is shown on your invoice; if the same issue recurs within that period, it is redone at no extra charge. If you experience conduct that falls short of this standard, report it through "My Orders" or by contacting support directly.</p>
 
-  <h2>8. Limitation of Liability</h2>
-  <p>Remont India facilitates the connection between you and independent Partners/Vendors and is not itself the provider of the underlying service or product. To the extent permitted by law, our liability for any claim relating to a booking is limited to the amount paid for that specific order, except where required otherwise by applicable Indian consumer protection law.</p>
+  <h2>8. Responsibility and Liability</h2>
+  <p>Remont India facilitates the connection between you and independent Partners/Vendors and is not itself the provider of the underlying service or product. Where services or products are provided by independent professionals or third parties, Remont India does not guarantee their future conduct or every aspect of their performance beyond the checks, commitments and warranties Remont India expressly provides. Remont India does not knowingly support or authorise fraud, theft, violence, harassment or any other unlawful activity, and may suspend accounts, cancel bookings and cooperate with lawful authorities where appropriate.</p>
+  <p>Nothing in these Terms or other platform documentation is intended to exclude, restrict or waive any liability, obligation, responsibility or legal remedy that cannot lawfully be excluded, restricted or waived under applicable law.</p>
 
   <h2>9. Account & Data</h2>
   <p>You are responsible for keeping your account credentials (phone number, OTP) confidential. See our <a href="/privacy">Privacy Policy</a> for how your information is collected, used, and shared.</p>
@@ -102,8 +103,10 @@ footer.site a{color:var(--amber)}
 
 <footer class="site">
   <div class="wrap">
-    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/refund-policy">Refund Policy</a> · <a href="/contact">Contact</a></p>
+    <p data-legal-footer="dot">© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/refund-policy">Refund Policy</a> · <a href="/contact">Contact</a></p>
   </div>
 </footer>
+<script src="/shared/legal-page.js" defer></script>
+<script src="/shared/legal-footer.js" defer></script>
 </body>
 </html>

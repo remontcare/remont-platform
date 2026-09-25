@@ -47,6 +47,7 @@ import { SupportModule } from './modules/support/support.module';
 import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module';
 import { LogisticsModule } from './modules/logistics/logistics.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
+import { LegalModule } from './modules/legal/legal.module';
 
 @Module({
   imports: [
@@ -105,6 +106,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
 
     AdminModule,
     CmsModule,
+    LegalModule, // Legal & Policies CMS (admin/legal, public /legal)
     AiCatalogModule,
     ReviewsModule,
     HealthModule,

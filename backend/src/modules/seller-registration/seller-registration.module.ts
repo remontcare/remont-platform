@@ -5,6 +5,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.module';
 import { Public, JwtAuthGuard, RolesGuard, Roles } from '../../common';
+import { recordPolicyAcceptances } from '../legal/legal.module';
 import { UserRole } from '@prisma/client';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 
@@ -122,6 +123,14 @@ export class SellerRegistrationService {
     await this.prisma.sellerRegistration.update({
       where: { registrationId },
       data: { status: 'PENDING', currentStep: 8, agreedTerms: true, agreedAt: new Date() },
+    });
+
+    // Record exactly which published policy versions this submission accepted (no-op for
+    // policies not yet published in Legal & Policies; never throws).
+    const sellerUser = await this.prisma.user.findUnique({ where: { phone: rec.phone }, select: { id: true } }).catch(() => null);
+    await recordPolicyAcceptances(this.prisma, {
+      policySlugs: ['terms-and-conditions', 'privacy-policy', 'seller-policy'],
+      subjectType: 'SELLER_REGISTRATION', subjectId: registrationId, userId: sellerUser?.id,
     });
 
     this.logger.log(`Seller registration submitted: ${registrationId} — ${rec.businessName} (${rec.phone})`);

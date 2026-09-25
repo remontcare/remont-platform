@@ -41,7 +41,7 @@ footer.site{background:var(--charcoal);color:rgba(255,255,255,.65);padding:32px 
 footer.site a{color:var(--amber)}
 </style>
 </head>
-<body>
+<body data-policy="privacy" data-fallback="static">
 <header class="site">
   <div class="wrap">
     <a href="/" class="brand">Remont <span>India</span></a>
@@ -66,7 +66,7 @@ footer.site a{color:var(--amber)}
 
   <h2>2. How We Use Your Information</h2>
   <ul>
-    <li>To create and confirm bookings, dispatch a nearby verified professional, and process payments</li>
+    <li>To create and confirm bookings, assign a nearby approved professional, and process payments</li>
     <li>To send order updates via WhatsApp, SMS, or in-app notifications (payment confirmation, professional assigned, work completed, refund status, etc.)</li>
     <li>To provide customer support and resolve refund or service-quality requests</li>
     <li>To improve our matching, pricing, and service quality over time</li>
@@ -93,7 +93,7 @@ footer.site a{color:var(--amber)}
   <p>You can view, edit, or delete your saved addresses at any time from your account. You may request a copy of your data or ask us to delete your account by writing to <a href="mailto:remont.care@gmail.com">remont.care@gmail.com</a>; we will respond within a reasonable time, subject to any records we're legally required to retain (e.g. completed invoices).</p>
 
   <h2>8. Children's Privacy</h2>
-  <p>Remont India is intended for use by adults booking services for their homes or businesses and is not directed at children.</p>
+  <p>Our accounts and services are meant for adults (18 years or older) booking services for their homes or businesses, and are not directed at children. We do not knowingly collect a child's personal data without the verifiable consent of a parent or lawful guardian, and we do not use children's data for tracking, behavioural monitoring or targeted advertising. If we learn that we have collected a child's data without that consent, we will delete it. Parents or guardians can contact remont.care@gmail.com.</p>
 
   <h2>9. Changes to This Policy</h2>
   <p>We may update this Privacy Policy as our services evolve. The "Last updated" date above reflects the most recent revision.</p>
@@ -104,8 +104,10 @@ footer.site a{color:var(--amber)}
 
 <footer class="site">
   <div class="wrap">
-    <p>© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/refund-policy">Refund Policy</a> · <a href="/contact">Contact</a></p>
+    <p data-legal-footer="dot">© 2026 Remont India Technologies Pvt. Ltd. · <a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/refund-policy">Refund Policy</a> · <a href="/contact">Contact</a></p>
   </div>
 </footer>
+<script src="/shared/legal-page.js" defer></script>
+<script src="/shared/legal-footer.js" defer></script>
 </body>
 </html>

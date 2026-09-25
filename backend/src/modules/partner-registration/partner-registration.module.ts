@@ -6,6 +6,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.module';
 import { Public, JwtAuthGuard, RolesGuard, Roles, normalizeSkillKey } from '../../common';
+import { recordPolicyAcceptances } from '../legal/legal.module';
 import { UserRole } from '@prisma/client';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -202,6 +203,13 @@ export class PartnerRegistrationService {
       // A MORE_DOCS/HOLD applicant resubmitting after fixing what admin flagged goes back to
       // PENDING for a fresh review — same transition a first-time submission makes.
       data: { status: 'PENDING', currentStep: 8, agreedTerms: true, agreedAt: new Date() },
+    });
+
+    // Record exactly which published policy versions this submission accepted (no-op for
+    // policies not yet published in Legal & Policies; never throws).
+    await recordPolicyAcceptances(this.prisma, {
+      policySlugs: ['terms-and-conditions', 'privacy-policy', 'partner-policy'],
+      subjectType: 'PARTNER_REGISTRATION', subjectId: registrationId, userId: verifiedUser.id,
     });
 
     this.logger.log(`Partner registration submitted: ${registrationId} — ${rec.fullName} (${rec.phone})`);

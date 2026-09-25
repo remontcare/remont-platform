@@ -263,6 +263,7 @@ var SIDEBAR_NAV = [
     { key:'delete-requests', label:'Delete Requests', icon:'🗑️', href:'/admin/delete-requests.html', superAdminOnly:true },
     { key:'audit-logs', label:'Audit Logs', icon:'📜', href:'/admin/audit-logs.html', superAdminOnly:true },
     { key:'settings', label:'Website Settings', icon:'🌐', href:'/admin/settings.html' },
+    { key:'legal-policies', label:'Legal & Policies', icon:'⚖️', href: (location.hostname === 'localhost' ? '/admin/legal-policies.html' : '/admin/settings/legal-policies') },
     { key:'ai-tools', label:'AI Chat Settings', icon:'🤖', href:'/admin/ai-tools.html' },
     { key:'staff', label:'System Settings', icon:'⚙️', href:'/admin/staff.html' },
   ]},
