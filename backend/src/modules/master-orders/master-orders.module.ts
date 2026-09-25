@@ -1,10 +1,11 @@
 import {
+  Optional,
   Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards, Logger,
   NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import {
-  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Min, ValidateNested,
+  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
@@ -18,6 +19,7 @@ import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { DispatchService, RoutingService, OrdersModule } from '../orders/orders.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { ShipmentService, LogisticsService, LogisticsModule } from '../logistics/logistics.module';
+import { CrmOrderSyncService, CrmSyncModule } from '../crm-sync/crm-sync.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -161,6 +163,9 @@ export class CreateMasterOrderDto {
   // once per "Place Order" press, resent unchanged on any automatic retry). Omit entirely for
   // byte-for-byte today's behaviour; see MasterOrder.idempotencyKey's schema comment.
   @IsOptional() @IsString() idempotencyKey?: string;
+  // Set when the cart came from a Remont One CRM WhatsApp cart link (ai-catalog
+  // cart-link): lets CrmOrderSyncService report this real order back to the CRM.
+  @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
 }
 
 export class PublicMasterCheckoutDto {
@@ -184,6 +189,7 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsString() gstin?: string;
   @IsOptional() @IsString() gstBusinessName?: string;
   @IsOptional() @IsString() idempotencyKey?: string;
+  @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -239,6 +245,7 @@ export class MasterOrdersService {
     private paymentNotify: PaymentNotificationsService,
     private shipments: ShipmentService,
     private logistics: LogisticsService,
+    @Optional() private crmSync?: CrmOrderSyncService,
   ) {}
 
   // Phase 5 — opens the seller-processing window right after payment confirms, instead of
@@ -793,6 +800,7 @@ export class MasterOrdersService {
     }
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, masterOrder.id, couponDiscount);
+    if (dto.crmRef) this.crmSync?.notify(masterOrder.id, 'order.created', dto.crmRef);
 
     // COD/Cash confirms immediately, so the wallet portion (if any) is real money owed
     // right now — debit it now. For ONLINE, the wallet debit happens in confirmPayment()
@@ -934,6 +942,7 @@ export class MasterOrdersService {
     }
 
     this.notifyPaymentSuccess(existing).catch(() => {});
+    this.crmSync?.notify(masterOrderId, 'order.paid');
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
   }
 
@@ -1010,6 +1019,7 @@ export class MasterOrdersService {
       if (child.serviceId && !child.bundleDispatchDeferred) this.routing.route(child.id).catch((e) => this.logger.error(`Routing failed: ${e.message}`));
     }
 
+    this.crmSync?.notify(masterOrderId, 'order.confirmed');
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
   }
 
@@ -1150,7 +1160,9 @@ export class PublicMasterOrderController {
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
       walletAmount: dto.walletAmount, gstin: dto.gstin, gstBusinessName: dto.gstBusinessName,
-      idempotencyKey: dto.idempotencyKey,
+      idempotencyKey: dto.idempotencyKey, crmRef: dto.crmRef,
+      // An order placed from a CRM WhatsApp cart link is a WhatsApp-channel order.
+      ...(dto.crmRef ? { channel: BookingChannel.WHATSAPP } : {}),
       slotStart: dto.slotStart, slotEnd: dto.slotEnd, city: dto.city,
       inlineAddress: {
         fullAddress: dto.fullAddress, city: dto.city, state: dto.state, pincode: dto.pincode,
@@ -1189,7 +1201,7 @@ export class PublicMasterOrderController {
 
 // ─── Module ───
 @Module({
-  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule, LogisticsModule],
+  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule, LogisticsModule, CrmSyncModule],
   // PublicMasterOrderController MUST be registered before MasterOrdersController —
   // Express/Nest matches routes in registration order, and MasterOrdersController's
   // POST /master-orders/:id/confirm-payment (a wildcard :id) would otherwise swallow

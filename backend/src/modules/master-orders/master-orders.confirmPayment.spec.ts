@@ -32,8 +32,9 @@ function makeService() {
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };
   const shipments: any = {};
   const logistics: any = {};
-  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments, logistics);
-  return { svc, prisma, payments, routing };
+  const crmSync: any = { notify: jest.fn() };
+  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments, logistics, crmSync);
+  return { svc, prisma, payments, routing, crmSync };
 }
 
 const SECRET = 'test-razorpay-secret';
@@ -149,5 +150,23 @@ describe('MasterOrdersService.confirmPayment — PAYMENT SECURITY on the bundle/
     const sig = sign(gatewayOrderId, paymentId);
     await expect(svc.confirmPayment('mo1', paymentId, gatewayOrderId, sig, 'cust-1')).rejects.toThrow(BadRequestException);
     expect(payments.getVerifiedCapturedAmount).not.toHaveBeenCalled();
+  });
+});
+
+describe('MasterOrdersService.confirmPayment — Remont One CRM order sync', () => {
+  beforeEach(() => { process.env.RAZORPAY_KEY_SECRET = SECRET; });
+
+  it('reports order.paid only after the payment is verified', async () => {
+    const { svc, prisma, payments, crmSync } = makeService();
+    prisma.masterOrder.findUnique.mockResolvedValue(pendingMasterOrder());
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1' });
+    payments.getVerifiedCapturedAmount.mockResolvedValue(1);
+    await expect(svc.confirmPayment('mo1', paymentId, gatewayOrderId, sign(gatewayOrderId, paymentId), 'cust-1'))
+      .rejects.toThrow(BadRequestException);
+    expect(crmSync.notify).not.toHaveBeenCalled();
+
+    payments.getVerifiedCapturedAmount.mockResolvedValue(5000);
+    await svc.confirmPayment('mo1', paymentId, gatewayOrderId, sign(gatewayOrderId, paymentId), 'cust-1');
+    expect(crmSync.notify).toHaveBeenCalledWith('mo1', 'order.paid');
   });
 });

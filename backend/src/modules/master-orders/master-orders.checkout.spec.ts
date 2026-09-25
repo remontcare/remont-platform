@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { MasterOrdersService } from './master-orders.module';
+import { MasterOrdersService, PublicMasterOrderController } from './master-orders.module';
 
 /**
  * End-to-end integration coverage for the Smart Order Grouping rule implemented in
@@ -118,8 +118,9 @@ function makeService() {
   // only calls this for PRODUCT groups), but still needed to satisfy the constructor.
   const logistics: any = { checkEligibility: jest.fn(async () => ({ tier: 'STANDARD', charge: 0 })) };
 
-  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments, logistics);
-  return { svc, prisma, createdOrders, createdMasterOrders, payments, routing, dispatch, shipments };
+  const crmSync: any = { notify: jest.fn() };
+  const svc = new MasterOrdersService(prisma, coupons, memberships, cities, payments, dispatch, routing, paymentNotify, shipments, logistics, crmSync);
+  return { svc, prisma, createdOrders, createdMasterOrders, payments, routing, dispatch, shipments, crmSync };
 }
 
 function itemsOf(order: any) {
@@ -462,5 +463,33 @@ describe('MasterOrdersService — Payment Mode business rules (ANY / ONLINE_ONLY
     expect(second.masterOrderId).toBe(first.masterOrderId);
     expect((second as any).alreadyProcessed).toBe(true);
     expect(payments.initiatePayment).not.toHaveBeenCalled();
+  });
+});
+
+describe('MasterOrdersService — Remont One CRM cart links', () => {
+  const REF = 'c'.repeat(32);
+
+  it('a checkout carrying crmRef reports order.created to the CRM; a normal checkout reports nothing', async () => {
+    const { svc, crmSync, createdMasterOrders } = makeService();
+    await svc.checkout({ items: [{ type: 'SERVICE', serviceId: 'fan-install', quantity: 1 }], addressId: 'addr-1', crmRef: REF } as any,
+      { customerId: 'cust-1', paymentMethod: 'COD' });
+    expect(crmSync.notify).toHaveBeenCalledWith(createdMasterOrders[0].id ?? expect.anything(), 'order.created', REF);
+
+    const plain = makeService();
+    await plain.svc.checkout({ items: [{ type: 'SERVICE', serviceId: 'fan-install', quantity: 1 }], addressId: 'addr-1' } as any,
+      { customerId: 'cust-1', paymentMethod: 'COD' });
+    expect(plain.crmSync.notify).not.toHaveBeenCalled();
+  });
+
+  it('the public checkout marks a cart-link order as a WhatsApp-channel order and passes crmRef on', async () => {
+    const masterOrders: any = { checkout: jest.fn(async () => ({})) };
+    const ctrl = new PublicMasterOrderController(masterOrders);
+    await ctrl.checkout({ name: 'Rahul', phone: '+919812345678', fullAddress: 'Arera Colony', city: 'Bhopal',
+      items: [{ type: 'SERVICE', serviceId: 'fan-install' }], paymentMethod: 'ONLINE', crmRef: REF } as any);
+    const [dto] = masterOrders.checkout.mock.calls[0];
+    expect(dto.crmRef).toBe(REF);
+    expect(dto.channel).toBe('WHATSAPP');
+    await ctrl.checkout({ name: 'A', phone: '+919800000000', fullAddress: 'x', items: [], paymentMethod: 'COD' } as any);
+    expect(masterOrders.checkout.mock.calls[1][0].channel).toBeUndefined();
   });
 });

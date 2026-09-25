@@ -11298,7 +11298,8 @@ function submitCheckoutOrder() {
     walletAmount:    walletAmount,
     gstin:           gstin || undefined,
     gstBusinessName: gstBusinessName || undefined,
-    paymentMethod:   paymentMethod
+    paymentMethod:   paymentMethod,
+    crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })()
   };
 
   fetch((API_BASE || '') + '/api/v1/master-orders/public/checkout', {
@@ -11317,6 +11318,7 @@ function submitCheckoutOrder() {
     var orderNumber = d.masterOrderNumber;
     var totalAmount = Number(d.totalAmount || 0);
     _checkoutOrderId = d.masterOrderId;
+    try { localStorage.removeItem('remont_crm_ref'); } catch (e) {}
     _checkoutOrderNumber = orderNumber;
     _checkoutTotalAmount = totalAmount;
 
@@ -11647,6 +11649,49 @@ function closeOrderSuccessModal() {
     // Clean URL without reload
     window.history.replaceState({}, '', window.location.pathname);
   }
+})();
+
+// ── Cart link from Remont One CRM (WhatsApp AI agent) ───────────────
+// ?cart=s:<serviceId>:<qty>,p:<productSlug>:<qty>&crm=<ref>, built and validated by the
+// backend's ai-catalog cart-link. Loads exactly those items into this browser's cart
+// with the website's OWN current name/price (the link carries no prices), then opens
+// the cart. The customer reviews, checks out and pays here as usual; crm=<ref> rides
+// along with the checkout so the real order is reported back to the CRM.
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var raw = params.get('cart');
+  if (!raw) return;
+  var ref = params.get('crm');
+  var tokens = raw.split(',').slice(0, 10).map(function(t) {
+    var p = t.split(':');
+    var qty = Math.max(1, Math.min(20, parseInt(p[2], 10) || 1));
+    return (p[0] === 's' || p[0] === 'p') && /^[A-Za-z0-9-]{3,120}$/.test(p[1] || '') ? { kind: p[0], key: p[1], qty: qty } : null;
+  }).filter(Boolean);
+  window.history.replaceState({}, '', window.location.pathname);
+  if (!tokens.length) return;
+  var base = (API_BASE || '') + '/api/v1';
+  function load(t) {
+    var url = t.kind === 's' ? base + '/services/' + encodeURIComponent(t.key) : base + '/products/' + encodeURIComponent(t.key);
+    return fetch(url).then(function(r) { return r.ok ? r.json() : null; }).then(function(j) {
+      var d = j && (j.data || j);
+      if (!d || !d.id || d.isActive === false) return null;
+      return t.kind === 's'
+        ? { id: d.id, name: d.name, price: Number(d.basePrice || 0), type: 'service', unit: d.unit || 'per visit',
+            categoryKey: (d.category && d.category.key) || '', inclusions: d.inclusions || [], qty: t.qty }
+        : { id: d.id, name: d.name, price: Number(d.price || 0), type: 'product', unit: d.unit || 'piece',
+            vendorId: d.vendorId || null, qty: t.qty };
+    }).catch(function() { return null; });
+  }
+  Promise.all(tokens.map(load)).then(function(items) {
+    items = items.filter(Boolean);
+    if (!items.length) { if (typeof showToast === 'function') showToast('These items are no longer available', 'error'); return; }
+    // The link is the exact order agreed on WhatsApp: it replaces the current cart.
+    localStorage.setItem('remont_cart', JSON.stringify(items));
+    try { if (ref && /^[a-f0-9]{32}$/.test(ref)) localStorage.setItem('remont_crm_ref', ref); else localStorage.removeItem('remont_crm_ref'); } catch (e) {}
+    if (typeof updateCartBadge === 'function') updateCartBadge();
+    if (items.length < tokens.length && typeof showToast === 'function') showToast('Some items are no longer available', 'error');
+    if (typeof openCart === 'function') openCart();
+  });
 })();
 
 // ── My Orders Modal ─────────────────────────────────────────────────

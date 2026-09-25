@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiExcludeController } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsNumber, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import {
+  ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { createHash, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -14,6 +17,7 @@ import { CitiesModule, CitiesService } from '../cities/cities.module';
 import { EstimatesModule, EstimatesService } from '../estimates/estimates.module';
 import { CmsModule, CmsService } from '../cms/cms.module';
 import { AmcModule, AmcService } from '../amc/amc.module';
+import { ProductsModule, ProductsService } from '../products/products.module';
 
 /**
  * AI CATALOG — a narrow, read-mostly, server-to-server API for the Remont One
@@ -28,6 +32,16 @@ import { AmcModule, AmcService } from '../amc/amc.module';
  *   GET  /api/v1/ai-catalog/business-info
  *   GET  /api/v1/ai-catalog/faqs?q=
  *   GET  /api/v1/ai-catalog/amc-plans?city=
+ *   GET  /api/v1/ai-catalog/products/search?q=&limit=
+ *   GET  /api/v1/ai-catalog/products/:id
+ *   POST /api/v1/ai-catalog/cart-link          { items: [{type, id, quantity}], crmRef }
+ *
+ * CART LINK: the website's cart lives in the customer's browser, so the CRM
+ * cannot fill it server-side. cart-link validates every item against this
+ * database and returns a URL on the website that loads exactly those items
+ * into the customer's own cart (index.html ?cart=). The customer reviews,
+ * checks out and pays there — the order and payment are the website's own.
+ * crmRef travels with the checkout so the order can be synced back to the CRM.
  *
  * AUTH: header `x-ai-catalog-key` must equal env AI_CATALOG_API_KEY (constant-
  * time compare). Unset env => every call is refused (fail closed).
@@ -42,6 +56,7 @@ import { AmcModule, AmcService } from '../amc/amc.module';
 const KEY_HEADER = 'x-ai-catalog-key';
 const SERVICE_ID = /^[a-z0-9]{10,40}$/i;           // cuid
 const CITY_NAME = /^[A-Za-z][A-Za-z .'-]{1,59}$/;
+const CRM_REF = /^[a-f0-9]{32}$/;                    // CRM-issued opaque token (uuid hex)
 
 function digest(v: string) {
   return createHash('sha256').update(v, 'utf8').digest();
@@ -91,6 +106,22 @@ class PriceBody {
   @IsOptional() @IsNumber() @Min(1) @Max(1_000_000) sqft?: number;
 }
 
+class CartLinkItem {
+  @IsIn(['service', 'product']) type: 'service' | 'product';
+  @IsString() @Matches(SERVICE_ID) id: string;
+  @IsOptional() @IsInt() @Min(1) @Max(20) quantity?: number;
+}
+
+class CartLinkBody {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => CartLinkItem)
+  items: CartLinkItem[];
+  @IsString() @Matches(CRM_REF) crmRef: string;
+}
+
+export function siteUrl(): string {
+  return (process.env.FRONTEND_URL || 'https://www.remontindia.com').replace(/\/+$/, '');
+}
+
 const num = (v: any) => (v === null || v === undefined ? null : Number(v));
 
 function faqList(raw: any): { question: string; answer: string }[] {
@@ -110,6 +141,7 @@ export class AiCatalogService {
     private estimates: EstimatesService,
     private cms: CmsService,
     private amc: AmcService,
+    private products: ProductsService,
   ) {}
 
   async categories() {
@@ -225,6 +257,57 @@ export class AiCatalogService {
       discountPercent: p.discountPercent, prioritySupport: p.prioritySupport,
     }));
   }
+
+  async searchProducts(q: string, limit = 5) {
+    // Reuses the website's own product listing (active products only).
+    const rows: any[] = await this.products.list({ q, limit });
+    return rows.slice(0, limit).map((p) => ({
+      id: p.id, name: p.name, brand: p.brand ?? null, unit: p.unit,
+      price: num(p.price), mrp: num(p.mrp), inStock: (p.stock ?? 0) > 0,
+      category: p.category ? { key: p.category.key, name: p.category.name } : null,
+    }));
+  }
+
+  async product(id: string) {
+    if (!SERVICE_ID.test(id)) throw new BadRequestException('invalid product id');
+    const p = await this.prisma.product.findFirst({
+      where: { id, isActive: true },
+      select: {
+        id: true, name: true, brand: true, description: true, unit: true, price: true, mrp: true,
+        stock: true, category: { select: { key: true, name: true } },
+      },
+    });
+    if (!p) throw new NotFoundException('Product not found');
+    const { stock, price, mrp, ...rest } = p;
+    return { ...rest, price: num(price), mrp: num(mrp), inStock: stock > 0 };
+  }
+
+  async cartLink(body: CartLinkBody) {
+    const svcIds = body.items.filter((i) => i.type === 'service').map((i) => i.id);
+    const prodIds = body.items.filter((i) => i.type === 'product').map((i) => i.id);
+    const [services, products] = await Promise.all([
+      this.prisma.service.findMany({ where: { id: { in: svcIds }, isActive: true }, select: { id: true, name: true } }),
+      this.prisma.product.findMany({ where: { id: { in: prodIds }, isActive: true }, select: { id: true, name: true, slug: true, stock: true } }),
+    ]);
+    const svc = new Map(services.map((s) => [s.id, s]));
+    const prod = new Map(products.map((p) => [p.id, p]));
+    const items = body.items.map((i) => {
+      const qty = i.quantity || 1;
+      if (i.type === 'service') {
+        const s = svc.get(i.id);
+        if (!s) throw new NotFoundException(`Service not found or inactive: ${i.id}`);
+        return { type: 'service', id: s.id, name: s.name, quantity: qty, token: `s:${s.id}:${qty}` };
+      }
+      const p = prod.get(i.id);
+      if (!p) throw new NotFoundException(`Product not found or inactive: ${i.id}`);
+      if (p.stock < qty) throw new BadRequestException(`Product out of stock: ${p.name}`);
+      // Products load on the site by slug (the public product endpoint is slug-based).
+      return { type: 'product', id: p.id, name: p.name, quantity: qty, token: `p:${p.slug}:${qty}` };
+    });
+    const cart = items.map((i) => i.token).join(',');
+    const url = `${siteUrl()}/?cart=${encodeURIComponent(cart)}&crm=${body.crmRef}`;
+    return { url, items: items.map(({ token, ...rest }) => rest) };
+  }
 }
 
 @ApiExcludeController()
@@ -243,10 +326,13 @@ export class AiCatalogController {
   @Get('business-info') info() { return this.svc.businessInfo(); }
   @Get('faqs') faqs(@Query() q: FaqQuery) { return this.svc.faqs(q.q); }
   @Get('amc-plans') amc(@Query() q: CityQuery) { return this.svc.amcPlans(q.city); }
+  @Get('products/search') productSearch(@Query() q: SearchQuery) { return this.svc.searchProducts(q.q, q.limit ?? 5); }
+  @Get('products/:id') product(@Param('id') id: string) { return this.svc.product(id); }
+  @Post('cart-link') cartLink(@Body() body: CartLinkBody) { return this.svc.cartLink(body); }
 }
 
 @Module({
-  imports: [ServicesModule, CitiesModule, EstimatesModule, CmsModule, AmcModule],
+  imports: [ServicesModule, CitiesModule, EstimatesModule, CmsModule, AmcModule, ProductsModule],
   controllers: [AiCatalogController],
   providers: [AiCatalogService, AiCatalogKeyGuard],
 })

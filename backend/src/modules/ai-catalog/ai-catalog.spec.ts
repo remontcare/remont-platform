@@ -39,7 +39,14 @@ describe('AiCatalogKeyGuard', () => {
 function makeService(over: Partial<Record<string, any>> = {}) {
   const prisma = {
     serviceCategory: { findMany: jest.fn(async () => [{ key: 'AC_SERVICE', name: 'AC', description: null, subCategories: [] }]) },
-    service: { findFirst: jest.fn(async (_args: any) => over.serviceRow ?? null) },
+    service: {
+      findFirst: jest.fn(async (_args: any) => over.serviceRow ?? null),
+      findMany: jest.fn(async (_args: any) => over.serviceRows ?? []),
+    },
+    product: {
+      findFirst: jest.fn(async (_args: any) => over.productRow ?? null),
+      findMany: jest.fn(async (_args: any) => over.productRows ?? []),
+    },
     city: { findMany: jest.fn(async () => [{ name: 'Bhopal' }, { name: 'Vadodara' }]) },
   };
   const services = { search: jest.fn(async () => over.searchRows ?? []) };
@@ -53,8 +60,9 @@ function makeService(over: Partial<Record<string, any>> = {}) {
     getFaqs: jest.fn(async () => over.faqs ?? []),
   };
   const amc = { listPlans: jest.fn(async () => over.plans ?? []) };
-  const svc = new AiCatalogService(prisma as any, services as any, cities as any, estimates as any, cms as any, amc as any);
-  return { svc, prisma, services, estimates };
+  const products = { list: jest.fn(async () => over.productList ?? []) };
+  const svc = new AiCatalogService(prisma as any, services as any, cities as any, estimates as any, cms as any, amc as any, products as any);
+  return { svc, prisma, services, estimates, products };
 }
 
 describe('AiCatalogService — minimal, safe responses', () => {
@@ -148,5 +156,44 @@ describe('AiCatalogService — minimal, safe responses', () => {
     const [plan]: any = await svc.amcPlans('Bhopal');
     expect(plan.priceYearly).toBe(1999);
     expect(plan.benefitsJson).toBeUndefined();
+  });
+});
+
+describe('AiCatalogService — products and cart links', () => {
+  const OLD = process.env.FRONTEND_URL;
+  afterEach(() => { process.env.FRONTEND_URL = OLD; });
+  const REF = 'a'.repeat(32);
+
+  it('product search reuses the website listing and exposes only customer fields', async () => {
+    const { svc, products } = makeService({ productList: [{
+      id: 'prodabcdefgh1', name: 'Havells Fan', brand: 'Havells', unit: 'piece', price: '2499.00', mrp: '2999.00',
+      stock: 4, category: { key: 'FANS', name: 'Fans' }, vendorId: 'v1', costPrice: 1500,
+    }] });
+    const out = await svc.searchProducts('fan', 5);
+    expect(products.list).toHaveBeenCalledWith({ q: 'fan', limit: 5 });
+    expect(out).toEqual([{ id: 'prodabcdefgh1', name: 'Havells Fan', brand: 'Havells', unit: 'piece',
+      price: 2499, mrp: 2999, inStock: true, category: { key: 'FANS', name: 'Fans' } }]);
+  });
+
+  it('cart link validates every item and points at the website cart', async () => {
+    process.env.FRONTEND_URL = 'https://www.remontindia.com/';
+    const { svc } = makeService({
+      serviceRows: [{ id: 'svcacservice1', name: 'AC Service' }],
+      productRows: [{ id: 'prodabcdefgh1', name: 'Havells Fan', slug: 'havells-fan-123', stock: 5 }],
+    });
+    const out = await svc.cartLink({ crmRef: REF, items: [
+      { type: 'service', id: 'svcacservice1', quantity: 2 }, { type: 'product', id: 'prodabcdefgh1' }] } as any);
+    expect(out.url).toBe(`https://www.remontindia.com/?cart=${encodeURIComponent('s:svcacservice1:2,p:havells-fan-123:1')}&crm=${REF}`);
+    expect(out.items).toEqual([
+      { type: 'service', id: 'svcacservice1', name: 'AC Service', quantity: 2 },
+      { type: 'product', id: 'prodabcdefgh1', name: 'Havells Fan', quantity: 1 }]);
+  });
+
+  it('cart link refuses inactive/unknown items and out-of-stock products', async () => {
+    const { svc } = makeService({ serviceRows: [], productRows: [{ id: 'prodabcdefgh1', name: 'Fan', slug: 'fan', stock: 0 }] });
+    await expect(svc.cartLink({ crmRef: REF, items: [{ type: 'service', id: 'svcmissing001' }] } as any))
+      .rejects.toThrow(NotFoundException);
+    await expect(svc.cartLink({ crmRef: REF, items: [{ type: 'product', id: 'prodabcdefgh1' }] } as any))
+      .rejects.toThrow('out of stock');
   });
 });
