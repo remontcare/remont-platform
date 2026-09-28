@@ -30,6 +30,7 @@ import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { AiCatalogModule } from './modules/ai-catalog/ai-catalog.module';
+import { PartnerOpsModule } from './modules/partner-ops/partner-ops.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthModule } from './modules/health/health.module';
 import { LocationModule } from './modules/location/location.module';
@@ -108,6 +109,7 @@ import { LegalModule } from './modules/legal/legal.module';
     CmsModule,
     LegalModule, // Legal & Policies CMS (admin/legal, public /legal)
     AiCatalogModule,
+    PartnerOpsModule, // read-only partner network summary for the CRM (API key)
     ReviewsModule,
     HealthModule,
     LocationModule,
