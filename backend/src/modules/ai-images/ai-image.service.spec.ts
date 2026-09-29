@@ -287,18 +287,45 @@ describe('product reference images (image_to_image)', () => {
 });
 
 describe('failures — clear admin-facing messages, never a silent provider switch', () => {
-  it.each([[402], [403], [404], [401]])('add-on not enabled (HTTP %i) → explicit setup instruction', async (status) => {
-    mockCloudinary({ generateStatus: status, generateBody: 'add-on not enabled for this account' });
+  it.each([[402], [403], [404]])('add-on not enabled (HTTP %i) → explicit setup instruction with Cloudinary detail', async (status) => {
+    mockCloudinary({ generateStatus: status, generateBody: JSON.stringify({ error: { code: 'X_1', message: 'Add-on not enabled for this account' } }) });
     const err = await new AiImageService(config(), mediaStub() as any).generate({ entity: 'SERVICE', name: 'AC Repair' }, ADMIN).catch((e) => e);
     expect(err).toBeInstanceOf(ServiceUnavailableException);
-    expect(err.message).toBe(ADDON_NOT_ENABLED);
-    expect(err.message).toMatch(/Image Generation add-on is not enabled/);
+    expect(err.message).toContain(ADDON_NOT_ENABLED);
+    expect(err.message).toContain('Cloudinary X_1: Add-on not enabled for this account');
+  });
+
+  it('a bare 401/403/404 is NOT reported as "add-on not enabled" — Cloudinary\'s own error is shown', async () => {
+    for (const status of [401, 403, 404]) {
+      mockCloudinary({ generateStatus: status, generateBody: JSON.stringify({ error: { code: 'E_9', message: 'Something else' } }) });
+      const err = await new AiImageService(config(), mediaStub() as any).generate({ entity: 'SERVICE', name: 'x' }, ADMIN).catch((e) => e);
+      expect(err.message).not.toMatch(/add-on is not enabled/);
+      expect(err.message).toContain('Cloudinary E_9: Something else');
+    }
+  });
+
+  it('regression: the real exhausted-quota 429 (body mentions "addons_quota") is reported as used-up credits, not a missing add-on', async () => {
+    const body = JSON.stringify({
+      error: { category: 'rate_limit_error', code: 'MG_00602', message: 'Generation limit exceeded. Upgrade your plan at https://console.cloudinary.com/app/image/generation/plans' },
+      limits: { addons_quota: [{ limit: 50, remaining: 0, type: 'image_generation', used_by_request: 1 }] },
+      request_id: 'abc123',
+    });
+    mockCloudinary({ generateStatus: 429, generateBody: body });
+    const service = new AiImageService(config(), mediaStub() as any);
+    const logSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+    const err = await service.generate({ entity: 'CATEGORY', name: 'CCTV & Security' }, ADMIN).catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.message).not.toMatch(/add-on is not enabled/);
+    expect(err.message).toMatch(/credits for cloud "test-cloud" are used up \(0 of 50 remaining\)/);
+    expect(err.message).toContain('MG_00602');
+    const logged = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toMatch(/cloud=test-cloud .*HTTP 429 code=MG_00602 category=rate_limit_error quota=0\/50 remaining request_id=abc123/);
   });
 
   it('exhausted Cloudinary credits and rate limits get their own messages', async () => {
     mockCloudinary({ generateStatus: 400, generateBody: 'monthly credit quota exceeded' });
     await expect(new AiImageService(config(), mediaStub() as any).generate({ entity: 'SERVICE', name: 'x' }, ADMIN))
-      .rejects.toThrow(/credits .* are exhausted/);
+      .rejects.toThrow(/credits .* are used up/);
     mockCloudinary({ generateStatus: 429, generateBody: 'too many requests' });
     await expect(new AiImageService(config(), mediaStub() as any).generate({ entity: 'SERVICE', name: 'x' }, ADMIN))
       .rejects.toThrow(/rate limited/);

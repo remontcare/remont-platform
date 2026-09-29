@@ -269,7 +269,7 @@ export class AiImageService {
    * Calls Cloudinary image generation (image_to_image when reference images are supplied,
    * text_to_image otherwise), downloads the short-lived result and normalises the ratio.
    * Provider errors are already mapped to admin-facing messages in cloudinary-images.ts —
-   * including the explicit "add-on not enabled" instruction. No provider fallback.
+   * each carrying Cloudinary's own error code and message. No provider fallback.
    */
   private async callModel(prompt: string, preset: AiImagePreset, n: number, referenceImages: string[]): Promise<Buffer[]> {
     try {
