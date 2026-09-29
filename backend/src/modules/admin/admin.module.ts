@@ -1,6 +1,7 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, UseGuards,
   NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, Req,
+  BadGatewayException, ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
@@ -13,6 +14,10 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
+import {
+  ServiceDetailsAiInput, ServiceDetailsAiResult, InvalidServiceDetailsAiOutput,
+  normalizeServiceDetailsInput, buildServiceDetailsMessages, validateServiceDetailsAiOutput,
+} from './service-details-ai';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { MasterOrdersService, MasterOrdersModule } from '../master-orders/master-orders.module';
 import { SettlementsService, SettlementsModule } from '../settlements/settlements.module';
@@ -1801,6 +1806,35 @@ Return JSON with:
   }
 
   /**
+   * Basic tab "AI Generate Service Details": ONE AI call → description + what's included +
+   * not included, for the exact service in the form (see service-details-ai.ts for the scope
+   * rules and validation). Returns text only — never saves — and, unlike generateAiContent,
+   * never falls back to template copy: a failure is an error the admin sees.
+   */
+  async generateServiceDetails(input: ServiceDetailsAiInput): Promise<ServiceDetailsAiResult> {
+    const ctx = normalizeServiceDetailsInput(input);
+    if (!this.openaiKey) throw new ServiceUnavailableException('AI generation is not configured on the server.');
+
+    let raw: string;
+    try {
+      raw = await openAiComplete(this.openaiKey, this.openaiModel, buildServiceDetailsMessages(ctx), {
+        maxTokens: 700, temperature: 0.3, jsonMode: true,
+      });
+    } catch (e) {
+      this.logger.warn(`Service details AI request failed: ${String(e?.message || e).slice(0, 300)}`);
+      throw new BadGatewayException('The AI service could not be reached. Please try again.');
+    }
+
+    try {
+      return validateServiceDetailsAiOutput(raw);
+    } catch (e) {
+      if (!(e instanceof InvalidServiceDetailsAiOutput)) throw e;
+      this.logger.warn(`Service details AI returned invalid output (${e.message}); ${raw?.length || 0} chars: ${String(raw || '').slice(0, 200)}`);
+      throw new BadGatewayException('The AI returned an invalid response. Your fields were not changed — please try again.');
+    }
+  }
+
+  /**
    * "Generate for all empty services" — one click fills the 196/222 services that
    * already have a basic description but zero SEO/inclusions content (or any other
    * still-missing field), without touching services an admin has already filled in
@@ -3571,6 +3605,11 @@ export class AdminController {
   // AI Content Generation
   @Post('ai/generate') aiGenerate(@Body() b: { type: 'SERVICE' | 'PRODUCT' | 'CATEGORY'; name: string; context?: string }) {
     return this.admin.generateAiContent(b.type, b.name, b.context);
+  }
+  // Basic tab "AI Generate Service Details" — one AI call, returns text only (nothing saved).
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('ai/service-details') aiServiceDetails(@Body() b: ServiceDetailsAiInput) {
+    return this.admin.generateServiceDetails(b);
   }
   @Post('ai/bulk-generate') aiBulkGenerate(@Body() b: { limit?: number }) {
     return this.admin.bulkGenerateAiContent(b.limit);

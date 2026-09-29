@@ -325,6 +325,10 @@
       <div class="form-group"><label class="form-label">Category <span style="color:red">*</span></label><select id="svc-cat" class="form-control" onchange="populateSvcSubcatSelect()"><option value="">Select…</option></select></div>
       <div class="form-group"><label class="form-label">Sub-Category <span style="color:red">*</span></label><select id="svc-subcat" class="form-control"><option value="">Select category first…</option></select></div>
       <div class="form-group"><label class="form-label">Service Name <span style="color:red">*</span></label><input id="svc-name" class="form-control" placeholder="1.5 Ton Split AC Service"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <small style="color:#6b7280">Fills Description, What's Included and Not Included from the details above. Review before saving.</small>
+        <button type="button" id="svc-ai-details-btn" class="btn btn-outline btn-sm" onclick="generateSvcDetails()">✨ AI Generate Service Details</button>
+      </div>
       <div class="form-group"><label class="form-label">Description</label><textarea id="svc-desc" class="form-control" rows="4" placeholder="What's included in this service…"></textarea></div>
       <div class="form-row">
         <div class="form-group" style="flex:1"><label class="form-label">Base Price (₹) <span style="color:red">*</span></label><input id="svc-price" class="form-control" type="number" placeholder="499"></div>
@@ -1109,6 +1113,60 @@ function generateAi(type, prefix) {
     }
     content.textContent = text;
   }).catch(function(e){ toast(e.message,'error'); });
+}
+
+// Basic tab: ONE request fills Description + What's Included + Not Included from the
+// current form values. Only fills the form — nothing is saved until the admin clicks Save.
+// On any error the three fields are left exactly as they were.
+function generateSvcDetails() {
+  var btn = document.getElementById('svc-ai-details-btn');
+  if (btn.disabled) return;
+  var catSel = document.getElementById('svc-cat');
+  var subSel = document.getElementById('svc-subcat');
+  var name = document.getElementById('svc-name').value.trim();
+  var catName = catSel.value ? catSel.options[catSel.selectedIndex].text.trim() : '';
+  var subName = subSel.value ? subSel.options[subSel.selectedIndex].text.trim() : '';
+  if (!name || !catName || !subName) { toast('Select Category and Sub-Category and enter the Service Name first', 'error'); return; }
+
+  var descEl = document.getElementById('svc-desc');
+  var incEl = document.getElementById('svc-inclusions');
+  var excEl = document.getElementById('svc-exclusions');
+  if ((descEl.value.trim() || incEl.value.trim() || excEl.value.trim()) &&
+      !confirm('Replace the current Description, What\'s Included and Not Included with AI-generated text? You can still edit it before saving.')) return;
+
+  var unitSel = document.getElementById('svc-unit');
+  var numOrNull = function(id) { var v = document.getElementById(id).value.trim(); return v === '' ? null : parseFloat(v); };
+  var body = {
+    serviceName: name,
+    categoryName: catName,
+    subCategoryName: subName,
+    description: descEl.value.trim(),
+    basePrice: numOrNull('svc-price'),
+    originalPrice: numOrNull('svc-mrp'),
+    durationMinutes: numOrNull('svc-duration'),
+    unit: unitSel.value ? unitSel.options[unitSel.selectedIndex].text.trim() : '',
+    sacCode: document.getElementById('svc-hsn').value.trim(),
+    gstRate: numOrNull('svc-gst'),
+  };
+
+  // If the admin closes/switches the modal mid-request, drop the late response.
+  var forSvcId = document.getElementById('svc-id').value;
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generating Service Details...';
+  api('POST', '/admin/ai/service-details', body).then(function(d) {
+    if (document.getElementById('svc-overlay').style.display === 'none' || document.getElementById('svc-id').value !== forSvcId) return;
+    if (!d || typeof d.description !== 'string' || !Array.isArray(d.whatsIncluded) || !Array.isArray(d.notIncluded)) {
+      throw new Error('AI returned an invalid response. Your fields were not changed.');
+    }
+    descEl.value = d.description;
+    incEl.value = d.whatsIncluded.join('\n');
+    excEl.value = d.notIncluded.join('\n');
+    toast('Service details generated successfully.', 'success');
+  }).catch(function(e) {
+    toast((e && e.message) || 'Could not generate service details. Your fields were not changed.', 'error');
+  }).then(function() {
+    btn.disabled = false; btn.textContent = label;
+  });
 }
 
 // Bulk-fills description/SEO/inclusions/exclusions/FAQ for services still missing
