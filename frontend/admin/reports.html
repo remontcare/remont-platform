@@ -57,6 +57,8 @@
       <button class="report-tab" onclick="switchTab('orders',this)">📦 Orders</button>
       <button class="report-tab" onclick="switchTab('vendors',this)">🏪 Vendors</button>
       <button class="report-tab" onclick="switchTab('financial',this)">💰 Financial</button>
+      <button class="report-tab" onclick="switchTab('sellersales',this)">🛒 Seller Sales</button>
+      <button class="report-tab" onclick="switchTab('sellerstock',this)">📦 Seller Stock</button>
     </div>
 
     <!-- Date Filters -->
@@ -96,6 +98,75 @@
       <div class="chart-wrap">
         <div class="chart-title">Top Products</div>
         <div class="bar-chart" id="product-bars">—</div>
+      </div>
+    </div>
+
+    <!-- Seller Sales Tab (GET /admin/reports/seller-sales — uses the From/To dates above) -->
+    <div id="tab-sellersales" style="display:none">
+      <div class="filter-bar">
+        <div class="filter-group"><label>Seller</label><select class="ss-seller" id="ss-seller"><option value="">All sellers (consolidated)</option></select></div>
+        <div class="filter-group"><label>Product / Order / Customer</label><input type="search" id="ss-q" placeholder="Search…"></div>
+        <div class="filter-group"><label>SKU</label><input type="text" id="ss-sku" placeholder="SKU"></div>
+        <div class="filter-group"><label>Order Status</label>
+          <select id="ss-order-status">
+            <option value="">All</option>
+            <option value="AWAITING_SELLER">Awaiting seller</option><option value="SELLER_ACCEPTED">Accepted</option>
+            <option value="PROCESSING">Packing</option><option value="READY_FOR_PICKUP">Ready for pickup</option>
+            <option value="HANDED_TO_LOGISTICS">Handed to delivery</option><option value="SELLER_REJECTED">Rejected by seller</option>
+            <option value="PENDING_PAYMENT">Pending payment</option><option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option><option value="REFUNDED">Refunded</option>
+          </select>
+        </div>
+        <div class="filter-group"><label>Payment Status</label>
+          <select id="ss-payment-status">
+            <option value="">All</option><option value="PAID">Paid</option><option value="PENDING">Pending</option><option value="INITIATED">Initiated</option>
+            <option value="PARTIAL">Partial</option><option value="FAILED">Failed</option><option value="CANCELLED">Cancelled</option><option value="REFUNDED">Refunded</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="loadSellerSales()">Apply</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn btn-sm" onclick="downloadSellerReport('sales','xlsx')">⬇ Excel (current filter)</button>
+        <button class="btn btn-sm" onclick="downloadSellerReport('sales','csv')">⬇ CSV (current filter)</button>
+        <button class="btn btn-sm" onclick="downloadSellerReport('sales','xlsx',true)">⬇ Excel — all sellers consolidated</button>
+      </div>
+      <div class="kpi-row" id="ss-kpis"></div>
+      <div class="chart-wrap"><div class="chart-title">Seller-wise Sales</div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Seller</th><th>Orders</th><th>Units</th><th>Gross Sales</th><th>Discounts</th><th>GST</th><th>Refunds</th><th>Net Sales</th></tr></thead><tbody id="ss-by-seller"></tbody></table></div>
+      </div>
+      <div class="chart-wrap"><div class="chart-title">Product / SKU-wise Sales</div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>SKU</th><th>Seller</th><th>Units</th><th>Gross Sales</th><th>Net Sales</th></tr></thead><tbody id="ss-by-product"></tbody></table></div>
+      </div>
+      <div class="chart-wrap"><div class="chart-title">Order-wise Sales <span id="ss-shown" style="font-weight:400;color:#9ca3af"></span></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Order</th><th>Date</th><th>Seller</th><th>Product</th><th>SKU</th><th>Qty</th><th>Price</th><th>GST</th><th>Value</th><th>Status</th><th>Payment</th><th>Counted</th></tr></thead><tbody id="ss-rows"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Seller Stock Tab (GET /admin/reports/seller-stock) -->
+    <div id="tab-sellerstock" style="display:none">
+      <div class="filter-bar">
+        <div class="filter-group"><label>Seller</label><select class="ss-seller" id="st-seller"><option value="">All sellers (consolidated)</option></select></div>
+        <div class="filter-group"><label>Product / Brand</label><input type="search" id="st-q" placeholder="Search…"></div>
+        <div class="filter-group"><label>SKU</label><input type="text" id="st-sku" placeholder="SKU"></div>
+        <div class="filter-group"><label>Stock Status</label>
+          <select id="st-stock-status">
+            <option value="">All</option><option value="LIVE">Live (in stock)</option><option value="LOW">Low stock</option>
+            <option value="OUT">Out of stock</option><option value="INACTIVE">Inactive</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="loadSellerStock()">Apply</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn btn-sm" onclick="downloadSellerReport('stock','xlsx')">⬇ Excel (current filter)</button>
+        <button class="btn btn-sm" onclick="downloadSellerReport('stock','csv')">⬇ CSV (current filter)</button>
+        <button class="btn btn-sm" onclick="downloadSellerReport('stock','xlsx',true)">⬇ Excel — all sellers consolidated</button>
+      </div>
+      <div class="kpi-row" id="st-kpis"></div>
+      <div class="chart-wrap"><div class="chart-title">Seller-wise Stock</div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Seller</th><th>Products</th><th>Live</th><th>Inactive</th><th>Low Stock</th><th>Out of Stock</th><th>Available Stock</th><th>Sold Qty</th></tr></thead><tbody id="st-by-seller"></tbody></table></div>
+      </div>
+      <div class="chart-wrap"><div class="chart-title">Product-wise Stock <span id="st-shown" style="font-weight:400;color:#9ca3af"></span></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Seller</th><th>Product</th><th>SKU</th><th>Stock</th><th>Sold</th><th>Available</th><th>Low</th><th>Out</th><th>Status</th><th>Last Updated</th></tr></thead><tbody id="st-rows"></tbody></table></div>
       </div>
     </div>
 
@@ -180,7 +251,7 @@ function switchTab(tab, btn) {
   currentTab = tab;
   document.querySelectorAll('.report-tab').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
-  ['sales','orders','vendors','financial'].forEach(function(t){
+  ['sales','orders','vendors','financial','sellersales','sellerstock'].forEach(function(t){
     document.getElementById('tab-' + t).style.display = t === tab ? '' : 'none';
   });
   loadCurrentTab();
@@ -190,8 +261,9 @@ function applyQuick(days) {
   if (!days) return;
   var to = new Date();
   var from = new Date(Date.now() - days * 86400000);
-  document.getElementById('dt-from').value = from.toISOString().slice(0,10);
-  document.getElementById('dt-to').value = to.toISOString().slice(0,10);
+  // Local calendar dates (toISOString() is UTC — after midnight IST it still said "yesterday").
+  document.getElementById('dt-from').value = from.toLocaleDateString('en-CA');
+  document.getElementById('dt-to').value = to.toLocaleDateString('en-CA');
   loadCurrentTab();
 }
 
@@ -201,7 +273,96 @@ function loadCurrentTab() {
     case 'orders': loadOrders(); break;
     case 'vendors': loadVendors(); break;
     case 'financial': loadFinancial(); break;
+    case 'sellersales': loadSellerSales(); break;
+    case 'sellerstock': loadSellerStock(); break;
   }
+}
+
+// ─── Seller sales & stock — computed server-side (backend/src/modules/reports/seller-reports.ts) ───
+var sellersLoaded = false;
+function loadSellerOptions() {
+  if (sellersLoaded) return Promise.resolve();
+  return api('GET', '/admin/product-vendors').then(function(list) {
+    sellersLoaded = true;
+    var opts = (list || []).slice().sort(function(a, b){ return String(a.businessName).localeCompare(String(b.businessName)); })
+      .map(function(v){ return '<option value="' + escape(v.id) + '">' + escape(v.businessName || v.id) + '</option>'; }).join('');
+    document.querySelectorAll('.ss-seller').forEach(function(sel){ sel.innerHTML = '<option value="">All sellers (consolidated)</option>' + opts; });
+  }).catch(function(e){ toast('Could not load sellers: ' + e.message, 'error'); });
+}
+function sellerReportQuery(kind, format, consolidated) {
+  var p = [];
+  function add(k, v){ if (v) p.push(k + '=' + encodeURIComponent(v)); }
+  if (kind === 'sales') {
+    add('from', document.getElementById('dt-from').value);
+    add('to', document.getElementById('dt-to').value);
+    if (!consolidated) {
+      add('vendorId', document.getElementById('ss-seller').value);
+      add('q', document.getElementById('ss-q').value.trim());
+      add('sku', document.getElementById('ss-sku').value.trim());
+      add('orderStatus', document.getElementById('ss-order-status').value);
+      add('paymentStatus', document.getElementById('ss-payment-status').value);
+    }
+  } else if (!consolidated) {
+    add('vendorId', document.getElementById('st-seller').value);
+    add('q', document.getElementById('st-q').value.trim());
+    add('sku', document.getElementById('st-sku').value.trim());
+    add('stockStatus', document.getElementById('st-stock-status').value);
+  }
+  add('format', format);
+  return '/admin/reports/seller-' + kind + (p.length ? '?' + p.join('&') : '');
+}
+function kpis(items) {
+  return items.map(function(k){ return '<div class="kpi"><div class="kpi-val">' + escape(String(k[1])) + '</div><div class="kpi-label">' + escape(k[0]) + '</div></div>'; }).join('');
+}
+function emptyRow(cols, msg) { return '<tr><td colspan="' + cols + '" style="text-align:center;color:#9ca3af;padding:18px">' + escape(msg) + '</td></tr>'; }
+function loadSellerSales() {
+  loadSellerOptions();
+  document.getElementById('ss-rows').innerHTML = emptyRow(12, 'Loading…');
+  api('GET', sellerReportQuery('sales')).then(function(d) {
+    currentData.sellersales = d;
+    var t = d.totals;
+    document.getElementById('ss-kpis').innerHTML = kpis([
+      ['Gross Sales', fmtCur(t.grossSales)], ['Net Sales', fmtCur(t.netSales)], ['Orders', t.totalOrders], ['Units Sold', t.totalUnitsSold],
+      ['Discounts', fmtCur(t.discounts)], ['GST', fmtCur(t.gst)], ['Refunds', fmtCur(t.refunds)], ['Not counted (unpaid/cancelled/rejected)', t.excludedOrders],
+    ]);
+    document.getElementById('ss-by-seller').innerHTML = (d.bySeller || []).map(function(s){
+      return '<tr><td>' + escape(s.sellerName) + '</td><td>' + s.orders + '</td><td>' + s.unitsSold + '</td><td>' + fmtCur(s.grossSales) + '</td><td>' + fmtCur(s.discounts) + '</td><td>' + fmtCur(s.gst) + '</td><td>' + fmtCur(s.refunds) + '</td><td><b>' + fmtCur(s.netSales) + '</b></td></tr>';
+    }).join('') || emptyRow(8, 'No counted sales');
+    document.getElementById('ss-by-product').innerHTML = (d.byProduct || []).map(function(p){
+      return '<tr><td>' + escape(p.productName) + '</td><td>' + escape(p.sku) + '</td><td>' + escape(p.sellerName) + '</td><td>' + p.unitsSold + '</td><td>' + fmtCur(p.grossSales) + '</td><td>' + fmtCur(p.netSales) + '</td></tr>';
+    }).join('') || emptyRow(6, 'No counted sales');
+    document.getElementById('ss-shown').textContent = d.rowsShown < t.lineCount ? '(showing ' + d.rowsShown + ' of ' + t.lineCount + ' — download for all)' : '';
+    document.getElementById('ss-rows').innerHTML = d.rows.map(function(r){
+      return '<tr><td>' + escape(r.orderNumber) + '</td><td>' + escape(r.orderDate) + '</td><td>' + escape(r.sellerName) + '</td><td>' + escape(r.productName) + '</td><td>' + escape(r.sku) + '</td><td>' + r.quantity + '</td><td>' + fmtCur(r.sellingPrice) + '</td><td>' + fmtCur(r.gst) + '</td><td>' + fmtCur(r.orderValue) + '</td><td>' + escape(r.orderStatus) + '</td><td>' + escape(r.paymentStatus) + '</td><td>' + escape(r.counted) + '</td></tr>';
+    }).join('') || emptyRow(12, 'No orders for these filters');
+  }).catch(function(e){ document.getElementById('ss-rows').innerHTML = emptyRow(12, e.message); });
+}
+function loadSellerStock() {
+  loadSellerOptions();
+  document.getElementById('st-rows').innerHTML = emptyRow(10, 'Loading…');
+  api('GET', sellerReportQuery('stock')).then(function(d) {
+    currentData.sellerstock = d;
+    var t = d.totals;
+    document.getElementById('st-kpis').innerHTML = kpis([
+      ['Products', t.totalProducts], ['Live', t.liveProducts], ['Inactive', t.inactiveProducts], ['Low Stock', t.lowStockProducts],
+      ['Out of Stock', t.outOfStockProducts], ['Available Stock', t.totalAvailableStock], ['Sold Quantity', t.totalSoldQuantity],
+    ]);
+    document.getElementById('st-by-seller').innerHTML = (d.bySeller || []).map(function(s){
+      return '<tr><td>' + escape(s.sellerName) + '</td><td>' + s.products + '</td><td>' + s.liveProducts + '</td><td>' + s.inactiveProducts + '</td><td>' + s.lowStockProducts + '</td><td>' + s.outOfStockProducts + '</td><td>' + s.availableStock + '</td><td>' + s.soldQuantity + '</td></tr>';
+    }).join('') || emptyRow(8, 'No products');
+    document.getElementById('st-shown').textContent = d.rowsShown < t.totalProducts ? '(showing ' + d.rowsShown + ' of ' + t.totalProducts + ' — download for all)' : '';
+    document.getElementById('st-rows').innerHTML = d.rows.map(function(r){
+      return '<tr><td>' + escape(r.sellerName) + '</td><td>' + escape(r.productName) + '</td><td>' + escape(r.sku) + '</td><td>' + r.currentStock + '</td><td>' + r.soldQuantity + '</td><td>' + r.availableStock + '</td><td>' + escape(r.lowStock) + '</td><td>' + escape(r.outOfStock) + '</td><td>' + escape(r.liveStatus) + '</td><td>' + escape(r.lastUpdated) + '</td></tr>';
+    }).join('') || emptyRow(10, 'No products for these filters');
+  }).catch(function(e){ document.getElementById('st-rows').innerHTML = emptyRow(10, e.message); });
+}
+function downloadSellerReport(kind, format, consolidated) {
+  var seller = !consolidated && document.getElementById(kind === 'sales' ? 'ss-seller' : 'st-seller');
+  var label = seller && seller.value ? seller.options[seller.selectedIndex].text.replace(/[^\w-]+/g, '-').toLowerCase() : 'all-sellers';
+  var day = new Date().toISOString().slice(0, 10);
+  downloadAuthedFile(sellerReportQuery(kind, format, consolidated), label + '-' + kind + '-report-' + day + '.' + format)
+    .then(function(){ toast('Report downloaded', 'success'); })
+    .catch(function(e){ toast(e.message, 'error'); });
 }
 
 function getDateParams() {
@@ -360,6 +521,8 @@ function loadFinancial() {
 
 function exportCurrentTab() {
   switch(currentTab) {
+    case 'sellersales': downloadSellerReport('sales', 'csv'); break;
+    case 'sellerstock': downloadSellerReport('stock', 'csv'); break;
     case 'sales':
       toast('Sales export: open Orders tab and use Export CSV there', 'warning'); break;
     case 'orders':

@@ -1,7 +1,8 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional, InternalServerErrorException,
+  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional, InternalServerErrorException, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorStatus } from '@prisma/client';
@@ -18,6 +19,8 @@ import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
+import { ReportsModule } from '../reports/reports.module';
+import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from '../reports/seller-reports';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -555,6 +558,9 @@ export class ProductVendorsService {
     return v;
   }
 
+  /** The caller's own seller profile (reports scope every query to its id). */
+  requireOwnVendor(userId: string) { return this.requireVendor(userId); }
+
   // Server-side ownership check — never trust a bare orderId from the client alone, mirrors
   // myOrders()'s own product.vendorId scoping.
   private async assertOwnsOrder(vendorId: string, orderId: string) {
@@ -876,7 +882,26 @@ export class ProductVendorsService {
 @Roles(UserRole.PRODUCT_VENDOR)
 @Controller('vendors/product')
 export class ProductVendorsController {
-  constructor(private pv: ProductVendorsService) {}
+  constructor(private pv: ProductVendorsService, private reports: SellerReportsService) {}
+
+  // ─── Sales & stock reports — always this seller's own data: the vendorId is resolved from
+  // the JWT here and any vendorId in the query string is ignored. ───
+  @Get('me/reports/sales')
+  async salesReport(@CurrentUser() u: JwtPayload, @Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const v = await this.pv.requireOwnVendor(u.sub);
+    const report = await this.reports.salesReport({ ...parseSalesFilter(q), vendorId: v.id }, 'SELLER');
+    return this.reports.send(res, 'sales', format, 'SELLER', report, 'sales-report');
+  }
+
+  @Get('me/reports/stock')
+  async stockReport(@CurrentUser() u: JwtPayload, @Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const v = await this.pv.requireOwnVendor(u.sub);
+    const report = await this.reports.stockReport({ ...parseStockFilter(q), vendorId: v.id }, 'SELLER');
+    return this.reports.send(res, 'stock', format, 'SELLER', report, 'stock-report');
+  }
+
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.pv.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.pv.profile(u.sub); }
   @Get('me/dashboard') dash(@CurrentUser() u: JwtPayload) { return this.pv.dashboard(u.sub); }
@@ -1012,7 +1037,7 @@ export class AgencyController {
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule, MediaModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule, MediaModule, ReportsModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],
