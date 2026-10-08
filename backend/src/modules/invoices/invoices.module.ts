@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Param, Query, UseGuards, NotFoundException, ForbiddenException, Res } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Param, Query, UseGuards, NotFoundException, ForbiddenException, BadRequestException, Res } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -10,6 +10,31 @@ import {
   type BillingLineInput, type BillingTransactionTypeValue,
 } from '../../common';
 import { renderInvoicePdf, buildInvoiceViewModel, type InvoiceDocKind } from './invoice-pdf';
+
+// Order statuses on which a (permanent, immutable) tax invoice may be issued. Anything else —
+// unpaid, cancelled, refunded, or a value outside OrderStatus — is refused.
+const INVOICEABLE_ORDER_STATUSES = new Set([
+  'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED', 'COMPLETED', 'INVOICED', 'CLOSED',
+]);
+// A product order is a sale only once its seller has accepted it.
+const INVOICEABLE_FULFILLMENT_STAGES = new Set(['SELLER_ACCEPTED', 'PROCESSING', 'READY_FOR_PICKUP', 'HANDED_TO_LOGISTICS']);
+
+/**
+ * Throws a business error unless a NEW invoice may be issued for this order. Checked by
+ * generateForOrder() for every caller (customer/seller endpoint, admin, auto-on-completion)
+ * — only after its existing-invoice short-circuit, so an already-issued invoice stays
+ * downloadable whatever happens to the order later.
+ */
+export function assertInvoiceEligible(order: { status?: string | null; productFulfillmentStage?: string | null }) {
+  const status = String(order.status ?? '');
+  const stage = order.productFulfillmentStage;
+  if (stage === 'SELLER_REJECTED') throw new BadRequestException('Invoice not allowed: this order was rejected by the seller');
+  if (stage === 'AWAITING_SELLER') throw new BadRequestException('Invoice not allowed: this order has not been accepted by the seller yet');
+  if (status === 'PENDING_PAYMENT') throw new BadRequestException('Invoice not allowed: this order is still pending payment');
+  if (status === 'CANCELLED' || status === 'REFUNDED') throw new BadRequestException(`Invoice not allowed: this order is ${status.toLowerCase()}`);
+  if (!INVOICEABLE_ORDER_STATUSES.has(status)) throw new BadRequestException(`Invoice not allowed for order status "${status || 'unknown'}"`);
+  if (stage != null && !INVOICEABLE_FULFILLMENT_STAGES.has(stage)) throw new BadRequestException(`Invoice not allowed for fulfilment stage "${stage}"`);
+}
 
 @Injectable()
 export class InvoicesService {
@@ -39,6 +64,7 @@ export class InvoicesService {
       },
     });
     if (!order) throw new NotFoundException('Order not found');
+    assertInvoiceEligible(order);
 
     const transactionType: BillingTransactionTypeValue =
       order.billingTransactionType || resolveBillingTransactionType(order.type, order.vendor?.staffType);
