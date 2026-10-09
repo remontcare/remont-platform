@@ -513,6 +513,32 @@ export function isValidIndiaCoords(lat: number | null | undefined, lng: number |
 // agrees on the same cutoff instead of one enforcing it and the other silently not.
 export const LOCATION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+// ─── Partner-facing job-offer view (data minimization) ──────────────────────────
+// What a technician may see about an order they have NOT accepted yet — used by
+// available-jobs, the upcoming-scheduled preview and the job-offer ring payload (socket +
+// stored notification). An explicit allowlist, so new Order columns (payment, OTPs, notes,
+// customer data, internal routing/dispatch fields) can never leak by default. Full address
+// and customer contact unlock only via the assigned-job endpoints after accept.
+export function partnerOfferView(order: any, extra: { distanceKm?: number | null; releaseAt?: Date | null } = {}) {
+  const num = (v: any) => (v === null || v === undefined ? null : Number(v));
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber ?? null,
+    status: order.status,
+    vendorId: order.vendorId ?? null,
+    totalAmount: num(order.totalAmount),
+    serviceAmount: num(order.serviceAmount),
+    vendorPayout: num(order.vendorPayout),
+    createdAt: order.createdAt ?? null,
+    slotStart: order.slotStart ?? null,
+    slotEnd: order.slotEnd ?? null,
+    service: order.service ? { name: order.service.name ?? null, categoryId: order.service.categoryId ?? null } : null,
+    address: order.address ? { city: order.address.city ?? null, area: order.address.area || null } : null,
+    ...('distanceKm' in extra ? { distanceKm: extra.distanceKm ?? null } : {}),
+    ...('releaseAt' in extra ? { releaseAt: extra.releaseAt ?? null } : {}),
+  };
+}
+
 // The ONE authoritative location-eligibility rule, shared by every path that decides whether
 // a given vendor may be matched to a given order: DispatchService.dispatch's no-GPS fallback,
 // ServiceVendorsService.isEligibleForOrder (partner's own available-jobs/accept re-check), and
