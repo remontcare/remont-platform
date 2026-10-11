@@ -1,5 +1,5 @@
 import { LeadSource } from '@prisma/client';
-import { AiToolExecutor, SUPPORT_WHATSAPP } from './ai-tools';
+import { AiToolExecutor, SUPPORT_WHATSAPP, CHAT_TOOL_ALLOWLIST } from './ai-tools';
 
 function makeDeps() {
   return {
@@ -12,8 +12,13 @@ function makeDeps() {
     sellerReg: { initRegistration: jest.fn(async (): Promise<any> => ({ registrationId: 'SR-1', isNew: true })), saveStep: jest.fn(async (): Promise<any> => ({ saved: true })) },
   };
 }
+// These tests act as the public website chat: the executor only runs tools on the caller's
+// server-decided allow-list, so every call carries the PUBLIC list unless a test overrides it.
 function makeExecutor(deps = makeDeps()) {
-  return { exec: new AiToolExecutor(deps.servicesSvc as any, deps.productsSvc as any, deps.citiesSvc as any, deps.crm as any, deps.estimatesSvc as any, deps.partnerReg as any, deps.sellerReg as any), deps };
+  const exec = new AiToolExecutor(deps.servicesSvc as any, deps.productsSvc as any, deps.citiesSvc as any, deps.crm as any, deps.estimatesSvc as any, deps.partnerReg as any, deps.sellerReg as any);
+  const execute = exec.execute.bind(exec);
+  exec.execute = (name: string, args: any, ctx: any = {}) => execute(name, args, { allowedTools: CHAT_TOOL_ALLOWLIST.PUBLIC, ...ctx });
+  return { exec, deps };
 }
 
 describe('AiToolExecutor — every tool reuses a real existing service, never invents data', () => {
@@ -102,8 +107,28 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
     }, {});
     expect(deps.partnerReg.initRegistration).toHaveBeenCalledWith('+919876500000', 'EN');
     expect(deps.partnerReg.saveStep).toHaveBeenCalledWith('PR-1', 1, { fullName: 'Suresh Kumar', city: 'Bhopal', categories: ['plumber'], experienceYears: '5' });
-    expect((result as any).registrationId).toBe('PR-1');
-    expect(action).toEqual({ type: 'CONTINUE_PARTNER_REGISTRATION', payload: { registrationId: 'PR-1', continueUrl: '/partner-register.html' } });
+    // No registration id goes back to the (unauthenticated) chat — the page finds it after OTP.
+    expect((result as any).registrationId).toBeUndefined();
+    expect(action).toEqual({ type: 'CONTINUE_PARTNER_REGISTRATION', payload: { continueUrl: '/partner-register.html' } });
+  });
+
+  it("start_partner_registration never writes into someone's EXISTING draft (the chat is unauthenticated)", async () => {
+    const { exec, deps } = makeExecutor();
+    deps.partnerReg.initRegistration.mockResolvedValueOnce({ registrationId: 'PR-VICTIM', isNew: false });
+    await exec.execute('start_partner_registration', { partnerType: 'SERVICE', fullName: 'Attacker', phone: '9876500000', city: 'X' }, {});
+    expect(deps.partnerReg.saveStep).not.toHaveBeenCalled();
+  });
+
+  it('start_partner_registration answers identically for new and existing numbers (no enumeration)', async () => {
+    const { exec, deps } = makeExecutor();
+    const fresh = await exec.execute('start_partner_registration', { partnerType: 'SERVICE', phone: '9876500000' }, {});
+    deps.partnerReg.initRegistration.mockResolvedValueOnce({ registrationId: 'PR-OLD', alreadyApproved: true, status: 'APPROVED' });
+    const existing = await exec.execute('start_partner_registration', { partnerType: 'SERVICE', phone: '9876500001' }, {});
+    expect(existing).toEqual(fresh);
+    expect(JSON.stringify(existing)).not.toMatch(/PR-OLD|APPROVED|alreadyApproved|alreadySubmitted/);
+    deps.sellerReg.initRegistration.mockResolvedValueOnce({ registrationId: 'SR-OLD', isNew: false });
+    await exec.execute('start_partner_registration', { partnerType: 'SELLER', phone: '9876500002', fullName: 'X' }, {});
+    expect(deps.sellerReg.saveStep).not.toHaveBeenCalled();
   });
 
   it('start_partner_registration(SELLER) routes to the seller registration flow instead', async () => {
@@ -113,7 +138,8 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
     }, {});
     expect(deps.sellerReg.initRegistration).toHaveBeenCalledWith('9876511111');
     expect(deps.partnerReg.initRegistration).not.toHaveBeenCalled();
-    expect(action).toEqual({ type: 'CONTINUE_SELLER_REGISTRATION', payload: { registrationId: 'SR-1', continueUrl: '/seller-register.html' } });
+    expect(deps.sellerReg.saveStep).toHaveBeenCalledWith('SR-1', 1, expect.objectContaining({ fullName: 'Meena Traders' }));
+    expect(action).toEqual({ type: 'CONTINUE_SELLER_REGISTRATION', payload: { continueUrl: '/seller-register.html' } });
   });
 
   it('start_partner_registration rejects an invalid phone WITHOUT touching the registration draft tables', async () => {
@@ -153,17 +179,18 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
     expect((result as any).options).toEqual(['1 BHK', '2 BHK', '3 BHK', '4 BHK', '5 BHK', '6 BHK']);
   });
 
-  it('an unknown tool name returns a clean error instead of throwing', async () => {
+  it('an unknown tool name returns a clean refusal instead of throwing', async () => {
     const { exec } = makeExecutor();
     const { result } = await exec.execute('delete_all_orders', {}, {});
-    expect((result as any).error).toMatch(/Unknown tool/);
+    expect((result as any).error).toBe('That action is not available here.');
   });
 
-  it('a tool that throws internally is caught — execute() never propagates', async () => {
+  it('a tool that throws internally is caught — execute() never propagates or leaks the internal error', async () => {
     const deps = makeDeps();
     deps.servicesSvc.search = jest.fn(async () => { throw new Error('DB unreachable'); });
     const { exec } = makeExecutor(deps);
     const { result } = await exec.execute('search_services', { query: 'AC' }, {});
-    expect((result as any).error).toBe('DB unreachable');
+    expect((result as any).error).not.toContain('DB unreachable');
+    expect((result as any).error).toMatch(/lookup failed/);
   });
 });

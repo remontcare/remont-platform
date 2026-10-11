@@ -13,7 +13,8 @@ import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, 
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
-import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
+import { parseAiJson } from '../ai-agent/openai-client';
+import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
 import {
   ServiceDetailsAiInput, ServiceDetailsAiResult, InvalidServiceDetailsAiOutput,
   normalizeServiceDetailsInput, buildServiceDetailsMessages, validateServiceDetailsAiOutput,
@@ -69,7 +70,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService, @Optional() private media?: MediaService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService, @Optional() private media?: MediaService, @Optional() private aiLimits?: AiLimitsService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -1768,10 +1769,14 @@ Return JSON with:
 - exclusions: array of 2-4 short bullet points of what's NOT included (e.g. spare parts, materials, exclusions)
 - faq: array of 4 objects with {q, a} — common customer questions and answers`;
 
-        const raw = await openAiComplete(this.openaiKey, this.openaiModel, [
-          { role: 'system', content: 'You are a marketing copywriter for Remont India home services. Return only valid JSON.' },
-          { role: 'user', content: prompt },
-        ], { maxTokens: 500, jsonMode: true });
+        // Shared AI budget (reserved before the call); a refusal falls back to the template below.
+        const raw = await completeWithinBudget(this.aiLimits, {
+          identityKey: 'admin-content', apiKey: this.openaiKey, model: this.openaiModel, maxTokens: 500, jsonMode: true,
+          messages: [
+            { role: 'system', content: 'You are a marketing copywriter for Remont India home services. Return only valid JSON.' },
+            { role: 'user', content: prompt },
+          ],
+        });
         return parseAiJson(raw);
       } catch (e) {
         this.logger.warn(`AI content generation failed, using template: ${e.message}`);
@@ -1817,10 +1822,14 @@ Return JSON with:
 
     let raw: string;
     try {
-      raw = await openAiComplete(this.openaiKey, this.openaiModel, buildServiceDetailsMessages(ctx), {
-        maxTokens: 700, temperature: 0.3, jsonMode: true,
+      raw = await completeWithinBudget(this.aiLimits, {
+        identityKey: 'admin-content', apiKey: this.openaiKey, model: this.openaiModel,
+        messages: buildServiceDetailsMessages(ctx), maxTokens: 700, temperature: 0.3, jsonMode: true,
       });
     } catch (e) {
+      if (e instanceof AiBudgetRefusedError) {
+        throw new ServiceUnavailableException("AI generation is unavailable right now (today's AI budget reached, usage tracking offline, or the configured model isn't approved).");
+      }
       this.logger.warn(`Service details AI request failed: ${String(e?.message || e).slice(0, 300)}`);
       throw new BadGatewayException('The AI service could not be reached. Please try again.');
     }
@@ -3856,7 +3865,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule, MediaModule, AiImagesModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule, MediaModule, AiImagesModule, AiLimitsModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

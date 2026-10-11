@@ -27,6 +27,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LeadSource } from '@prisma/client';
 import { OpenAiTool } from './openai-client';
+import { redactForLog } from './ai-redaction';
 import { ServicesService } from '../services/services.module';
 import { ProductsService } from '../products/products.module';
 import { CitiesService } from '../cities/cities.module';
@@ -53,6 +54,60 @@ export interface ToolContext {
   customerEmail?: string;
   sessionId?: string;
   channel?: string;
+  /** Tools this caller may use (server-decided from the authenticated role). Unset = none. */
+  allowedTools?: readonly string[];
+}
+
+// ─── Who may use which chat tool ─────────────────────────────────────────────────────────
+// Decided on the server from the verified JWT role (or anonymous), never from the model or the
+// request. The model is only offered these tools, and execute() refuses anything else even if
+// the model asks for it. Admin AI tools (/ai/tools/*) are a separate, admin-only API and are
+// never reachable through chat.
+export type AiAudience = 'PUBLIC' | 'CUSTOMER' | 'PARTNER' | 'SELLER' | 'ADMIN';
+const SALES_TOOLS = [
+  'search_services', 'search_products', 'check_city_availability', 'get_estimate',
+  'add_service_to_cart', 'add_product_to_cart', 'create_lead', 'create_site_visit_request',
+  'start_partner_registration', 'present_options', 'handover_to_human',
+] as const;
+export const CHAT_TOOL_ALLOWLIST: Record<AiAudience, readonly string[]> = {
+  PUBLIC: SALES_TOOLS,
+  CUSTOMER: SALES_TOOLS,
+  // Already-registered partners/sellers: no onboarding tool (it would start an application for
+  // whatever phone the model supplies); everything else is the same read/lead/handover set.
+  PARTNER: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
+  SELLER: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
+  ADMIN: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
+};
+export function audienceForRole(role?: string | null): AiAudience {
+  switch (role) {
+    case 'CUSTOMER': return 'CUSTOMER';
+    case 'SERVICE_VENDOR': case 'AGENCY_OWNER': return 'PARTNER';
+    case 'PRODUCT_VENDOR': return 'SELLER';
+    case 'ADMIN': case 'SUPER_ADMIN': return 'ADMIN';
+    default: return 'PUBLIC';
+  }
+}
+export function chatToolsFor(audience: AiAudience): OpenAiTool[] {
+  const allowed = new Set(CHAT_TOOL_ALLOWLIST[audience]);
+  return AI_CHAT_TOOLS.filter((t) => allowed.has(t.function.name));
+}
+
+/** Tool arguments come from the model: bound every string and drop anything that isn't plain data. */
+export function sanitizeToolArgs(args: unknown, depth = 0): any {
+  if (depth > 3) return undefined;
+  if (typeof args === 'string') return args.slice(0, 1000);
+  if (typeof args === 'number') return Number.isFinite(args) ? args : undefined;
+  if (typeof args === 'boolean' || args === null) return args;
+  if (Array.isArray(args)) return args.slice(0, 20).map((v) => sanitizeToolArgs(v, depth + 1));
+  if (args && typeof args === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(args).slice(0, 30)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      out[k] = sanitizeToolArgs(v, depth + 1);
+    }
+    return out;
+  }
+  return undefined;
 }
 
 export interface ToolResult {
@@ -276,7 +331,14 @@ export class AiToolExecutor {
     private sellerReg: SellerRegistrationService,
   ) {}
 
-  async execute(toolName: string, args: any, ctx: ToolContext): Promise<ToolResult> {
+  async execute(toolName: string, rawArgs: any, ctx: ToolContext): Promise<ToolResult> {
+    // Enforced here, not just by what the model is offered: a tool outside the caller's
+    // allow-list is refused even if the model (or a prompt-injected message) asks for it.
+    if (!ctx.allowedTools?.includes(toolName)) {
+      this.logger.warn(`Refused tool "${String(toolName).slice(0, 60)}" — not allowed for this caller`);
+      return { result: { error: 'That action is not available here.' } };
+    }
+    const args = sanitizeToolArgs(rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) || {};
     try {
       switch (toolName) {
         case 'search_services':
@@ -305,8 +367,10 @@ export class AiToolExecutor {
           return { result: { error: `Unknown tool: ${toolName}` } };
       }
     } catch (e) {
-      this.logger.warn(`Tool "${toolName}" failed: ${e.message}`);
-      return { result: { error: e.message || 'Tool execution failed' } };
+      // The detail stays in the server log (redacted); the model only learns that it failed,
+      // so internal errors can never be repeated to the visitor.
+      this.logger.warn(`Tool "${toolName}" failed: ${redactForLog(e?.message)}`);
+      return { result: { error: 'This lookup failed. Apologise and offer to connect the customer with the Remont team.' } };
     }
   }
 
@@ -402,41 +466,38 @@ export class AiToolExecutor {
     if (phone.length !== 10) return { result: { error: 'A valid 10-digit mobile number is required' } };
     const categories = args.category ? [args.category] : undefined;
 
+    // The chat is unauthenticated, so the phone here is unproven. Prefill only a draft this
+    // call just created (nothing of anyone's to overwrite) — never an existing application,
+    // which only its OTP-verified owner may edit. The owner reviews/corrects it after OTP.
+    // The reply is IDENTICAL whether or not this phone already has an application (no
+    // registrationId, no approved/submitted status), so the chat can't be used to probe which
+    // numbers are registered. The registration page finds the draft again after OTP.
     if (args.partnerType === 'SELLER') {
       const draft = await this.sellerReg.initRegistration(phone);
       const registrationId = (draft as any).registrationId;
-      if (registrationId) {
+      if (registrationId && (draft as any).isNew === true) {
         await this.sellerReg.saveStep(registrationId, 1, {
           fullName: args.fullName, city: args.city, categories,
         }).catch(() => null);
       }
-      const result = {
-        partnerType: 'SELLER', registrationId,
-        continueUrl: '/seller-register.html',
-        alreadyApproved: (draft as any).alreadyApproved,
-        alreadySubmitted: (draft as any).alreadySubmitted,
-      };
-      return registrationId
-        ? { result, action: { type: 'CONTINUE_SELLER_REGISTRATION', payload: { registrationId, continueUrl: result.continueUrl } } }
-        : { result };
+      return this.registrationHandoff('SELLER', '/seller-register.html', 'CONTINUE_SELLER_REGISTRATION');
     }
 
     const draft = await this.partnerReg.initRegistration('+91' + phone, 'EN');
     const registrationId = (draft as any).registrationId;
-    if (registrationId) {
+    if (registrationId && (draft as any).isNew === true) {
       await this.partnerReg.saveStep(registrationId, 1, {
         fullName: args.fullName, city: args.city, categories, experienceYears: args.experienceYears,
       }).catch(() => null);
     }
-    const result = {
-      partnerType: 'SERVICE', registrationId,
-      continueUrl: '/partner-register.html',
-      alreadyApproved: (draft as any).alreadyApproved,
-      alreadySubmitted: (draft as any).alreadySubmitted,
+    return this.registrationHandoff('SERVICE', '/partner-register.html', 'CONTINUE_PARTNER_REGISTRATION');
+  }
+
+  private registrationHandoff(partnerType: 'SERVICE' | 'SELLER', continueUrl: string, type: string): ToolResult {
+    return {
+      result: { partnerType, continueUrl, next: 'Open the registration page and verify the mobile number with OTP to continue. Do not say whether an application already exists for this number.' },
+      action: { type, payload: { continueUrl } } as FrontendAction,
     };
-    return registrationId
-      ? { result, action: { type: 'CONTINUE_PARTNER_REGISTRATION', payload: { registrationId, continueUrl: result.continueUrl } } }
-      : { result };
   }
 
   // No service call — this is a pure UI signal. AiAgentService.chat() reads
