@@ -131,7 +131,7 @@ export interface ToolResult {
 // Remont India's real, existing public contact channels — used site-wide
 // (footer, header, every service landing page). Never invent a new number.
 export const SUPPORT_WHATSAPP = '919232071064';
-export const SUPPORT_PHONE = '+919876543210';
+export const SUPPORT_PHONE = '+919232071064';
 
 // ─── Tool schemas — sent to OpenAI as `tools`. Descriptions double as the
 //     model's only instruction for when/how to call each one. ─────────────

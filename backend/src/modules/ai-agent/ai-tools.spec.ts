@@ -153,7 +153,7 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
   it('handover_to_human returns the real, existing support WhatsApp number and captures a follow-up lead when phone is known', async () => {
     const { exec, deps } = makeExecutor();
     const { result, action } = await exec.execute('handover_to_human', { reason: 'Structural crack, needs an engineer' }, { customerPhone: '9876543210', customerName: 'Amit', city: 'Bhopal' });
-    expect(result).toEqual({ handedOver: true, whatsapp: SUPPORT_WHATSAPP, phone: '+919876543210' });
+    expect(result).toEqual({ handedOver: true, whatsapp: SUPPORT_WHATSAPP, phone: '+919232071064' });
     expect(action).toEqual({ type: 'OPEN_WHATSAPP', payload: { number: SUPPORT_WHATSAPP, reason: 'Structural crack, needs an engineer' } });
     expect(deps.crm.captureLead).toHaveBeenCalledWith(expect.objectContaining({ serviceInterested: 'Human handover', notes: 'Structural crack, needs an engineer' }));
   });
