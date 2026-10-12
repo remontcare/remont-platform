@@ -440,6 +440,19 @@ export class WithdrawalService {
     });
   }
 
+  /**
+   * GET /vendors/wallet/available — the caller's own withdrawable amount, by the same rule
+   * request() validates against (availableBalance: ledger − base hold − pending, pooled for an
+   * agency owner). Agency team members can't withdraw (their owner does).
+   */
+  async myAvailable(userId: string) {
+    const vendor = await this.resolveVendor(userId);
+    if (vendor.agencyOwnerId) return { available: 0, canWithdraw: false };
+    const available = await this.ledger.availableBalance(vendor.id);
+    // Floored to whole paise (never rounded up past what request() would accept).
+    return { available: Math.floor(available * 100 + 1e-6) / 100, canWithdraw: true };
+  }
+
   async myHistory(userId: string, limit = 50) {
     const vendor = await this.resolveVendor(userId);
     return this.prisma.withdrawalRequest.findMany({ where: { vendorId: vendor.id }, orderBy: { createdAt: 'desc' }, take: limit });
@@ -492,6 +505,12 @@ export class PartnerLedgerController {
   @Post('wallet/topup/confirm')
   confirmWalletTopup(@CurrentUser() u: JwtPayload, @Body() b: { gatewayOrderId: string; paymentId: string; signature: string }) {
     return this.withdrawals.confirmTopup(u.sub, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)
+  @Get('wallet/available')
+  myAvailable(@CurrentUser() u: JwtPayload) {
+    return this.withdrawals.myAvailable(u.sub);
   }
 
   @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)

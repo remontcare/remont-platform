@@ -24,7 +24,7 @@
  *                                   addToCart()/openCart()/wa.me links — no new client code invented,
  *                                   only a small dispatcher added in index.html to call them.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { LeadSource } from '@prisma/client';
 import { OpenAiTool } from './openai-client';
 import { redactForLog } from './ai-redaction';
@@ -35,6 +35,10 @@ import { CrmService } from '../crm/crm.module';
 import { EstimatesService } from '../estimates/estimates.module';
 import { PartnerRegistrationService } from '../partner-registration/partner-registration.module';
 import { SellerRegistrationService } from '../seller-registration/seller-registration.module';
+import { PrismaService } from '../../prisma/prisma.module';
+import { ServiceVendorsService, ProductVendorsService } from '../vendors/vendors.module';
+import { PartnerLedgerService } from '../partner-ledger/partner-ledger.module';
+import { SellerReportsService, LOW_STOCK_THRESHOLD } from '../reports/seller-reports';
 
 export interface FrontendAction {
   type:
@@ -56,6 +60,10 @@ export interface ToolContext {
   channel?: string;
   /** Tools this caller may use (server-decided from the authenticated role). Unset = none. */
   allowedTools?: readonly string[];
+  /** The verified JWT subject — the ONLY identity the own-data tools ever use. Unset = anonymous. */
+  actorUserId?: string | null;
+  /** Server-decided audience of the caller (from the verified role). */
+  audience?: AiAudience;
 }
 
 // ─── Who may use which chat tool ─────────────────────────────────────────────────────────
@@ -69,13 +77,18 @@ const SALES_TOOLS = [
   'add_service_to_cart', 'add_product_to_cart', 'create_lead', 'create_site_visit_request',
   'start_partner_registration', 'present_options', 'handover_to_human',
 ] as const;
+// Partner/Seller tools read only the caller's OWN data, resolved from ctx.actorUserId on the
+// server — they take no user/vendor id from the model. Never offered to PUBLIC/CUSTOMER/ADMIN.
+export const PARTNER_TOOLS = ['get_my_jobs', 'get_my_job_detail', 'get_my_earnings', 'search_parts', 'present_options', 'handover_to_human'] as const;
+export const SELLER_TOOLS = ['get_my_sales_summary', 'get_my_stock_overview', 'present_options', 'handover_to_human'] as const;
+const OWN_DATA_TOOLS = new Set<string>(['get_my_jobs', 'get_my_job_detail', 'get_my_earnings', 'get_my_sales_summary', 'get_my_stock_overview']);
 export const CHAT_TOOL_ALLOWLIST: Record<AiAudience, readonly string[]> = {
   PUBLIC: SALES_TOOLS,
   CUSTOMER: SALES_TOOLS,
-  // Already-registered partners/sellers: no onboarding tool (it would start an application for
-  // whatever phone the model supplies); everything else is the same read/lead/handover set.
-  PARTNER: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
-  SELLER: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
+  // Registered partners/sellers get their own role assistant: no customer sales actions (cart,
+  // estimate, lead, site visit, registration) — only their own-data reads, parts search and handover.
+  PARTNER: PARTNER_TOOLS,
+  SELLER: SELLER_TOOLS,
   ADMIN: SALES_TOOLS.filter((t) => t !== 'start_partner_registration'),
 };
 export function audienceForRole(role?: string | null): AiAudience {
@@ -315,6 +328,69 @@ export const AI_CHAT_TOOLS: OpenAiTool[] = [
       },
     },
   },
+  // ─── Partner (technician) — own data only ───
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_jobs',
+      description: "The logged-in partner's OWN assigned jobs (most recent first): job id, order number, status, service, area/city, scheduled slot and their payout. No customer contact details.",
+      parameters: {
+        type: 'object',
+        properties: { scope: { type: 'string', enum: ['ACTIVE', 'TODAY', 'COMPLETED', 'ALL'], description: 'ACTIVE = not yet completed or cancelled (default)' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_job_detail',
+      description: "One of the logged-in partner's OWN jobs, by the jobId or orderNumber from get_my_jobs: status, payment status, slot, amounts and extra-work items with their customer-approval state. No customer contact details.",
+      parameters: {
+        type: 'object',
+        properties: { jobId: { type: 'string' }, orderNumber: { type: 'string' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_earnings',
+      description: "The logged-in partner's OWN earnings (today, this month, lifetime, pending payout) and the wallet balance available to withdraw.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_parts',
+      description: 'Search the live Remont product catalog for a spare part or accessory by name, brand or model text. Returns real listings with real stock status. Compatibility is NOT verified by Remont.',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'Part name plus brand/model, e.g. "washing machine drain pump LG"' } },
+        required: ['query'],
+      },
+    },
+  },
+  // ─── Seller — own data only ───
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_sales_summary',
+      description: "The logged-in seller's OWN sales for a period: paid orders, units sold, gross sales, discounts, refunds, net sales and top products. Counts paid orders that were not cancelled, refunded or rejected.",
+      parameters: {
+        type: 'object',
+        properties: { period: { type: 'string', enum: ['TODAY', 'LAST_7_DAYS', 'LAST_30_DAYS', 'LAST_90_DAYS', 'THIS_MONTH'], description: 'Default LAST_30_DAYS' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_stock_overview',
+      description: "The logged-in seller's OWN catalog stock: totals, live items that are out of stock, low-stock items, best sellers by paid units, and live items with no paid sales recorded yet.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 @Injectable()
@@ -329,6 +405,13 @@ export class AiToolExecutor {
     private estimatesSvc: EstimatesService,
     private partnerReg: PartnerRegistrationService,
     private sellerReg: SellerRegistrationService,
+    // Own-data services for the partner/seller tools — optional only so older unit tests that
+    // construct the executor positionally keep working; Nest always injects them.
+    @Optional() private serviceVendors?: ServiceVendorsService,
+    @Optional() private productVendors?: ProductVendorsService,
+    @Optional() private ledger?: PartnerLedgerService,
+    @Optional() private sellerReports?: SellerReportsService,
+    @Optional() private prisma?: PrismaService,
   ) {}
 
   async execute(toolName: string, rawArgs: any, ctx: ToolContext): Promise<ToolResult> {
@@ -339,8 +422,24 @@ export class AiToolExecutor {
       return { result: { error: 'That action is not available here.' } };
     }
     const args = sanitizeToolArgs(rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) || {};
+    // Own-data tools act only for the verified caller — never for an id the model supplies.
+    if (OWN_DATA_TOOLS.has(toolName) && !ctx.actorUserId) {
+      return { result: { error: 'Please sign in to the app to see your own details.' } };
+    }
     try {
       switch (toolName) {
+        case 'get_my_jobs':
+          return { result: await this.myJobs(ctx.actorUserId!, args.scope) };
+        case 'get_my_job_detail':
+          return { result: await this.myJobDetail(ctx.actorUserId!, args) };
+        case 'get_my_earnings':
+          return { result: await this.myEarnings(ctx.actorUserId!) };
+        case 'search_parts':
+          return { result: await this.searchParts(args.query) };
+        case 'get_my_sales_summary':
+          return { result: await this.mySalesSummary(ctx.actorUserId!, args.period) };
+        case 'get_my_stock_overview':
+          return { result: await this.myStockOverview(ctx.actorUserId!) };
         case 'search_services':
           return { result: await this.searchServices(args.query) };
         case 'search_products':
@@ -510,6 +609,13 @@ export class AiToolExecutor {
   }
 
   private handoverToHuman(args: any, ctx: ToolContext): ToolResult {
+    // A registered partner/seller is not a sales lead: hand straight over to support on WhatsApp.
+    if (ctx.audience === 'PARTNER' || ctx.audience === 'SELLER') {
+      return {
+        result: { handedOver: true, channel: 'WhatsApp support', ticketCreated: false },
+        action: { type: 'OPEN_WHATSAPP', payload: { number: SUPPORT_WHATSAPP, reason: String(args.reason || '').slice(0, 200) } },
+      };
+    }
     // Best-effort lead capture for follow-up — never blocks the handover itself.
     if (args.customerPhone || ctx.customerPhone) {
       this.crm.captureLead({
@@ -525,6 +631,198 @@ export class AiToolExecutor {
     return {
       result: { handedOver: true, whatsapp: SUPPORT_WHATSAPP, phone: SUPPORT_PHONE },
       action: { type: 'OPEN_WHATSAPP', payload: { number: SUPPORT_WHATSAPP, reason: args.reason || '' } },
+    };
+  }
+
+  // ─── Partner / Seller own-data tools ─────────────────────────────────────────────────────
+  // Each reuses the SAME service method the app's own screen calls (identical ownership
+  // scoping), then returns an explicit allow-list of fields: customer name, phone, street,
+  // pincode, OTPs and payment ids never reach the model.
+
+  private static readonly ACTIVE_JOB_STATUSES = new Set(['CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED']);
+
+  private static ist(d: Date | string | null | undefined): string | null {
+    if (!d) return null;
+    const date = new Date(d);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
+  /** YYYY-MM-DD in India time. */
+  private static istDay(d: Date): string {
+    return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  }
+
+  private static num(v: unknown): number | null {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  private static jobSummary(o: any) {
+    return {
+      jobId: o.id,
+      orderNumber: o.orderNumber ?? null,
+      status: o.status,
+      service: o.service?.name ?? null,
+      area: o.address?.area || null,
+      city: o.address?.city || null,
+      scheduledFor: AiToolExecutor.ist(o.slotStart),
+      completedAt: AiToolExecutor.ist(o.completedAt),
+      yourPayout: AiToolExecutor.num(o.vendorPayout),
+    };
+  }
+
+  private async myJobs(userId: string, scope?: string) {
+    if (!this.serviceVendors) return { error: 'Job lookup is unavailable right now.' };
+    const all: any[] = await this.serviceVendors.myJobs(userId);
+    const today = AiToolExecutor.istDay(new Date());
+    const rows = all.filter((o) => {
+      switch (scope) {
+        case 'COMPLETED': return o.status === 'COMPLETED';
+        case 'TODAY': return !!o.slotStart && AiToolExecutor.istDay(new Date(o.slotStart)) === today;
+        case 'ALL': return true;
+        default: return AiToolExecutor.ACTIVE_JOB_STATUSES.has(o.status);
+      }
+    });
+    return { scope: scope || 'ACTIVE', count: rows.length, showingFirst: Math.min(rows.length, 10), jobs: rows.slice(0, 10).map(AiToolExecutor.jobSummary) };
+  }
+
+  private async myJobDetail(userId: string, args: any) {
+    if (!this.serviceVendors) return { error: 'Job lookup is unavailable right now.' };
+    const jobId = typeof args.jobId === 'string' ? args.jobId.trim() : '';
+    const orderNumber = typeof args.orderNumber === 'string' ? args.orderNumber.trim() : '';
+    if (!jobId && !orderNumber) return { error: 'Which job? Give the job id or order number from the job list.' };
+    // Looked up only inside the caller's own job list (vendorId-scoped by myJobs): another
+    // partner's job simply isn't found, and nothing reveals whether it exists.
+    const all: any[] = await this.serviceVendors.myJobs(userId);
+    const o = all.find((j) => (jobId && j.id === jobId) || (orderNumber && j.orderNumber === orderNumber));
+    if (!o) return { found: false, message: 'No job with that id or number among your 50 most recent assigned jobs (older jobs are in the Jobs tab of the app).' };
+    return {
+      found: true,
+      ...AiToolExecutor.jobSummary(o),
+      paymentStatus: o.paymentStatus ?? null,
+      jobValue: AiToolExecutor.num(o.totalAmount),
+      extraWork: (o.extraWorkItems || []).slice(0, 10).map((x: any) => ({
+        description: String(x.description || '').slice(0, 200),
+        amount: AiToolExecutor.num(x.amount),
+        customerApproved: !!x.customerApproved,
+      })),
+    };
+  }
+
+  private async myEarnings(userId: string) {
+    if (!this.serviceVendors || !this.prisma) return { error: 'Earnings lookup is unavailable right now.' };
+    const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId }, select: { id: true, isAgencyOwner: true, agencyOwnerId: true } });
+    if (!vendor) return { error: 'No partner profile found for this account.' };
+    const e: any = await this.serviceVendors.earnings(userId);
+    const isAgencyMember = !!vendor.agencyOwnerId;
+    let withdrawable: number | null = null;
+    if (!isAgencyMember && this.ledger) {
+      try { withdrawable = await this.ledger.availableBalance(vendor.id); } catch { withdrawable = null; }
+    }
+    return {
+      today: { earnings: AiToolExecutor.num(e?.today?.earnings) ?? 0, completedJobs: e?.today?.jobs ?? 0 },
+      thisMonth: { earnings: AiToolExecutor.num(e?.thisMonth?.earnings) ?? 0, completedJobs: e?.thisMonth?.jobs ?? 0 },
+      lifetimeEarnings: AiToolExecutor.num(e?.lifetime?.amount),
+      pendingPayout: AiToolExecutor.num(e?.lifetime?.pending),
+      isAgencyOwner: !!vendor.isAgencyOwner,
+      isAgencyMember,
+      // Agency members can't withdraw (their owner does); an owner's figure pools the team.
+      withdrawableBalance: isAgencyMember ? null : withdrawable,
+      note: isAgencyMember
+        ? 'Agency team member: withdrawals are made by the agency owner.'
+        : vendor.isAgencyOwner ? "Withdrawable balance includes your team members' available earnings." : undefined,
+    };
+  }
+
+  private async searchParts(query: string) {
+    const q = typeof query === 'string' ? query.trim() : '';
+    if (q.length < 2) return { error: 'Tell me the part name and the appliance brand/model.' };
+    const rows: any[] = await this.productsSvc.list({ q, limit: 8 });
+    return {
+      compatibilityVerified: false,
+      note: 'Real Remont catalog listings. Compatibility is NOT verified — match the part number/model on the old part or appliance label before use. Parts cannot be ordered from this chat.',
+      results: rows.map((p: any) => {
+        const stock = Number(p.stock ?? 0);
+        return {
+          name: p.name, brand: p.brand ?? null, sku: p.sku ?? null, listedModelNumber: p.modelNumber ?? null,
+          price: AiToolExecutor.num(p.price), category: p.category?.name ?? null,
+          stockStatus: stock <= 0 ? 'OUT_OF_STOCK' : stock <= LOW_STOCK_THRESHOLD ? 'LOW_STOCK' : 'IN_STOCK',
+        };
+      }),
+    };
+  }
+
+  private static periodRange(period?: string): { label: string; from: Date; to: Date } {
+    const to = new Date();
+    const day = 24 * 60 * 60 * 1000;
+    const today = AiToolExecutor.istDay(to);
+    switch (period) {
+      case 'TODAY': return { label: 'TODAY', from: new Date(`${today}T00:00:00+05:30`), to };
+      case 'LAST_7_DAYS': return { label: 'LAST_7_DAYS', from: new Date(to.getTime() - 7 * day), to };
+      case 'LAST_90_DAYS': return { label: 'LAST_90_DAYS', from: new Date(to.getTime() - 90 * day), to };
+      case 'THIS_MONTH': return { label: 'THIS_MONTH', from: new Date(`${today.slice(0, 8)}01T00:00:00+05:30`), to };
+      default: return { label: 'LAST_30_DAYS', from: new Date(to.getTime() - 30 * day), to };
+    }
+  }
+
+  /** The caller's own ProductVendor id — always set, so a report can never widen to all sellers. */
+  private async ownSellerId(userId: string): Promise<string | null> {
+    if (!this.productVendors) return null;
+    try {
+      const v: any = await this.productVendors.requireOwnVendor(userId);
+      return typeof v?.id === 'string' && v.id ? v.id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async mySalesSummary(userId: string, period?: string) {
+    if (!this.sellerReports) return { error: 'Sales lookup is unavailable right now.' };
+    const vendorId = await this.ownSellerId(userId);
+    if (!vendorId) return { error: 'No seller profile found for this account.' };
+    const range = AiToolExecutor.periodRange(period);
+    const r: any = await this.sellerReports.salesReport({ vendorId, from: range.from, to: range.to }, 'SELLER');
+    const t = r?.totals || {};
+    return {
+      period: range.label,
+      from: AiToolExecutor.istDay(range.from),
+      to: AiToolExecutor.istDay(range.to),
+      scope: 'Your own products and orders only. Counts paid orders that were not cancelled, refunded or rejected.',
+      paidOrders: t.totalOrders ?? 0,
+      unitsSold: t.totalUnitsSold ?? 0,
+      grossSales: t.grossSales ?? 0,
+      discounts: t.discounts ?? 0,
+      refunds: t.refunds ?? 0,
+      netSales: t.netSales ?? 0,
+      ordersNotCounted: t.excludedOrders ?? 0,
+      topProducts: (r?.byProduct || []).slice(0, 5).map((p: any) => ({ name: p.productName, sku: p.sku, unitsSold: p.unitsSold, paidOrders: p.orders, netSales: p.netSales })),
+      partialData: !!r?.truncated,
+    };
+  }
+
+  private async myStockOverview(userId: string) {
+    if (!this.sellerReports) return { error: 'Stock lookup is unavailable right now.' };
+    const vendorId = await this.ownSellerId(userId);
+    if (!vendorId) return { error: 'No seller profile found for this account.' };
+    const r: any = await this.sellerReports.stockReport({ vendorId }, 'SELLER');
+    const rows: any[] = r?.rows || [];
+    const live = rows.filter((x) => x.liveStatus === 'Live');
+    const brief = (x: any) => ({ name: x.productName, sku: x.sku, availableStock: x.availableStock, paidUnitsSold: x.soldQuantity });
+    const noSales = live.filter((x) => !x.soldQuantity);
+    return {
+      scope: 'Your own catalog only. paidUnitsSold = all-time paid units (not cancelled, refunded or rejected).',
+      lowStockThreshold: LOW_STOCK_THRESHOLD,
+      totals: r?.totals ? {
+        products: r.totals.totalProducts, liveProducts: r.totals.liveProducts, inactiveProducts: r.totals.inactiveProducts,
+        lowStockProducts: r.totals.lowStockProducts, outOfStockLiveProducts: r.totals.outOfStockProducts,
+        totalAvailableStock: r.totals.totalAvailableStock, totalPaidUnitsSold: r.totals.totalSoldQuantity,
+      } : null,
+      outOfStockLive: live.filter((x) => x.outOfStock === 'Yes').sort((a, b) => b.soldQuantity - a.soldQuantity).slice(0, 10).map(brief),
+      lowStock: live.filter((x) => x.lowStock === 'Yes').sort((a, b) => a.availableStock - b.availableStock).slice(0, 10).map(brief),
+      bestSellers: rows.filter((x) => x.soldQuantity > 0).sort((a, b) => b.soldQuantity - a.soldQuantity).slice(0, 5).map(brief),
+      liveWithNoPaidSalesYet: { count: noSales.length, examples: noSales.slice(0, 10).map(brief) },
     };
   }
 }

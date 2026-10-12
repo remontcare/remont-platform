@@ -22,6 +22,10 @@ import { SellerRegistrationService, SellerRegistrationModule } from '../seller-r
 import { detectIntent, detectLanguage, hasNoHindiSignal, getReply, getSuggestions } from './intent-engine';
 import { openAiChatWithTools, parseAiJson, OpenAiMessage } from './openai-client';
 import { AiToolExecutor, FrontendAction, ToolContext, audienceForRole, chatToolsFor, CHAT_TOOL_ALLOWLIST } from './ai-tools';
+import { ROLE_PROMPT_LEAK_MARKERS, isRoleAudience, rolePromptFor, roleFallbackReply, roleSafeRefusal, roleSuggestions } from './remi-prompts';
+import { VendorsModule } from '../vendors/vendors.module';
+import { PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
+import { ReportsModule } from '../reports/reports.module';
 
 /**
  * Public chat with optional login: no Authorization header → anonymous public-sales mode;
@@ -216,6 +220,9 @@ export class AiAgentService {
       let dynamicOptions: string[] | undefined;
 
       const audience = audienceForRole(actor.userId ? actor.role : null);
+      // Registered partners/sellers (verified JWT role) get their own Remi persona, tools and fallbacks.
+      const roleAudience = isRoleAudience(audience) ? audience : null;
+      const fallbackReply = () => (roleAudience ? roleFallbackReply(roleAudience, lang) : getReply(intent, lang));
       const budget = this.limits ? await this.limits.budgetAllows(admission.identityKey, !actor.userId) : { allowed: true };
       if (!budget.allowed) this.logger.warn(`AI budget/quota reached (${budget.reason}) — rule-based reply for ${admission.identityKey}`);
 
@@ -227,6 +234,8 @@ export class AiAgentService {
             city, customerName, customerPhone, customerEmail,
             sessionId: session?.id, channel,
             allowedTools: CHAT_TOOL_ALLOWLIST[audience],
+            actorUserId: actor.userId ?? null,
+            audience,
           };
           // What's already known — so the model never re-asks. The phone NUMBER itself is not
           // sent to the provider; tools get it from ctx on the server.
@@ -254,7 +263,7 @@ export class AiAgentService {
           const redaction = newRedactionMap();
           const history = existingMessages.slice(-(cfg?.['ai.history.maxMessages'] ?? 12));
           const convo: OpenAiMessage[] = [
-            { role: 'system', content: REMI_SYSTEM_PROMPT },
+            { role: 'system', content: roleAudience ? rolePromptFor(roleAudience) : REMI_SYSTEM_PROMPT },
             ...contextMsg,
             ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: redactForProvider(String(m.content ?? ''), redaction) })),
             ...langMsg,
@@ -326,20 +335,20 @@ export class AiAgentService {
 
           if (!replyText) {
             this.logger.warn('OpenAI tool loop ended without a final text reply — falling back to rule-based');
-            replyText = getReply(intent, lang);
-          } else if (PROMPT_LEAK_MARKERS.some((m) => replyText.includes(m))) {
+            replyText = fallbackReply();
+          } else if ([...PROMPT_LEAK_MARKERS, ...ROLE_PROMPT_LEAK_MARKERS].some((m) => replyText.includes(m))) {
             this.logger.warn(`Remi reply looked like a system-prompt leak — replaced (${admission.identityKey})`);
-            replyText = SAFE_REFUSAL;
+            replyText = roleAudience ? roleSafeRefusal(roleAudience) : SAFE_REFUSAL;
           } else {
             // The caller's own details may appear in the reply shown back to them.
             replyText = restoreFromProvider(replyText, redaction);
           }
         } catch (e) {
           this.logger.warn(`OpenAI chat failed, falling back to rule-based: ${redactForLog(e?.message)}`);
-          replyText = getReply(intent, lang);
+          replyText = fallbackReply();
         }
       } else {
-        replyText = getReply(intent, lang);
+        replyText = fallbackReply();
       }
 
       const userMsg: ChatMessage = { role: 'user', content: message, timestamp: new Date().toISOString() };
@@ -375,6 +384,8 @@ export class AiAgentService {
       // get_estimate. Preserves the original auto-capture behavior for the non-tool-calling path.
       let leadId = toolLeadId || session.resultLeadId || undefined;
       if (
+        // A registered partner/seller asking about their work is not a customer sales lead.
+        !roleAudience &&
         !leadId &&
         customerPhone &&
         ['AC', 'PLUMBING', 'ELECTRICAL', 'APPLIANCE', 'INTERIOR', 'RENOVATION',
@@ -404,7 +415,7 @@ export class AiAgentService {
         language: lang,
         // present_options this turn wins over the generic per-intent fallback list —
         // it's what actually drives the "answer by tapping, not typing" flow.
-        suggestions: dynamicOptions || suggestions,
+        suggestions: dynamicOptions || (roleAudience ? roleSuggestions(roleAudience, lang) : suggestions),
         leadId,
         actions,
       };
@@ -756,6 +767,8 @@ export class AiToolsController {
   imports: [
     CrmModule, ServicesModule, ProductsModule, CitiesModule,
     EstimatesModule, PartnerRegistrationModule, SellerRegistrationModule, AiLimitsModule,
+    // Own-data services for the partner/seller chat tools (same services the app's screens use).
+    VendorsModule, PartnerLedgerModule, ReportsModule,
   ],
   controllers: [AiAgentController, AiToolsController],
   providers: [AiAgentService, AiToolsService, AiToolExecutor, PrismaService],
