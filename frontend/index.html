@@ -12270,19 +12270,25 @@ function _pdPrintWindow(title, bodyHtml) {
 
 function pdDownloadInvoice() {
   var orderId = _pdOrderId;
-  apiPost('/api/v1/invoices/orders/' + orderId + '/generate', {}).then(function(res) {
-    var inv = res && res.data ? res.data : res;
-    var rows =
-      '<tr><td>Subtotal</td><td class="right">₹' + Number(inv.customerSubtotal).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr><td>CGST</td><td class="right">₹' + Number(inv.customerCgst).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr><td>SGST</td><td class="right">₹' + Number(inv.customerSgst).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr class="total"><td>Total</td><td class="right">₹' + Number(inv.customerTotal).toLocaleString('en-IN') + '</td></tr>';
-    _pdPrintWindow('Invoice ' + inv.invoiceNumber,
-      '<h1>Remont India</h1><h2>GST Invoice · ' + escHtml(inv.invoiceNumber) + '</h2>' +
-      '<div style="font-size:13px;color:#6b7280">' + new Date(inv.generatedAt).toLocaleDateString('en-IN') + '</div>' +
-      '<table>' + rows + '</table>');
+  var base = (typeof API_BASE !== 'undefined' && API_BASE) || (typeof window.API_BASE === 'string' ? window.API_BASE : '');
+  var token = localStorage.getItem('remont_token');
+  var headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  // Issue the invoice if it isn't yet (idempotent; refused while the order isn't invoiceable),
+  // then download the issued PDF itself — never a page rebuilt in the browser.
+  apiPost('/api/v1/invoices/orders/' + orderId + '/generate', {}).catch(function() { return null; }).then(function() {
+    return fetch(base + '/api/v1/invoices/orders/' + orderId + '/pdf?docKind=ALL', { headers: headers });
+  }).then(function(res) {
+    if (res.status === 404) throw new Error('The invoice for this booking is not issued yet — it is issued once the job is completed or the order is shipped.');
+    if (!res.ok) throw new Error('Could not download the invoice (' + res.status + ')');
+    return res.blob();
+  }).then(function(blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'Remont-invoice-' + orderId + '.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
   }).catch(function(e) {
-    showToast((e && e.message) || 'Could not generate invoice', 'error');
+    showToast((e && e.message) || 'Could not download the invoice', 'error');
   });
 }
 

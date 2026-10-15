@@ -955,7 +955,7 @@ export function addressSnapshotFields(addr?: {
 // "Generate Invoice" button — didn't even share code with the other two).
 export * from './billing-engine';
 import {
-  calculateInvoice, stateFromGstin, normalizeState,
+  calculateInvoice, stateFromGstin, normalizeState, isValidGstinFormat,
   type BillingTransactionTypeValue, type BillingLineInput,
 } from './billing-engine';
 
@@ -1248,6 +1248,9 @@ export interface TaxRateResolver {
   // overrideInclusive accepts a Prisma-nullable boolean directly (Product.gstInclusive).
   priceTypeFor(hsnSac?: string | null, categoryId?: string | null, overrideInclusive?: boolean | null): 'INCLUSIVE' | 'EXCLUSIVE';
   defaultHsn: string | null;
+  /** true when a rate was actually configured (override, HSN/category row or blanket row) —
+   * false means rateFor() is only returning the unconfigured default. */
+  hasConfiguredRate?(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): boolean;
 }
 export async function buildTaxRateResolver(
   prisma: any,
@@ -1292,6 +1295,14 @@ export async function buildTaxRateResolver(
       if (row.gstApplicable === false) return 0; // exempt — distinct from a genuine 0% NIL rate, but forces the same 0 here
       return Number(row.rate);
     },
+    hasConfiguredRate(hsnSac, overridePercent, categoryId) {
+      if (overridePercent !== undefined && overridePercent !== null && !Number.isNaN(Number(overridePercent))) return true;
+      if (hsnSac && byHsn.has(hsnSac)) return true;
+      if (categoryId && byCategory.has(categoryId)) return true;
+      // Only a genuine blanket row (no HSN, no category) configures everything else — another
+      // category's row must not silently price this product (resolveRow's legacy fallback would).
+      return rows.some((r: any) => !r.hsnCode && !r.productCategoryId);
+    },
     priceTypeFor(hsnSac, categoryId, overrideInclusive) {
       if (overrideInclusive !== undefined && overrideInclusive !== null) {
         return overrideInclusive ? 'INCLUSIVE' : 'EXCLUSIVE';
@@ -1314,6 +1325,12 @@ export async function resolveProductGstLine(
   product: { hsnSac?: string | null; gstOverridePercent?: any; gstInclusive?: boolean | null; categoryId: string },
   lineAmount: number,
 ): Promise<{ taxableValue: number; gstAmount: number; ratePercent: number; inclusive: boolean }> {
+  // A product is never sold at a silent 0% because nobody configured its GST: without a product
+  // override, an HSN/category TaxConfig row or a blanket PRODUCT row, checkout refuses it. (An
+  // exempt or nil-rated product is configured explicitly — override 0, or gstApplicable=false.)
+  if (prodTax.hasConfiguredRate && !prodTax.hasConfiguredRate(product.hsnSac, product.gstOverridePercent, product.categoryId)) {
+    throw new BadRequestException(`"${(product as any).name || 'This product'}" can't be sold yet: its GST rate is not configured. An admin must set it (Admin › Taxes, or the product's GST rate).`);
+  }
   const ratePercent = prodTax.rateFor(product.hsnSac, product.gstOverridePercent, product.categoryId);
   const inclusive = prodTax.priceTypeFor(product.hsnSac, product.categoryId, product.gstInclusive) === 'INCLUSIVE';
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -1482,7 +1499,10 @@ export interface BillingCompanyConfig {
   bankName: string; bankIfsc: string; bankAccountNumber: string;
   invoiceTerms: string[];
 }
-const BILLING_CONFIG_DEFAULTS: BillingCompanyConfig = {
+// The company details every invoice was issued with before billing settings existed. Used ONLY for
+// a one-time migration into SiteSetting (group 'billing') when no billing setting exists at all —
+// never as a silent per-field fallback. From then on Admin › Settings › Billing is the only source.
+const LEGACY_BILLING_DETAILS: BillingCompanyConfig = {
   legalName: 'REMONT INDIA PRIVATE LIMITED',
   gstin: '23AAKCR9036L1ZY',
   state: 'Madhya Pradesh',
@@ -1500,25 +1520,47 @@ const BILLING_CONFIG_DEFAULTS: BillingCompanyConfig = {
     'GST as applicable has been charged only on Remont India Private Limited’s own taxable supply, as itemized above.',
   ],
 };
+
+const STANDARD_INVOICE_TERMS = LEGACY_BILLING_DETAILS.invoiceTerms;
+
+/** Billing details for invoices — from saved settings; refuses to invoice with incomplete identity. */
 export async function getBillingCompanyConfig(prisma: any): Promise<BillingCompanyConfig> {
-  const rows = await prisma.siteSetting.findMany({ where: { group: 'billing' } });
+  let rows: { key: string; value: string }[] = await prisma.siteSetting.findMany({ where: { group: 'billing' } });
+  if (!rows.length) {
+    const L = LEGACY_BILLING_DETAILS;
+    const seed: [string, string, string][] = [
+      ['company_legal_name', L.legalName, 'Legal name (as on GST registration)'],
+      ['company_gstin', L.gstin, 'GSTIN'],
+      ['company_address', L.address, 'Registered address'],
+      ['company_mobile', L.mobile, 'Mobile'],
+      ['company_email', L.email, 'Email'],
+      ['company_website', L.website, 'Website'],
+      ['company_bank_name', L.bankName, 'Bank name'],
+      ['company_ifsc', L.bankIfsc, 'Bank IFSC'],
+      ['company_account_number', L.bankAccountNumber, 'Bank account number'],
+      ['invoice_terms', L.invoiceTerms.join('\n'), 'Invoice terms (one per line)'],
+    ];
+    await prisma.siteSetting.createMany({ data: seed.map(([key, value, label]) => ({ key, value, label, group: 'billing' })), skipDuplicates: true });
+    rows = seed.map(([key, value]) => ({ key, value }));
+  }
   const map: Record<string, string> = {};
-  for (const r of rows) map[r.key] = r.value;
-  const gstin = map.company_gstin || BILLING_CONFIG_DEFAULTS.gstin;
+  for (const r of rows) map[r.key] = (r.value ?? '').trim();
+  const missing = ['company_legal_name', 'company_gstin', 'company_address'].filter((k) => !map[k]);
+  if (missing.length) throw new BadRequestException(`Billing settings are incomplete (${missing.join(', ')}) — complete them in Admin › Settings › Billing before invoices can be issued`);
+  const gstin = map.company_gstin.toUpperCase();
+  if (!isValidGstinFormat(gstin)) throw new BadRequestException(`Billing settings: "${gstin}" is not a valid GSTIN`);
   return {
-    legalName: map.company_legal_name || BILLING_CONFIG_DEFAULTS.legalName,
+    legalName: map.company_legal_name,
     gstin,
-    // The GSTIN's own state prefix is authoritative once a GSTIN is set — prevents the
-    // registered state silently drifting out of sync with an admin-edited GSTIN.
-    state: stateFromGstin(gstin) || map.company_state || BILLING_CONFIG_DEFAULTS.state,
-    address: map.company_address || BILLING_CONFIG_DEFAULTS.address,
-    mobile: map.company_mobile || BILLING_CONFIG_DEFAULTS.mobile,
-    email: map.company_email || BILLING_CONFIG_DEFAULTS.email,
-    website: map.company_website || BILLING_CONFIG_DEFAULTS.website,
-    bankName: map.company_bank_name || BILLING_CONFIG_DEFAULTS.bankName,
-    bankIfsc: map.company_ifsc || BILLING_CONFIG_DEFAULTS.bankIfsc,
-    bankAccountNumber: map.company_account_number || BILLING_CONFIG_DEFAULTS.bankAccountNumber,
-    invoiceTerms: map.invoice_terms ? map.invoice_terms.split('\n').map((s) => s.trim()).filter(Boolean) : BILLING_CONFIG_DEFAULTS.invoiceTerms,
+    state: stateFromGstin(gstin) || map.company_state || '',
+    address: map.company_address,
+    mobile: map.company_mobile || '',
+    email: map.company_email || '',
+    website: map.company_website || '',
+    bankName: map.company_bank_name || '',
+    bankIfsc: map.company_ifsc || '',
+    bankAccountNumber: map.company_account_number || '',
+    invoiceTerms: map.invoice_terms ? map.invoice_terms.split('\n').map((t) => t.trim()).filter(Boolean) : STANDARD_INVOICE_TERMS,
   };
 }
 

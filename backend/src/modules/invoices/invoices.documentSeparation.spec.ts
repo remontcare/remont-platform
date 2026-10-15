@@ -1,4 +1,5 @@
 import { InvoicesService } from './invoices.module';
+import { billingFindMany } from '../../common/billing-fixture.test';
 
 /**
  * Phase 5 (C-08) — Seller->Customer product tax invoice and Remont->Seller platform fee
@@ -17,7 +18,7 @@ function makeService() {
       findUnique: jest.fn(async () => null),
       create: jest.fn(async (args: any) => ({ id: 'inv-1', ...args.data })),
     },
-    siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => null) },
     taxConfig: { findMany: jest.fn(async () => []) },
   };
   let seq = 0;

@@ -7,7 +7,7 @@ import { OrdersService, GuestBookingService } from './orders.module';
  * without creating anything.
  */
 const SERVICE = { id: 'svc-tiny', categoryId: 'cat-1', basePrice: 5, hsnSac: null, gstOverridePercent: null, isActive: true, durationMinutes: 60, name: 'Tiny job' };
-const PRODUCT = { id: 'p1', categoryId: 'pc-1', vendorId: null, price: 100, hsnSac: null, gstOverridePercent: null, gstInclusive: null, isActive: true };
+const PRODUCT = { id: 'p1', categoryId: 'pc-1', vendorId: null, price: 100, hsnSac: null, gstOverridePercent: 18, gstInclusive: null, isActive: true };
 const RULES = [
   { id: 'min-199', ruleType: 'MINIMUM_CHARGE', scope: 'CATEGORY', categoryId: 'cat-1', serviceId: null, cityId: null, commissionType: 'FLAT', value: 199, slabJson: null, priority: 0, stackable: false, isActive: true },
   { id: 'comm-20', ruleType: 'COMMISSION', scope: 'CATEGORY', categoryId: 'cat-1', serviceId: null, cityId: null, commissionType: 'PERCENTAGE', value: 20, slabJson: null, priority: 0, stackable: false, isActive: true },

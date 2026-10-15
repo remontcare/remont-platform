@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { billingFindMany } from '../../common/billing-fixture.test';
 import { InvoicesService, assertInvoiceEligible } from './invoices.module';
 
 /**
@@ -13,7 +14,7 @@ function makeService(order: any, existingInvoice: any = null) {
       findUnique: jest.fn(async () => existingInvoice),
       create: jest.fn(async (args: any) => ({ id: 'inv-1', ...args.data })),
     },
-    siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => null) },
     taxConfig: { findMany: jest.fn(async () => []) },
   };
   let seq = 0;

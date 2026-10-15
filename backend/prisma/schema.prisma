@@ -878,6 +878,9 @@ model ServiceCategory {
   subCategories   SubCategory[]
   commissionRules CommissionRule[]
   priceModifiers  ServicePriceModifier[]
+  // Section 9(5): for services in this category supplied through Remont by an UNREGISTERED partner,
+  // Remont (the e-commerce operator) issues the tax invoice and pays the GST. Admin-configurable.
+  section95Applicable Boolean @default(true)
 }
 
 model SubCategory {
@@ -2324,6 +2327,14 @@ model Invoice {
   order          Order           @relation(fields: [orderId], references: [id])
   creditNotes    CreditNote[]
   eInvoiceRecord EInvoiceRecord?
+  // Partner job where Remont, as e-commerce operator, issues the customer tax invoice and pays the
+  // GST on the service under section 9(5) (unregistered partner, eligible category).
+  section95         Boolean          @default(false)
+  // GST was collected but neither the partner nor Remont (category not under 9(5)) is liable — needs review.
+  taxReviewRequired Boolean          @default(false)
+  // Incremented on every authorised reissue; earlier versions are kept in InvoiceVersion.
+  version           Int              @default(1)
+  versions          InvoiceVersion[]
 }
 
 // Phase 6 (C-06) — the formal GST adjustment document for a post-invoice refund. An issued
@@ -2353,8 +2364,55 @@ model CreditNote {
 
   invoice Invoice @relation(fields: [invoiceId], references: [id])
 
+  // REFUND (a refund after issue) or INVOICE_CANCELLATION (reverses an invoice that was reissued)
+  kind                  String  @default("REFUND")
+  originalInvoiceNumber String?
+
   @@index([orderId])
   @@index([refundRequestId])
+}
+
+/// An issued invoice that was superseded by an authorised reissue — its full row as it was issued,
+/// kept immutable for the audit trail (the matching cancellation credit note reverses it).
+model InvoiceVersion {
+  id                   String   @id @default(cuid())
+  invoiceId            String
+  invoice              Invoice  @relation(fields: [invoiceId], references: [id])
+  version              Int
+  invoiceNumber        String
+  vendorDocumentNumber String?
+  remontDocumentNumber String?
+  snapshot             Json
+  reason               String
+  supersededBy         String
+  creditNoteId         String?
+  supersededAt         DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+/// Purchases with input GST (bills from suppliers) — entered by an admin, plus gateway fees, which
+/// the purchase register derives from PaymentTransaction.gatewayFee automatically.
+model PurchaseRecord {
+  id              String   @id @default(cuid())
+  supplierName    String
+  supplierGstin   String?
+  supplierState   String?
+  invoiceNumber   String
+  invoiceDate     DateTime
+  category        String   @default("GENERAL")
+  description     String?
+  hsnSac          String?
+  taxableValue    Decimal  @db.Decimal(12, 2)
+  cgst            Decimal  @default(0) @db.Decimal(12, 2)
+  sgst            Decimal  @default(0) @db.Decimal(12, 2)
+  igst            Decimal  @default(0) @db.Decimal(12, 2)
+  totalValue      Decimal  @db.Decimal(12, 2)
+  itcEligible     Boolean  @default(true)
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@index([invoiceDate])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2534,6 +2592,11 @@ model PaymentTransaction {
   creditedAt        DateTime?
 
   @@index([userId])
+  // Gateway charges on this payment (Razorpay payment.fee / payment.tax, in rupees) — an expense
+  // with input GST. Null until known.
+  gatewayFee      Decimal? @db.Decimal(10, 2)
+  gatewayFeeTax   Decimal? @db.Decimal(10, 2)
+
   @@index([orderId])
   @@index([masterOrderId])
   @@index([refundRequestId])

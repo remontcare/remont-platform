@@ -3875,7 +3875,9 @@ export class AdminController {
   @Get('invoices/:id') invoice(@Param('id') id: string) { return this.admin.getInvoice(id); }
   @Post('invoices/:orderId/generate') genInvoice(@Param('orderId') id: string) { return this.admin.generateInvoice(id); }
   @Get('invoices/orders/:orderId/pdf')
-  async invoicePdf(@Param('orderId') id: string, @Query('doc') doc: 'CUSTOMER' | 'VENDOR' | 'REMONT' = 'CUSTOMER', @Res() res: Response) {
+  async invoicePdf(@Param('orderId') id: string, @Query('doc') docParam: string = 'CUSTOMER', @Res() res: Response) {
+    // ALL = every issued document plus its credit notes, in one PDF.
+    const doc = (['CUSTOMER', 'VENDOR', 'REMONT', 'ALL'].includes(docParam) ? docParam : 'CUSTOMER') as 'CUSTOMER' | 'VENDOR' | 'REMONT' | 'ALL';
     const buf = await this.invoices.getPdfBufferAdmin(id, doc);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="invoice-${id}-${doc.toLowerCase()}.pdf"`);

@@ -6,6 +6,8 @@ import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, getBillingCompanyConfig } from '../../common';
 import { UserRole } from '@prisma/client';
 import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from './seller-reports';
+import { AccountingReportsService, AccountingReportsController, TEST_GATEWAYS } from './accounting-reports';
+import { PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GST / Accounting / Ledger Excel exports — every row is read from already-
@@ -64,10 +66,10 @@ export class ReportsService {
 
     const rows: any[] = [];
     for (const inv of invoices) {
-      const isSummaryOnly = inv.transactionType === 'PLATFORM_SERVICE';
+      const isSummaryOnly = inv.transactionType === 'PLATFORM_SERVICE' && !inv.section95;
       if (!isSummaryOnly) {
         rows.push({
-          invoiceNo: inv.invoiceNumber, invoiceDate: inv.generatedAt, transactionType: inv.transactionType || 'UNCLASSIFIED',
+          invoiceNo: inv.invoiceNumber, invoiceDate: inv.generatedAt, transactionType: inv.section95 ? 'PLATFORM_SERVICE (Section 9(5) — Remont as ECO)' : inv.transactionType || 'UNCLASSIFIED',
           partyName: inv.order?.customer?.name || inv.order?.guestName || 'Customer',
           gstin: inv.supplierGstin || '', placeOfSupply: inv.placeOfSupply || '',
           taxableValue: Number(inv.customerSubtotal), cgst: Number(inv.customerCgst), sgst: Number(inv.customerSgst), igst: Number(inv.customerIgst),
@@ -76,8 +78,11 @@ export class ReportsService {
       }
       if (Number(inv.remontTotal) > 0) {
         rows.push({
-          invoiceNo: inv.invoiceNumber + '-FEE', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Remont Fee)`,
-          partyName: inv.order?.customer?.name || 'Customer',
+          invoiceNo: inv.remontDocumentNumber || inv.invoiceNumber + '-FEE', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Remont Fee)`,
+          // Commission is billed to the partner (service) or seller (product), not the customer.
+          partyName: (inv.lineItemsSnapshot as any)?.parties?.remont?.recipient?.name
+            || (inv.transactionType === 'PLATFORM_SERVICE' ? inv.order?.vendor?.businessName || inv.order?.vendor?.fullName : null)
+            || inv.order?.customer?.name || 'Customer',
           gstin: company.gstin, placeOfSupply: inv.placeOfSupply || '', // Remont's own GSTIN — Remont is always the supplier on this row
           taxableValue: Number(inv.platformCommission) + Number(inv.bookingFee), cgst: Number(inv.remontCgst), sgst: Number(inv.remontSgst), igst: Number(inv.remontIgst),
           totalValue: Number(inv.remontTotal),
@@ -85,7 +90,7 @@ export class ReportsService {
       }
       if (Number(inv.vendorTotal) > 0 && inv.order?.vendor?.gstin) {
         rows.push({
-          invoiceNo: inv.invoiceNumber + '-PTR', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Partner Service Invoice)`,
+          invoiceNo: inv.vendorDocumentNumber || inv.invoiceNumber + '-PTR', invoiceDate: inv.generatedAt, transactionType: `${inv.transactionType || 'UNCLASSIFIED'} (Partner Service Invoice)`,
           partyName: inv.order?.vendor?.fullName || inv.order?.vendor?.businessName || 'Partner',
           gstin: inv.order?.vendor?.gstin || '', placeOfSupply: inv.placeOfSupply || '',
           taxableValue: Number(inv.vendorLabor), cgst: Number(inv.vendorCgst), sgst: Number(inv.vendorSgst), igst: 0,
@@ -132,6 +137,18 @@ export class ReportsService {
     const payments = orderIds.length
       ? await this.prisma.paymentTransaction.findMany({ where: { orderId: { in: orderIds } } })
       : [];
+    // Refunds = money actually returned on processed refund requests (wallet + gateway legs).
+    // (PaymentTransaction.refundRequestId is never written for refunds, so it can't be the source.)
+    const processedRefunds = orderIds.length
+      ? await this.prisma.refundRequest.findMany({ where: { orderId: { in: orderIds }, status: 'PROCESSED' } })
+      : [];
+    const refundByOrder = new Map<string, number>();
+    for (const r of processedRefunds) {
+      const amt = r.walletCreditAmount != null || r.gatewayRefundAmount != null
+        ? Number(r.walletCreditAmount || 0) + Number(r.gatewayRefundAmount || 0)
+        : Number(r.approvedAmount || 0);
+      refundByOrder.set(r.orderId!, (refundByOrder.get(r.orderId!) || 0) + amt);
+    }
     const paymentsByOrder = new Map<string, typeof payments>();
     for (const p of payments) {
       if (!p.orderId) continue;
@@ -158,13 +175,17 @@ export class ReportsService {
       { header: 'Net Transaction Value', key: 'net', width: 18 },
       { header: 'Transaction Status', key: 'status', width: 16 },
       { header: 'Payment Mode', key: 'paymentMode', width: 14 },
+      { header: 'Test payment (excluded)', key: 'testPayment', width: 22 },
     ];
     ws.getRow(1).font = { bold: true };
 
     for (const o of ordersList) {
       const type = o.billingTransactionType || o.invoice?.transactionType || 'UNCLASSIFIED';
-      const paid = (paymentsByOrder.get(o.id) || []).filter((p) => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
-      const refunded = (paymentsByOrder.get(o.id) || []).filter((p) => p.refundRequestId).reduce((s, p) => s + Number(p.amount), 0);
+      const own = paymentsByOrder.get(o.id) || [];
+      // Test-gateway (DEV_MOCK / RAZORPAY_DEV) payments are not money received.
+      const testPaid = own.filter((p) => p.status === 'PAID' && TEST_GATEWAYS.includes(p.gateway)).reduce((s, p) => s + Number(p.amount), 0);
+      const paid = own.filter((p) => p.status === 'PAID' && !p.isWalletTopup && !TEST_GATEWAYS.includes(p.gateway)).reduce((s, p) => s + Number(p.amount), 0);
+      const refunded = Math.round((refundByOrder.get(o.id) || 0) * 100) / 100;
       const remontRevenue = type === 'DIRECT_PROJECT' ? Number(o.subtotal) : Number(o.remontCommission) + Number(o.platformCharges);
       ws.addRow({
         date: o.createdAt.toLocaleDateString('en-IN'),
@@ -183,6 +204,7 @@ export class ReportsService {
         net: paid - refunded,
         status: o.status,
         paymentMode: o.paymentMethod || '',
+        testPayment: testPaid > 0 ? testPaid : '',
       });
     }
     return toBuffer(wb);
@@ -516,5 +538,10 @@ export class ReportsController {
   }
 }
 
-@Module({ controllers: [ReportsController], providers: [ReportsService, SellerReportsService], exports: [ReportsService, SellerReportsService] })
+@Module({
+  imports: [PartnerLedgerModule],
+  controllers: [ReportsController, AccountingReportsController],
+  providers: [ReportsService, SellerReportsService, AccountingReportsService],
+  exports: [ReportsService, SellerReportsService, AccountingReportsService],
+})
 export class ReportsModule {}

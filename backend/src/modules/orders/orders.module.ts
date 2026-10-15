@@ -1323,6 +1323,14 @@ export class OrdersService {
         throw new BadRequestException('Order cannot be completed at this stage');
       }
       const updated = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+      // An in-house technician is Remont staff, paid salary — the job's whole value is Remont's
+      // revenue (DIRECT_PROJECT invoice). Crediting partner earnings/payout as well would count
+      // the same money twice, so only the job count moves. (Cash they collect is still recorded
+      // by the COD collection flow.)
+      if (v.staffType === 'IN_HOUSE') {
+        await tx.serviceVendor.update({ where: { id: v.id }, data: { completedJobs: { increment: 1 } } });
+        return updated;
+      }
       await tx.serviceVendor.update({
         where: { id: v.id },
         data: {

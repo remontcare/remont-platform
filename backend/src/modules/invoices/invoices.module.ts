@@ -1,4 +1,5 @@
-import { Module, Injectable, Controller, Get, Post, Param, Query, UseGuards, NotFoundException, ForbiddenException, BadRequestException, Res } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards, NotFoundException, ForbiddenException, BadRequestException, ConflictException, Res, Logger } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -6,10 +7,13 @@ import {
   JwtAuthGuard, CurrentUser, JwtPayload,
   buildInvoiceBreakdown, resolveBillingTransactionType, buildTaxRateResolver, getBillingCompanyConfig,
   stateFromGstin, PLATFORM_FEE_DEFAULT_RATE, PLATFORM_FEE_DEFAULT_SAC, distributeInvoiceDiscount, buildServiceTaxResolver,
-  nextInvoiceDocumentNumber,
+  nextInvoiceDocumentNumber, isValidGstinFormat, logAudit, Roles, RolesGuard,
   type BillingLineInput, type BillingTransactionTypeValue,
 } from '../../common';
-import { renderInvoicePdf, buildInvoiceViewModel, type InvoiceDocKind } from './invoice-pdf';
+import { renderInvoiceBundlePdf, buildInvoiceViewModel, type InvoiceDocKind, type InvoicePdfPage, type InvoicePaymentInfo } from './invoice-pdf';
+
+export type InvoicePdfRequest = InvoiceDocKind | 'ALL';
+const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Order statuses on which a (permanent, immutable) tax invoice may be issued. Anything else —
 // unpaid, cancelled, refunded, or a value outside OrderStatus — is refused.
@@ -38,6 +42,7 @@ export function assertInvoiceEligible(order: { status?: string | null; productFu
 
 @Injectable()
 export class InvoicesService {
+  private readonly logger = new Logger(InvoicesService.name);
   constructor(private prisma: PrismaService) {}
 
   /**
@@ -52,20 +57,58 @@ export class InvoicesService {
     const existing = await this.prisma.invoice.findUnique({ where: { orderId } });
     if (existing) return existing;
 
+    const order = await this.loadOrderForBilling(orderId);
+    assertInvoiceEligible(order);
+    const { breakdown, transactionType, hasVendorDoc, hasRemontDoc, section95, taxReviewRequired } = await this.computeInvoice(order);
+
+    // Phase 5 (C-07/C-08/L-01) — BEGIN TRANSACTION -> atomic per-series counter -> CREATE
+    // -> COMMIT, all in one DB transaction: if invoice.create() fails, the counter
+    // increment(s) above roll back with it, so a failed generation never burns/reuses a
+    // number. CUSTOMER's number is always allocated (every transaction type has a
+    // customer-facing page); VENDOR/REMONT are legally distinct documents (different
+    // issuer/recipient — C-08) and only get their own number when that page actually
+    // exists for this order, so an order with no partner line or no Remont commission
+    // never wastes a sequence slot on a document that was never issued.
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const customerDocumentNumber = await nextInvoiceDocumentNumber(tx, 'CUSTOMER_TAX_INVOICE');
+      const vendorDocumentNumber = hasVendorDoc ? await nextInvoiceDocumentNumber(tx, 'PARTNER_SETTLEMENT_INVOICE') : null;
+      const remontDocumentNumber = hasRemontDoc ? await nextInvoiceDocumentNumber(tx, 'PLATFORM_FEE_INVOICE') : null;
+      return tx.invoice.create({
+        data: { orderId, ...breakdown, section95, taxReviewRequired, invoiceNumber: customerDocumentNumber, vendorDocumentNumber, remontDocumentNumber },
+      });
+    });
+    if (!order.billingTransactionType) {
+      await this.prisma.order.update({ where: { id: orderId }, data: { billingTransactionType: transactionType } });
+    }
+    return invoice;
+  }
+
+  /** The order with everything the invoice computation reads. */
+  async loadOrderForBilling(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
         vendor: true,
-        service: true,
+        service: { include: { category: { select: { section95Applicable: true, warrantyDays: true } } } },
         serviceItems: { include: { service: true } },
         items: { include: { product: { include: { vendor: true } } } },
         extraWorkItems: { where: { customerApproved: true } },
         discountAllocation: true,
+        customer: true, address: true, masterOrder: true,
       },
     });
     if (!order) throw new NotFoundException('Order not found');
-    assertInvoiceEligible(order);
+    return order;
+  }
 
+  /**
+   * Pure computation of an order's invoice documents (no numbers, no writes) — shared by first
+   * issue and by an authorised reissue, so a corrected invoice is computed exactly like a new one.
+   */
+  async computeInvoice(order: BillingOrder) {
+    // Section 9(5) — set in the PLATFORM_SERVICE branch below.
+    let section95 = false;
+    let taxReviewRequired = false;
     const transactionType: BillingTransactionTypeValue =
       order.billingTransactionType || resolveBillingTransactionType(order.type, order.vendor?.staffType);
     const placeOfSupply = order.snapshotState || 'Madhya Pradesh';
@@ -150,6 +193,16 @@ export class InvoicesService {
       // No booking fee is charged at checkout, so none is printed (was a ₹49 fallback).
       bookingFee = 0;
       const serviceRate = svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent);
+      // Section 9(5) CGST Act: a service supplied through Remont (the e-commerce operator) by a
+      // partner who is NOT GST-registered — Remont is the person liable for that GST and issues
+      // the customer's tax invoice itself. Which categories are notified for 9(5) is admin
+      // configuration (ServiceCategory.section95Applicable). Unregistered partner + category not
+      // under 9(5) + GST charged = nobody is liable for the GST collected → flagged for review.
+      const partnerRegistered = !!order.vendor?.gstin && isValidGstinFormat(String(order.vendor.gstin).trim().toUpperCase());
+      if (!partnerRegistered) {
+        if (order.service?.category?.section95Applicable !== false) section95 = true;
+        else if (serviceRate > 0) taxReviewRequired = true;
+      }
 
       // Customer summary mirrors exactly what the formal Remont Platform Fee Invoice
       // below will bill (fee + booking fee, both at feeRate) so the GST-on-fee figure
@@ -162,7 +215,7 @@ export class InvoicesService {
       // The customer page is a payment statement (never a tax invoice — see invoice-pdf.ts):
       // the service as charged, with the GST checkout actually collected on it.
       const [partnerLine] = distributeInvoiceDiscount(
-        [{ description: order.service?.name || 'Partner Service Value', qty: 1, rate: partnerAmount, taxRatePercent: serviceRate }],
+        [{ description: order.service?.name || 'Partner Service Value', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: serviceRate }],
         orderDiscount,
       );
       customerLines = [
@@ -175,7 +228,8 @@ export class InvoicesService {
       // invoice" badge for this page regardless); supplierGstin stays blank so it's never
       // printed as if it carried Remont's GSTIN as an invoicing entity.
       customerSupplierState = company.state;
-      customerSupplierGstin = null;
+      // Under 9(5) the customer document IS Remont's tax invoice, so it carries Remont's GSTIN.
+      customerSupplierGstin = section95 ? company.gstin : null;
 
       vendorLines = partnerAmount > 0
         ? [{ description: order.service?.name || 'Partner Service Value', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) }]
@@ -274,34 +328,14 @@ export class InvoicesService {
     // this frozen block over re-reading the seller's/customer's/Remont's CURRENT master
     // data, so an issued invoice's legal party details can never silently change after the
     // fact just because someone edits a profile/business listing later.
-    const partySnapshotSource = { ...breakdown, generatedAt: new Date() };
+    const partySnapshotSource = { ...breakdown, section95, taxReviewRequired, generatedAt: new Date() };
     const parties: Record<string, { supplier: unknown; recipient: unknown }> = {};
     for (const [key, docKind] of [['customer', 'CUSTOMER'], ['vendor', 'VENDOR'], ['remont', 'REMONT']] as [string, InvoiceDocKind][]) {
       const vm = buildInvoiceViewModel(partySnapshotSource, docKind, { company, order });
       parties[key] = { supplier: vm.supplier, recipient: vm.recipient };
     }
     (breakdown as any).lineItemsSnapshot = { ...(breakdown.lineItemsSnapshot as any), parties };
-
-    // Phase 5 (C-07/C-08/L-01) — BEGIN TRANSACTION -> atomic per-series counter -> CREATE
-    // -> COMMIT, all in one DB transaction: if invoice.create() fails, the counter
-    // increment(s) above roll back with it, so a failed generation never burns/reuses a
-    // number. CUSTOMER's number is always allocated (every transaction type has a
-    // customer-facing page); VENDOR/REMONT are legally distinct documents (different
-    // issuer/recipient — C-08) and only get their own number when that page actually
-    // exists for this order, so an order with no partner line or no Remont commission
-    // never wastes a sequence slot on a document that was never issued.
-    const invoice = await this.prisma.$transaction(async (tx) => {
-      const customerDocumentNumber = await nextInvoiceDocumentNumber(tx, 'CUSTOMER_TAX_INVOICE');
-      const vendorDocumentNumber = vendorLines.length ? await nextInvoiceDocumentNumber(tx, 'PARTNER_SETTLEMENT_INVOICE') : null;
-      const remontDocumentNumber = remontLines.length ? await nextInvoiceDocumentNumber(tx, 'PLATFORM_FEE_INVOICE') : null;
-      return tx.invoice.create({
-        data: { orderId, ...breakdown, invoiceNumber: customerDocumentNumber, vendorDocumentNumber, remontDocumentNumber },
-      });
-    });
-    if (!order.billingTransactionType) {
-      await this.prisma.order.update({ where: { id: orderId }, data: { billingTransactionType: transactionType } });
-    }
-    return invoice;
+    return { breakdown, transactionType, hasVendorDoc: vendorLines.length > 0, hasRemontDoc: remontLines.length > 0, section95, taxReviewRequired };
   }
 
   /**
@@ -334,6 +368,7 @@ export class InvoicesService {
         data: {
           creditNoteNumber, invoiceId: invoice.id, orderId, refundRequestId, reason,
           taxableValueReversed, cgstReversed, sgstReversed, igstReversed, totalReversed,
+          kind: 'REFUND', originalInvoiceNumber: invoice.invoiceNumber,
         },
       });
     });
@@ -371,9 +406,10 @@ export class InvoicesService {
     return order.invoice;
   }
 
-  async getPdfBuffer(userId: string, orderId: string, docKind: 'CUSTOMER' | 'VENDOR' | 'REMONT') {
+  async getPdfBuffer(userId: string, orderId: string, docKind: InvoicePdfRequest) {
     const order = await this.fetchOrderForPdf(orderId);
     if (!this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
+    if (docKind === 'ALL') return this.renderPdfForOrder(order, this.documentsVisibleTo(userId, order), true);
     // Phase 8 (H-08/Workstream 5) — isAuthorizedForInvoice() is deliberately "any party to
     // this order" for every docKind, which was harmless while the controller only ever
     // requested 'CUSTOMER'. Now that docKind is caller-selectable, a MARKETPLACE_PRODUCT
@@ -384,13 +420,233 @@ export class InvoicesService {
       const isSeller = !!order.items?.some((it: any) => it.product?.vendor?.userId === userId);
       if (!isSeller) throw new ForbiddenException();
     }
-    return this.renderPdfForOrder(order, docKind);
+    return this.renderPdfForOrder(order, [docKind], false);
   }
 
   /** Unrestricted variant for the admin panel — AdminController already gates by role. */
-  async getPdfBufferAdmin(orderId: string, docKind: 'CUSTOMER' | 'VENDOR' | 'REMONT') {
+  async getPdfBufferAdmin(orderId: string, docKind: InvoicePdfRequest) {
     const order = await this.fetchOrderForPdf(orderId);
-    return this.renderPdfForOrder(order, docKind);
+    if (docKind === 'ALL') return this.renderPdfForOrder(order, this.issuedDocuments(order.invoice), true);
+    return this.renderPdfForOrder(order, [docKind], false);
+  }
+
+  /** The documents actually issued for this invoice (a VENDOR/REMONT page exists only with its number). */
+  private issuedDocuments(invoice: any): InvoiceDocKind[] {
+    return ['CUSTOMER', ...(invoice.vendorDocumentNumber ? ['VENDOR'] : []), ...(invoice.remontDocumentNumber ? ['REMONT'] : [])] as InvoiceDocKind[];
+  }
+
+  /**
+   * Combined download for a party to the order: only the documents that party issued or is
+   * the recipient of — the customer gets the customer page and the partner's document to them;
+   * the partner gets their own document and Remont's commission invoice to them; the seller
+   * gets their product invoice and Remont's commission invoice to them.
+   */
+  private documentsVisibleTo(userId: string, order: any): InvoiceDocKind[] {
+    const issued = this.issuedDocuments(order.invoice);
+    const kinds = new Set<InvoiceDocKind>();
+    const marketplace = order.invoice.transactionType === 'MARKETPLACE_PRODUCT';
+    if (order.customerId === userId) { kinds.add('CUSTOMER'); kinds.add('VENDOR'); }
+    if (order.vendor?.userId === userId) { kinds.add('VENDOR'); kinds.add('REMONT'); }
+    if (order.items?.some((it: any) => it.product?.vendor?.userId === userId)) { kinds.add('CUSTOMER'); if (marketplace) kinds.add('REMONT'); }
+    return issued.filter((k) => kinds.has(k));
+  }
+
+  /** What the customer actually paid for this order, and by what means — from real payment rows. */
+  async paymentInfoFor(order: any, total: number): Promise<InvoicePaymentInfo> {
+    const txs = await this.prisma.paymentTransaction.findMany({
+      where: {
+        status: 'PAID', isWalletTopup: false, refundRequestId: null,
+        OR: [{ orderId: order.id }, ...(order.masterOrderId ? [{ masterOrderId: order.masterOrderId }] : [])],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const wallet = Number(order.walletUsed || 0);
+    const ownPaid = txs.filter((t) => t.orderId === order.id).reduce((a, t) => a + Number(t.amount), 0);
+    // Fully paid (refunds are reversed by credit notes, never by rewriting the invoice).
+    const fullyPaid = order.paymentStatus === 'PAID' || order.paymentStatus === 'REFUNDED';
+    const received = fullyPaid ? total : Math.min(total, r2(ownPaid + wallet));
+    const refs: string[] = [];
+    const tx = txs[0];
+    if (tx) {
+      if (tx.collectionMode) refs.push(`${tx.collectionMode} collected by partner`);
+      else refs.push(`${tx.gateway === 'RAZORPAY' ? 'Razorpay' : tx.gateway} ${tx.gatewayPaymentId || tx.gatewayOrderId || ''}`.trim());
+    }
+    if (wallet > 0) refs.push(`Remont wallet Rs. ${wallet.toFixed(2)}`);
+    if (!refs.length && order.paymentMethod === 'COD') refs.push(fullyPaid ? 'Cash on delivery' : 'Cash on delivery — payable on delivery');
+    return { received: r2(received), reference: refs.join(' · ') || null };
+  }
+
+  /** A credit note PDF — for a party to the order (customer / partner / seller) or an admin (userId null). */
+  async getCreditNotePdf(userId: string | null, creditNoteId: string) {
+    const cn = await this.prisma.creditNote.findUnique({ where: { id: creditNoteId } });
+    if (!cn) throw new NotFoundException('Credit note not found');
+    const order = await this.fetchOrderForPdf(cn.orderId);
+    if (userId && !this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
+    const company = await getBillingCompanyConfig(this.prisma);
+    return { buffer: await renderInvoiceBundlePdf([{ kind: 'CREDIT_NOTE', invoice: order.invoice, creditNote: cn }], { company, order }), number: cn.creditNoteNumber };
+  }
+
+  /** Credit notes issued against an order's invoice (customer-visible list). */
+  async listCreditNotes(userId: string, orderId: string) {
+    const order = await this.fetchOrderForPdf(orderId);
+    if (!this.isAuthorizedForInvoice(userId, order)) throw new ForbiddenException();
+    return this.prisma.creditNote.findMany({
+      where: { orderId },
+      select: { id: true, creditNoteNumber: true, kind: true, reason: true, totalReversed: true, issuedAt: true, originalInvoiceNumber: true },
+      orderBy: { issuedAt: 'asc' },
+    });
+  }
+
+  /** Admin: the invoice as it stands, every superseded version, and every credit note. */
+  async history(orderId: string) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { orderId },
+      include: { versions: { orderBy: { version: 'asc' } }, creditNotes: { orderBy: { issuedAt: 'asc' } } },
+    });
+    if (!invoice) throw new NotFoundException('No invoice for this order');
+    const { versions, creditNotes, ...current } = invoice;
+    return {
+      current: {
+        id: current.id, version: current.version, invoiceNumber: current.invoiceNumber,
+        vendorDocumentNumber: current.vendorDocumentNumber, remontDocumentNumber: current.remontDocumentNumber,
+        transactionType: current.transactionType, section95: current.section95, taxReviewRequired: current.taxReviewRequired,
+        customerTotal: current.customerTotal, generatedAt: current.generatedAt,
+      },
+      versions: versions.map((v) => ({ version: v.version, invoiceNumber: v.invoiceNumber, vendorDocumentNumber: v.vendorDocumentNumber, remontDocumentNumber: v.remontDocumentNumber, customerTotal: (v.snapshot as any)?.customerTotal ?? null, reason: v.reason, supersededBy: v.supersededBy, supersededAt: v.supersededAt, creditNoteId: v.creditNoteId })),
+      creditNotes: creditNotes.map((c) => ({ id: c.id, creditNoteNumber: c.creditNoteNumber, kind: c.kind, reason: c.reason, totalReversed: c.totalReversed, issuedAt: c.issuedAt, originalInvoiceNumber: c.originalInvoiceNumber, refundRequestId: c.refundRequestId })),
+    };
+  }
+
+  /**
+   * Reissue preview — what a corrected invoice would contain, computed from the order exactly as
+   * a new invoice would be, next to what was issued. Writes nothing.
+   */
+  async reissuePreview(orderId: string) {
+    const invoice = await this.prisma.invoice.findUnique({ where: { orderId }, include: { creditNotes: true } });
+    if (!invoice) throw new NotFoundException('No invoice for this order');
+    const order = await this.loadOrderForBilling(orderId);
+    const next = await this.computeInvoice(order);
+    const issued = { customerTotal: Number(invoice.customerTotal), customerSubtotal: Number(invoice.customerSubtotal), gst: r2(Number(invoice.customerCgst) + Number(invoice.customerSgst) + Number(invoice.customerIgst)), section95: invoice.section95, transactionType: invoice.transactionType };
+    const b: any = next.breakdown;
+    const corrected = { customerTotal: Number(b.customerTotal), customerSubtotal: Number(b.customerSubtotal), gst: r2(Number(b.customerCgst) + Number(b.customerSgst) + Number(b.customerIgst)), section95: next.section95, transactionType: next.transactionType };
+    const paid = r2(Number(order.totalAmount) + Number(order.walletUsed || 0));
+    const refundCredits = invoice.creditNotes.filter((c) => c.kind !== 'INVOICE_CANCELLATION');
+    return {
+      invoiceNumber: invoice.invoiceNumber, version: invoice.version,
+      issued, corrected,
+      orderAmountPaid: paid,
+      issuedMatchesPaid: Math.abs(issued.customerTotal - paid) < 1,
+      correctedMatchesPaid: Math.abs(corrected.customerTotal - paid) < 1,
+      changes: Object.keys(issued).filter((k) => (issued as any)[k] !== (corrected as any)[k]),
+      refundCreditNotesCarriedForward: refundCredits.map((c) => ({ creditNoteNumber: c.creditNoteNumber, totalReversed: Number(c.totalReversed) })),
+      effect: 'The issued invoice is kept unchanged as a version record and cancelled by a credit note for its remaining value; a corrected invoice is issued under new numbers; refund credit notes already issued are re-issued against the corrected invoice so the net position equals what the customer actually paid and was refunded.',
+    };
+  }
+
+  /**
+   * Authorised correction of an issued invoice (SUPER_ADMIN, mandatory reason). Never edits or
+   * deletes the issued document: its full row is archived as an InvoiceVersion, a cancellation
+   * credit note reverses whatever value it still carries, the corrected invoice gets NEW numbers
+   * in the same series, earlier refund credit notes are carried onto it, and everything is audited.
+   */
+  async reissue(actor: { sub: string; role: UserRole }, orderId: string, reason: string, expectedVersion?: number) {
+    const why = String(reason || '').trim();
+    if (why.length < 10) throw new BadRequestException('A reason of at least 10 characters is required to reissue an invoice');
+    const current = await this.prisma.invoice.findUnique({ where: { orderId }, include: { creditNotes: true } });
+    if (!current) throw new NotFoundException('No invoice for this order');
+    if (expectedVersion != null && Number(expectedVersion) !== current.version) throw new ConflictException('The invoice changed since the preview — review it again');
+    const order = await this.loadOrderForBilling(orderId);
+    const next = await this.computeInvoice(order);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Serialise reissues of the same invoice; the version guard below rejects a stale one.
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `invoice-reissue:${current.id}`);
+      const fresh = await tx.invoice.findUnique({ where: { id: current.id }, include: { creditNotes: true } });
+      if (!fresh || fresh.version !== current.version) throw new ConflictException('The invoice was reissued concurrently — review it again');
+
+      // 1. Cancel what the issued invoice still carries (net of credit notes already issued on it).
+      const prior = fresh.creditNotes.filter((c) => c.originalInvoiceNumber == null || c.originalInvoiceNumber === fresh.invoiceNumber);
+      const sum = (k: 'taxableValueReversed' | 'cgstReversed' | 'sgstReversed' | 'igstReversed' | 'totalReversed') => prior.reduce((a, c) => a + Number(c[k]), 0);
+      const remaining = {
+        taxableValueReversed: r2(Number(fresh.customerSubtotal) - sum('taxableValueReversed')),
+        cgstReversed: r2(Number(fresh.customerCgst) - sum('cgstReversed')),
+        sgstReversed: r2(Number(fresh.customerSgst) - sum('sgstReversed')),
+        igstReversed: r2(Number(fresh.customerIgst) - sum('igstReversed')),
+        totalReversed: r2(Number(fresh.customerTotal) - sum('totalReversed')),
+      };
+      // Older credit notes predating originalInvoiceNumber: record which document they reversed.
+      await tx.creditNote.updateMany({ where: { invoiceId: fresh.id, originalInvoiceNumber: null }, data: { originalInvoiceNumber: fresh.invoiceNumber } });
+      const cancellation = remaining.totalReversed > 0
+        ? await tx.creditNote.create({ data: {
+            creditNoteNumber: await nextInvoiceDocumentNumber(tx, 'CREDIT_NOTE'), invoiceId: fresh.id, orderId,
+            reason: why, kind: 'INVOICE_CANCELLATION', originalInvoiceNumber: fresh.invoiceNumber, ...remaining,
+          } })
+        : null;
+
+      // 2. Archive the issued row exactly as it was.
+      const { creditNotes: _cn, ...issuedRow } = fresh;
+      await tx.invoiceVersion.create({ data: {
+        invoiceId: fresh.id, version: fresh.version, invoiceNumber: fresh.invoiceNumber,
+        vendorDocumentNumber: fresh.vendorDocumentNumber, remontDocumentNumber: fresh.remontDocumentNumber,
+        snapshot: JSON.parse(JSON.stringify(issuedRow)), reason: why, supersededBy: actor.sub, creditNoteId: cancellation?.id ?? null,
+      } });
+
+      // 3. The corrected invoice — new numbers, version + 1.
+      const updated = await tx.invoice.update({
+        where: { id: fresh.id },
+        data: {
+          ...(next.breakdown as any), section95: next.section95, taxReviewRequired: next.taxReviewRequired,
+          invoiceNumber: await nextInvoiceDocumentNumber(tx, 'CUSTOMER_TAX_INVOICE'),
+          vendorDocumentNumber: next.hasVendorDoc ? await nextInvoiceDocumentNumber(tx, 'PARTNER_SETTLEMENT_INVOICE') : null,
+          remontDocumentNumber: next.hasRemontDoc ? await nextInvoiceDocumentNumber(tx, 'PLATFORM_FEE_INVOICE') : null,
+          version: fresh.version + 1, generatedAt: new Date(),
+        },
+      });
+
+      // 4. Refunds already credited stay credited — re-issued against the corrected invoice.
+      const carried: string[] = [];
+      const newTotal = Number(updated.customerTotal);
+      for (const c of prior.filter((x) => x.kind !== 'INVOICE_CANCELLATION')) {
+        const ratio = newTotal > 0 ? Math.min(1, Number(c.totalReversed) / newTotal) : 0;
+        const cn = await tx.creditNote.create({ data: {
+          creditNoteNumber: await nextInvoiceDocumentNumber(tx, 'CREDIT_NOTE'), invoiceId: fresh.id, orderId, refundRequestId: c.refundRequestId,
+          reason: `${c.reason} (re-issued against corrected invoice ${updated.invoiceNumber}; originally ${c.creditNoteNumber})`,
+          kind: 'REFUND', originalInvoiceNumber: updated.invoiceNumber,
+          taxableValueReversed: r2(Number(updated.customerSubtotal) * ratio), cgstReversed: r2(Number(updated.customerCgst) * ratio),
+          sgstReversed: r2(Number(updated.customerSgst) * ratio), igstReversed: r2(Number(updated.customerIgst) * ratio),
+          totalReversed: r2(Math.min(Number(c.totalReversed), newTotal)),
+        } });
+        carried.push(cn.creditNoteNumber);
+      }
+      await logAudit(tx, {
+        actorId: actor.sub, actorRole: actor.role, action: 'INVOICE_REISSUED', targetType: 'Invoice', targetId: fresh.id,
+        metadata: {
+          orderId, reason: why, fromVersion: fresh.version, toVersion: updated.version,
+          supersededInvoiceNumber: fresh.invoiceNumber, newInvoiceNumber: updated.invoiceNumber,
+          cancellationCreditNote: cancellation?.creditNoteNumber ?? null, carriedCreditNotes: carried,
+          oldTotal: Number(fresh.customerTotal), newTotal,
+        },
+      });
+      return { invoice: updated, cancellationCreditNote: cancellation?.creditNoteNumber ?? null, carriedCreditNotes: carried };
+    }, { timeout: 30000 });
+    return result;
+  }
+
+  /**
+   * Best-effort automatic issue for product orders (at hand-over to logistics and on delivery).
+   * Idempotent; a failure is recorded on the order for the admin retry queue, never thrown.
+   */
+  async autoIssueProductInvoice(orderId: string) {
+    try {
+      await this.generateForOrder(orderId);
+      await this.prisma.order.update({ where: { id: orderId }, data: { invoiceGenerationFailed: false, invoiceGenerationError: null } });
+    } catch (e: any) {
+      this.logger.warn(`Product invoice for ${orderId} not issued: ${e?.message || e}`);
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { invoiceGenerationFailed: true, invoiceGenerationError: String(e?.message || e).slice(0, 1000) },
+      }).catch(() => {});
+    }
   }
 
   private async fetchOrderForPdf(orderId: string) {
@@ -402,15 +658,27 @@ export class InvoicesService {
         items: { include: { product: { include: { vendor: true } } } },
       },
     });
-    if (!order?.invoice) throw new NotFoundException();
+    if (!order?.invoice) throw new NotFoundException('No invoice has been issued for this order yet');
     return order;
   }
 
-  private async renderPdfForOrder(order: any, docKind: 'CUSTOMER' | 'VENDOR' | 'REMONT') {
+  private async renderPdfForOrder(order: any, docKinds: InvoiceDocKind[], withCreditNotes: boolean) {
+    for (const k of docKinds) {
+      if (k === 'VENDOR' && !order.invoice.vendorDocumentNumber && order.invoice.transactionType !== 'PLATFORM_SERVICE') throw new NotFoundException('No partner document was issued for this order');
+      if (k === 'REMONT' && !order.invoice.remontDocumentNumber && !(Number(order.invoice.remontTotal) > 0)) throw new NotFoundException('No Remont commission document was issued for this order');
+    }
     const company = await getBillingCompanyConfig(this.prisma);
-    return renderInvoicePdf(order.invoice, docKind, { company, order });
+    const payment = docKinds.includes('CUSTOMER') ? await this.paymentInfoFor(order, Number(order.invoice.customerTotal)) : null;
+    const pages: InvoicePdfPage[] = docKinds.map((docKind) => ({ kind: 'INVOICE' as const, invoice: order.invoice, docKind }));
+    if (withCreditNotes && docKinds.includes('CUSTOMER')) {
+      const notes = await this.prisma.creditNote.findMany({ where: { invoiceId: order.invoice.id }, orderBy: { issuedAt: 'asc' } });
+      for (const creditNote of notes) pages.push({ kind: 'CREDIT_NOTE', invoice: order.invoice, creditNote });
+    }
+    return renderInvoiceBundlePdf(pages, { company, order, payment });
   }
 }
+
+type BillingOrder = Awaited<ReturnType<InvoicesService['loadOrderForBilling']>>;
 
 @ApiTags('Invoices')
 @ApiBearerAuth() @UseGuards(JwtAuthGuard)
@@ -427,15 +695,51 @@ export class InvoicesController {
   // to hardcode 'CUSTOMER', so a seller/partner had no way to ever reach their OWN
   // commission/settlement-invoice page for an order they're legitimately part of. Defaults
   // to 'CUSTOMER' — every existing caller/URL is byte-for-byte unchanged.
+  // docKind=ALL — one PDF with every document the caller is party to, plus credit notes.
   @Get('orders/:orderId/pdf')
   async pdf(@CurrentUser() u: JwtPayload, @Param('orderId') id: string, @Query('docKind') docKind: string | undefined, @Res() res: Response) {
-    const kind = docKind === 'VENDOR' || docKind === 'REMONT' ? docKind : 'CUSTOMER';
+    const kind: InvoicePdfRequest = docKind === 'VENDOR' || docKind === 'REMONT' || docKind === 'ALL' ? docKind : 'CUSTOMER';
     const buf = await this.inv.getPdfBuffer(u.sub, id, kind);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="invoice-${id}-${kind.toLowerCase()}.pdf"`);
     res.send(buf);
   }
+  @Get('orders/:orderId/credit-notes') creditNotes(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) {
+    return this.inv.listCreditNotes(u.sub, id);
+  }
+  @Get('credit-notes/:id/pdf')
+  async creditNotePdf(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Res() res: Response) {
+    const { buffer, number } = await this.inv.getCreditNotePdf(u.sub, id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${number}.pdf"`);
+    res.send(buffer);
+  }
 }
 
-@Module({ controllers: [InvoicesController], providers: [InvoicesService], exports: [InvoicesService] })
+/** Admin invoice tools beyond the AdminController basics: history, credit-note PDFs, reissue. */
+@ApiTags('Admin')
+@ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+@Controller('admin/invoice-tools')
+export class InvoicesAdminController {
+  constructor(private inv: InvoicesService) {}
+  @Get('orders/:orderId/history') history(@Param('orderId') id: string) { return this.inv.history(id); }
+  @Get('credit-notes/:id/pdf')
+  async creditNotePdf(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, number } = await this.inv.getCreditNotePdf(null, id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${number}.pdf"`);
+    res.send(buffer);
+  }
+  // Correcting an issued tax document is a SUPER_ADMIN action — preview first, then reissue.
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('orders/:orderId/reissue-preview') reissuePreview(@Param('orderId') id: string) { return this.inv.reissuePreview(id); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('orders/:orderId/reissue')
+  reissue(@CurrentUser() u: JwtPayload, @Param('orderId') id: string, @Body() body: { reason: string; expectedVersion?: number }) {
+    return this.inv.reissue({ sub: u.sub, role: u.role as UserRole }, id, body?.reason, body?.expectedVersion);
+  }
+}
+
+@Module({ controllers: [InvoicesController, InvoicesAdminController], providers: [InvoicesService], exports: [InvoicesService] })
 export class InvoicesModule {}

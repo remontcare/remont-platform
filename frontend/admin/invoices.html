@@ -38,6 +38,17 @@
   </div>
 </div>
 
+<!-- History / correction -->
+<div id="inv-overlay" class="overlay" style="display:none">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">
+      <span class="modal-title">Invoice history &amp; corrections</span>
+      <button class="modal-close" onclick="closeModal('inv-overlay')">×</button>
+    </div>
+    <div id="inv-body" style="padding:16px"></div>
+  </div>
+</div>
+
 <script src="./common.js"></script>
 <script>
 renderSidebar('invoices');
@@ -71,8 +82,9 @@ function render() {
         : '<small style="color:#9ca3af">No GST — informational</small>';
     var orderId = inv.order && inv.order.id;
     var type = inv.transactionType;
-    var actions = '<button class="btn btn-xs btn-outline" onclick="regenerate(\'' + orderId + '\')">Regenerate</button> ' +
-      '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">PDF</button>';
+    var actions = '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'ALL\')">All documents (PDF)</button> ' +
+      '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">Customer PDF</button> ' +
+      '<button class="btn btn-xs btn-outline" onclick="openHistory(\'' + orderId + '\')">History / Correct</button>';
     if (type === 'PLATFORM_SERVICE') {
       actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Platform Fee Invoice</button>' +
         ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')">Partner Service Invoice</button>';
@@ -80,7 +92,10 @@ function render() {
       actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Commission Invoice</button>';
     }
     return '<tr>' +
-      '<td><strong>' + escape(inv.invoiceNumber || 'INV-' + inv.id.slice(-6)) + '</strong></td>' +
+      '<td><strong>' + escape(inv.invoiceNumber || 'INV-' + inv.id.slice(-6)) + '</strong>' +
+        (inv.version > 1 ? ' <small style="color:#6b7280">v' + inv.version + '</small>' : '') +
+        (inv.section95 ? '<br>' + badge('Sec 9(5)', 'blue') : '') +
+        (inv.taxReviewRequired ? '<br>' + badge('Tax review', 'yellow') : '') + '</td>' +
       '<td>' + escape(orderId ? orderId.slice(-8).toUpperCase() : '—') + '</td>' +
       '<td>' + escape((cust && cust.name) || '—') + '<br><small style="color:#9ca3af">' + escape((cust && cust.phone) || '') + '</small></td>' +
       '<td>' + badge(TYPE_LABELS[type] || type || 'Unclassified', type === 'DIRECT_PROJECT' ? 'blue' : type === 'MARKETPLACE_PRODUCT' ? 'purple' : 'gray') + '</td>' +
@@ -95,11 +110,66 @@ function render() {
   document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Invoice #</th><th>Order ID</th><th>Customer</th><th>Type</th><th>Subtotal</th><th>GST</th><th>Total</th><th>Status</th><th>Issued</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
-function regenerate(orderId) {
+// Issued invoices are never regenerated in place. A correction archives the issued version,
+// cancels it with a credit note and issues a corrected invoice under new numbers (SUPER_ADMIN).
+var histOrderId = null, histPreview = null;
+function openHistory(orderId) {
   if (!orderId) { toast('No order linked', 'error'); return; }
-  api('POST', '/admin/invoices/' + orderId + '/generate').then(function(inv) {
-    toast('Invoice regenerated: ' + inv.invoiceNumber, 'success'); load();
+  histOrderId = orderId; histPreview = null;
+  document.getElementById('inv-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('inv-overlay').style.display = 'flex';
+  api('GET', '/admin/invoice-tools/orders/' + orderId + '/history').then(renderHistory)
+    .catch(function(e) { document.getElementById('inv-body').innerHTML = '<p>' + escape(e.message) + '</p>'; });
+}
+function renderHistory(h) {
+  var c = h.current;
+  var html = '<p><b>Current:</b> ' + escape(c.invoiceNumber) + ' (version ' + c.version + ') — ' + fmtCur(c.customerTotal) + ' — issued ' + fmtDateShort(c.generatedAt) +
+    (c.section95 ? ' ' + badge('Section 9(5)', 'blue') : '') + (c.taxReviewRequired ? ' ' + badge('Tax review required', 'yellow') : '') + '</p>';
+  html += '<h4 style="margin:12px 0 6px">Superseded versions</h4>' + (h.versions.length ? '<table><thead><tr><th>v</th><th>Invoice</th><th>Total</th><th>Reason</th><th>When</th></tr></thead><tbody>' +
+    h.versions.map(function(v) { return '<tr><td>' + v.version + '</td><td>' + escape(v.invoiceNumber) + '</td><td>' + (v.customerTotal != null ? fmtCur(v.customerTotal) : '—') + '</td><td>' + escape(v.reason) + '</td><td>' + fmtDateShort(v.supersededAt) + '</td></tr>'; }).join('') +
+    '</tbody></table>' : '<p style="color:#6b7280">None — this invoice has never been corrected.</p>');
+  html += '<h4 style="margin:12px 0 6px">Credit notes</h4>' + (h.creditNotes.length ? '<table><thead><tr><th>No.</th><th>Kind</th><th>Against</th><th>Amount</th><th>Issued</th><th></th></tr></thead><tbody>' +
+    h.creditNotes.map(function(cn) { return '<tr><td>' + escape(cn.creditNoteNumber) + '</td><td>' + escape(cn.kind === 'INVOICE_CANCELLATION' ? 'Cancellation' : 'Refund') + '</td><td>' + escape(cn.originalInvoiceNumber || '') + '</td><td>' + fmtCur(cn.totalReversed) + '</td><td>' + fmtDateShort(cn.issuedAt) + '</td><td><button class="btn btn-xs btn-outline" onclick="downloadCreditNote(\'' + cn.id + '\',\'' + escapeJsAttr(cn.creditNoteNumber) + '\')">PDF</button></td></tr>'; }).join('') +
+    '</tbody></table>' : '<p style="color:#6b7280">None.</p>');
+  if (isSuperAdmin()) {
+    html += '<div style="margin-top:16px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px">' +
+      '<b>Correct this invoice</b><p style="font-size:12px;color:#6b7280;margin:4px 0 8px">Recomputes the invoice from the order as it stands. The issued invoice is kept and cancelled by a credit note; a corrected invoice is issued under new numbers. Preview first — nothing changes until you confirm.</p>' +
+      '<button class="btn btn-sm btn-outline" onclick="previewReissue()">Preview correction</button><div id="reissue-preview" style="margin-top:10px"></div></div>';
+  } else {
+    html += '<p style="margin-top:14px;font-size:12px;color:#6b7280">Corrections to issued invoices can only be made by a Super Admin.</p>';
+  }
+  document.getElementById('inv-body').innerHTML = html;
+}
+function previewReissue() {
+  var box = document.getElementById('reissue-preview');
+  box.innerHTML = '<div class="loading">Computing…</div>';
+  api('GET', '/admin/invoice-tools/orders/' + histOrderId + '/reissue-preview').then(function(pv) {
+    histPreview = pv;
+    var row = function(label, a, b) { return '<tr><td>' + label + '</td><td>' + a + '</td><td>' + b + '</td></tr>'; };
+    box.innerHTML = '<table><thead><tr><th></th><th>Issued</th><th>Corrected</th></tr></thead><tbody>' +
+      row('Total', fmtCur(pv.issued.customerTotal), fmtCur(pv.corrected.customerTotal)) +
+      row('Taxable value', fmtCur(pv.issued.customerSubtotal), fmtCur(pv.corrected.customerSubtotal)) +
+      row('GST', fmtCur(pv.issued.gst), fmtCur(pv.corrected.gst)) +
+      row('Section 9(5)', pv.issued.section95 ? 'Yes' : 'No', pv.corrected.section95 ? 'Yes' : 'No') +
+      row('Matches amount paid (' + fmtCur(pv.orderAmountPaid) + ')', pv.issuedMatchesPaid ? '✓' : '✗', pv.correctedMatchesPaid ? '✓' : '✗') +
+      '</tbody></table>' +
+      (pv.refundCreditNotesCarriedForward.length ? '<p style="font-size:12px">Refund credit notes re-issued against the corrected invoice: ' + pv.refundCreditNotesCarriedForward.map(function(c) { return escape(c.creditNoteNumber); }).join(', ') + '</p>' : '') +
+      (pv.changes.length ? '' : '<p style="color:#b45309">The corrected invoice would be identical — no correction needed.</p>') +
+      '<textarea id="reissue-reason" class="form-control" rows="2" placeholder="Reason for correction (required, recorded in the audit log and on the credit note)"></textarea>' +
+      '<button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="confirmReissue()"' + (pv.changes.length ? '' : ' disabled') + '>Issue corrected invoice</button>';
+  }).catch(function(e) { box.innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
+}
+function confirmReissue() {
+  var reason = (document.getElementById('reissue-reason').value || '').trim();
+  if (reason.length < 10) { toast('Enter a reason (at least 10 characters)', 'error'); return; }
+  if (!confirm('Cancel invoice ' + histPreview.invoiceNumber + ' with a credit note and issue a corrected invoice? This cannot be undone.')) return;
+  api('POST', '/admin/invoice-tools/orders/' + histOrderId + '/reissue', { reason: reason, expectedVersion: histPreview.version }).then(function(r) {
+    toast('Corrected invoice issued: ' + r.invoice.invoiceNumber + (r.cancellationCreditNote ? ' (cancelled by ' + r.cancellationCreditNote + ')' : ''), 'success');
+    openHistory(histOrderId); load();
   }).catch(function(e) { toast(e.message, 'error'); });
+}
+function downloadCreditNote(id, number) {
+  downloadAuthedFile('/admin/invoice-tools/credit-notes/' + id + '/pdf', number + '.pdf').catch(function(e) { toast(e.message, 'error'); });
 }
 
 function downloadPdf(orderId, doc) {

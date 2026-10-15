@@ -430,7 +430,8 @@ export class ServiceVendorsService {
 
     // Resolved before the transaction — reading a SiteSetting doesn't need to be part of
     // the atomic claim, only the debit itself does.
-    const leadCostAmount = await this.ledger.getLeadCostAmount();
+    // Lead cost is a partner's advance against commission — never charged to Remont's own staff.
+    const leadCostAmount = v.staffType === 'IN_HOUSE' ? 0 : await this.ledger.getLeadCostAmount();
 
     // This conditional update is the claim lock: only one concurrent request can change
     // an unassigned confirmed order to VENDOR_ASSIGNED. The Lead Cost debit rides in the

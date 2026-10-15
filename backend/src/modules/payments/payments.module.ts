@@ -7,7 +7,20 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER, Roles, RolesGuard } from '../../common';
+import { UserRole } from '@prisma/client';
+
+/**
+ * Razorpay reports its charge on a captured payment as `fee` (paise, INCLUDING GST) and `tax`
+ * (the GST part). Stored in rupees as the net fee and its GST separately — the GST is input tax.
+ * Empty when the payment carries no fee information (never guessed).
+ */
+export function gatewayFeeFromPayment(payment: any): { gatewayFee?: number; gatewayFeeTax?: number } {
+  if (!payment || payment.fee == null || Number.isNaN(Number(payment.fee))) return {};
+  const fee = Number(payment.fee) / 100;
+  const tax = payment.tax != null && !Number.isNaN(Number(payment.tax)) ? Number(payment.tax) / 100 : 0;
+  return { gatewayFee: Math.round((fee - tax) * 100) / 100, gatewayFeeTax: Math.round(tax * 100) / 100 };
+}
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 interface PhonePeConfig {
@@ -202,6 +215,34 @@ export class PaymentsService implements OnModuleInit {
    * historically the thing that made the underpayment bypass possible) — this always goes
    * back to the gateway itself.
    */
+  /**
+   * Admin backfill of gateway fees for captured Razorpay payments that have none recorded —
+   * read-only fetches from Razorpay (no money moves), a bounded batch per call.
+   */
+  async backfillGatewayFees(limit = 50) {
+    if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
+    const rows = await this.prisma.paymentTransaction.findMany({
+      where: { gateway: 'RAZORPAY', status: 'PAID', gatewayPaymentId: { not: null }, gatewayFee: null, refundRequestId: null },
+      orderBy: { createdAt: 'asc' }, take: Math.min(Math.max(1, Number(limit) || 50), 200),
+    });
+    let updated = 0; const failed: { id: string; error: string }[] = []; let noFee = 0;
+    for (const row of rows) {
+      try {
+        const payment: any = await this.razorpay.payments.fetch(row.gatewayPaymentId as string);
+        const fee = gatewayFeeFromPayment(payment);
+        if (fee.gatewayFee == null) { noFee++; continue; }
+        await this.prisma.paymentTransaction.update({ where: { id: row.id }, data: fee });
+        updated++;
+      } catch (e: any) {
+        failed.push({ id: row.id, error: String(e?.error?.description || e?.message || e).slice(0, 200) });
+      }
+    }
+    const remaining = await this.prisma.paymentTransaction.count({
+      where: { gateway: 'RAZORPAY', status: 'PAID', gatewayPaymentId: { not: null }, gatewayFee: null, refundRequestId: null },
+    });
+    return { checked: rows.length, updated, withoutFeeData: noFee, failed, remaining };
+  }
+
   async getVerifiedCapturedAmount(gatewayOrderId: string, paymentId: string): Promise<number> {
     if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
     let payment: any;
@@ -475,7 +516,7 @@ export class PaymentsService implements OnModuleInit {
       if (tx) {
         await this.prisma.paymentTransaction.update({
           where: { id: tx.id },
-          data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature },
+          data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature, ...gatewayFeeFromPayment(payment) },
         });
         // tx.orderId is a loose, non-FK string — for a wallet top-up it's the literal
         // 'WALLET_TOPUP' marker (no Order row exists), and for a master-order checkout
@@ -621,9 +662,18 @@ export class PaymentsController {
   }
 }
 
+@ApiTags('Admin')
+@ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+@Controller('admin/payments')
+export class PaymentsAdminController {
+  constructor(private p: PaymentsService) {}
+  @Post('gateway-fees/backfill') backfill(@Query('limit') limit?: string) { return this.p.backfillGatewayFees(limit ? Number(limit) : 50); }
+}
+
 @Module({
   imports: [PaymentNotificationsModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PaymentsAdminController],
   providers: [PaymentsService],
   exports: [PaymentsService],
 })

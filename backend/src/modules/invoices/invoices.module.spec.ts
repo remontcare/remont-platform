@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { billingFindMany } from '../../common/billing-fixture.test';
 import { InvoicesService } from './invoices.module';
 
 function baseOrder(overrides: any = {}) {
@@ -22,7 +23,7 @@ function makeService() {
       count: jest.fn(async () => 0),
       create: jest.fn(async (args: any) => ({ id: 'inv-1', ...args.data })),
     },
-    siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => null) },
     taxConfig: { findMany: jest.fn(async () => []) },
     $queryRaw: jest.fn(async () => [{ lastNumber: 1 }]),
   };

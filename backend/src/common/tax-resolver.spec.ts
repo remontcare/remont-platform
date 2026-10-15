@@ -124,9 +124,15 @@ describe('resolveProductGstLine', () => {
     expect(r.taxableValue).toBe(1000);
   });
 
-  it('0% or unconfigured rate: nothing to back out, taxableValue equals the line amount', async () => {
+  it('explicitly configured 0% (exempt/nil): nothing to back out, taxableValue equals the line amount', async () => {
     const prodTax = await buildTaxRateResolverFromCommon(prismaWith([]), 'PRODUCT');
-    const r = await resolveProductGstLine(prodTax, { hsnSac: null, gstOverridePercent: null, gstInclusive: true, categoryId: 'cat-1' }, 500);
+    const r = await resolveProductGstLine(prodTax, { hsnSac: null, gstOverridePercent: 0, gstInclusive: true, categoryId: 'cat-1' }, 500);
     expect(r).toEqual({ taxableValue: 500, gstAmount: 0, ratePercent: 0, inclusive: true });
+  });
+
+  it('no GST configured anywhere: the product is refused, never sold at a silent 0%', async () => {
+    const prodTax = await buildTaxRateResolverFromCommon(prismaWith([]), 'PRODUCT');
+    await expect(resolveProductGstLine(prodTax, { hsnSac: null, gstOverridePercent: null, gstInclusive: true, categoryId: 'cat-1', name: 'Wall switch' } as any, 500))
+      .rejects.toThrow(/Wall switch.*GST rate is not configured/);
   });
 });

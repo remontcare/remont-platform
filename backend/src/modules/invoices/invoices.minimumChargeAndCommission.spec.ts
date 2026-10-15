@@ -1,4 +1,5 @@
 import { InvoicesService } from './invoices.module';
+import { billingFindMany } from '../../common/billing-fixture.test';
 import { buildInvoiceViewModel } from './invoice-pdf';
 
 /**
@@ -20,7 +21,7 @@ function makeService() {
   const prisma: any = {
     order: { findUnique: jest.fn(), update: jest.fn(async (a: any) => ({ id: a.where.id, ...a.data })) },
     invoice: { findUnique: jest.fn(async () => null), create: jest.fn(async (a: any) => ({ id: 'inv-1', ...a.data })) },
-    siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => ({ value: '49' })) }, // a booking-fee setting must NOT be printed
+    siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => ({ value: '49' })) }, // a booking-fee setting must NOT be printed
     taxConfig: { findMany: jest.fn(async () => []) },
     $queryRaw: jest.fn(async () => [{ lastNumber: 1 }]),
   };
