@@ -280,7 +280,13 @@
         <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold %</label><input id="cat-warranty-pct" class="form-control" type="number" min="0" max="100" step="0.1" placeholder="Blank = platform default"></div>
       </div>
       <small style="color:#9ca3af;font-size:11px">Vendor Wallet: % of a completed job's payout in this category held back for this many days before auto-release. Leave both blank to use the platform-wide default from Settings → Vendor Wallet.</small>
-      <label style="display:flex;align-items:flex-start;gap:6px;font-size:13px;margin-top:10px"><input type="checkbox" id="cat-sec95" checked style="margin-top:3px"> <span><b>GST Section 9(5) applies</b> — when a partner who is <i>not</i> GST-registered does a job in this category, Remont issues the customer's tax invoice and pays the GST. Untick only if your CA confirms this category is not notified under 9(5); such jobs are then flagged for tax review.</span></label>
+      <div class="form-group" style="margin-top:10px"><label class="form-label">GST Section 9(5)</label>
+        <select id="cat-sec95" class="form-control">
+          <option value="">CA review required — not treated as 9(5)</option>
+          <option value="APPLICABLE">Applicable — CA-approved for 9(5)</option>
+          <option value="NOT_APPLICABLE">Not applicable</option>
+        </select>
+        <small style="color:#9ca3af;font-size:11px">Only "Applicable": when an external partner who is <i>not</i> GST-registered does a job in this category, Remont issues the customer's tax invoice for the full service value and pays the GST. Other settings never get 9(5) treatment — such jobs are flagged for tax review. Never applies to in-house employees.</small></div>
       <div class="form-group"><label class="form-label">Logo / Icon Image <small style="color:#9ca3af">(shown instead of the emoji on the site — upload a square logo/icon)</small></label><input id="cat-logo" class="form-control" placeholder="https://…"></div>
       <div class="form-group"><label class="form-label">Cover Image</label><input id="cat-img" class="form-control" placeholder="https://…"></div>
       <div class="form-group"><label class="form-label">Promo Video <small style="color:#9ca3af">(paste a URL or upload a file)</small></label><input id="cat-video" class="form-control" placeholder="https://youtube.com/…"></div>
@@ -579,7 +585,7 @@ function openCatModal(cat) {
   document.getElementById('cat-premium').checked = cat ? cat.isPremium : false;
   document.getElementById('cat-active').checked = cat ? cat.isActive : true;
   document.getElementById('cat-warranty-days').value = (cat && cat.warrantyDays != null) ? cat.warrantyDays : '';
-  document.getElementById('cat-sec95').checked = cat ? cat.section95Applicable !== false : true;
+  document.getElementById('cat-sec95').value = (cat && cat.gstSection95Status) || '';
   document.getElementById('cat-warranty-pct').value = (cat && cat.warrantyHoldPercent != null) ? cat.warrantyHoldPercent : '';
   document.getElementById('cat-slug').value = cat ? (cat.slug||'') : '';
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
@@ -613,7 +619,7 @@ function saveCategory() {
   var warrantyDaysVal = document.getElementById('cat-warranty-days').value.trim();
   var warrantyPctVal = document.getElementById('cat-warranty-pct').value.trim();
   data.warrantyDays = warrantyDaysVal === '' ? null : parseInt(warrantyDaysVal);
-  data.section95Applicable = document.getElementById('cat-sec95').checked;
+  data.gstSection95Status = document.getElementById('cat-sec95').value || null;
   data.warrantyHoldPercent = warrantyPctVal === '' ? null : parseFloat(warrantyPctVal);
   if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
   var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);

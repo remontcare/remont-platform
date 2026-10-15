@@ -150,6 +150,8 @@
           <div id="acc-fees" style="margin-top:8px"></div>
           <div id="acc-test" style="margin-top:12px"></div>
         </div></div>
+      <div class="card" style="margin-bottom:16px;border:1px solid #fecaca"><div class="card-header"><span class="card-title">e-Invoice &amp; e-Way Bill</span></div>
+        <div style="padding:16px" id="acc-einv"><div class="loading">Loading…</div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Partner payout reconciliation</span></div>
         <div style="padding:16px"><div id="acc-payout" class="loading">Loading…</div></div></div>
     </div>
@@ -357,6 +359,12 @@ function loadAccounting() {
   api('GET', '/admin/accounting/test-payments/summary').then(function(t) {
     document.getElementById('acc-test').innerHTML = '<p style="font-size:13px">Test-gateway payments (DEV_MOCK / RAZORPAY_DEV): <b>' + t.count + '</b> recorded, ' + t.paidCount + ' marked paid totalling ' + fmtCur(t.paidTotal) + ' — no real money; excluded from all accounting. <a href="#" onclick="downloadAuthedFile(\'/admin/accounting/test-payments\', \'test-gateway-payments.xlsx\');return false">Download list</a></p>';
   }).catch(function() {});
+  api('GET', '/admin/accounting/e-invoice-status').then(function(st) {
+    var cnt = function(rows) { return rows.length ? rows.map(function(r) { return r.environment + ' ' + r.status + ': ' + r.count; }).join(', ') : 'none'; };
+    document.getElementById('acc-einv').innerHTML = '<p>' + badge('SIMULATION ONLY — not connected to the government IRP / e-Way Bill portal', 'red') + '</p>' +
+      '<p style="font-size:13px;margin-top:8px">' + escape(st.message) + '</p>' +
+      '<p style="font-size:12px;color:#6b7280">e-Invoice records: ' + escape(cnt(st.eInvoiceRecords)) + ' · e-Way Bill records: ' + escape(cnt(st.eWayBillRecords)) + '</p>';
+  }).catch(function(e) { document.getElementById('acc-einv').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
   api('GET', '/admin/accounting/partner-payout-reconciliation').then(renderPayoutRecon)
     .catch(function(e) { document.getElementById('acc-payout').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
 }

@@ -866,8 +866,11 @@ model ServiceCategory {
   // pending CA confirmation. Nullable/tri-state, defaulting to null (undetermined) for
   // every existing and new category: null = CA_REVIEW_REQUIRED (today's exact behaviour —
   // the partner is invoiced as supplier, Remont only invoices its own fee, unchanged),
-  // 'APPLICABLE'/'NOT_APPLICABLE' is the eventual CA-confirmed answer. Setting this field
-  // alone changes NOTHING in invoice issuance or GST liability — that would require
+  // 'APPLICABLE'/'NOT_APPLICABLE' is the eventual CA-confirmed answer. Since the accounting
+  // completion release this field DRIVES invoice issuance: only 'APPLICABLE' makes an
+  // unregistered EXTERNAL partner's job a section 9(5) supply invoiced by Remont (see
+  // InvoicesService.computeInvoice); null/'NOT_APPLICABLE' never do. Historical note: before that,
+  // setting this field alone changed NOTHING in invoice issuance or GST liability — that would require
   // changing who is treated as the supplier for this category, an invoice-engine change
   // deliberately out of scope until legally confirmed. TCS (see TcsRecord) is also
   // withheld for any category still null here, since s.52(1)'s proviso means TCS and
@@ -878,9 +881,9 @@ model ServiceCategory {
   subCategories   SubCategory[]
   commissionRules CommissionRule[]
   priceModifiers  ServicePriceModifier[]
-  // Section 9(5): for services in this category supplied through Remont by an UNREGISTERED partner,
-  // Remont (the e-commerce operator) issues the tax invoice and pays the GST. Admin-configurable.
-  section95Applicable Boolean @default(true)
+  // RETIRED — duplicated gstSection95Status above and is no longer read anywhere. Kept only so the
+  // deploy's schema sync never drops a column (no destructive migrations).
+  section95Applicable Boolean @default(false)
 }
 
 model SubCategory {

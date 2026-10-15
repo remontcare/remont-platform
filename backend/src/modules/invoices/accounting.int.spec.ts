@@ -42,8 +42,8 @@ d('Accounting & invoices (throwaway Postgres)', () => {
     const u = await prisma.user.create({ data: { phone: phone(), name: 'p' } });
     return prisma.serviceVendor.create({ data: { userId: u.id, fullName: `Partner ${seq}`, businessName: `Partner ${seq}`, baseCity: 'Bhopal', staffType, gstin } as any });
   }
-  async function category(section95Applicable = true) {
-    return prisma.serviceCategory.create({ data: { key: uniq('C'), name: 'Electrical', icon: 'x', slug: uniq('c'), section95Applicable } as any });
+  async function category(gstSection95Status: string | null = 'APPLICABLE') {
+    return prisma.serviceCategory.create({ data: { key: uniq('C'), name: 'Electrical', icon: 'x', slug: uniq('c'), gstSection95Status } as any });
   }
   async function serviceOrder(vendor: any, cat: any, extra: Record<string, any> = {}) {
     const customer = await prisma.user.create({ data: { phone: phone(), name: 'Customer' } });
@@ -84,7 +84,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
   });
 
   it('section 9(5): unregistered partner in an eligible category → the customer document is Remont\'s tax invoice', async () => {
-    const o = await serviceOrder(await partner(), await category(true));
+    const o = await serviceOrder(await partner(), await category('APPLICABLE'));
     const inv = await invoices.generateForOrder(o.id);
     expect(inv.section95).toBe(true);
     expect(inv.taxReviewRequired).toBe(false);
@@ -101,7 +101,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
   });
 
   it('registered partner → booking summary whose note names the partner\'s own tax invoice (no misleading platform-fee claim)', async () => {
-    const o = await serviceOrder(await partner('23ABCDE1234F1Z5'), await category(true));
+    const o = await serviceOrder(await partner('23ABCDE1234F1Z5'), await category('APPLICABLE'));
     const inv = await invoices.generateForOrder(o.id);
     expect(inv.section95).toBe(false);
     const order = await prisma.order.findUnique({ where: { id: o.id }, include: { vendor: true, customer: true } });
@@ -112,14 +112,34 @@ d('Accounting & invoices (throwaway Postgres)', () => {
   });
 
   it('unregistered partner in a category NOT under 9(5) → flagged for tax review', async () => {
-    const inv = await invoices.generateForOrder((await serviceOrder(await partner(), await category(false))).id);
+    const inv = await invoices.generateForOrder((await serviceOrder(await partner(), await category('NOT_APPLICABLE'))).id);
     expect(inv.section95).toBe(false);
     expect(inv.taxReviewRequired).toBe(true);
   });
 
+  it('a category is NOT under 9(5) unless set APPLICABLE (default = CA review required)', async () => {
+    const cat = await prisma.serviceCategory.create({ data: { key: uniq('C'), name: 'Painting', icon: 'x', slug: uniq('c'), section95Applicable: true } as any });
+    expect(cat.gstSection95Status).toBeNull(); // the retired flag has no effect
+    const inv = await invoices.generateForOrder((await serviceOrder(await partner(), cat)).id);
+    expect(inv.section95).toBe(false);
+    expect(inv.taxReviewRequired).toBe(true);
+  });
+
+  it('in-house employee: never 9(5), GST on the full service amount, Remont is the supplier — even with an old PLATFORM_SERVICE snapshot', async () => {
+    const tech = await partner(undefined, 'IN_HOUSE');
+    const fresh = await invoices.generateForOrder((await serviceOrder(tech, await category('APPLICABLE'))).id);
+    expect(fresh.transactionType).toBe('DIRECT_PROJECT');
+    expect(fresh.section95).toBe(false);
+    expect(Number(fresh.customerSubtotal)).toBe(349);
+    expect(Number(fresh.customerCgst) + Number(fresh.customerSgst)).toBeCloseTo(62.82, 2);
+    expect(fresh.supplierGstin).toBe('23AAKCR9036L1ZY');
+    const stale = await invoices.generateForOrder((await serviceOrder(tech, await category('APPLICABLE'), { billingTransactionType: 'PLATFORM_SERVICE' })).id);
+    expect(stale.section95).toBe(false);
+  });
+
   it('PDFs: combined admin PDF has every document + credit notes; the customer gets only theirs; credit-note PDF renders; received amount is the real payment', async () => {
     const vendor = await partner();
-    const o = await serviceOrder(vendor, await category(true));
+    const o = await serviceOrder(vendor, await category('APPLICABLE'));
     await invoices.generateForOrder(o.id);
     await prisma.paymentTransaction.create({ data: { orderId: o.id, userId: o.customerId, amount: 411.82, status: 'PAID', gateway: 'RAZORPAY', gatewayPaymentId: 'pay_INT123' } as any });
     const cn = await invoices.issueCreditNote(o.id, undefined, 100, 'partial refund');
@@ -140,7 +160,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
   });
 
   it('reissue: issued invoice archived, cancelled by credit note, corrected invoice under new numbers, refunds carried, audited; stale/concurrent reissue refused', async () => {
-    const o = await serviceOrder(await partner(), await category(true));
+    const o = await serviceOrder(await partner(), await category('APPLICABLE'));
     const original = await invoices.generateForOrder(o.id);
     // simulate a pre-fix invoice: issued as a booking summary although 9(5) applied
     await prisma.invoice.update({ where: { id: original.id }, data: { section95: false, supplierGstin: null } });
@@ -201,9 +221,9 @@ d('Accounting & invoices (throwaway Postgres)', () => {
   });
 
   it('reports: workbooks build from real rows; 9(5) supplies land in the ECO bucket; test-gateway orders are excluded', async () => {
-    const o = await serviceOrder(await partner(), await category(true));
+    const o = await serviceOrder(await partner(), await category('APPLICABLE'));
     await invoices.generateForOrder(o.id);
-    const t = await serviceOrder(await partner(), await category(true));
+    const t = await serviceOrder(await partner(), await category('APPLICABLE'));
     await invoices.generateForOrder(t.id);
     await prisma.paymentTransaction.create({ data: { orderId: t.id, userId: t.customerId, amount: 411.82, status: 'PAID', gateway: 'DEV_MOCK' } as any });
     expect((await reports.testOrderIds([o.id, t.id])).has(t.id)).toBe(true);
@@ -225,7 +245,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
     const v = await partner();
     await prisma.serviceVendor.update({ where: { id: v.id }, data: { pendingPayout: 2144.29 } });
     await prisma.partnerLedgerEntry.create({ data: { vendorId: v.id, type: 'TOP_UP', amount: 20.14, balanceAfter: 20.14 } as any });
-    const job = await serviceOrder(v, await category(true), { vendorPayout: 2124.15 });
+    const job = await serviceOrder(v, await category('APPLICABLE'), { vendorPayout: 2124.15 });
     const rec = (await reports.partnerPayoutReconciliation()).vendors.find((x: any) => x.vendorId === v.id)!;
     expect(rec.difference).toBe(2124.15);
     expect(rec.unpostedJobs.map((j: any) => j.orderId)).toEqual([job.id]);
@@ -242,7 +262,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
 
   it('in-house technician completing a job: no partner earnings, payout, hold or ledger entries (no double counting)', async () => {
     const tech = await partner(undefined, 'IN_HOUSE');
-    const o = await serviceOrder(tech, await category(true), { status: 'IN_PROGRESS', endOtp: null });
+    const o = await serviceOrder(tech, await category('APPLICABLE'), { status: 'IN_PROGRESS', endOtp: null });
     const stub: any = {};
     const orders = new OrdersService(prisma as any, stub, stub, stub, stub, stub, stub, stub, new PartnerLedgerService(prisma as any), invoices, stub);
     await orders.complete(tech.userId, o.id, '', []);

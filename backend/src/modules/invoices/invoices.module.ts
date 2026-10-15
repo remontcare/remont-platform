@@ -89,7 +89,7 @@ export class InvoicesService {
       where: { id: orderId },
       include: {
         vendor: true,
-        service: { include: { category: { select: { section95Applicable: true, warrantyDays: true } } } },
+        service: { include: { category: { select: { gstSection95Status: true, warrantyDays: true } } } },
         serviceItems: { include: { service: true } },
         items: { include: { product: { include: { vendor: true } } } },
         extraWorkItems: { where: { customerApproved: true } },
@@ -196,11 +196,14 @@ export class InvoicesService {
       // Section 9(5) CGST Act: a service supplied through Remont (the e-commerce operator) by a
       // partner who is NOT GST-registered — Remont is the person liable for that GST and issues
       // the customer's tax invoice itself. Which categories are notified for 9(5) is admin
-      // configuration (ServiceCategory.section95Applicable). Unregistered partner + category not
+      // configuration (ServiceCategory.gstSection95Status = 'APPLICABLE'). Unregistered partner + category not
       // under 9(5) + GST charged = nobody is liable for the GST collected → flagged for review.
       const partnerRegistered = !!order.vendor?.gstin && isValidGstinFormat(String(order.vendor.gstin).trim().toUpperCase());
-      if (!partnerRegistered) {
-        if (order.service?.category?.section95Applicable !== false) section95 = true;
+      // Only an EXTERNAL partner's job can be a 9(5) supply — an in-house employee's job is Remont's
+      // own supply (DIRECT_PROJECT) even if this order carries an older PLATFORM_SERVICE snapshot.
+      const externalPartner = !!order.vendor && order.vendor.staffType !== 'IN_HOUSE';
+      if (externalPartner && !partnerRegistered) {
+        if (order.service?.category?.gstSection95Status === 'APPLICABLE') section95 = true;
         else if (serviceRate > 0) taxReviewRequired = true;
       }
 

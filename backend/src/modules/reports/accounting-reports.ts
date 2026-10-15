@@ -565,6 +565,23 @@ export class AccountingReportsService {
     });
   }
 
+  /**
+   * e-Invoice (IRP) and e-Way Bill: only MOCK adapters exist (compliance.module.ts) — no GSP/IRP
+   * credentials, so nothing is ever registered with the government. Every record is SANDBOX.
+   */
+  async eInvoiceStatus() {
+    const [einv, eway] = await Promise.all([
+      this.prisma.eInvoiceRecord.groupBy({ by: ['environment', 'status'], _count: { _all: true } }),
+      this.prisma.eWayBillRecord.groupBy({ by: ['environment', 'status'], _count: { _all: true } }),
+    ]);
+    return {
+      mode: 'SIMULATION', liveIntegration: false,
+      message: 'e-Invoice and e-Way Bill are simulated only. No IRN or e-Way Bill number in this system is government-issued; MOCK-* numbers have no legal validity. A GSP/IRP integration with credentials is required before go-live where e-invoicing applies.',
+      eInvoiceRecords: einv.map((r: any) => ({ environment: r.environment, status: r.status, count: r._count._all })),
+      eWayBillRecords: eway.map((r: any) => ({ environment: r.environment, status: r.status, count: r._count._all })),
+    };
+  }
+
   // ─── purchases (input-tax records) ────────────────────────────────────────
 
   async createPurchase(actorId: string, b: any) {
@@ -621,6 +638,7 @@ export class AccountingReportsController {
   @Get('test-payments') async test(@Res() res: Response) { const { buffer } = await this.r.testPayments(); send(res, buffer, 'test-gateway-payments.xlsx'); }
   @Get('test-payments/summary') async testSummary() { return (await this.r.testPayments()).summary; }
   @Get('partner-payout-reconciliation') payoutRecon() { return this.r.partnerPayoutReconciliation(); }
+  @Get('e-invoice-status') eInvoiceStatus() { return this.r.eInvoiceStatus(); }
   @Roles(UserRole.SUPER_ADMIN)
   @Post('partner-payout-reconciliation/:vendorId/correct')
   correct(@CurrentUser() u: JwtPayload, @Param('vendorId') id: string, @Body() b: { amount: number; expectedDifference: number; reason: string; orderId?: string }) {
