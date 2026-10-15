@@ -420,6 +420,66 @@ enum RefundRequestStatus {
   PARTIALLY_APPROVED
   REJECTED
   PROCESSED
+  // Money-moving decision claimed; legs being executed.
+  PROCESSING
+  // Gateway refund accepted by the provider, not yet processed (never "completed").
+  REFUND_PENDING
+  // Provider outcome unknown (timeout / 5xx / conflict) — claim kept; reconcile from Admin › Refunds.
+  NEEDS_ATTENTION
+  // Provider confirmed the gateway refund failed (or rejected it outright) — its claim released.
+  REFUND_FAILED
+}
+
+enum ProviderRefundStatus {
+  CREATED   // persisted, not yet confirmed sent
+  PENDING   // provider accepted it, still processing
+  PROCESSED // provider confirmed processed (final)
+  FAILED    // provider confirmed failed, or definitively rejected the request (final)
+  UNKNOWN   // outcome uncertain — never assumed either way
+}
+
+/// One gateway refund attempt per refund request, with a stable internal id and idempotency key
+/// that every retry reuses (same key + same amount) — so a timeout can never create a second refund.
+model ProviderRefund {
+  id                   String               @id @default(cuid()) // stable internal refund id (also the provider "receipt")
+  refundRequestId      String               @unique
+  refundRequest        RefundRequest        @relation(fields: [refundRequestId], references: [id])
+  paymentTransactionId String
+  gateway              String
+  gatewayPaymentId     String
+  amountPaise          Int
+  idempotencyKey       String               @unique
+  providerRefundId     String?              @unique
+  status               ProviderRefundStatus @default(CREATED)
+  providerStatus       String?
+  attempts             Int                  @default(0)
+  lastError            String?
+  lastCheckedAt        DateTime?
+  processedAt          DateTime?
+  failedAt             DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([status])
+}
+
+/// At most ONE wallet credit per refund request — inserted in the same transaction as the credit,
+/// so two racing retries can never both credit (a new table: the constraint applies with a plain push).
+model RefundWalletCredit {
+  id                  String   @id @default(cuid())
+  refundRequestId     String   @unique
+  walletTransactionId String?
+  createdAt           DateTime @default(now())
+}
+
+/// Webhook de-duplication by the provider's event id (Razorpay x-razorpay-event-id).
+model PaymentWebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String    @unique
+  event       String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
 }
 
 // Default is WALLET_CREDIT per business rule — gateway refund is the exception path
@@ -643,8 +703,22 @@ enum CommissionType {
   SLAB
 }
 
+// What a CommissionRule row prices. Same scope/city/priority/effective-date resolution for
+// every type (resolveServiceRule() in common/index.ts) — no second rule system:
+//   COMMISSION          — Remont's commission, deducted from the partner (unchanged behaviour)
+//   MINIMUM_CHARGE      — minimum GST-inclusive amount a customer pays for one service booking
+//   CANCELLATION_CHARGE — the charge an admin MAY approve when a customer cancels/refuses
+//                         after the partner arrived; never deducted automatically
+// Existing rows default to COMMISSION, so every current rule keeps working unchanged.
+enum ServiceRuleType {
+  COMMISSION
+  MINIMUM_CHARGE
+  CANCELLATION_CHARGE
+}
+
 model CommissionRule {
   id         String          @id @default(cuid())
+  ruleType   ServiceRuleType @default(COMMISSION)
   scope      CommissionScope
   categoryId String? // required when scope=CATEGORY
   serviceId  String? // required when scope=SERVICE
@@ -654,6 +728,9 @@ model CommissionRule {
   // Percentage (0-100) or flat ₹ amount — ignored when commissionType=SLAB, where
   // slabJson is the source of truth instead.
   value          Decimal        @default(0) @db.Decimal(10, 2)
+  // CANCELLATION_CHARGE only: the minimum penalty when the rule is a percentage
+  // (penalty = max(value% of the service amount, minimumAmount)). null = no minimum.
+  minimumAmount  Decimal?       @db.Decimal(10, 2)
   slabJson       Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
 
   // Higher priority wins when more than one rule matches at the same specificity level.
@@ -674,6 +751,7 @@ model CommissionRule {
 
   @@index([categoryId, cityId])
   @@index([serviceId, cityId])
+  @@index([ruleType])
 }
 
 // Phase 7 — marketplace fee rules for PRODUCT sellers (commission/marketing/gateway/future
@@ -1910,6 +1988,24 @@ model Order {
   cancelledAt        DateTime?
   cancelReason       String?
 
+  // Minimum service charge (CommissionRule ruleType=MINIMUM_CHARGE) frozen at checkout: the
+  // pre-GST amount added so this service booking's GST-inclusive total reaches the minimum.
+  // Already included in serviceAmount/subtotal; kept separately for the invoice line and
+  // audit. 0 = no minimum applied (every existing order).
+  minimumChargeAdjustment Decimal @default(0) @db.Decimal(10, 2)
+  minimumChargeRuleId     String?
+
+  // Partner "I have arrived" — a fresh location captured at that moment, kept separate from
+  // the order status (which is unchanged) and from periodic tracking. arrivalVerification is
+  // decided server-side from distance/accuracy; never set to VERIFIED without coordinates.
+  arrivedAt           DateTime?
+  arrivalLatitude     Float?
+  arrivalLongitude    Float?
+  arrivalAccuracyM    Float?
+  arrivalDistanceM    Float?
+  arrivalVerification ArrivalVerification?
+  arrivalNote         String?
+
   // Set when OrdersService.autoGenerateInvoice() (fire-and-forget on job completion) throws —
   // previously that failure was only ever logged, leaving the order stuck COMPLETED with no
   // invoice forever and nothing admin-visible. InvoicesService.generateForOrder() is already
@@ -2470,6 +2566,16 @@ model RefundRequest {
   walletCreditAmount  Decimal?            @db.Decimal(10, 2)
   gatewayRefundAmount Decimal?            @db.Decimal(10, 2)
   gatewayRefundId     String?
+  // Set when a support case raised this refund: its amount is then tracked on the case
+  // (SupportCase.refundedTotal) and the partner is never auto-charged for it.
+  supportCaseId       String?
+  // Amount reserved against the booking's refundable limit when a money-moving decision is
+  // claimed (under the booking lock). Released only when the provider confirms a failure.
+  claimedAmount       Decimal             @default(0) @db.Decimal(10, 2)
+  // Admin-decided recovery FROM the partner for this refund (never automatic)
+  partnerRecovery     Decimal?            @db.Decimal(10, 2)
+  partnerRecoveredAt  DateTime?
+  providerRefund      ProviderRefund?
   adminNotes          String?
   approvedBy          String?
   approvedAt          DateTime?
@@ -2482,6 +2588,7 @@ model RefundRequest {
   @@index([masterOrderId])
   @@index([customerId])
   @@index([status])
+  @@index([supportCaseId])
 }
 
 // Append-only audit trail — mirrors the existing OrderTimeline/writeOrderTimeline()
@@ -2516,6 +2623,16 @@ enum SupportItemType {
   SERVICE
 }
 
+enum ArrivalVerification {
+  VERIFIED
+  NOT_VERIFIED_TOO_FAR
+  NOT_VERIFIED_LOW_ACCURACY
+  NOT_VERIFIED_NO_LOCATION
+  NOT_VERIFIED_NO_ADDRESS_COORDINATES
+  NOT_VERIFIED_MOCK_LOCATION
+  NOT_VERIFIED_STALE_LOCATION
+}
+
 enum SupportIssueType {
   // product
   NOT_DELIVERED
@@ -2535,6 +2652,9 @@ enum SupportIssueType {
   PARTNER_DID_NOT_ARRIVE
   SERVICE_STARTED_ISSUE
   SERVICE_COMPLETED_ISSUE_NOT_FIXED
+  // Raised by the PARTNER after arrival when the customer refused the service — always
+  // admin-reviewed, never treated as confirmed customer fault on the partner's word alone.
+  CUSTOMER_REFUSED_SERVICE
   // shared
   OTHER_ISSUE
 }
@@ -2623,6 +2743,29 @@ model SupportCase {
   decidedBy        String?
   decidedAt        DateTime?
   refundRequestId  String?
+
+  // Post-arrival review additions. openedByRole is null for every pre-existing (customer) case.
+  openedByRole         String? // CUSTOMER | SERVICE_VENDOR
+  customerStatement    String? // customer's dispute of a proposed charge, before the decision
+  appealStatement      String? // one appeal after a decision
+  appealedAt           DateTime?
+  // Total refunded to the customer across the decision and any appeal decision — an appeal
+  // can only ever refund the difference, never refund twice.
+  refundedTotal        Decimal   @default(0) @db.Decimal(10, 2)
+  // Admin-decided recovery FROM the partner (a separate, traceable ledger debit — never automatic)
+  partnerRecovery      Decimal?  @db.Decimal(10, 2)
+  partnerRecoveredAt   DateTime?
+  // Cancellation penalty approved by the admin: how much was kept from money actually received,
+  // and how much is only PENDING COLLECTION (never charged automatically, not collected revenue).
+  penaltyAssessed          Decimal?  @db.Decimal(10, 2)
+  penaltyRetained          Decimal?  @db.Decimal(10, 2)
+  penaltyPendingCollection Decimal?  @db.Decimal(10, 2)
+  penaltyAssessedAt        DateTime?
+  // Admin-approved partner compensation; partnerCompensatedAt is the one-time claim that
+  // guarantees the ledger credit is posted at most once.
+  partnerCompensation  Decimal?  @db.Decimal(10, 2)
+  partnerCompensatedAt DateTime?
+  orderCancelledByCase Boolean   @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

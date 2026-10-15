@@ -250,6 +250,9 @@ export async function resolveCommission(
   const rules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
     where: {
       isActive: true,
+      // Rollback-safety step: only COMMISSION rows are commission. MINIMUM_CHARGE /
+      // CANCELLATION_CHARGE rows (added by the next release) are never read as commission.
+      ruleType: 'COMMISSION',
       OR: [{ serviceId }, { categoryId, serviceId: null }],
       AND: [
         { OR: [{ cityId: null }, { cityId: cityId || undefined }] },

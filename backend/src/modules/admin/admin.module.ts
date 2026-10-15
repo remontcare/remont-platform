@@ -1921,6 +1921,8 @@ Return JSON with:
   async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string) {
     return this.prisma.commissionRule.findMany({
       where: {
+        // This screen manages commission only — other rule types are never listed or edited here.
+        ruleType: 'COMMISSION',
         ...(scope ? { scope: scope as any } : {}),
         ...(categoryId ? { categoryId } : {}),
         ...(serviceId ? { serviceId } : {}),
