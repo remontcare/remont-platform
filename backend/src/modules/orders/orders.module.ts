@@ -1585,6 +1585,19 @@ export class OrdersService {
         where: { id: orderId },
         data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
       });
+      // Money already received (online payment and/or wallet) is never lost track of: the
+      // cancellation records a refund REQUEST for admin review — it moves no money. Skipped
+      // when one is already open for this order.
+      const received = order.paymentStatus === 'PAID' || Number(order.walletUsed || 0) > 0;
+      if (received) {
+        const open = await tx.refundRequest.findFirst({ where: { orderId, status: { in: ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED'] } }, select: { id: true } });
+        if (!open) {
+          const rr = await tx.refundRequest.create({
+            data: { orderId, customerId: order.customerId, reason: `Order cancelled by the customer: ${reason || 'no reason given'}`, evidenceUrls: [], partnerId: order.vendorId || undefined, status: 'REQUESTED' },
+          });
+          await tx.refundRequestLog.create({ data: { refundRequestId: rr.id, actorId: userId, actorRole: UserRole.CUSTOMER, action: 'REQUESTED', notes: 'Raised automatically on cancellation — awaiting admin review' } });
+        }
+      }
       if (order.vendorId && Number(order.leadCostAmount) > 0) {
         const claimed = await tx.order.updateMany({
           where: { id: orderId, leadCostRefunded: false },

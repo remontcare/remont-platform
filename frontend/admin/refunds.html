@@ -111,6 +111,34 @@ var PROVIDER_STATUS_TEXT = {
   PROCESSED: 'Processed by the gateway (completed)', FAILED: 'Failed at the gateway — the amount is refundable again',
   UNKNOWN: 'Outcome unknown — check with the gateway before doing anything else',
 };
+var PROVIDER_SHORT = { CREATED: 'Sending', PENDING: 'Pending', PROCESSED: 'Refunded', FAILED: 'Failed', UNKNOWN: 'Needs check' };
+// The money picture, kept separate from partner recovery (a different decision and ledger entry).
+function summaryHtml(rr) {
+  var m = rr.summary; if (!m) return '';
+  function row(label, value, strong) { return '<div style="display:flex;justify-content:space-between;gap:12px"><span>' + label + '</span><span>' + (strong ? '<strong>' + value + '</strong>' : value) + '</span></div>'; }
+  var cur = function(v) { return v == null ? '—' : fmtCur(v); };
+  return '<div style="background:#eef2ff;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">' +
+    '<div style="font-weight:700;margin-bottom:6px">Customer refund</div>' +
+    row('Payment received for this booking', cur(m.paymentReceived)) +
+    row('Requested', 'Refund requested — the admin sets the amount') +
+    row('Approved', m.approved > 0 ? fmtCur(m.approved) : '—', true) +
+    row('Refunded (wallet credited / gateway confirmed)', fmtCur(m.processed), true) +
+    (m.inProgress > 0 ? row('In progress at the gateway', fmtCur(m.inProgress)) : '') +
+    row('Still refundable on this booking (all routes)', cur(m.remainingRefundable)) +
+    (m.gatewayStatus ? row('Gateway status', escape(PROVIDER_SHORT[m.gatewayStatus] || m.gatewayStatus)) : '') +
+    (m.decidedAt ? row('Decided by', escape(m.decidedBy || '—') + ' · ' + fmtDate(m.decidedAt)) : '') +
+    (m.walletTransactionId ? row('Wallet transaction', escape(m.walletTransactionId)) : '') +
+    (m.gatewayReference ? row('Gateway reference', escape(m.gatewayReference)) : '') +
+  '</div>';
+}
+function recoveryPanelHtml(rr) {
+  if (!rr.orderId) return '';
+  var body = rr.partnerRecoveredAt
+    ? 'Recovered from the partner: <strong>' + fmtCur(rr.partnerRecovery) + '</strong> on ' + fmtDate(rr.partnerRecoveredAt) + ' (recorded in the partner ledger)'
+    : 'No partner recovery. A customer refund never deducts from the partner automatically.' +
+      (rr.status === 'PROCESSED' ? '<div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="rrPartnerRecovery()">Recover from partner…</button> <small style="color:#6b7280">only with a valid reason permitted by the partner agreement</small></div>' : '');
+  return '<div style="background:#fff7ed;border-radius:8px;padding:12px;margin-top:10px;font-size:13px"><div style="font-weight:700;margin-bottom:4px">Partner recovery (separate decision)</div>' + body + '</div>';
+}
 function providerHtml(rr) {
   var p = rr.providerRefund; if (!p) return '';
   var open = p.status !== 'PROCESSED' && p.status !== 'FAILED';
@@ -139,18 +167,22 @@ function rrConfirmOutcome() {
     .catch(function(e) { toast(e.message, 'error'); });
 }
 function rrPartnerRecovery() {
-  var amount = Number(prompt('Recover from the partner (₹) — a separate ledger debit, only for a job the partner was paid for:'));
-  if (!(amount > 0)) return;
-  var reason = prompt('Reason (required, audited):'); if (!reason || !reason.trim()) return;
-  if (!confirm('Debit ₹' + amount + ' from the partner? This is recorded once and audited.')) return;
-  api('POST', '/refunds/' + currentRR.id + '/partner-recovery', { amount: amount, reason: reason.trim() })
+  var input = prompt('Recover from the partner — enter an amount in ₹ (e.g. 150) or a percentage of what the partner earned on this job (e.g. 20%). Only for a job the partner was paid for:');
+  if (!input) return;
+  input = input.trim();
+  var body = /%$/.test(input) ? { percent: Number(input.replace('%', '')) } : { amount: Number(input) };
+  if (!(body.percent > 0 || body.amount > 0)) { toast('Enter an amount or a percentage', 'error'); return; }
+  var reason = prompt('Reason and the policy / agreement clause that permits it (required, audited):'); if (!reason || !reason.trim()) return;
+  if (!confirm('Debit ' + (body.percent ? body.percent + '% of the partner\'s earning' : '₹' + body.amount) + ' from the partner? Recorded once in the partner ledger and audited.')) return;
+  body.reason = reason.trim();
+  api('POST', '/refunds/' + currentRR.id + '/partner-recovery', body)
     .then(function() { toast('Partner recovery recorded', 'success'); openDetail(currentRR.id); })
     .catch(function(e) { toast(e.message, 'error'); });
 }
 
 function renderTable() {
   if (!allRequests.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No refund requests found.</div>'; return; }
-  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Customer</th><th>Order</th><th>Reason</th><th>Partner Response</th><th>Status</th><th>Requested</th><th>Action</th></tr></thead><tbody>' +
+  document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Customer</th><th>Order</th><th>Reason</th><th>Partner Response</th><th>Status</th><th>Approved</th><th>Gateway</th><th>Requested</th><th>Action</th></tr></thead><tbody>' +
     allRequests.map(function(r) {
       return '<tr>' +
         '<td><strong>' + escape(r.customerName || r.customerId) + '</strong><br><small style="color:#6b7280">' + escape(r.customerPhone || '') + '</small></td>' +
@@ -158,6 +190,8 @@ function renderTable() {
         '<td style="max-width:200px">' + escape(r.reason) + '</td>' +
         '<td style="max-width:180px">' + (r.partnerResponse ? escape(r.partnerResponse) : '<span style="color:#9ca3af">—</span>') + '</td>' +
         '<td>' + badge(r.status.replace(/_/g, ' '), STATUS_COLOR[r.status] || 'gray') + '</td>' +
+        '<td>' + (r.approvedAmount != null && Number(r.approvedAmount) > 0 ? fmtCur(r.approvedAmount) : '<span style="color:#9ca3af">—</span>') + '</td>' +
+        '<td style="font-size:12px">' + (r.providerRefund ? escape((PROVIDER_SHORT[r.providerRefund.status] || r.providerRefund.status)) : '<span style="color:#9ca3af">—</span>') + '</td>' +
         '<td style="color:#9ca3af;font-size:12px">' + fmtDateShort(r.createdAt) + '</td>' +
         '<td><button class="btn btn-xs btn-primary" onclick="openDetail(\'' + r.id + '\')">Review</button></td>' +
         '</tr>';
@@ -185,6 +219,7 @@ function renderDetail(rr) {
   var html =
     '<div style="padding:16px 20px">' +
     '<div style="margin-bottom:12px">' + badge(rr.status.replace(/_/g, ' '), STATUS_COLOR[rr.status] || 'gray') + '</div>' +
+    summaryHtml(rr) +
     '<div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">' +
       '<div><strong>Order:</strong> ' + escape(rr.orderNumber || '—') + (rr.orderTotalAmount ? ' (' + fmtCur(rr.orderTotalAmount) + ')' : '') + '</div>' +
       '<div><strong>Customer:</strong> ' + escape(rr.customerName || rr.customerId) + (rr.customerPhone ? ' · ' + escape(rr.customerPhone) : '') + '</div>' +
@@ -232,11 +267,7 @@ function renderDetail(rr) {
       (rr.approvedAmount ? ' · ' + fmtCur(rr.approvedAmount) : '') +
       (rr.gatewayRefundId ? '<br><strong>Gateway Refund ID:</strong> ' + escape(rr.gatewayRefundId) : '') +
       (rr.adminNotes ? '<br><strong>Notes:</strong> ' + escape(rr.adminNotes) : '') +
-      (rr.partnerRecoveredAt ? '<br><strong>Recovered from partner:</strong> ' + fmtCur(rr.partnerRecovery) : '') +
-      '</div>' + providerHtml(rr) +
-      (rr.orderId && rr.status === 'PROCESSED' && !rr.partnerRecoveredAt
-        ? '<div style="margin-top:10px"><button class="btn btn-outline btn-sm" onclick="rrPartnerRecovery()">Recover from partner…</button> <small style="color:#6b7280">never automatic — explicit decision with a reason</small></div>'
-        : '');
+      '</div>' + providerHtml(rr) + recoveryPanelHtml(rr);
   }
   html += '</div>';
   document.getElementById('rr-detail-body').innerHTML = html;

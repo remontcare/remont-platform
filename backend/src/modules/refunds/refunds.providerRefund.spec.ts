@@ -263,3 +263,39 @@ describe('Partner recovery — explicit, capped, once (every route)', () => {
     expect(t.prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'PARTNER_RECOVERY' }) }));
   });
 });
+
+describe('Clarity: duplicate customer requests, admin money summary, recovery by percentage', () => {
+  it('a customer submitting again gets their open request back (no duplicate)', async () => {
+    const t = makeService();
+    t.prisma.refundRequest.findFirst = jest.fn(async () => ({ id: 'rr-open', status: 'REQUESTED' }));
+    t.prisma.refundRequest.create = jest.fn();
+    const res: any = await t.svc.raise('cust-1', 'order-1', undefined, 'again', [], { returnOpenRequest: true });
+    expect(res.id).toBe('rr-open');
+    expect(t.prisma.refundRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('the admin summary separates approved, really refunded, in progress and still refundable', async () => {
+    const t = makeService(); t.addRequest();
+    await t.svc.decide('admin-1', 'rr-1', 'PARTIAL_WALLET_PARTIAL_GATEWAY', { walletCreditAmount: 200, gatewayRefundAmount: 300 });
+    t.prisma.walletTransaction.findFirst = jest.fn(async () => ({ id: 'wt-9', amount: 200 }));
+    t.prisma.refundRequest.findUnique = jest.fn(async () => ({ ...t.requests.get('rr-1'), logs: [], providerRefund: pr(t) }));
+    const d: any = await t.svc.getDetail('rr-1', 'admin-1', 'ADMIN' as any);
+    expect(d.summary).toEqual(expect.objectContaining({
+      paymentReceived: 1000, approved: 500, processed: 200, inProgress: 300, remainingRefundable: 500,
+      walletTransactionId: 'wt-9', gatewayReference: 'rfnd_1', gatewayStatus: 'PENDING',
+    }));
+    // customers never see the admin summary
+    const c: any = await t.svc.getDetail('rr-1', 'cust-1', 'CUSTOMER' as any);
+    expect(c.summary).toBeUndefined();
+  });
+
+  it('recovery as a percentage of what the partner earned on the job (₹800 × 25% = ₹200)', async () => {
+    const t = makeService(); t.addRequest({ status: 'PROCESSED' });
+    t.prisma.refundRequest.findUnique = jest.fn(async () => ({ ...t.requests.get('rr-1') }));
+    t.prisma.refundRequest.findMany = jest.fn(async () => []);
+    t.prisma.refundRequest.updateMany = jest.fn(async () => ({ count: 1 }));
+    await t.svc.partnerRecoveryForRequest('admin-1', 'rr-1', NaN, 'damage — clause 7.2', 25);
+    expect(t.ledgerEntries.map((e) => e.amount)).toEqual([-200]);
+    await expect(t.svc.partnerRecoveryForRequest('admin-1', 'rr-1', NaN, 'x', 150)).rejects.toThrow(/between 0 and 100/);
+  });
+});

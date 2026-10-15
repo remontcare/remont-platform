@@ -55,10 +55,17 @@ export class RefundsService {
 
   async raise(
     customerId: string, orderId: string | undefined, masterOrderId: string | undefined, reason: string, evidenceUrls: string[],
-    opts?: { allowWalletPortion?: boolean; supportCaseId?: string },
+    opts?: { allowWalletPortion?: boolean; supportCaseId?: string; returnOpenRequest?: boolean },
   ) {
     if (!orderId && !masterOrderId) throw new BadRequestException('orderId or masterOrderId is required');
     if (!reason?.trim()) throw new BadRequestException('A reason is required');
+    if (opts?.returnOpenRequest) {
+      // A customer submitting again (double-tap / second visit) gets their open request back.
+      const open = await this.prisma.refundRequest.findFirst({
+        where: { customerId, ...(orderId ? { orderId } : { masterOrderId }), status: { in: ACTIVE_STATUSES } },
+      });
+      if (open) return open;
+    }
 
     let partnerId: string | undefined;
     if (orderId) {
@@ -158,12 +165,45 @@ export class RefundsService {
     const rr = await this.prisma.refundRequest.findUnique({ where: { id }, include: { logs: { orderBy: { createdAt: 'asc' } }, providerRefund: true } });
     if (!rr) throw new NotFoundException();
     const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
-    if (adminRoles.includes(actorRole) || rr.customerId === actorUserId) return rr;
+    if (adminRoles.includes(actorRole)) return { ...rr, summary: await this.refundSummary(rr) };
+    if (rr.customerId === actorUserId) return rr;
     if (actorRole === UserRole.SERVICE_VENDOR) {
       const v = await this.prisma.serviceVendor.findUnique({ where: { userId: actorUserId } });
       if (v && rr.partnerId === v.id) return rr;
     }
     throw new ForbiddenException();
+  }
+
+  /**
+   * Plain money picture for the admin: what the booking actually received, what this request
+   * approved, how much of it has really been paid out (wallet credited / gateway confirmed), how
+   * much is still in progress, and what the booking can still refund — plus the references.
+   */
+  private async refundSummary(rr: any) {
+    const walletTx = await this.prisma.walletTransaction.findFirst({ where: { refundRequestId: rr.id, type: 'CREDIT' }, select: { id: true, amount: true, createdAt: true } });
+    const pr = rr.providerRefund;
+    const walletDone = walletTx ? Number(walletTx.amount) : 0;
+    const gatewayDone = pr ? (pr.status === 'PROCESSED' ? pr.amountPaise / 100 : 0)
+      : (rr.status === 'PROCESSED' ? Number(rr.gatewayRefundAmount || 0) : 0); // decided before provider tracking
+    const processed = r2(walletDone + gatewayDone);
+    const approved = Number(rr.approvedAmount || 0);
+    const booking = (rr.orderId || rr.masterOrderId)
+      ? await this.bookingRefundState(this.prisma, { orderId: rr.orderId, masterOrderId: rr.masterOrderId }).catch(() => null)
+      : null;
+    const decidedBy = rr.approvedBy ? await this.prisma.user.findUnique({ where: { id: rr.approvedBy }, select: { name: true } }).catch(() => null) : null;
+    return {
+      paymentReceived: booking?.received ?? null,
+      requested: null as number | null, // customers ask for a refund; the admin sets the amount
+      approved,
+      processed,
+      inProgress: r2(Math.max(0, Number(rr.claimedAmount || 0) - processed)),
+      remainingRefundable: booking?.refundable ?? null,
+      walletTransactionId: walletTx?.id ?? null,
+      gatewayReference: pr?.providerRefundId ?? rr.gatewayRefundId ?? null,
+      gatewayStatus: pr?.status ?? null,
+      decidedBy: decidedBy?.name ?? rr.approvedBy ?? null,
+      decidedAt: rr.approvedAt ?? null,
+    };
   }
 
   private async getActiveRequest(id: string) {
@@ -648,9 +688,15 @@ export class RefundsService {
   }
 
   /** Admin › Refunds: record a partner recovery for a refund request (explicit decision). */
-  async partnerRecoveryForRequest(adminId: string, refundRequestId: string, amount: number, reason: string) {
+  async partnerRecoveryForRequest(adminId: string, refundRequestId: string, amount: number, reason: string, percent?: number) {
     const rr = await this.prisma.refundRequest.findUnique({ where: { id: refundRequestId }, select: { orderId: true } });
     if (!rr?.orderId) throw new BadRequestException('Partner recovery applies to a service booking refund');
+    if (percent != null && !Number.isNaN(Number(percent))) {
+      // "X% of what the partner earned on this job" — the admin decides the percentage
+      if (!(Number(percent) > 0 && Number(percent) <= 100)) throw new BadRequestException('Percentage must be between 0 and 100');
+      const order = await this.prisma.order.findUnique({ where: { id: rr.orderId }, select: { vendorPayout: true } });
+      amount = r2((Number(order?.vendorPayout || 0) * Number(percent)) / 100);
+    }
     const res = await this.recordPartnerRecovery(adminId, { source: 'REFUND_REQUEST', sourceId: refundRequestId, orderId: rr.orderId, amount, reason, sourceLabel: `refund request ${refundRequestId}` });
     if (res.applied) await this.log(refundRequestId, adminId, UserRole.ADMIN, 'PARTNER_RECOVERED', `₹${r2(Number(amount))}: ${reason}`);
     return res;
@@ -665,7 +711,7 @@ export class RefundsController {
 
   @Post()
   raise(@CurrentUser() u: JwtPayload, @Body() b: { orderId?: string; masterOrderId?: string; reason: string; evidenceUrls?: string[] }) {
-    return this.refunds.raise(u.sub, b.orderId, b.masterOrderId, b.reason, b.evidenceUrls || []);
+    return this.refunds.raise(u.sub, b.orderId, b.masterOrderId, b.reason, b.evidenceUrls || [], { returnOpenRequest: true });
   }
 
   @Get('mine') mine(@CurrentUser() u: JwtPayload) { return this.refunds.listForCustomer(u.sub); }
@@ -711,8 +757,8 @@ export class RefundsController {
   // Admin: explicit recovery from the partner for this refund (never automatic).
   @UseGuards(RolesGuard) @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post(':id/partner-recovery')
-  partnerRecovery(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { amount: number; reason: string }) {
-    return this.refunds.partnerRecoveryForRequest(u.sub, id, Number(b.amount), b.reason);
+  partnerRecovery(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { amount?: number; percent?: number; reason: string }) {
+    return this.refunds.partnerRecoveryForRequest(u.sub, id, Number(b.amount), b.reason, b.percent != null ? Number(b.percent) : undefined);
   }
 
   @UseGuards(RolesGuard) @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
