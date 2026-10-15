@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.module';
 import {
   JwtAuthGuard, CurrentUser, JwtPayload,
   buildInvoiceBreakdown, resolveBillingTransactionType, buildTaxRateResolver, getBillingCompanyConfig,
-  stateFromGstin, PLATFORM_FEE_DEFAULT_RATE, PLATFORM_FEE_DEFAULT_SAC, distributeInvoiceDiscount,
+  stateFromGstin, PLATFORM_FEE_DEFAULT_RATE, PLATFORM_FEE_DEFAULT_SAC, distributeInvoiceDiscount, buildServiceTaxResolver,
   nextInvoiceDocumentNumber,
   type BillingLineInput, type BillingTransactionTypeValue,
 } from '../../common';
@@ -97,7 +97,8 @@ export class InvoicesService {
       // Type 2 — Remont's own team fulfils the work. Full project value, one tax invoice.
       // Each line resolves its OWN GST rate by its own HSN/SAC — different services
       // legitimately sit in different GST slabs, so this is never a single blanket rate.
-      const svcTax = await buildTaxRateResolver(this.prisma, 'SERVICE');
+      // Same service GST source checkout charged with (TaxConfig/override, else 18%).
+      const svcTax = await buildServiceTaxResolver(this.prisma);
       customerLines = order.serviceItems.map((si) => ({
         description: si.service.name,
         hsnSac: si.service.hsnSac || svcTax.defaultHsn,
@@ -108,6 +109,13 @@ export class InvoicesService {
       }));
       for (const ew of order.extraWorkItems) {
         customerLines.push({ description: ew.description, qty: 1, rate: Number(ew.amount), taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) });
+      }
+      // Minimum service charge top-up frozen at checkout — its own visible line, same rate.
+      if (Number(order.minimumChargeAdjustment) > 0) {
+        customerLines.push({
+          description: 'Minimum service charge adjustment', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1,
+          rate: Number(order.minimumChargeAdjustment), taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent),
+        });
       }
       // Phase 3 (M-04) — checkout already computed this order's GST on the discounted
       // amount (unconditional for every SERVICE order); mirror that here so the invoice's
@@ -129,13 +137,19 @@ export class InvoicesService {
       // amounts PLUS the GST on the platform fee for transparency, reusing the exact
       // same rate/place-of-supply the formal Remont Platform Fee Invoice uses, so the
       // numbers always agree — never a second, independently-derived GST figure.
-      const svcTax = await buildTaxRateResolver(this.prisma, 'SERVICE');
+      const svcTax = await buildServiceTaxResolver(this.prisma);
       const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+      // serviceAmount already includes any minimum-charge top-up frozen at checkout.
       const partnerAmount = Number(order.serviceAmount) + order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
-      const feeAmount = Number(order.remontCommission) + Number(order.platformCharges);
+      // Commission is INCLUDED in the service price and deducted from the partner (vendorPayout
+      // = serviceAmount − commission) — it is never charged to the customer a second time.
+      // Only a fee the customer actually paid on top (Order.platformCharges) is a customer line.
+      const commissionAmount = Number(order.remontCommission);
+      const customerFeeAmount = Number(order.platformCharges);
       const feeRate = feeTax.rateFor(null, null);
-      const feeSetting = await this.prisma.siteSetting.findUnique({ where: { key: 'default_booking_fee' } });
-      bookingFee = feeSetting ? parseFloat(feeSetting.value) || 0 : 49;
+      // No booking fee is charged at checkout, so none is printed (was a ₹49 fallback).
+      bookingFee = 0;
+      const serviceRate = svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent);
 
       // Customer summary mirrors exactly what the formal Remont Platform Fee Invoice
       // below will bill (fee + booking fee, both at feeRate) so the GST-on-fee figure
@@ -145,14 +159,15 @@ export class InvoicesService {
       // applied to at checkout (the platform fee/booking fee below are Remont's own take,
       // untouched by a customer coupon) — reduce only that line, not the whole array,
       // same "checkout already discounted this" reasoning as the DIRECT_PROJECT branch.
+      // The customer page is a payment statement (never a tax invoice — see invoice-pdf.ts):
+      // the service as charged, with the GST checkout actually collected on it.
       const [partnerLine] = distributeInvoiceDiscount(
-        [{ description: order.service?.name || 'Partner Service Value', qty: 1, rate: partnerAmount, taxRatePercent: 0 }],
+        [{ description: order.service?.name || 'Partner Service Value', qty: 1, rate: partnerAmount, taxRatePercent: serviceRate }],
         orderDiscount,
       );
       customerLines = [
         partnerLine,
-        ...(feeAmount > 0 ? [{ description: 'Remont Platform Fee', qty: 1, rate: feeAmount, taxRatePercent: feeRate }] : []),
-        ...(bookingFee > 0 ? [{ description: 'Booking Fee', qty: 1, rate: bookingFee, taxRatePercent: feeRate }] : []),
+        ...(customerFeeAmount > 0 ? [{ description: 'Remont Platform Fee', qty: 1, rate: customerFeeAmount, taxRatePercent: feeRate }] : []),
       ];
       discountReducesTaxableValue = true;
       // Set so the engine computes the correct GST-on-fee figure for display above — this
@@ -166,8 +181,13 @@ export class InvoicesService {
         ? [{ description: order.service?.name || 'Partner Service Value', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) }]
         : [];
 
-      if (feeAmount > 0) {
-        remontLines = [{ description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: feeAmount, taxRatePercent: feeRate }];
+      // Remont's own document: the commission it earns from the partner (recipient = partner,
+      // see invoice-pdf.ts), plus any customer fee actually charged.
+      if (commissionAmount + customerFeeAmount > 0) {
+        remontLines = [
+          ...(commissionAmount > 0 ? [{ description: 'Remont Commission', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: commissionAmount, taxRatePercent: feeRate }] : []),
+          ...(customerFeeAmount > 0 ? [{ description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: customerFeeAmount, taxRatePercent: feeRate }] : []),
+        ];
       }
     } else {
       // Type 3 — marketplace product sale. The seller is the invoicing entity for the
@@ -241,6 +261,9 @@ export class InvoicesService {
       remontPlaceOfSupply,
       discount: orderDiscount,
       discountReducesTaxableValue,
+      // A service customer document equals the exact amount charged (checkout never rounds);
+      // product invoices keep their existing whole-rupee rounding unchanged.
+      customerRoundToRupee: transactionType === 'MARKETPLACE_PRODUCT',
     });
 
     // C-05 — freeze this invoice's party identity (supplier/recipient name, address,

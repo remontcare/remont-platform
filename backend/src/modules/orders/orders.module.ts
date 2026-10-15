@@ -1,17 +1,17 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, InternalServerErrorException,
+  NotFoundException, BadRequestException, ForbiddenException, ConflictException, Logger, Optional, InternalServerErrorException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode, MediaEntityType } from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsBoolean, IsDateString, IsEmail, IsIn, Min, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -464,12 +464,15 @@ class ExtraWorkService {
   private async recalc(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { extraWorkItems: { where: { customerApproved: true } } },
+      include: { extraWorkItems: { where: { customerApproved: true } }, service: true },
     });
     if (!order) return;
     const extraTotal = order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
     const subtotal = Number(order.serviceAmount) + Number(order.productsAmount) + extraTotal;
-    const gst = Math.round(subtotal * 0.18 * 100) / 100;
+    const svcRate = order.service
+      ? (await buildServiceTaxResolver(this.prisma)).rateFor(order.service.hsnSac, order.service.gstOverridePercent)
+      : SERVICE_GST_FALLBACK_RATE;
+    const gst = Math.round(subtotal * (svcRate / 100) * 100) / 100;
     const discount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.walletUsed);
     const total = Math.max(0, subtotal + gst - discount);
     // Commission was already resolved once and snapshotted at confirmation time (Task 9) —
@@ -485,6 +488,17 @@ class ExtraWorkService {
   }
 }
 
+/** Partner "I have arrived". All optional: a GPS failure is reported via locationError, never
+ * with made-up coordinates; the server decides verification (recordPartnerArrival). */
+export class PartnerArrivalDto {
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsNumber() @Min(0) accuracyM?: number;
+  @IsOptional() @IsString() @MaxLength(200) locationError?: string;
+  // Device metadata (optional; untrusted — can only downgrade verification, never upgrade it)
+  @IsOptional() @IsBoolean() isMocked?: boolean;
+  @IsOptional() @IsNumber() @Min(0) fixAgeMs?: number;
+}
 // ─── Main Orders service ───
 @Injectable()
 export class OrdersService {
@@ -504,29 +518,18 @@ export class OrdersService {
     @Optional() private media?: MediaService,
   ) {}
 
-  async create(customerId: string, dto: CreateOrderDto) {
-    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
-    if (dto.idempotencyKey) {
-      const existing = await this.prisma.order.findUnique({
-        where: { idempotencyKey: dto.idempotencyKey },
-        include: { items: true, service: true, address: true },
-      });
-      if (existing) return existing;
-    }
-
-    // City activation gate: if the order names a city that resolves to a managed City row
-    // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
-    // allowed through unchanged — this only tightens the case we can actually verify.
-    if (dto.city) {
-      const city = await this.cities.getByName(dto.city);
-      if (city && !city.isActive) {
-        throw new BadRequestException(`${city.name} is not currently accepting orders`);
-      }
-    }
-
+  /**
+   * The single pricing path for create() and quote(): service price (city override, minimum
+   * charge, shared GST rate, commission), product GST/fees, membership/coupon discounts, GST and
+   * wallet. Writes nothing — so the app's quote is exactly what create() then charges.
+   */
+  private async priceOrder(customerId: string, dto: CreateOrderDto) {
     let serviceAmount = 0;
     let productsAmount = 0;
     let commissionResult = { commissionAmount: 0, ruleId: null as string | null, ruleLabel: 'No service on this order' };
+    let serviceGstRatePercent = SERVICE_GST_FALLBACK_RATE;
+    let minimumChargeAdjustment = 0;
+    let minimumChargeRuleId: string | null = null;
     const itemInputs: any[] = [];
 
     if (dto.serviceId) {
@@ -542,9 +545,17 @@ export class OrdersService {
       } else {
         serviceAmount = Number(svc.basePrice);
       }
-      commissionResult = await resolveCommission(this.prisma, {
-        serviceId: svc.id, categoryId: svc.categoryId, cityId: cityRowId, amount: serviceAmount,
-      });
+      // Rules need the booking's city even when the client sends no city name (the app never
+      // does): take it from the customer's own address. Unrecognised → all-city rules only.
+      if (!cityRowId) {
+        cityRowId = await resolveCityIdForRules(this.prisma, { addressId: dto.addressId, customerId, inlineCity: dto.inlineAddress?.city });
+      }
+      const priced = await priceServiceBooking(this.prisma, svc, cityRowId, serviceAmount);
+      serviceAmount = priced.serviceAmount;
+      commissionResult = priced.commissionResult;
+      serviceGstRatePercent = priced.gstRatePercent;
+      minimumChargeAdjustment = priced.minimumChargeAdjustment;
+      minimumChargeRuleId = priced.minimumChargeRuleId;
     }
 
     // Phase 8 — resolves each product line's real GST (was previously ignored entirely
@@ -603,36 +614,6 @@ export class OrdersService {
       }
     }
 
-    // Resolve addressId: if an inline address is provided and no addressId, create one
-    let resolvedAddressId = dto.addressId;
-    let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
-    if (!resolvedAddressId && dto.inlineAddress) {
-      // Previously hardcoded latitude/longitude to 0 regardless of what the client had —
-      // the DTO didn't even declare the fields, so Nest's global whitelist silently stripped
-      // any coords a client sent. Every order created this way landed at "Null Island",
-      // which DispatchService.dispatch() then treats as a real GPS fix thousands of km from
-      // every vendor, excluding all of them and leaving the order permanently undispatched.
-      const lat = dto.inlineAddress.latitude;
-      const lng = dto.inlineAddress.longitude;
-      const hasValidCoords = isValidIndiaCoords(lat, lng);
-      resolvedAddress = await this.prisma.address.create({
-        data: {
-          userId: customerId,
-          label: dto.inlineAddress.label || 'Delivery Address',
-          fullAddress: dto.inlineAddress.fullAddress,
-          city: dto.inlineAddress.city || '',
-          state: dto.inlineAddress.state || '',
-          pincode: dto.inlineAddress.pincode || '',
-          latitude: hasValidCoords ? lat! : 0,
-          longitude: hasValidCoords ? lng! : 0,
-        },
-      });
-      resolvedAddressId = resolvedAddress.id;
-    } else if (resolvedAddressId) {
-      // An existing saved address was selected — snapshot it as it is *right now*.
-      // Later edits to this Address row must not retroactively change this order.
-      resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
-    }
 
     let subtotal = serviceAmount + productsAmount;
     const membershipPct = await this.memberships.getActiveDiscount(customerId);
@@ -658,7 +639,7 @@ export class OrdersService {
       ? Math.round(((serviceAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
       : 0;
     const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
-    const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
+    const serviceGstAmount = Math.round(discountedServiceAmount * (serviceGstRatePercent / 100) * 100) / 100;
 
     // Phase 3 (C-02/C-03) — a SELLER-funded coupon reduces the PRODUCT taxable base/GST by
     // its share of the combined discount, exactly like the SERVICE share above already
@@ -706,6 +687,79 @@ export class OrdersService {
         }
       : undefined;
 
+
+    return { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown };
+  }
+
+  /** What POST /orders would charge for this cart, without creating anything. */
+  async quote(customerId: string, dto: CreateOrderDto) {
+    const p = await this.priceOrder(customerId, dto);
+    return {
+      currency: 'INR',
+      serviceAmount: p.serviceAmount,
+      minimumChargeAdjustment: p.minimumChargeAdjustment,
+      productsAmount: p.productsAmount,
+      subtotal: p.subtotal,
+      membershipDiscount: p.membershipDiscount,
+      couponDiscount: p.couponDiscount,
+      gstAmount: p.gstAmount,
+      walletUsed: p.walletUsed,
+      totalAmount: p.totalAmount,
+    };
+  }
+
+  async create(customerId: string, dto: CreateOrderDto) {
+    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+        include: { items: true, service: true, address: true },
+      });
+      if (existing) return existing;
+    }
+
+    // City activation gate: if the order names a city that resolves to a managed City row
+    // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
+    // allowed through unchanged — this only tightens the case we can actually verify.
+    if (dto.city) {
+      const city = await this.cities.getByName(dto.city);
+      if (city && !city.isActive) {
+        throw new BadRequestException(`${city.name} is not currently accepting orders`);
+      }
+    }
+
+    const { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown } = await this.priceOrder(customerId, dto);
+
+    // Resolve addressId: if an inline address is provided and no addressId, create one
+    let resolvedAddressId = dto.addressId;
+    let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
+    if (!resolvedAddressId && dto.inlineAddress) {
+      // Previously hardcoded latitude/longitude to 0 regardless of what the client had —
+      // the DTO didn't even declare the fields, so Nest's global whitelist silently stripped
+      // any coords a client sent. Every order created this way landed at "Null Island",
+      // which DispatchService.dispatch() then treats as a real GPS fix thousands of km from
+      // every vendor, excluding all of them and leaving the order permanently undispatched.
+      const lat = dto.inlineAddress.latitude;
+      const lng = dto.inlineAddress.longitude;
+      const hasValidCoords = isValidIndiaCoords(lat, lng);
+      resolvedAddress = await this.prisma.address.create({
+        data: {
+          userId: customerId,
+          label: dto.inlineAddress.label || 'Delivery Address',
+          fullAddress: dto.inlineAddress.fullAddress,
+          city: dto.inlineAddress.city || '',
+          state: dto.inlineAddress.state || '',
+          pincode: dto.inlineAddress.pincode || '',
+          latitude: hasValidCoords ? lat! : 0,
+          longitude: hasValidCoords ? lng! : 0,
+        },
+      });
+      resolvedAddressId = resolvedAddress.id;
+    } else if (resolvedAddressId) {
+      // An existing saved address was selected — snapshot it as it is *right now*.
+      // Later edits to this Address row must not retroactively change this order.
+      resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
+    }
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -734,6 +788,7 @@ export class OrdersService {
             couponCode: dto.couponCode, couponDiscount, membershipDiscount,
             walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
             commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
+            minimumChargeAdjustment, minimumChargeRuleId: minimumChargeRuleId || undefined,
             aiSessionId: dto.aiSessionId, leadId: dto.leadId,
             guestName: dto.guestName,
             guestPhone: dto.guestPhone,
@@ -1174,6 +1229,22 @@ export class OrdersService {
     return result;
   }
 
+  /**
+   * Partner "I have arrived": records a fresh location and the server's verification decision
+   * (recordPartnerArrival in common). The order status is NOT changed — arrival is evidence,
+   * kept separate from the partner's self-reported progress. Idempotent.
+   */
+  async markArrived(vendorUserId: string, orderId: string, body: { latitude?: number; longitude?: number; accuracyM?: number; locationError?: string }) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!v) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (!order.arrivedAt && !['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE'].includes(order.status)) {
+      throw new BadRequestException('Arrival can only be recorded before the job starts');
+    }
+    return recordPartnerArrival(this.prisma, order, body || {}, { vendorId: v.id });
+  }
+
   async verifyStartOtp(vendorUserId: string, orderId: string, otp: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
@@ -1485,6 +1556,20 @@ export class OrdersService {
       // else: not yet shipped — falls through to the plain-cancel transaction below, unchanged
     } else if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
       throw new BadRequestException('Cannot cancel at this stage');
+    } else if (order.startOtpVerified || ['STARTED', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+      // The customer shared the START OTP: the work has begun, so self-service cancellation is
+      // closed. Genuine problems still go to Support/Admin as a complaint.
+      throw new ConflictException({
+        error: 'SERVICE_STARTED',
+        message: 'The service has already started (you shared the start OTP), so it can no longer be cancelled here. If something is wrong, please raise a complaint — our team will review it.',
+      });
+    } else if (order.arrivedAt) {
+      // The partner has already arrived: cancellation goes to admin review (with the arrival
+      // evidence and the configured penalty) instead of an instant cancel — never decided here.
+      throw new ConflictException({
+        error: 'CANCELLATION_REVIEW_REQUIRED',
+        message: 'Your partner has already arrived, so this cancellation needs a quick review by our team. Please submit a cancellation request.',
+      });
     }
     // Customer-initiated cancellation refunds any Lead Cost already charged to the assigned
     // vendor — per spec, only a vendor-side drop (rejectJob) forfeits it.
@@ -1583,12 +1668,11 @@ export class GuestBookingService {
     // basePrice → else basePrice as-is (CitiesService.getServicePrice — shared with
     // the authenticated create() and Master Order checkout price resolution).
     const cityPrice = await this.cities.getServicePrice(city.name, dto.serviceId);
-    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
-    const commissionResult = await resolveCommission(this.prisma, {
-      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
-    });
+    const priced = await priceServiceBooking(this.prisma, svc, city.id, cityPrice !== null ? cityPrice : Number(svc.basePrice));
+    const serviceAmount = priced.serviceAmount;
+    const commissionResult = priced.commissionResult;
 
-    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
+    const gstAmount = Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
     const totalAmount = serviceAmount + gstAmount;
 
     // Parse slot datetime as IST (UTC+5:30) to avoid local-timezone drift
@@ -1658,6 +1742,7 @@ export class GuestBookingService {
           gstAmount,
           totalAmount,
           remontCommission: commissionResult.commissionAmount,
+          minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
           vendorPayout: serviceAmount - commissionResult.commissionAmount,
           commissionRuleId: commissionResult.ruleId,
           commissionRuleLabel: commissionResult.ruleLabel,
@@ -1973,6 +2058,8 @@ export class OrdersController {
   constructor(private orders: OrdersService, private extras: ExtraWorkService) {}
 
   @Post() create(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.create(u.sub, dto); }
+  // Same pricing as POST /orders (priceOrder), nothing created.
+  @Post('quote') quote(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.quote(u.sub, dto); }
   @Post(':id/confirm-payment') pay(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
   @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
@@ -1980,6 +2067,8 @@ export class OrdersController {
     return this.orders.cancel(u.sub, id, b.reason);
   }
   @Patch(':id/en-route') enRoute(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.markEnRoute(u.sub, id); }
+  // Partner "I have arrived" — fresh location evidence; order status unchanged.
+  @Patch(':id/arrived') arrived(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: PartnerArrivalDto) { return this.orders.markArrived(u.sub, id, b); }
   @Post(':id/regenerate-otp') regenerateOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { type: 'START' | 'END' }) {
     return this.orders.regenerateOtp(u.sub, id, b.type);
   }

@@ -42,6 +42,7 @@ function makeService() {
       create: jest.fn(),
     },
     commissionRule: { findMany: jest.fn(async () => []) },
+    taxConfig: { findMany: jest.fn(async () => []) }, // no rates configured (production today)
     siteSetting: { findUnique: jest.fn(async () => null) },
     masterOrder: {
       count: jest.fn(async () => 0),

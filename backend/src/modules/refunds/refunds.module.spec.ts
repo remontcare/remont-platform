@@ -1,17 +1,41 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { RefundsService } from './refunds.module';
 
+// In-memory ProviderRefund table (one gateway refund per refund request).
+function providerRefundStore() {
+  const rows = new Map<string, any>();
+  const apply = (r: any, data: any) => {
+    const n = { ...r };
+    for (const [k, v] of Object.entries(data)) n[k] = v && typeof v === 'object' && 'increment' in (v as any) ? Number(r[k] || 0) + (v as any).increment : v;
+    return n;
+  };
+  return {
+    rows,
+    findUnique: jest.fn(async ({ where }: any) => (where.id ? rows.get(where.id) ?? null : [...rows.values()].find((r) => r.refundRequestId === where.refundRequestId) ?? null)),
+    findFirst: jest.fn(async ({ where }: any) => [...rows.values()].find((r) => (where.OR || []).some((c: any) => (c.providerRefundId && r.providerRefundId === c.providerRefundId) || (c.id?.in && c.id.in.includes(r.id)))) ?? null),
+    create: jest.fn(async ({ data }: any) => { const r = { id: 'prf_' + (rows.size + 1), status: 'CREATED', attempts: 0, providerRefundId: null, ...data }; rows.set(r.id, r); return r; }),
+    update: jest.fn(async ({ where, data }: any) => { const n = apply(rows.get(where.id), data); rows.set(where.id, n); return n; }),
+    updateMany: jest.fn(async ({ where, data }: any) => {
+      const r = rows.get(where.id);
+      if (!r || (where.status?.in && !where.status.in.includes(r.status))) return { count: 0 };
+      rows.set(where.id, apply(r, data));
+      return { count: 1 };
+    }),
+  };
+}
+
 function makeService() {
   // Stateful updateMany models the real atomic claim: it only "succeeds" (count 1) when the
   // in-memory status is still one of ACTIVE_STATUSES at call time — the same guarantee a real
   // DB row-level conditional UPDATE gives two concurrent/retried callers.
   let current: any = null;
   const prisma: any = {
-    order: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: 'o1', ...args.data })) },
+    order: { findUnique: jest.fn(async () => ({ id: 'order-1', totalAmount: 1000, paymentStatus: 'PAID' })), update: jest.fn(async (args: any) => ({ id: 'o1', ...args.data })) },
     masterOrder: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: 'mo1', ...args.data })) },
     serviceVendor: { findUnique: jest.fn() },
-    paymentTransaction: { findFirst: jest.fn() },
+    paymentTransaction: { findFirst: jest.fn(), findMany: jest.fn(async () => [{ amount: 1000 }]) },
     refundRequest: {
+      findUniqueOrThrow: jest.fn(async () => (current ? { ...current } : null)),
       create: jest.fn(async (args: any) => { current = { id: 'rr-1', status: 'REQUESTED', ...args.data }; return current; }),
       findUnique: jest.fn(async () => (current ? { ...current } : null)),
       updateMany: jest.fn(async (args: any) => {
@@ -26,12 +50,19 @@ function makeService() {
       findMany: jest.fn(async () => []),
     },
     refundRequestLog: { create: jest.fn(async () => ({})) },
+    walletTransaction: { findFirst: jest.fn(async () => null) }, // no earlier credit for this request
     user: { findUnique: jest.fn(async () => ({ phone: '9999999999' })) },
     // No live Warranty Hold in these tests by default — the deductFromHold hook is a no-op.
     partnerHold: { findFirst: jest.fn(async () => null) },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $queryRaw: jest.fn(async () => []), // booking-level advisory lock
+    refundWalletCredit: { create: jest.fn(async () => ({})), update: jest.fn(async () => ({})) }, // once-only credit guard
+    providerRefund: providerRefundStore(),
   };
-  const payments: any = { refundPayment: jest.fn(async () => ({ refundId: 'rfnd_1', gateway: 'RAZORPAY' })) };
+  const payments: any = {
+    refundPayment: jest.fn(async () => ({ refundId: 'rfnd_1', gateway: 'RAZORPAY' })),
+    createRazorpayRefund: jest.fn(async (_p: string, amountPaise: number) => ({ ok: true, refund: { id: 'rfnd_1', status: 'processed', amount: amountPaise } })),
+  };
   const wallet: any = { credit: jest.fn(async () => ({})) };
   const paymentNotify: any = { refundProcessed: jest.fn(async () => {}) };
   const ledger: any = { deductFromHold: jest.fn(async () => ({})), clawbackFromBalance: jest.fn(async () => ({})) };
@@ -101,7 +132,7 @@ describe('RefundsService.decide — the only place money or a wallet credit actu
     setCurrent({ id: 'rr-1', status: 'REQUESTED', orderId: 'o1', customerId: 'cust-1' });
     prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000 });
     const result = await svc.decide('admin-1', 'rr-1', 'WALLET_CREDIT' as any, {});
-    expect(wallet.credit).toHaveBeenCalledWith('cust-1', 1000, 'REFUND', 'o1', expect.any(String), 'rr-1', 'admin-1');
+    expect(wallet.credit).toHaveBeenCalledWith('cust-1', 1000, 'REFUND', 'o1', expect.any(String), 'rr-1', 'admin-1', expect.anything());
     expect(result.status).toBe('PROCESSED');
   });
 
@@ -109,10 +140,11 @@ describe('RefundsService.decide — the only place money or a wallet credit actu
     const { svc, prisma, payments, setCurrent } = makeService();
     setCurrent({ id: 'rr-1', status: 'REQUESTED', orderId: 'o1', customerId: 'cust-1' });
     prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000 });
-    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY' });
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY', gatewayPaymentId: 'pay_1' });
     const result = await svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {});
-    expect(payments.refundPayment).toHaveBeenCalledWith('tx-1', 1000);
-    expect(result.status).toBe('PROCESSED');
+    // one provider refund with a stable idempotency key derived from the request
+    expect(payments.createRazorpayRefund).toHaveBeenCalledWith('pay_1', 100000, 'rfnd_rr-1', expect.any(String), expect.objectContaining({ refund_request_id: 'rr-1' }));
+    expect(result.status).toBe('PROCESSED'); // Razorpay answered "processed"
   });
 
   it('GATEWAY_REFUND fails clearly when only a cash-collected payment exists — no gateway to refund through', async () => {
@@ -121,17 +153,17 @@ describe('RefundsService.decide — the only place money or a wallet credit actu
     prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000 });
     prisma.paymentTransaction.findFirst.mockResolvedValue(null); // the findFirst query filters gateway IN (RAZORPAY, PHONEPE)
     await expect(svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {})).rejects.toThrow(BadRequestException);
-    expect(payments.refundPayment).not.toHaveBeenCalled();
+    expect(payments.createRazorpayRefund).not.toHaveBeenCalled();
   });
 
   it('PARTIAL_WALLET_PARTIAL_GATEWAY does both legs', async () => {
     const { svc, prisma, wallet, payments, setCurrent } = makeService();
     setCurrent({ id: 'rr-1', status: 'REQUESTED', orderId: 'o1', customerId: 'cust-1' });
     prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000 });
-    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY' });
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY', gatewayPaymentId: 'pay_1' });
     const result = await svc.decide('admin-1', 'rr-1', 'PARTIAL_WALLET_PARTIAL_GATEWAY' as any, { walletCreditAmount: 300, gatewayRefundAmount: 700 });
-    expect(wallet.credit).toHaveBeenCalledWith('cust-1', 300, 'REFUND', 'o1', expect.any(String), 'rr-1', 'admin-1');
-    expect(payments.refundPayment).toHaveBeenCalledWith('tx-1', 700);
+    expect(wallet.credit).toHaveBeenCalledWith('cust-1', 300, 'REFUND', 'o1', expect.any(String), 'rr-1', 'admin-1', expect.anything());
+    expect(payments.createRazorpayRefund).toHaveBeenCalledWith('pay_1', 70000, 'rfnd_rr-1', expect.any(String), expect.any(Object));
     // 300 + 700 == totalAmount (1000) -> full refund reflected on the order
     expect(prisma.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: { paymentStatus: 'REFUNDED' } }));
     expect(result.status).toBe('PROCESSED');
@@ -160,24 +192,20 @@ describe('RefundsService.decide — the only place money or a wallet credit actu
     expect(wallet.credit).toHaveBeenCalledTimes(1);
   });
 
-  // Retry-after-failure safety: a gateway timeout/error must not leave the request stuck
-  // "PROCESSED" with no money actually moved — the claim rolls back to UNDER_REVIEW so a
-  // retried decide() call can go through again.
-  it('rolls back to UNDER_REVIEW when the gateway call fails, so the decision can be retried', async () => {
+  // FINAL decision (Razorpay safety): an uncertain gateway outcome (timeout) is NEVER rolled back
+  // to a re-decidable state — Razorpay may still process the original refund. The request needs
+  // attention, its reservation is kept, and only reconciliation (same key + amount) settles it.
+  it('a gateway timeout leaves the refund NEEDS_ATTENTION with its claim kept — it cannot be decided again', async () => {
     const { svc, prisma, payments, setCurrent } = makeService();
     setCurrent({ id: 'rr-1', status: 'REQUESTED', orderId: 'o1', customerId: 'cust-1' });
-    prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000 });
-    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY' });
-    payments.refundPayment.mockRejectedValueOnce(new Error('gateway timeout'));
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', totalAmount: 1000, paymentStatus: 'PAID' });
+    prisma.paymentTransaction.findFirst.mockResolvedValue({ id: 'tx-1', amount: 1000, gateway: 'RAZORPAY', gatewayPaymentId: 'pay_1' });
+    payments.createRazorpayRefund.mockResolvedValueOnce({ ok: false, kind: 'UNCERTAIN', message: 'No response from Razorpay: timeout' });
 
-    await expect(svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {})).rejects.toThrow('gateway timeout');
-
-    const row = await prisma.refundRequest.findUnique({ where: { id: 'rr-1' } });
-    expect(row.status).toBe('UNDER_REVIEW');
-
-    // Retry now succeeds — UNDER_REVIEW is still an active status.
-    payments.refundPayment.mockResolvedValueOnce({ refundId: 'rfnd_2', gateway: 'RAZORPAY' });
-    const retried = await svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {});
-    expect(retried.status).toBe('PROCESSED');
+    const res = await svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {});
+    expect(res.status).toBe('NEEDS_ATTENTION');
+    expect(Number(res.claimedAmount)).toBe(1000);
+    await expect(svc.decide('admin-1', 'rr-1', 'GATEWAY_REFUND' as any, {})).rejects.toBeInstanceOf(BadRequestException);
+    expect(payments.createRazorpayRefund).toHaveBeenCalledTimes(1);
   });
 });

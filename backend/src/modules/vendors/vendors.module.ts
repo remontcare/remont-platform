@@ -9,7 +9,7 @@ import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorS
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, ARRIVAL_RESET_DATA } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -473,7 +473,8 @@ export class ServiceVendorsService {
 
     return this.prisma.order.update({
       where: { id: orderId },
-      data: { vendorId: null, status: 'CONFIRMED' },
+      // The next partner must record their own arrival — never inherit this partner's.
+      data: { vendorId: null, status: 'CONFIRMED', ...ARRIVAL_RESET_DATA },
     });
   }
 

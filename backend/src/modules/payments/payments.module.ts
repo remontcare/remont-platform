@@ -243,10 +243,78 @@ export class PaymentsService implements OnModuleInit {
     throw new BadRequestException(`Cannot issue a gateway refund for a ${tx.gateway} payment — use Wallet Credit instead`);
   }
 
-  private async refundPhonePe(merchantTransactionId: string, amount: number): Promise<{ refundId: string; gateway: string }> {
+  // ─── Duplicate-safe gateway refunds (used by RefundsService's provider-refund workflow) ───
+  //
+  // Razorpay idempotent refunds: POST /v1/payments/{id}/refund with the X-Refund-Idempotency
+  // header (≥10 chars, [A-Za-z0-9_-]). A retry MUST reuse the same key and the same body; the
+  // same key with a different body is rejected (409), a concurrent same-key request returns 409
+  // "still in progress". The razorpay SDK (2.9.x) cannot send per-request headers, so this call
+  // uses the REST endpoint directly with the same credentials. Every non-success outcome is
+  // classified so the caller never assumes a refund did — or did not — happen when it is unsure.
+  async createRazorpayRefund(
+    gatewayPaymentId: string, amountPaise: number, idempotencyKey: string, receipt: string, notes: Record<string, string>,
+  ): Promise<
+    | { ok: true; refund: { id: string; status: string; amount: number; receipt?: string } }
+    | { ok: false; kind: 'DEFINITE_REJECTION' | 'UNCERTAIN' | 'IN_PROGRESS' | 'KEY_CONFLICT'; httpStatus?: number; message: string }
+  > {
+    if (!this.razorpayKeyId || !this.razorpayKeySecret) return { ok: false, kind: 'DEFINITE_REJECTION', message: 'Razorpay is not configured' };
+    if (!/^[A-Za-z0-9_-]{10,}$/.test(idempotencyKey)) return { ok: false, kind: 'DEFINITE_REJECTION', message: 'Invalid idempotency key' };
+    let resp: any;
+    try {
+      resp = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(gatewayPaymentId)}/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Basic ' + Buffer.from(`${this.razorpayKeyId}:${this.razorpayKeySecret}`).toString('base64'),
+          'X-Refund-Idempotency': idempotencyKey,
+        },
+        body: JSON.stringify({ amount: amountPaise, receipt, notes }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e: any) {
+      // Timeout / network failure: the request may or may not have reached Razorpay.
+      return { ok: false, kind: 'UNCERTAIN', message: `No response from Razorpay: ${e?.message || e}` };
+    }
+    let body: any = null;
+    try { body = await resp.json(); } catch { body = null; }
+    if (resp.ok && body?.id) return { ok: true, refund: { id: body.id, status: body.status, amount: body.amount, receipt: body.receipt } };
+    const message = String(body?.error?.description || body?.error?.reason || `HTTP ${resp.status}`);
+    if (resp.status === 409) {
+      return /in progress/i.test(message)
+        ? { ok: false, kind: 'IN_PROGRESS', httpStatus: 409, message }
+        : { ok: false, kind: 'KEY_CONFLICT', httpStatus: 409, message };
+    }
+    // "fully refunded already" can mean an earlier attempt DID go through — never treat as a clean rejection.
+    if (resp.status >= 400 && resp.status < 500 && !/fully refunded/i.test(message)) {
+      return { ok: false, kind: 'DEFINITE_REJECTION', httpStatus: resp.status, message };
+    }
+    return { ok: false, kind: 'UNCERTAIN', httpStatus: resp.status, message };
+  }
+
+  /** Current state of one Razorpay refund (null when Razorpay is not configured). */
+  async fetchRazorpayRefund(gatewayPaymentId: string, refundId: string): Promise<{ id: string; status: string; amount: number; receipt?: string } | null> {
+    if (!this.razorpay) return null;
+    const r = await this.razorpay.payments.fetchRefund(gatewayPaymentId, refundId);
+    return { id: r.id, status: r.status, amount: r.amount, receipt: r.receipt };
+  }
+
+  /** Finds the refund for our stable receipt / internal id among a payment's refunds (null = none found). */
+  async findRazorpayRefundByReceipt(gatewayPaymentId: string, receipt: string): Promise<{ id: string; status: string; amount: number; receipt?: string } | null> {
+    if (!this.razorpay) throw new BadRequestException('Razorpay is not configured');
+    const list = await this.razorpay.payments.fetchMultipleRefund(gatewayPaymentId, { count: 100 });
+    const match = (list?.items || []).find((r: any) => r.receipt === receipt || r?.notes?.internal_refund_id === receipt);
+    return match ? { id: match.id, status: match.status, amount: match.amount, receipt: match.receipt } : null;
+  }
+
+  /** PhonePe refund with a caller-supplied, stable merchant refund id (no status API is wired here). */
+  async submitPhonePeRefund(merchantTransactionId: string, amount: number, merchantRefundId: string) {
+    return this.refundPhonePe(merchantTransactionId, amount, merchantRefundId);
+  }
+
+  private async refundPhonePe(merchantTransactionId: string, amount: number, stableRefundId?: string): Promise<{ refundId: string; gateway: string }> {
     const cfg = this.phonePe;
     if (!cfg.merchantId || !cfg.saltKey) throw new BadRequestException('PhonePe is not configured');
-    const merchantRefundId = `REFUND_${merchantTransactionId.slice(-8)}_${Date.now()}`;
+    const merchantRefundId = stableRefundId || `REFUND_${merchantTransactionId.slice(-8)}_${Date.now()}`;
     const payload = {
       merchantId: cfg.merchantId,
       merchantTransactionId: merchantRefundId,
@@ -358,7 +426,7 @@ export class PaymentsService implements OnModuleInit {
 
   // ─── Webhook ───────────────────────────────────────────────────────────────
 
-  async handleWebhook(rawBody: string, signature: string) {
+  async handleWebhook(rawBody: string, signature: string, eventId?: string) {
     const secret = this.razorpayWebhookSecret;
     if (!secret) throw new BadRequestException('Webhook secret not configured');
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
@@ -366,6 +434,40 @@ export class PaymentsService implements OnModuleInit {
 
     const event = JSON.parse(rawBody);
     this.logger.log(`Webhook: ${event.event}`);
+
+    // De-duplicate by Razorpay's event id (x-razorpay-event-id), AFTER the signature check. An
+    // event is marked processed only once its handling succeeded, so a delivery that failed
+    // half-way is processed again on Razorpay's retry; a successfully handled one is skipped.
+    if (eventId) {
+      const seen = await this.prisma.paymentWebhookEvent.findUnique({ where: { eventId } });
+      if (seen?.processedAt) return { received: true, duplicate: true };
+      if (!seen) {
+        try {
+          await this.prisma.paymentWebhookEvent.create({ data: { provider: 'RAZORPAY', eventId, event: String(event.event || '') } });
+        } catch {
+          // a concurrent delivery of the same event inserted it first
+          const again = await this.prisma.paymentWebhookEvent.findUnique({ where: { eventId } });
+          if (again?.processedAt) return { received: true, duplicate: true };
+        }
+      }
+    }
+    await this.handleWebhookEvent(event, signature);
+    if (eventId) await this.prisma.paymentWebhookEvent.update({ where: { eventId }, data: { processedAt: new Date() } }).catch(() => {});
+    return { received: true };
+  }
+
+  private async handleWebhookEvent(event: any, signature: string) {
+    // Refund lifecycle → the refund workflow (RefundsService) — never marked complete on acceptance.
+    if (typeof event.event === 'string' && event.event.startsWith('refund.')) {
+      const refund = event.payload?.refund?.entity;
+      if (refund?.id) {
+        await this.events.emitAsync('provider.refund.update', {
+          gateway: 'RAZORPAY', event: event.event, refundId: refund.id, paymentId: refund.payment_id,
+          status: refund.status, amount: refund.amount, receipt: refund.receipt, internalRefundId: refund.notes?.internal_refund_id,
+        });
+      }
+      return;
+    }
 
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity;
@@ -455,7 +557,6 @@ export class PaymentsService implements OnModuleInit {
         }
       }
     }
-    return { received: true };
   }
 
   private async notifyPaymentFailed(userId: string, orderId: string, reason?: string) {
@@ -514,9 +615,9 @@ export class PaymentsController {
   }
 
   @Public() @Post('webhook')
-  webhook(@Headers('x-razorpay-signature') signature: string, @Req() req: RawBodyRequest<any>) {
+  webhook(@Headers('x-razorpay-signature') signature: string, @Headers('x-razorpay-event-id') eventId: string, @Req() req: RawBodyRequest<any>) {
     const rawBody = req.rawBody?.toString('utf8') ?? '';
-    return this.p.handleWebhook(rawBody, signature);
+    return this.p.handleWebhook(rawBody, signature, eventId || undefined);
   }
 }
 

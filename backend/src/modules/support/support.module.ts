@@ -1,6 +1,6 @@
 import {
   Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards,
-  BadRequestException, NotFoundException, ForbiddenException,
+  BadRequestException, NotFoundException, ForbiddenException, ConflictException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import {
@@ -8,8 +8,9 @@ import {
   NotificationChannel,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, logAudit } from '../../common';
-import { RefundsService, RefundsModule } from '../refunds/refunds.module';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, logAudit, recordPartnerArrival, resolveCityIdForRules, resolveCancellationPenalty } from '../../common';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { RefundsService, RefundsModule, RefundCapacityExceeded } from '../refunds/refunds.module';
 import { AdminService, AdminModule } from '../admin/admin.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
@@ -61,6 +62,8 @@ interface RecommendInput {
   policy: PolicyConfig;
   warranty: { days: number; percent: number };
   productPolicy?: ProductPolicy;
+  /** CANCELLATION_CHARGE rule amount for this service/category/city (0 = none configured). */
+  cancellationCharge?: number;
 }
 
 interface Recommendation {
@@ -81,6 +84,57 @@ const money = (n: number) => Math.round(n * 100) / 100;
 const REFUND_RESOLUTIONS: SupportResolutionType[] = [
   'FULL_REFUND', 'PARTIAL_REFUND', 'REFUND_MINUS_VISIT', 'REFUND_MINUS_DIAGNOSIS',
 ];
+
+// Service cancellations whose charge comes from the configurable CANCELLATION_CHARGE rule
+// (CommissionRule ruleType, by service/category/city) — never a hardcoded amount.
+const CANCELLATION_ISSUES: SupportIssueType[] = ['PARTNER_ON_THE_WAY', 'PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'];
+const OPEN_CASE_STATUSES: SupportCaseStatus[] = ['OPEN', 'IN_REVIEW', 'WAITING_CUSTOMER', 'WAITING_PARTNER', 'DISPUTE', 'ADMIN_REVIEW'];
+// Service cases an admin settles by cancelling, reassigning, continuing the service or refunding.
+const SERVICE_REVIEW_ISSUES: SupportIssueType[] = [...CANCELLATION_ISSUES, 'SERVICE_STARTED_ISSUE'];
+// The customer shared the START OTP (Order.startOtpVerified) — the work has begun.
+const SERVICE_STARTED_STATUSES = ['STARTED', 'EXTRA_WORK_ADDED', 'IN_PROGRESS'];
+const ORDER_CLOSED_STATUSES = ['COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'];
+const ACTIVE_REFUND_STATUSES = ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED']; // undecided
+const SERVICE_STARTED_MESSAGE = 'The service has already started (you shared the start OTP), so it can no longer be cancelled here. If something is wrong, please raise a complaint — our team will review it.';
+const serviceStarted = (o: { startOtpVerified?: boolean | null; status: string }) => !!o.startOtpVerified || SERVICE_STARTED_STATUSES.includes(o.status);
+
+export const REFUSAL_REASONS = ['CUSTOMER_REFUSED', 'CUSTOMER_CHANGED_MIND', 'PRICE_DISAGREEMENT', 'SITE_NOT_READY', 'WORK_DIFFERENT_FROM_BOOKING', 'OTHER'] as const;
+const REFUSAL_REASON_LABELS: Record<(typeof REFUSAL_REASONS)[number], string> = {
+  CUSTOMER_REFUSED: 'Customer refused the service',
+  CUSTOMER_CHANGED_MIND: 'Customer changed their mind',
+  PRICE_DISAGREEMENT: 'Customer disagreed with the price',
+  SITE_NOT_READY: 'Site not ready for the work',
+  WORK_DIFFERENT_FROM_BOOKING: 'Work differs from what was booked',
+  OTHER: 'Other',
+};
+
+/** Partner, after arriving: the customer refused the service. Location fields as for arrival. */
+export class PartnerRefusalDto {
+  @IsIn(REFUSAL_REASONS as unknown as string[]) reasonCode: (typeof REFUSAL_REASONS)[number];
+  @IsOptional() @IsString() @MaxLength(1000) remarks?: string;
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsNumber() @Min(0) accuracyM?: number;
+  @IsOptional() @IsString() @MaxLength(200) locationError?: string;
+}
+export class CustomerStatementDto {
+  @IsString() @MaxLength(1000) statement: string;
+}
+export class CancellationRequestDto {
+  @IsString() @MaxLength(1000) reason: string;
+}
+export class AdminDecideDto {
+  @IsString() resolutionType: SupportResolutionType;
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
+  @IsString() @MaxLength(2000) reason: string;
+  @IsOptional() @IsString() newVendorId?: string;
+  @IsOptional() @IsNumber() @Min(0) partnerCompensation?: number;
+  @IsOptional() @IsBoolean() cancelOrder?: boolean;
+  // Recovery FROM the partner (separate ledger debit) — only for a job the partner was paid for.
+  @IsOptional() @IsNumber() @Min(0) partnerRecovery?: number;
+  // Cancellation penalty the admin approves (≤ the configured rule for the service/city).
+  @IsOptional() @IsNumber() @Min(0) penaltyAmount?: number;
+}
 
 @Injectable()
 export class SupportPolicyEngine {
@@ -310,21 +364,30 @@ export class SupportPolicyEngine {
               policyApplied: `Assignment SLA: ${policy.slaMin} minutes (not yet expired).`,
             };
       }
-      case 'PARTNER_ON_THE_WAY': {
-        const refund = Math.max(0, money(amountBasis - policy.visitCharge));
+      // Cancellation charges come only from the CANCELLATION_CHARGE rule (service/category/
+      // city, admin-configured; none = ₹0) — never a hardcoded amount — and are NEVER deducted
+      // automatically: a configured charge always routes to admin review first.
+      case 'PARTNER_ON_THE_WAY':
+        // Before arrival no penalty applies — but a request alone never moves money: an admin
+        // confirms the cancellation and approves the refund.
         return {
-          routeType: 'AUTO_RESOLUTION', resolutionType: 'REFUND_MINUS_VISIT', amount: refund,
-          reasonForCustomer: `Partner had already started travelling. As per the applicable cancellation policy, a visit charge was deducted.\n\nService Amount: ₹${amountBasis}\nVisit Charge: -₹${policy.visitCharge}\nRefund: ₹${refund}`,
-          policyApplied: `Visit charge on cancellation after dispatch: ₹${policy.visitCharge}.`,
+          routeType: 'SUPPORT_CASE', resolutionType: 'FULL_REFUND', amount: money(amountBasis),
+          reasonForCustomer: 'Your partner had not arrived yet, so no cancellation penalty applies. Our team will confirm the cancellation and your refund shortly.',
+          policyApplied: 'Before arrival: no cancellation penalty. Cancellation and refund are confirmed by an admin.',
         };
-      }
-      case 'PARTNER_ARRIVED': {
-        const deduction = policy.visitCharge + policy.diagnosisCharge;
-        const refund = Math.max(0, money(amountBasis - deduction));
+      case 'PARTNER_ARRIVED':
+      case 'CUSTOMER_REFUSED_SERVICE': {
+        const charge = Math.max(0, input.cancellationCharge || 0);
         return {
-          routeType: 'AUTO_RESOLUTION', resolutionType: 'REFUND_MINUS_DIAGNOSIS', amount: refund,
-          reasonForCustomer: `Partner had already arrived and begun diagnosis. Visit and diagnosis charges apply.\n\nService Amount: ₹${amountBasis}\nVisit Charge: -₹${policy.visitCharge}\nDiagnosis Charge: -₹${policy.diagnosisCharge}\nRefund: ₹${refund}`,
-          policyApplied: `Visit charge ₹${policy.visitCharge} + diagnosis charge ₹${policy.diagnosisCharge} on cancellation after arrival.`,
+          routeType: 'SUPPORT_CASE',
+          resolutionType: charge > 0 ? 'REFUND_MINUS_VISIT' : 'FULL_REFUND',
+          amount: Math.max(0, money(amountBasis - charge)),
+          reasonForCustomer: issueType === 'CUSTOMER_REFUSED_SERVICE'
+            ? 'Your partner reported that the service could not go ahead at your address. Our team will review the details, including your side, before deciding anything. No charge is applied until then.'
+            : 'Your partner had already arrived, so our team will review this cancellation before deciding any charge. Nothing is deducted until then.',
+          policyApplied: charge > 0
+            ? `Configured cancellation charge for this service/city: ₹${charge} — applies only if an admin approves it.`
+            : 'No cancellation charge is configured for this service/city.',
         };
       }
       case 'PARTNER_DID_NOT_ARRIVE':
@@ -392,6 +455,72 @@ export class SupportCasesService {
     return `SUP-${(count + 1).toString().padStart(6, '0')}`;
   }
 
+  /**
+   * For service cancellations: the configured CANCELLATION_CHARGE (service/category/city rule,
+   * 0 if none) and the amount the customer actually PAID — the refund basis. Refunding
+   * order.totalAmount would credit money never collected on an unpaid cash-on-service order.
+   */
+  private async cancellationContext(order: {
+    id: string; customerId: string; masterOrderId?: string | null; addressId?: string | null;
+    serviceId?: string | null; service?: { id: string; categoryId: string } | null; snapshotCity?: string | null;
+    paymentStatus?: string | null; totalAmount: any; walletUsed?: any; serviceAmount?: any;
+  }, client: any = this.prisma) {
+    // Money actually received and everything committed against it by EVERY refund route
+    // (completed refunds + outstanding reservations) — the same boundary RefundsService enforces.
+    const state = await this.refunds.bookingRefundState(client, { orderId: order.id });
+    const bookingTotal = money(Number(order.totalAmount || 0) + Number(order.walletUsed || 0));
+    // Penalty: the booking's city (snapshot, else the customer's own address) — never another city's rule.
+    const cityId = await resolveCityIdForRules(client, { cityName: order.snapshotCity, addressId: order.addressId, customerId: order.customerId });
+    const penalty = order.service
+      ? await resolveCancellationPenalty(client, { serviceId: order.service.id, categoryId: order.service.categoryId, cityId, serviceAmount: Number(order.serviceAmount || 0), cap: bookingTotal })
+      : { penalty: 0, ruleId: null, label: 'No cancellation penalty configured', breakdown: { percent: null, percentAmount: null, minimum: null, cap: bookingTotal, capped: false } };
+    return {
+      charge: penalty.penalty, penalty, paid: state.received, bookingTotal,
+      alreadyRefunded: state.committed, inFlight: state.inFlight, refundable: state.refundable,
+    };
+  }
+
+  /**
+   * Claims a case's refund amount (compare-and-swap on refundedTotal) so two decisions on the SAME
+   * case can never both raise a refund. The booking-wide limit across every route and case is
+   * enforced atomically by RefundsService.decide() under the shared booking lock.
+   */
+  private async claimCaseRefund(caseId: string, total: number): Promise<{ prior: number; delta: number }> {
+    const kase = await this.prisma.supportCase.findUnique({ where: { id: caseId }, select: { refundedTotal: true } });
+    const prior = money(Number(kase?.refundedTotal || 0));
+    const delta = money(total - prior);
+    if (delta <= 0) return { prior, delta: 0 };
+    const c = await this.prisma.supportCase.updateMany({ where: { id: caseId, refundedTotal: prior }, data: { refundedTotal: money(prior + delta) } });
+    if (c.count !== 1) throw new ConflictException('A refund for this case is already being processed — reload the case');
+    return { prior, delta };
+  }
+
+  /**
+   * Creates a support case. With `oncePer`, at most one OPEN case may exist for that order and
+   * issue: the check and the insert run in ONE transaction holding a Postgres advisory lock keyed
+   * on order+issue, so simultaneous submits serialise and the later one gets the case the first
+   * created. No schema change; every query runs on the transaction's own connection.
+   */
+  private async createCase(
+    oncePer: { orderId: string; issueType: SupportIssueType } | null,
+    build: (caseNumber: string) => any,
+  ): Promise<{ kase: any; existing: boolean }> {
+    if (!oncePer) {
+      return { kase: await this.prisma.supportCase.create({ data: build(await this.nextCaseNumber()) }), existing: false };
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const lockKey = `support-case-open:${oncePer.orderId}:${oncePer.issueType}`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const open = await tx.supportCase.findFirst({
+        where: { orderId: oncePer.orderId, issueType: oncePer.issueType, status: { in: OPEN_CASE_STATUSES } },
+      });
+      if (open) return { kase: open, existing: true };
+      const count = await tx.supportCase.count();
+      const kase = await tx.supportCase.create({ data: build(`SUP-${(count + 1).toString().padStart(6, '0')}`) });
+      return { kase, existing: false };
+    }, { timeout: 15000, maxWait: 10000 });
+  }
+
   private async loadOrderForCase(orderId: string) {
     return this.prisma.order.findUnique({
       where: { id: orderId },
@@ -434,10 +563,15 @@ export class SupportCasesService {
     };
 
     if (issueType) {
-      const amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
+      let amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
+      let cancellationCharge: number | undefined;
+      if (itemType === 'SERVICE' && CANCELLATION_ISSUES.includes(issueType)) {
+        const c = await this.cancellationContext(order);
+        amountBasis = c.refundable; cancellationCharge = c.charge;
+      }
       const policy = await this.policyEngine.getPolicyConfig();
       const warranty = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
-      result.recommendation = this.policyEngine.recommend({ itemType, issueType, order, amountBasis, policy, warranty, productPolicy });
+      result.recommendation = this.policyEngine.recommend({ itemType, issueType, order, amountBasis, policy, warranty, productPolicy, cancellationCharge });
     }
     return result;
   }
@@ -458,29 +592,46 @@ export class SupportCasesService {
     }
 
     const itemType: SupportItemType = order.items.length > 0 ? 'PRODUCT' : 'SERVICE';
-    const amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
+    let amountBasis = orderItem ? Number(orderItem.totalPrice) : Number(order.totalAmount);
+    let cancellationCharge: number | undefined;
+    if (itemType === 'SERVICE' && CANCELLATION_ISSUES.includes(dto.issueType) && serviceStarted(order)) {
+      throw new ConflictException({ error: 'SERVICE_STARTED', message: SERVICE_STARTED_MESSAGE });
+    }
+    if (itemType === 'SERVICE' && CANCELLATION_ISSUES.includes(dto.issueType)) {
+      // At most one open cancellation case per order and issue — a repeat submit returns it.
+      const existingOpen = await this.prisma.supportCase.findFirst({
+        where: { orderId: order.id, issueType: dto.issueType, status: { in: OPEN_CASE_STATUSES } },
+      });
+      if (existingOpen) return existingOpen;
+      const c = await this.cancellationContext(order);
+      amountBasis = c.refundable; cancellationCharge = c.charge;
+    }
     const policy = await this.policyEngine.getPolicyConfig();
     const warranty = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
     const productPolicy = itemType === 'PRODUCT' ? this.productPolicyFor(order, orderItem) : undefined;
-    const rec = this.policyEngine.recommend({ itemType, issueType: dto.issueType, order, amountBasis, policy, warranty, productPolicy });
+    const rec = this.policyEngine.recommend({ itemType, issueType: dto.issueType, order, amountBasis, policy, warranty, productPolicy, cancellationCharge });
 
-    const caseNumber = await this.nextCaseNumber();
-    const created = await this.prisma.supportCase.create({
-      data: {
+    const isCancellationCase = itemType === 'SERVICE' && CANCELLATION_ISSUES.includes(dto.issueType);
+    const { kase: created, existing } = await this.createCase(
+      isCancellationCase ? { orderId: order.id, issueType: dto.issueType } : null,
+      (caseNumber) => ({
         caseNumber, orderId: order.id, orderItemId: orderItem?.id, customerId,
         partnerId: order.vendorId || undefined,
         itemType, issueType: dto.issueType, description: dto.description,
         evidenceUrls: dto.evidenceUrls || [],
         requestedRemedy: dto.requestedRemedy,
         statusSnapshot: order.status,
+        openedByRole: 'CUSTOMER',
         status: rec.routeType === 'DISPUTE' ? 'DISPUTE' : 'OPEN',
         routeType: rec.routeType,
         recommendedResolution: rec.resolutionType ?? undefined,
         recommendedAmount: rec.amount ?? undefined,
         recommendationReason: rec.reasonForCustomer,
         policyApplied: rec.policyApplied,
-      },
-    });
+      }),
+    );
+    if (existing) return created; // a simultaneous submit already opened it
+    const caseNumber = created.caseNumber;
     await this.log(created.id, customerId, UserRole.CUSTOMER, 'OPENED', `${dto.issueType}${dto.description ? `: ${dto.description}` : ''}`);
 
     if (rec.routeType === 'AUTO_RESOLUTION') {
@@ -502,6 +653,111 @@ export class SupportCasesService {
     }
 
     return created;
+  }
+
+  /**
+   * Partner, at the customer's address: the customer refused the service. Records the arrival
+   * evidence (fresh location, server-verified, recorded once) and opens an ADMIN_REVIEW case.
+   * The partner's word alone never confirms customer fault and nothing moves money here.
+   */
+  async partnerReportRefusal(vendorUserId: string, orderId: string, dto: PartnerRefusalDto) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!v) throw new ForbiddenException();
+    const order = await this.loadOrderForCase(orderId);
+    if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (order.items.length > 0) throw new BadRequestException('Only service jobs can be reported this way');
+    if (!['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE'].includes(order.status)) {
+      throw new BadRequestException('A refusal can only be reported before the job starts');
+    }
+    if (dto.reasonCode === 'OTHER' && !dto.remarks?.trim()) throw new BadRequestException('Please add remarks for "Other"');
+
+    const existingOpen = await this.prisma.supportCase.findFirst({
+      where: { orderId: order.id, issueType: 'CUSTOMER_REFUSED_SERVICE', status: { in: OPEN_CASE_STATUSES } },
+    });
+    if (existingOpen) return existingOpen;
+
+    const arrival = await recordPartnerArrival(this.prisma, order, dto, { vendorId: v.id });
+    const { charge, refundable } = await this.cancellationContext(order);
+    const policy = await this.policyEngine.getPolicyConfig();
+    const warranty = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
+    const rec = this.policyEngine.recommend({
+      itemType: 'SERVICE', issueType: 'CUSTOMER_REFUSED_SERVICE', order, amountBasis: refundable, policy, warranty, cancellationCharge: charge,
+    });
+    const remarks = dto.remarks?.trim() || '';
+    const { kase: created, existing } = await this.createCase(
+      { orderId: order.id, issueType: 'CUSTOMER_REFUSED_SERVICE' },
+      (caseNumber) => ({
+        caseNumber, orderId: order.id, customerId: order.customerId, partnerId: v.id,
+        itemType: 'SERVICE', issueType: 'CUSTOMER_REFUSED_SERVICE',
+        description: `${REFUSAL_REASON_LABELS[dto.reasonCode]}${remarks ? ' — ' + remarks : ''}`,
+        evidenceUrls: [],
+        statusSnapshot: order.status,
+        openedByRole: 'SERVICE_VENDOR',
+        status: 'ADMIN_REVIEW',
+        routeType: 'SUPPORT_CASE',
+        partnerResponse: remarks || REFUSAL_REASON_LABELS[dto.reasonCode],
+        partnerRespondedAt: new Date(),
+        recommendedResolution: rec.resolutionType ?? undefined,
+        recommendedAmount: rec.amount ?? undefined,
+        recommendationReason: rec.reasonForCustomer,
+        policyApplied: rec.policyApplied,
+      }),
+    );
+    if (existing) return created; // a simultaneous report already opened it
+    const caseNumber = created.caseNumber;
+    await this.log(created.id, vendorUserId, UserRole.SERVICE_VENDOR, 'OPENED_BY_PARTNER',
+      `${dto.reasonCode}${remarks ? ': ' + remarks : ''} | arrival ${arrival.arrival.arrivalVerification}${arrival.arrival.arrivalDistanceM != null ? ' (' + arrival.arrival.arrivalDistanceM + ' m)' : ''}`);
+    await this.notifications.create(order.customerId, {
+      title: 'Your partner reported an issue at your address',
+      body: `Case ${caseNumber}: the partner reported the service could not go ahead. Our team will review — you can add your side from your bookings.`,
+      channels: [NotificationChannel.IN_APP],
+      orderId: order.id,
+    }).catch(() => {});
+    return created;
+  }
+
+  /** Customer asks to cancel after the partner arrived/started — opens a review case (no instant cancel). */
+  async requestCancellation(customerId: string, orderId: string, reason: string) {
+    const order = await this.loadOrderForCase(orderId);
+    if (!order || order.customerId !== customerId) throw new ForbiddenException();
+    if (order.items.length > 0) throw new BadRequestException('Product orders use the normal cancel/return flow');
+    if (ORDER_CLOSED_STATUSES.includes(order.status)) {
+      throw new BadRequestException('This booking can no longer be cancelled');
+    }
+    if (serviceStarted(order)) throw new ConflictException({ error: 'SERVICE_STARTED', message: SERVICE_STARTED_MESSAGE });
+    if (!order.arrivedAt) {
+      throw new BadRequestException('Your partner has not arrived yet — you can cancel this booking directly');
+    }
+    return this.openCase(customerId, { orderId, issueType: 'PARTNER_ARRIVED', description: `Cancellation requested: ${reason}` });
+  }
+
+  /** Customer's side / dispute of a proposed charge, before the admin decides. */
+  async customerRespond(customerId: string, caseId: string, statement: string) {
+    const kase = await this.prisma.supportCase.findUnique({ where: { id: caseId } });
+    if (!kase || kase.customerId !== customerId) throw new ForbiddenException();
+    if (!OPEN_CASE_STATUSES.includes(kase.status)) throw new BadRequestException('This case is no longer open — you can appeal the decision instead');
+    if (!statement?.trim()) throw new BadRequestException('Please write your response');
+    const updated = await this.prisma.supportCase.update({
+      where: { id: caseId },
+      data: { customerStatement: statement.trim(), status: kase.status === 'WAITING_CUSTOMER' ? 'ADMIN_REVIEW' : kase.status },
+    });
+    await this.log(caseId, customerId, UserRole.CUSTOMER, 'CUSTOMER_STATEMENT', statement.trim());
+    return updated;
+  }
+
+  /** One appeal of a decided cancellation case — back to admin review (claimed atomically). */
+  async customerAppeal(customerId: string, caseId: string, statement: string) {
+    const kase = await this.prisma.supportCase.findUnique({ where: { id: caseId } });
+    if (!kase || kase.customerId !== customerId) throw new ForbiddenException();
+    if (!CANCELLATION_ISSUES.includes(kase.issueType)) throw new BadRequestException('Only cancellation decisions can be appealed here');
+    if (!statement?.trim()) throw new BadRequestException('Please explain your appeal');
+    const claimed = await this.prisma.supportCase.updateMany({
+      where: { id: caseId, status: 'RESOLVED', appealedAt: null },
+      data: { appealStatement: statement.trim(), appealedAt: new Date(), status: 'ADMIN_REVIEW', closedAt: null },
+    });
+    if (claimed.count !== 1) throw new BadRequestException('This decision cannot be appealed (already appealed, or not decided yet)');
+    await this.log(caseId, customerId, UserRole.CUSTOMER, 'APPEALED', statement.trim());
+    return this.prisma.supportCase.findUnique({ where: { id: caseId } });
   }
 
   async partnerRespond(vendorUserId: string, caseId: string, response: string) {
@@ -530,15 +786,48 @@ export class SupportCasesService {
 
     let refundRequestId: string | undefined;
     if (resolutionType && REFUND_RESOLUTIONS.includes(resolutionType) && amount && amount > 0) {
-      const rr = await this.refunds.raise(
-        kase.customerId, kase.orderId, undefined,
-        `Support case ${kase.caseNumber} (${kase.issueType}): ${reason}`, kase.evidenceUrls,
-      );
-      // Default is WALLET_CREDIT per the same business rule RefundsService itself documents —
-      // this module never picks a gateway refund; an admin who wants that opens the
-      // RefundRequest directly via the existing Refunds admin screen.
-      await this.refunds.decide(actorId || 'SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: reason });
-      refundRequestId = rr.id;
+      // `amount` is the TOTAL the customer should get back for this case; anything already
+      // refunded (a decision before an appeal) is subtracted, so a case never refunds twice.
+      const { prior, delta } = await this.claimCaseRefund(caseId, amount);
+      if (delta > 0) {
+        let rr: { id: string };
+        try {
+          const description = `Support case ${kase.caseNumber} (${kase.issueType}): ${reason}`;
+          // The wallet portion of an unpaid (cash) booking is refundable from a service case.
+          const payment = kase.itemType === 'SERVICE'
+            ? await this.prisma.order.findUnique({ where: { id: kase.orderId }, select: { paymentStatus: true, walletUsed: true } })
+            : null;
+          const walletPortionOnly = !!payment && !['PAID', 'PARTIAL'].includes(payment.paymentStatus) && Number(payment.walletUsed || 0) > 0;
+          // Tagged with the case: its amount is tracked on the case and the partner is never
+          // auto-charged for it (any recovery is a separate admin decision).
+          rr = await this.refunds.raise(kase.customerId, kase.orderId, undefined, description, kase.evidenceUrls, { allowWalletPortion: walletPortionOnly, supportCaseId: caseId });
+        } catch (e) {
+          // Nothing was refunded — release the claim so the decision can be retried.
+          await this.prisma.supportCase.updateMany({ where: { id: caseId, refundedTotal: money(prior + delta) }, data: { refundedTotal: prior } });
+          throw e;
+        }
+        refundRequestId = rr.id;
+        await this.prisma.supportCase.update({ where: { id: caseId }, data: { refundRequestId: rr.id } });
+        try {
+          // Default is WALLET_CREDIT per the same business rule RefundsService itself documents —
+          // this module never picks a gateway refund; an admin who wants that opens the
+          // RefundRequest directly via the existing Refunds admin screen.
+          await this.refunds.decide(actorId || 'SYSTEM', rr.id, 'WALLET_CREDIT', { approvedAmount: delta, adminNotes: reason });
+        } catch (e) {
+          if (e instanceof RefundCapacityExceeded) {
+            // Refused BEFORE any money moved (another route/case used the booking's limit first):
+            // release this case's claim and withdraw the undecided request.
+            await this.prisma.supportCase.updateMany({ where: { id: caseId, refundedTotal: money(prior + delta) }, data: { refundedTotal: prior } });
+            await this.refunds.withdrawUndecided(rr.id, `Withdrawn — ${(e as Error).message}`);
+            throw e;
+          }
+          // Money may or may not have moved, so the claim is KEPT (fail closed: this case will
+          // never raise a second refund). The request stays open in Admin › Refunds, whose own
+          // atomic claim lets it be completed exactly once.
+          await this.log(caseId, actorId ?? undefined, actorId ? UserRole.ADMIN : undefined, 'REFUND_NEEDS_ATTENTION', `Refund request ${rr.id} (₹${delta}) failed: ${(e as Error).message}`);
+          throw new ConflictException(`The refund could not be completed automatically — finish refund request ${rr.id} from Admin › Refunds. This case will not issue it again.`);
+        }
+      }
     } else if (resolutionType === 'REASSIGN_PARTNER') {
       if (!actorId) throw new BadRequestException('Reassigning a partner requires admin review');
       if (!opts?.newVendorId) throw new BadRequestException('newVendorId is required to reassign a partner');
@@ -601,7 +890,7 @@ export class SupportCasesService {
 
   async adminDecide(
     adminId: string, caseId: string, resolutionType: SupportResolutionType,
-    amount: number | undefined, reason: string, opts?: { newVendorId?: string },
+    amount: number | undefined, reason: string, opts?: { newVendorId?: string; partnerCompensation?: number; cancelOrder?: boolean; partnerRecovery?: number; penaltyAmount?: number },
   ) {
     if (!reason?.trim()) throw new BadRequestException('A reason is required for every support-case decision');
     const kase = await this.prisma.supportCase.findUnique({ where: { id: caseId } });
@@ -619,7 +908,218 @@ export class SupportCasesService {
     if (kase.resolutionType === 'WARRANTY_CLAIM_OPENED') {
       throw new BadRequestException('This warranty claim is awaiting seller/admin review — decide it from the Warranty Cases queue instead');
     }
-    return this.executeResolution(caseId, resolutionType, amount ?? null, reason, adminId, opts);
+    // Service review cases (cancellation requests, partner-reported refusals, issues during the
+    // service): the admin cancels the booking, reassigns, continues the service or refunds. Every
+    // money step is validated BEFORE anything moves and kept separate — customer refund, partner
+    // compensation (credit) and partner recovery (debit) are distinct, individually traceable entries.
+    const compensation = money(Number(opts?.partnerCompensation || 0));
+    const recovery = money(Number(opts?.partnerRecovery || 0));
+    const penalty = money(Number(opts?.penaltyAmount || 0));
+    const refundRequested = REFUND_RESOLUTIONS.includes(resolutionType) && (amount ?? 0) > 0;
+    if (SERVICE_REVIEW_ISSUES.includes(kase.issueType)) {
+      const order = await this.loadOrderForCase(kase.orderId);
+      if (!order) throw new NotFoundException('Order not found');
+      if (opts?.cancelOrder && resolutionType === 'REASSIGN_PARTNER') {
+        throw new BadRequestException('Choose one: cancel the booking, or reassign it to another partner');
+      }
+      // Workflow: on a cancellation request a refund becomes available only once the booking is
+      // cancelled (in this decision or earlier) — "continue" or "reassign" never refunds.
+      if (refundRequested && CANCELLATION_ISSUES.includes(kase.issueType) && !opts?.cancelOrder && order.status !== 'CANCELLED') {
+        throw new BadRequestException('Approve the cancellation first — on a cancellation request a refund is only available once the booking is cancelled');
+      }
+      if (refundRequested) {
+        const { paid, alreadyRefunded, refundable } = await this.cancellationContext(order);
+        const refundNow = money((amount ?? 0) - Number(kase.refundedTotal || 0));
+        if (refundNow > refundable) {
+          throw new BadRequestException(`This decision would refund ₹${refundNow} more, but only ₹${refundable} is still refundable (paid ₹${paid}, already refunded ₹${alreadyRefunded})`);
+        }
+      }
+      if (compensation > 0) {
+        if (!kase.partnerId) throw new BadRequestException('This case has no partner to compensate');
+        if (kase.partnerCompensatedAt && money(Number(kase.partnerCompensation)) !== compensation) {
+          throw new BadRequestException(`Partner compensation of ₹${Number(kase.partnerCompensation)} was already applied for this case`);
+        }
+        if (compensation > Number(order.totalAmount)) throw new BadRequestException('Compensation cannot exceed the booking amount');
+      }
+      if (recovery > 0) this.validatePartnerRecovery(kase, order, recovery);
+      if (penalty > 0) {
+        // Only the configured rule for this service/city, only after arrival, only when cancelling.
+        if (!['PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'].includes(kase.issueType) || !order.arrivedAt) {
+          throw new BadRequestException('A cancellation penalty applies only when the customer cancels after the partner has arrived');
+        }
+        if (!opts?.cancelOrder && order.status !== 'CANCELLED') throw new BadRequestException('A cancellation penalty applies only when the booking is cancelled');
+        const { penalty: configured } = await this.cancellationContext(order);
+        if (!(configured.penalty > 0)) throw new BadRequestException('No cancellation penalty is configured for this service and city');
+        if (penalty > configured.penalty) throw new BadRequestException(`The penalty cannot exceed the configured ₹${configured.penalty} (${configured.label})`);
+      }
+    } else if (penalty > 0) {
+      throw new BadRequestException('A cancellation penalty applies only to cancellation cases');
+    } else if (compensation > 0 || opts?.cancelOrder) {
+      throw new BadRequestException('Compensation and cancellation apply only to service review cases');
+    } else if (recovery > 0) {
+      // A completed job the customer says was not fixed: the partner WAS paid, so an admin may
+      // record a recovery — never automatic, always its own ledger entry.
+      if (kase.issueType !== 'SERVICE_COMPLETED_ISSUE_NOT_FIXED') throw new BadRequestException('Partner recovery applies only to service cases');
+      const order = await this.loadOrderForCase(kase.orderId);
+      if (!order) throw new NotFoundException('Order not found');
+      this.validatePartnerRecovery(kase, order, recovery);
+    }
+
+    // One decision at a time: atomically move the case out of its open state (CLOSED here means
+    // "decision in progress"; executeResolution() then sets RESOLVED). A concurrent or repeated
+    // decide() fails this claim before ANY side effect. Every step below is itself idempotent, so
+    // after a failure the case is re-opened and a retry completes only what is left.
+    const claimed = await this.prisma.supportCase.updateMany({ where: { id: caseId, status: kase.status }, data: { status: 'CLOSED' } });
+    if (claimed.count !== 1) throw new ConflictException('This case is being decided by someone else or has just changed — reload it');
+    try {
+      // Order of steps = the approved workflow: partner ledger decisions, then the cancellation,
+      // then (only after it) the customer refund.
+      if (compensation > 0) await this.compensatePartnerOnce(kase, compensation, reason, adminId);
+      if (recovery > 0) await this.recoverFromPartnerOnce(kase, recovery, reason, adminId);
+      if (opts?.cancelOrder) await this.cancelOrderOnce(kase, reason, adminId);
+      await this.executeResolution(caseId, resolutionType, amount ?? null, reason, adminId, opts);
+    } catch (e) {
+      await this.prisma.supportCase.updateMany({ where: { id: caseId, status: 'CLOSED' }, data: { status: kase.status } }).catch(() => {});
+      throw e;
+    }
+    if (penalty > 0) await this.recordPenalty(kase, penalty, adminId);
+    return this.prisma.supportCase.findUnique({ where: { id: caseId } });
+  }
+
+  /**
+   * Records the admin-approved cancellation penalty AFTER the decision: the part covered by money
+   * actually received and not refunded is "retained"; the rest is only "pending collection" — never
+   * charged automatically and not collected revenue. Records only; no money moves here. (GST/tax
+   * treatment of the penalty is unchanged pending CA confirmation.)
+   */
+  private async recordPenalty(kase: { id: string; orderId: string }, penalty: number, adminId: string) {
+    const state = await this.refunds.bookingRefundState(this.prisma, { orderId: kase.orderId });
+    const retained = money(Math.min(penalty, state.refundable));
+    const pending = money(penalty - retained);
+    await this.prisma.supportCase.update({
+      where: { id: kase.id },
+      data: { penaltyAssessed: penalty, penaltyRetained: retained, penaltyPendingCollection: pending, penaltyAssessedAt: new Date() },
+    });
+    await this.log(kase.id, adminId, UserRole.ADMIN, 'PENALTY_ASSESSED', `₹${penalty}: ₹${retained} retained from payment, ₹${pending} pending collection (not charged)`);
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'CANCELLATION_PENALTY_ASSESSED', targetType: 'SupportCase', targetId: kase.id, metadata: { penalty, retained, pending } });
+  }
+
+  /** A partner is never charged for money that was never paid to them, nor more than they were paid. */
+  private validatePartnerRecovery(
+    kase: { partnerId: string | null; partnerRecoveredAt: Date | null; partnerRecovery: any },
+    order: { completedAt?: Date | null; status: string; vendorPayout?: any }, recovery: number,
+  ) {
+    if (!kase.partnerId) throw new BadRequestException('This case has no partner to recover from');
+    const paidOut = !!order.completedAt || ['COMPLETED', 'INVOICED', 'CLOSED'].includes(order.status);
+    if (!paidOut) throw new BadRequestException('The partner was never paid for this booking — there is nothing to recover');
+    if (recovery > Number(order.vendorPayout || 0)) throw new BadRequestException(`Recovery cannot exceed the ₹${Number(order.vendorPayout || 0)} paid to the partner for this booking`);
+    if (kase.partnerRecoveredAt && money(Number(kase.partnerRecovery)) !== recovery) {
+      throw new BadRequestException(`A partner recovery of ₹${Number(kase.partnerRecovery)} was already applied for this case`);
+    }
+  }
+
+  /** Recovery FROM the partner for a case — the shared, atomic rule (claim + ledger debit + audit
+   * in one transaction; never more than the partner earned on the booking across all routes). */
+  private async recoverFromPartnerOnce(kase: { id: string; caseNumber: string; orderId: string }, amount: number, reason: string, adminId: string) {
+    const res = await this.refunds.recordPartnerRecovery(adminId, {
+      source: 'SUPPORT_CASE', sourceId: kase.id, orderId: kase.orderId, amount, reason, sourceLabel: `support case ${kase.caseNumber}`,
+    });
+    if (res.applied) await this.log(kase.id, adminId, UserRole.ADMIN, 'PARTNER_RECOVERED', `₹${amount}`);
+  }
+
+  /** Partner compensation for a case, at most once: claim, post via the existing audited ledger
+   * adjustment, and release the claim only if the ledger shows nothing was posted. */
+  private async compensatePartnerOnce(kase: { id: string; caseNumber: string; partnerId: string | null }, amount: number, reason: string, adminId: string) {
+    const claimed = await this.prisma.supportCase.updateMany({
+      where: { id: kase.id, partnerCompensatedAt: null },
+      data: { partnerCompensatedAt: new Date(), partnerCompensation: amount },
+    });
+    if (claimed.count !== 1) return; // already applied (same amount — validated by the caller)
+    const note = `Compensation — support case ${kase.caseNumber}: ${reason}`;
+    try {
+      await this.admin.postLedgerAdjustment(kase.partnerId!, amount, note, adminId);
+      await this.log(kase.id, adminId, UserRole.ADMIN, 'PARTNER_COMPENSATED', `₹${amount}`);
+    } catch (e) {
+      const posted = await this.prisma.partnerLedgerEntry.findFirst({
+        where: { vendorId: kase.partnerId!, type: 'ADJUSTMENT', notes: { startsWith: `Compensation — support case ${kase.caseNumber}:` } },
+        select: { id: true },
+      }).catch(() => ({ id: 'unknown' }));
+      if (!posted) await this.prisma.supportCase.updateMany({ where: { id: kase.id }, data: { partnerCompensatedAt: null, partnerCompensation: null } });
+      throw e;
+    }
+  }
+
+  /** Order cancellation for a case, at most once; the claim is released only if the order did not get cancelled. */
+  private async cancelOrderOnce(kase: { id: string; caseNumber: string; orderId: string; issueType: SupportIssueType }, reason: string, adminId: string) {
+    if (!SERVICE_REVIEW_ISSUES.includes(kase.issueType)) return;
+    const claimed = await this.prisma.supportCase.updateMany({ where: { id: kase.id, orderCancelledByCase: false }, data: { orderCancelledByCase: true } });
+    if (claimed.count !== 1) return;
+    try {
+      await this.admin.adminCancelOrder(kase.orderId, `Support case ${kase.caseNumber}: ${reason}`, adminId, UserRole.ADMIN);
+      await this.log(kase.id, adminId, UserRole.ADMIN, 'ORDER_CANCELLED', reason);
+    } catch (e) {
+      const order = await this.prisma.order.findUnique({ where: { id: kase.orderId }, select: { status: true } }).catch(() => null);
+      if (order && order.status !== 'CANCELLED') await this.prisma.supportCase.updateMany({ where: { id: kase.id }, data: { orderCancelledByCase: false } });
+      throw e;
+    }
+  }
+
+  /**
+   * What cancelling this booking would mean, shown to the customer BEFORE they confirm. An
+   * estimate only: after arrival an admin reviews and decides; nothing is deducted until then.
+   */
+  async cancellationPreview(customerId: string, orderId: string) {
+    const order = await this.loadOrderForCase(orderId);
+    if (!order || order.customerId !== customerId) throw new ForbiddenException();
+    if (order.items.length > 0) throw new BadRequestException('Product orders use the normal cancel/return flow');
+    const stage = ORDER_CLOSED_STATUSES.includes(order.status) ? 'CLOSED'
+      : serviceStarted(order) ? 'SERVICE_STARTED'
+        : order.arrivedAt ? 'PARTNER_ARRIVED' : 'BEFORE_ARRIVAL';
+    const ctx = await this.cancellationContext(order);
+    const applies = stage === 'PARTNER_ARRIVED';
+    const penalty = applies ? ctx.penalty.penalty : 0;
+    return {
+      stage,
+      canCancelDirectly: stage === 'BEFORE_ARRIVAL',
+      canRequestCancellation: stage === 'PARTNER_ARRIVED',
+      complaintOnly: stage === 'SERVICE_STARTED',
+      message: stage === 'SERVICE_STARTED' ? SERVICE_STARTED_MESSAGE : stage === 'CLOSED' ? 'This booking can no longer be cancelled' : undefined,
+      bookingTotal: ctx.bookingTotal,
+      paid: ctx.paid,
+      alreadyRefunded: ctx.alreadyRefunded,
+      penalty: applies ? { amount: penalty, rule: ctx.penalty.label, ...ctx.penalty.breakdown } : null,
+      // Only money actually received can come back; a penalty above it is never charged automatically.
+      estimatedRefund: applies ? money(Math.max(0, ctx.refundable - penalty)) : null,
+      note: applies ? 'Estimate only — our team reviews every cancellation after arrival and confirms the final amount. Nothing is deducted until then.' : undefined,
+    };
+  }
+
+  /**
+   * Reconciles a case's refund claim with what was actually refunded — e.g. after a failed
+   * automatic refund was completed (possibly for a different amount) or rejected in Admin ›
+   * Refunds. Only when none of the case's refund requests is still open; never moves money.
+   */
+  async reconcileRefundClaim(adminId: string, caseId: string) {
+    const found = await this.prisma.supportCase.findUnique({ where: { id: caseId }, select: { orderId: true } });
+    if (!found) throw new NotFoundException('Support case not found');
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${'support-case-refund:' + caseId}))`;
+      const kase = await tx.supportCase.findUnique({ where: { id: caseId }, select: { refundedTotal: true } });
+      const requests = await tx.refundRequest.findMany({ where: { supportCaseId: caseId }, select: { id: true, status: true, claimedAmount: true, approvedAmount: true } });
+      const open = requests.find((r: any) => ACTIVE_REFUND_STATUSES.includes(r.status));
+      if (open) throw new BadRequestException(`Refund request ${open.id} is still open — complete or reject it in Admin › Refunds first`);
+      // Reserved amounts stay counted while a gateway refund is pending / needs attention; a
+      // reservation drops only when the provider confirmed a failure (never on a guess).
+      const processed = money(requests.reduce((sum: number, r: any) => sum + (Number(r.claimedAmount || 0) > 0 ? Number(r.claimedAmount) : r.status === 'PROCESSED' ? Number(r.approvedAmount || 0) : 0), 0));
+      const before = money(Number(kase?.refundedTotal || 0));
+      if (before !== processed) await tx.supportCase.update({ where: { id: caseId }, data: { refundedTotal: processed } });
+      return { before, after: processed, changed: before !== processed };
+    }, { timeout: 15000, maxWait: 10000 });
+    if (result.changed) {
+      await this.log(caseId, adminId, UserRole.ADMIN, 'REFUND_RECONCILED', `Refund total ${result.before} → ${result.after} (processed refunds)`);
+      await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'SUPPORT_REFUND_RECONCILED', targetType: 'SupportCase', targetId: caseId, metadata: result });
+    }
+    return result;
   }
 
   async listForCustomer(customerId: string) {
@@ -644,7 +1144,7 @@ export class SupportCasesService {
       { id: string; name: string; phone: string }[],
       { id: string; fullName: string }[],
     ] = await Promise.all([
-      orderIds.length ? this.prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNumber: true } }) : [],
+      orderIds.length ? this.prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNumber: true, arrivedAt: true, arrivalVerification: true, arrivalDistanceM: true } }) : [],
       customerIds.length ? this.prisma.user.findMany({ where: { id: { in: customerIds } }, select: { id: true, name: true, phone: true } }) : [],
       partnerIds.length ? this.prisma.serviceVendor.findMany({ where: { id: { in: partnerIds } }, select: { id: true, fullName: true } }) : [],
     ]);
@@ -654,6 +1154,9 @@ export class SupportCasesService {
     return cases.map((c) => ({
       ...c,
       orderNumber: orderById.get(c.orderId)?.orderNumber,
+      arrivedAt: (orderById.get(c.orderId) as any)?.arrivedAt,
+      arrivalVerification: (orderById.get(c.orderId) as any)?.arrivalVerification,
+      arrivalDistanceM: (orderById.get(c.orderId) as any)?.arrivalDistanceM,
       customerName: customerById.get(c.customerId)?.name,
       customerPhone: customerById.get(c.customerId)?.phone,
       partnerName: c.partnerId ? partnerById.get(c.partnerId)?.fullName : undefined,
@@ -661,10 +1164,39 @@ export class SupportCasesService {
   }
 
   async getDetail(id: string, actorUserId: string, actorRole: UserRole) {
-    const kase = await this.prisma.supportCase.findUnique({ where: { id }, include: { logs: { orderBy: { createdAt: 'asc' } } } });
-    if (!kase) throw new NotFoundException();
+    const found = await this.prisma.supportCase.findUnique({ where: { id }, include: { logs: { orderBy: { createdAt: 'asc' } } } });
+    if (!found) throw new NotFoundException();
+    const arrival = await this.prisma.order.findUnique({
+      where: { id: found.orderId },
+      select: { status: true, arrivedAt: true, arrivalVerification: true, arrivalDistanceM: true, arrivalAccuracyM: true, arrivalLatitude: true, arrivalLongitude: true, arrivalNote: true, snapshotLatitude: true, snapshotLongitude: true },
+    });
+    const kase: any = { ...found, order: arrival };
     const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
-    if (adminRoles.includes(actorRole) || kase.customerId === actorUserId) return kase;
+    if (adminRoles.includes(actorRole)) {
+      // Admin review: payment, penalty and refund status side by side (cancellation approval,
+      // refund approval and refund completion are separate, visible states).
+      if (SERVICE_REVIEW_ISSUES.includes(found.issueType)) {
+        const order = await this.loadOrderForCase(found.orderId);
+        if (order) {
+          const ctx = await this.cancellationContext(order);
+          kase.review = {
+            startOtpVerified: !!order.startOtpVerified, orderStatus: order.status,
+            paymentStatus: order.paymentStatus, bookingTotal: ctx.bookingTotal, paid: ctx.paid,
+            alreadyRefunded: ctx.alreadyRefunded, inFlight: ctx.inFlight, refundable: ctx.refundable,
+            penalty: { amount: ctx.penalty.penalty, rule: ctx.penalty.label, ...ctx.penalty.breakdown },
+            suggestedRefund: money(Math.max(0, Number(found.refundedTotal || 0) + ctx.refundable - (order.arrivedAt && !serviceStarted(order) ? ctx.penalty.penalty : 0))),
+            vendorPayout: Number(order.vendorPayout || 0), partnerPaidOut: !!order.completedAt || ['COMPLETED', 'INVOICED', 'CLOSED'].includes(order.status),
+          };
+        }
+      }
+      kase.refunds = await this.prisma.refundRequest.findMany({
+        where: { OR: [{ supportCaseId: found.id }, ...(found.refundRequestId ? [{ id: found.refundRequestId }] : [])] },
+        select: { id: true, status: true, decisionMode: true, approvedAmount: true, claimedAmount: true, walletCreditAmount: true, gatewayRefundAmount: true, gatewayRefundId: true, approvedAt: true, createdAt: true, providerRefund: { select: { status: true, providerRefundId: true, lastError: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+      return kase;
+    }
+    if (kase.customerId === actorUserId) return kase;
     if (actorRole === UserRole.SERVICE_VENDOR) {
       const v = await this.prisma.serviceVendor.findUnique({ where: { userId: actorUserId } });
       if (v && kase.partnerId === v.id) return kase;
@@ -700,6 +1232,35 @@ export class SupportCasesController {
     return this.support.getDetail(id, u.sub, u.role);
   }
 
+  // Partner, after arriving: customer refused the service (reason + remarks + fresh location).
+  @Post('partner/orders/:orderId/customer-refused')
+  partnerRefused(@CurrentUser() u: JwtPayload, @Param('orderId') orderId: string, @Body() b: PartnerRefusalDto) {
+    return this.support.partnerReportRefusal(u.sub, orderId, b);
+  }
+
+  // Customer: cancel after the partner arrived/started — opens an admin review case.
+  @Get('orders/:orderId/cancellation-preview')
+  cancellationPreview(@CurrentUser() u: JwtPayload, @Param('orderId') orderId: string) {
+    return this.support.cancellationPreview(u.sub, orderId);
+  }
+
+  @Post('orders/:orderId/cancellation-request')
+  cancellationRequest(@CurrentUser() u: JwtPayload, @Param('orderId') orderId: string, @Body() b: CancellationRequestDto) {
+    return this.support.requestCancellation(u.sub, orderId, b.reason);
+  }
+
+  // Customer: their side / dispute of a proposed charge, before the decision.
+  @Post('cases/:id/customer-respond')
+  customerRespond(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: CustomerStatementDto) {
+    return this.support.customerRespond(u.sub, id, b.statement);
+  }
+
+  // Customer: one appeal of a decided cancellation case.
+  @Post('cases/:id/appeal')
+  appeal(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: CustomerStatementDto) {
+    return this.support.customerAppeal(u.sub, id, b.statement);
+  }
+
   @Post('cases/:id/partner-respond')
   partnerRespond(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { response: string }) {
     return this.support.partnerRespond(u.sub, id, b.response);
@@ -713,9 +1274,18 @@ export class SupportCasesController {
   @Post('cases/:id/decide')
   decide(
     @CurrentUser() u: JwtPayload, @Param('id') id: string,
-    @Body() b: { resolutionType: SupportResolutionType; amount?: number; reason: string; newVendorId?: string },
+    @Body() b: AdminDecideDto,
   ) {
-    return this.support.adminDecide(u.sub, id, b.resolutionType, b.amount, b.reason, { newVendorId: b.newVendorId });
+    return this.support.adminDecide(u.sub, id, b.resolutionType, b.amount, b.reason, {
+      newVendorId: b.newVendorId, partnerCompensation: b.partnerCompensation, cancelOrder: b.cancelOrder, partnerRecovery: b.partnerRecovery, penaltyAmount: b.penaltyAmount,
+    });
+  }
+
+  // Admin: re-align a case's refund claim with the refunds actually processed (no money moves).
+  @UseGuards(RolesGuard) @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Post('cases/:id/reconcile-refund')
+  reconcileRefund(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.support.reconcileRefundClaim(u.sub, id);
   }
 }
 

@@ -9157,6 +9157,28 @@ window.RemontMedia = (function () {
     window._bmTotal = total;
     window._bmGst = gst;
     window._bmSubtotal = subtotal;
+    bmRefreshServerQuote();
+  }
+
+  // The direct-booking path prices one service exactly like a cart service booking (city
+  // price, minimum charge, configured GST) — so the server quote for that one service is the
+  // amount this booking charges. This path does not apply coupons (see bmApplyCoupon).
+  function bmRefreshServerQuote() {
+    var svcId = document.getElementById('bm-svc-id').value;
+    if (!svcId) return;
+    var body = JSON.stringify({ items: [{ type: 'SERVICE', serviceId: svcId, quantity: 1 }], city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined });
+    fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(res) {
+        var q = res && (res.data || res);
+        if (!q || typeof q.totalAmount !== 'number') return;
+        var fmt = function(n) { return '₹' + Number(n).toLocaleString('en-IN'); };
+        [['bs-service', q.subtotal], ['bs-gst', q.gstAmount], ['bs-total', q.totalAmount], ['bp-subtotal', q.subtotal], ['bp-gst', q.gstAmount], ['bp-total', q.totalAmount]]
+          .forEach(function(pair) { var el = document.getElementById(pair[0]); if (el) el.textContent = fmt(pair[1]); });
+        ['bs-discount-row', 'bp-disc-row'].forEach(function(id) { var el = document.getElementById(id); if (el) el.style.display = 'none'; });
+        window._bmTotal = q.totalAmount; window._bmGst = q.gstAmount; window._bmSubtotal = q.subtotal;
+        if (window._bmCoupon) showToast('Coupons apply at cart checkout — add this service to the cart to use one', 'info');
+      }).catch(function() {});
   }
 
   function bmBuildPayRecap() {
@@ -9174,6 +9196,7 @@ window.RemontMedia = (function () {
     document.getElementById('bp-gst').textContent = '₹' + gst.toLocaleString('en-IN');
     document.getElementById('bp-total').textContent = '₹' + total.toLocaleString('en-IN');
     window._bmTotal = total;
+    bmRefreshServerQuote();
   }
 
   function bmApplyCoupon() {
@@ -10156,6 +10179,9 @@ function cartCheckout() {
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>Subtotal</span><span id="co-subtotal">₹0</span>
         </div>
+        <div id="co-min-line" style="display:none;justify-content:space-between;font-size:12px;color:#6b7280;margin-bottom:6px">
+          <span>Includes minimum service charge</span><span id="co-min-line-amt">₹0</span>
+        </div>
         <div id="co-coupon-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>Coupon discount</span><span id="co-coupon-line-amt">−₹0</span>
         </div>
@@ -10163,7 +10189,7 @@ function cartCheckout() {
           <span>🎁 Bundle offer (<span id="co-bundle-line-pct">10</span>% off service)</span><span id="co-bundle-line-amt">−₹0</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
-          <span>GST (18%)</span><span id="co-gst">₹0</span>
+          <span>GST</span><span id="co-gst">₹0</span>
         </div>
         <div id="co-delivery-line" style="display:none;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>Delivery Charge</span><span id="co-delivery-line-amt">₹0</span>
@@ -10969,6 +10995,60 @@ function handleCheckoutSubmit() {
 // charged via Razorpay is always the backend's own independently-computed totalAmount from
 // MasterOrdersService.checkout() — this display does not need to match it to the paisa.
 var _coDeliveryCharge = 0;
+// ── Server quote (POST /master-orders/public/quote) — writes nothing; same pricing as checkout.
+var _coQuote = null, _coQuoteFor = null, _coQuoteTimer = null, _coQuoteInflight = null;
+function _coQuoteBody() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
+  return {
+    items: cart.map(function(i) {
+      return i.type === 'service' ? { type: 'SERVICE', serviceId: i.id, quantity: i.qty || 1 } : { type: 'PRODUCT', productId: i.id, quantity: i.qty || 1 };
+    }),
+    city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined,
+    couponCode: _coCoupon ? _coCoupon.code : undefined,
+    latitude: savedLoc && savedLoc.latitude ? savedLoc.latitude : undefined,
+    longitude: savedLoc && savedLoc.longitude ? savedLoc.longitude : undefined,
+    state: savedLoc ? (savedLoc.state || undefined) : undefined,
+    pincode: savedLoc ? (savedLoc.pincode || undefined) : undefined,
+  };
+}
+function _coQuoteKey() { try { return JSON.stringify(_coQuoteBody()); } catch (e) { return ''; } }
+function _coScheduleQuote(key) {
+  if (!key || _coQuoteInflight === key) return;
+  clearTimeout(_coQuoteTimer);
+  _coQuoteTimer = setTimeout(function() {
+    _coQuoteInflight = key;
+    // Signed in → the authenticated quote prices YOUR account (membership included). Guests get
+    // the public quote, which never looks anyone up by phone (privacy) — a member checking out
+    // as a guest sees their member discount once the order is placed.
+    var token = localStorage.getItem('remont_token');
+    var publicQuote = function() {
+      return fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key,
+      });
+    };
+    var req = publicQuote;
+    if (token) {
+      var b = JSON.parse(key);
+      var authBody = JSON.stringify({
+        items: b.items, city: b.city, couponCode: b.couponCode,
+        inlineAddress: (b.latitude != null || b.fullAddress) ? { fullAddress: b.fullAddress || '', city: b.city, state: b.state, pincode: b.pincode, latitude: b.latitude, longitude: b.longitude } : undefined,
+      });
+      req = function() {
+        return fetch((API_BASE || '') + '/api/v1/master-orders/quote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: authBody,
+        }).then(function(r) { return r.status === 401 ? publicQuote() : r; }); // expired session → guest quote
+      };
+    }
+    req().then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || r.status); return d; }); })
+      .then(function(res) {
+        _coQuote = res.data || res; _coQuoteFor = key; _coQuoteInflight = null;
+        recalcTotals();
+      })
+      .catch(function() { _coQuoteInflight = null; /* keep the estimate; checkout re-prices on the server */ });
+  }, 300);
+}
+
 function recalcTotals() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   var subtotal = 0;
@@ -10991,6 +11071,26 @@ function recalcTotals() {
   var discounted = Math.max(0, subtotal - couponDiscount - bundleDiscount);
   var gst = Math.round(discounted * 0.18 * 100) / 100;
   var preWalletTotal = discounted + gst + _coDeliveryCharge;
+  var minimumCharge = 0;
+  // The server quote is produced by the SAME pricing checkout charges with (minimum charge,
+  // configured GST, coupon, bundle, delivery) — once it arrives it replaces the estimate above.
+  var quoteKey = _coQuoteKey();
+  if (_coQuote && _coQuoteFor === quoteKey) {
+    subtotal = _coQuote.subtotal;
+    bundleDiscount = _coQuote.bundleDiscount || 0;
+    couponDiscount = (_coQuote.couponDiscount || 0) + (_coQuote.membershipDiscount || 0);
+    gst = _coQuote.gstAmount;
+    _coDeliveryCharge = _coQuote.deliveryCharge || 0;
+    preWalletTotal = _coQuote.totalAmount;
+    minimumCharge = _coQuote.minimumChargeAdjustment || 0;
+  } else {
+    _coScheduleQuote(quoteKey);
+  }
+  var minLine = document.getElementById('co-min-line');
+  if (minLine) {
+    minLine.style.display = minimumCharge > 0 ? 'flex' : 'none';
+    if (minimumCharge > 0) document.getElementById('co-min-line-amt').textContent = '₹' + minimumCharge.toLocaleString('en-IN');
+  }
 
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletApplied = (useWalletEl && useWalletEl.checked) ? Math.min(_coWalletBalance, preWalletTotal) : 0;
@@ -12248,9 +12348,15 @@ function cancelOrderFromList(orderId) {
     method: 'PATCH', headers: headers,
     body: JSON.stringify({ reason: 'Customer requested cancellation' })
   }).then(function(r) {
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }).then(function() {
+    return r.json().catch(function() { return {}; }).then(function(d) {
+      if (r.status === 409 && d && d.errorCode === 'CANCELLATION_REVIEW_REQUIRED') return { reviewRequired: true, message: d.message };
+      if (r.status === 409 && d && d.errorCode === 'SERVICE_STARTED') return { serviceStarted: true, message: d.message };
+      if (!r.ok) throw new Error(r.status);
+      return d;
+    });
+  }).then(function(res) {
+    if (res && res.reviewRequired) { requestCancellationReview(orderId, res.message); return; }
+    if (res && res.serviceStarted) { offerServiceComplaint(orderId, res.message); return; }
     showToast('Order cancelled', 'success');
     loadMyOrders();
   }).catch(function() {
@@ -12417,6 +12523,7 @@ var SUPPORT_ISSUE_LABELS = {
   PARTNER_ON_THE_WAY: 'Partner On The Way — I want to cancel', PARTNER_ARRIVED: 'Partner Arrived — I want to cancel',
   PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
   SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
+  CUSTOMER_REFUSED_SERVICE: 'Partner reported the service could not go ahead',
 };
 var _supCtx = { orderId: null, orderItemId: null, itemLabel: null };
 
@@ -12579,7 +12686,84 @@ function _renderSupportResult(kase) {
     (kase.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:10px">Policy: ' + escHtml(kase.policyApplied) + '</div>' : '') +
     '<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Case ID: <b>' + escHtml(kase.caseNumber) + '</b></div>' +
     '<div style="font-size:12px;color:#374151;padding:10px;background:#eff6ff;border-radius:8px">Next step: ' + escHtml(nextStep) + '</div>' +
+    (SUPPORT_CANCELLATION_ISSUES.indexOf(kase.issueType) !== -1 && !resolved && kase.status !== 'CLOSED'
+      ? '<button onclick="supportCustomerRespond(\'' + kase.id + '\')" style="width:100%;margin-top:10px;padding:10px;background:#fff;color:#0d1535;border:1.5px solid #0d1535;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">' + (kase.customerStatement ? 'Update your response' : 'Add your side') + '</button>'
+      : '') +
+    (SUPPORT_CANCELLATION_ISSUES.indexOf(kase.issueType) !== -1 && resolved && !kase.appealedAt
+      ? '<button onclick="supportCustomerAppeal(\'' + kase.id + '\')" style="width:100%;margin-top:10px;padding:10px;background:#fff;color:#c4601a;border:1.5px solid #c4601a;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Appeal this decision</button>'
+      : '') +
     '<button onclick="closeSupportModal()" style="width:100%;margin-top:14px;padding:11px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Done</button>';
+}
+
+function _supPost(path, body) {
+  var token = localStorage.getItem('remont_token');
+  var headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return fetch(API_BASE + path, { method: 'POST', headers: headers, body: JSON.stringify(body) })
+    .then(function(r) { return r.json().catch(function() { return {}; }).then(function(d) { if (!r.ok) throw new Error(d.message || 'Request failed'); return d.data || d; }); });
+}
+
+// Partner already arrived: the cancellation goes to our team for review (no instant cancel,
+// no automatic charge). The partner's arrival record and the customer's reason are kept.
+// The service has started (start OTP shared): no self-service cancellation — a genuine problem
+// still goes to our team as a complaint through the existing support flow.
+function offerServiceComplaint(orderId, message) {
+  if (confirm((message || 'The service has already started, so it can no longer be cancelled here.') + '\n\nRaise a complaint about this service now?')) {
+    openSupportModal(orderId);
+  }
+}
+
+function _fmtRs(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+
+// Shows the customer what cancelling now would mean BEFORE they confirm (penalty rule, what was
+// paid, estimated refund) — an estimate; our team reviews and confirms the final amount.
+function requestCancellationReview(orderId, serverMessage) {
+  var token = localStorage.getItem('remont_token');
+  var headers = {}; if (token) headers['Authorization'] = 'Bearer ' + token;
+  fetch(API_BASE + '/api/v1/support/orders/' + orderId + '/cancellation-preview', { headers: headers })
+    .then(function(r) { return r.json().catch(function() { return {}; }).then(function(d) { if (!r.ok) throw new Error(d.message || 'Could not load the cancellation details'); return d.data || d; }); })
+    .then(function(pv) {
+      if (pv.complaintOnly) { offerServiceComplaint(orderId, pv.message); return; }
+      if (!pv.canRequestCancellation) { showToast(pv.message || 'This booking can no longer be cancelled', 'error'); return; }
+      var lines = [serverMessage || 'Your partner has already arrived, so this cancellation needs a review.', ''];
+      lines.push('Amount paid so far: ' + _fmtRs(pv.paid));
+      if (pv.penalty && pv.penalty.amount > 0) {
+        lines.push('Cancellation charge: ' + _fmtRs(pv.penalty.amount) + ' (' + pv.penalty.rule + ')');
+      } else {
+        lines.push('Cancellation charge: none for this service');
+      }
+      lines.push('Estimated refund: ' + _fmtRs(pv.estimatedRefund));
+      if (pv.note) lines.push('', pv.note);
+      if (!confirm(lines.join('\n') + '\n\nSend the cancellation request?')) return;
+      _submitCancellationRequest(orderId);
+    })
+    .catch(function(e) { showToast(e.message || 'Could not load the cancellation details', 'error'); });
+}
+
+function _submitCancellationRequest(orderId) {
+  var reason = prompt('Please tell us why you want to cancel:');
+  if (reason === null) return;
+  if (!reason.trim()) { showToast('Please enter a reason', 'error'); return; }
+  _supPost('/api/v1/support/orders/' + orderId + '/cancellation-request', { reason: reason.trim() }).then(function(kase) {
+    showToast('Cancellation request submitted' + (kase && kase.caseNumber ? ' (' + kase.caseNumber + ')' : '') + ' — our team will review it', 'success');
+    loadMyOrders();
+  }).catch(function(e) { showToast(e.message || 'Could not submit the request', 'error'); });
+}
+
+var SUPPORT_CANCELLATION_ISSUES = ['PARTNER_ON_THE_WAY', 'PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'];
+function supportCustomerRespond(caseId) {
+  var statement = prompt('Add your side of what happened (our team will see it before deciding):');
+  if (statement === null || !statement.trim()) return;
+  _supPost('/api/v1/support/cases/' + caseId + '/customer-respond', { statement: statement.trim() })
+    .then(function() { showToast('Your response was added', 'success'); viewSupportCase(caseId); })
+    .catch(function(e) { showToast(e.message, 'error'); });
+}
+function supportCustomerAppeal(caseId) {
+  var statement = prompt('Explain why you want this decision reviewed again (you can appeal once):');
+  if (statement === null || !statement.trim()) return;
+  _supPost('/api/v1/support/cases/' + caseId + '/appeal', { statement: statement.trim() })
+    .then(function() { showToast('Appeal submitted — our team will review it again', 'success'); viewSupportCase(caseId); })
+    .catch(function(e) { showToast(e.message, 'error'); });
 }
 
 function viewSupportCase(caseId) {

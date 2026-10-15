@@ -48,6 +48,10 @@
             <option value="PARTIALLY_APPROVED">Partially Approved</option>
             <option value="REJECTED">Rejected</option>
             <option value="PROCESSED">Processed</option>
+            <option value="PROCESSING">Processing</option>
+            <option value="REFUND_PENDING">Refund pending (gateway)</option>
+            <option value="NEEDS_ATTENTION">Needs attention</option>
+            <option value="REFUND_FAILED">Refund failed</option>
           </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
@@ -99,7 +103,50 @@ function renderStats() {
 var STATUS_COLOR = {
   REQUESTED: 'yellow', PARTNER_RESPONDED: 'blue', UNDER_REVIEW: 'blue', ESCALATED: 'red',
   APPROVED: 'green', PARTIALLY_APPROVED: 'green', PROCESSED: 'green', REJECTED: 'gray',
+  // gateway refunds: accepted ≠ completed; uncertain outcomes are never assumed either way
+  PROCESSING: 'blue', REFUND_PENDING: 'yellow', NEEDS_ATTENTION: 'red', REFUND_FAILED: 'gray',
 };
+var PROVIDER_STATUS_TEXT = {
+  CREATED: 'Created — not yet confirmed sent', PENDING: 'Accepted by the gateway — processing (not completed)',
+  PROCESSED: 'Processed by the gateway (completed)', FAILED: 'Failed at the gateway — the amount is refundable again',
+  UNKNOWN: 'Outcome unknown — check with the gateway before doing anything else',
+};
+function providerHtml(rr) {
+  var p = rr.providerRefund; if (!p) return '';
+  var open = p.status !== 'PROCESSED' && p.status !== 'FAILED';
+  return '<div style="background:' + (p.status === 'UNKNOWN' ? '#fef2f2' : '#f9fafb') + ';border-radius:8px;padding:12px;margin-top:10px;font-size:13px">' +
+    '<strong>Gateway refund (' + escape(p.gateway) + '):</strong> ' + escape(PROVIDER_STATUS_TEXT[p.status] || p.status) +
+    '<br><small>Internal refund id ' + escape(p.id) + ' · key ' + escape(p.idempotencyKey) + (p.providerRefundId ? ' · gateway ref ' + escape(p.providerRefundId) : '') +
+    ' · attempts ' + (p.attempts || 0) + (p.lastCheckedAt ? ' · last checked ' + fmtDate(p.lastCheckedAt) : '') + '</small>' +
+    (p.lastError ? '<div style="color:#b91c1c;margin-top:4px">' + escape(p.lastError) + '</div>' : '') +
+    (open && p.gateway === 'RAZORPAY' ? '<div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="rrReconcile()">Check with Razorpay</button> <small style="color:#6b7280">finds or re-sends the SAME refund (same key, same amount) — never a second one</small></div>' : '') +
+    (open && p.gateway !== 'RAZORPAY' ? '<div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="rrConfirmOutcome()">Record verified outcome</button> <small style="color:#6b7280">after checking the ' + escape(p.gateway) + ' dashboard</small></div>' : '') +
+  '</div>';
+}
+function rrReconcile() {
+  api('POST', '/refunds/' + currentRR.id + '/reconcile', {}).then(function() { toast('Checked with Razorpay', 'success'); openDetail(currentRR.id); load(); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
+function rrConfirmOutcome() {
+  var outcome = prompt('Verified outcome at the gateway: type PROCESSED or FAILED');
+  if (!outcome) return;
+  outcome = outcome.trim().toUpperCase();
+  if (outcome !== 'PROCESSED' && outcome !== 'FAILED') { toast('Type PROCESSED or FAILED', 'error'); return; }
+  var reference = prompt('Gateway reference you verified:'); if (!reference) return;
+  var reason = prompt('Reason / where you verified it:'); if (!reason) return;
+  api('POST', '/refunds/' + currentRR.id + '/confirm-provider-outcome', { outcome: outcome, reference: reference, reason: reason })
+    .then(function() { toast('Outcome recorded', 'success'); openDetail(currentRR.id); load(); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
+function rrPartnerRecovery() {
+  var amount = Number(prompt('Recover from the partner (₹) — a separate ledger debit, only for a job the partner was paid for:'));
+  if (!(amount > 0)) return;
+  var reason = prompt('Reason (required, audited):'); if (!reason || !reason.trim()) return;
+  if (!confirm('Debit ₹' + amount + ' from the partner? This is recorded once and audited.')) return;
+  api('POST', '/refunds/' + currentRR.id + '/partner-recovery', { amount: amount, reason: reason.trim() })
+    .then(function() { toast('Partner recovery recorded', 'success'); openDetail(currentRR.id); })
+    .catch(function(e) { toast(e.message, 'error'); });
+}
 
 function renderTable() {
   if (!allRequests.length) { document.getElementById('tbl').innerHTML = '<div class="empty-state">No refund requests found.</div>'; return; }
@@ -185,7 +232,11 @@ function renderDetail(rr) {
       (rr.approvedAmount ? ' · ' + fmtCur(rr.approvedAmount) : '') +
       (rr.gatewayRefundId ? '<br><strong>Gateway Refund ID:</strong> ' + escape(rr.gatewayRefundId) : '') +
       (rr.adminNotes ? '<br><strong>Notes:</strong> ' + escape(rr.adminNotes) : '') +
-      '</div>';
+      (rr.partnerRecoveredAt ? '<br><strong>Recovered from partner:</strong> ' + fmtCur(rr.partnerRecovery) : '') +
+      '</div>' + providerHtml(rr) +
+      (rr.orderId && rr.status === 'PROCESSED' && !rr.partnerRecoveredAt
+        ? '<div style="margin-top:10px"><button class="btn btn-outline btn-sm" onclick="rrPartnerRecovery()">Recover from partner…</button> <small style="color:#6b7280">never automatic — explicit decision with a reason</small></div>'
+        : '');
   }
   html += '</div>';
   document.getElementById('rr-detail-body').innerHTML = html;

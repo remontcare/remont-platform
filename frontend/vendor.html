@@ -1195,7 +1195,7 @@ function renderJfStep(){
       <div class="cc-detail-row"><span class="cdl">Address</span><span class="cdr">${addressText||'Unlocked after accept'}</span></div></div>
       ${mapEmbed}`;
     foot = `<a class="map-nav-btn" href="${escapeHtml(mapHref)}" target="_blank" rel="noopener noreferrer">🗺️ Start Navigation</a>
-      <button class="btn-primary" onclick="jfGoto(3)">I've Arrived →</button>`;
+      <button class="btn-primary" id="jf-arrived-btn" onclick="jfMarkArrived()">I've Arrived →</button>`;
   }
   else if(s===3){
     html = `<div class="jf-step-tag">Step 3 of 9 — Verify</div><div class="jf-title">Verify Customer OTP</div>
@@ -1289,6 +1289,23 @@ function jfStartHeading(){
   apiFetch('/orders/'+jfState.orderId+'/en-route', {method:'PATCH'})
     .then(function(){ jfGoto(2); })
     .catch(function(e){ alert('Could not update status: '+e.message); btn.disabled=false; btn.textContent='Start Job →'; });
+}
+// "I've Arrived": a fresh foreground location at this moment, verified server-side. A failed fix
+// is sent as a reason (never fabricated coordinates); the partner can still continue.
+function jfMarkArrived(){
+  if(jfState.mock){ jfGoto(3); return; }
+  var btn=document.getElementById('jf-arrived-btn'); btn.disabled=true; btn.textContent='Recording arrival…';
+  function send(body){
+    apiFetch('/orders/'+jfState.orderId+'/arrived', {method:'PATCH', body: JSON.stringify(body)})
+      .then(function(r){ var v=r&&r.arrival&&r.arrival.arrivalVerification; if(v&&v!=='VERIFIED') alert(body.locationError?'Arrival recorded without location — turn on location so it can be verified.':'Arrival recorded — your location could not be verified.'); jfGoto(3); })
+      .catch(function(e){ alert('Could not record arrival: '+e.message); btn.disabled=false; btn.textContent="I've Arrived →"; });
+  }
+  if(!navigator.geolocation){ send({locationError:'GEOLOCATION_UNAVAILABLE'}); return; }
+  navigator.geolocation.getCurrentPosition(
+    // fixAgeMs uses the device clock alone (fix time vs now), so clock skew can't distort it.
+    function(p){ send({latitude:p.coords.latitude, longitude:p.coords.longitude, accuracyM:p.coords.accuracy, fixAgeMs: Math.max(0, Date.now() - (p.timestamp || Date.now()))}); },
+    function(err){ send({locationError: err&&err.code===1?'PERMISSION_DENIED':(err&&err.code===3?'TIMEOUT':'LOCATION_ERROR')}); },
+    {enableHighAccuracy:true, timeout:15000, maximumAge:0});
 }
 function jfRejectJob(){
   if(!confirm("Reject this job? It will go back into the pool for other vendors.")) return;

@@ -244,24 +244,44 @@ export async function resolveCommission(
   prisma: any,
   params: { serviceId: string; categoryId: string; cityId?: string | null; amount: number },
 ): Promise<{ commissionAmount: number; ruleId: string | null; ruleLabel: string }> {
+  return resolveServiceRule(prisma, 'COMMISSION', params);
+}
+
+/** What a CommissionRule row prices — see ServiceRuleType in schema.prisma. */
+export type ServiceRuleTypeValue = 'COMMISSION' | 'MINIMUM_CHARGE' | 'CANCELLATION_CHARGE';
+
+/**
+ * The existing commission resolution (service beats category, city-specific beats all-city,
+ * priority, opt-in stacking, effective dates), generalised over CommissionRule.ruleType so the
+ * minimum-charge and cancellation-charge rules reuse it instead of a second rule engine.
+ * Only COMMISSION falls back to the `default_commission_pct` setting — the new types have no
+ * fallback: no matching rule means ₹0 (nothing is ever invented).
+ */
+export async function resolveServiceRule(
+  prisma: any,
+  ruleType: ServiceRuleTypeValue,
+  params: { serviceId: string; categoryId: string; cityId?: string | null; amount: number },
+): Promise<{ commissionAmount: number; ruleId: string | null; ruleLabel: string; rule?: CommissionRuleRow | null }> {
   const { serviceId, categoryId, cityId, amount } = params;
   const now = new Date();
 
-  const rules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
+  const candidateRules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
     where: {
       isActive: true,
-      // Rollback-safety step: only COMMISSION rows are commission. MINIMUM_CHARGE /
-      // CANCELLATION_CHARGE rows (added by the next release) are never read as commission.
-      ruleType: 'COMMISSION',
+      ruleType,
       OR: [{ serviceId }, { categoryId, serviceId: null }],
       AND: [
-        { OR: [{ cityId: null }, { cityId: cityId || undefined }] },
+        // This city's rules or all-city rules only. With no known city, ONLY all-city rules —
+        // `{ cityId: undefined }` would be "no filter" to Prisma and match every city's rule.
+        cityId ? { OR: [{ cityId: null }, { cityId }] } : { cityId: null },
         { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
         { OR: [{ validTo: null }, { validTo: { gte: now } }] },
       ],
     },
     orderBy: { priority: 'desc' },
   });
+  // Defence in depth: a rule scoped to another city is never applied, whatever the query returned.
+  const rules = candidateRules.filter((r) => !r.cityId || (!!cityId && r.cityId === cityId));
 
   // City-specific beats "all cities" at the same scope level.
   const bySpecificity = (a: CommissionRuleRow, b: CommissionRuleRow) => {
@@ -276,6 +296,9 @@ export async function resolveCommission(
   // alone still applies when no category rule exists.
   const primary = serviceRules[0] || categoryRules[0] || null;
 
+  if (!primary && ruleType !== 'COMMISSION') {
+    return { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0', rule: null };
+  }
   if (!primary) {
     const setting = await prisma.siteSetting.findUnique({ where: { key: 'default_commission_pct' } });
     const pct = setting ? parseFloat(setting.value) || 0 : 0;
@@ -288,7 +311,265 @@ export async function resolveCommission(
   for (const r of stacked) commissionAmount += computeRuleAmount(r, amount);
 
   const label = describeRule(primary) + (stacked.length ? ` + ${stacked.length} stacked rule(s)` : '');
-  return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
+  return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label, rule: primary };
+}
+
+/**
+ * Customer cancellation penalty after the partner has arrived — the CANCELLATION_CHARGE rule for
+ * the booking's service/category and city (same resolver as commission). Admin-configured:
+ *   FLAT ₹X                       → ₹X
+ *   PERCENTAGE X%                 → X% of the booking's service amount
+ *   PERCENTAGE X% + minimumAmount → the higher of the two
+ *   no rule / ₹0 rule             → no penalty
+ * Never more than `cap` (the booking's total payable). Nothing is invented: no rule → ₹0.
+ */
+export async function resolveCancellationPenalty(
+  prisma: any,
+  p: { serviceId: string; categoryId: string; cityId?: string | null; serviceAmount: number; cap: number },
+): Promise<{ penalty: number; ruleId: string | null; label: string; breakdown: { percent: number | null; percentAmount: number | null; minimum: number | null; cap: number; capped: boolean } }> {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const cap = round2(Math.max(0, Number(p.cap) || 0));
+  const r = await resolveServiceRule(prisma, 'CANCELLATION_CHARGE', { serviceId: p.serviceId, categoryId: p.categoryId, cityId: p.cityId, amount: p.serviceAmount });
+  const rule: any = r.rule;
+  if (!rule) return { penalty: 0, ruleId: null, label: 'No cancellation penalty configured', breakdown: { percent: null, percentAmount: null, minimum: null, cap, capped: false } };
+  const percent = rule.commissionType === 'PERCENTAGE' ? Number(rule.value) : null;
+  const percentAmount = percent != null ? round2((Math.max(0, Number(p.serviceAmount) || 0) * percent) / 100) : null;
+  const minimum = rule.commissionType === 'FLAT' ? Number(rule.value) : rule.minimumAmount != null ? Number(rule.minimumAmount) : null;
+  const raw = round2(Math.max(percentAmount ?? 0, minimum ?? 0));
+  const penalty = round2(Math.min(raw, cap));
+  const label = percent != null
+    ? `${percent}% of the service amount${minimum != null ? `, minimum ₹${minimum}` : ''}`
+    : `₹${minimum} flat`;
+  return { penalty, ruleId: rule.id, label: raw > 0 ? label : 'No cancellation penalty (₹0 rule)', breakdown: { percent, percentAmount, minimum, cap, capped: raw > cap } };
+}
+
+/**
+ * The City row id a booking's service rules (commission, minimum charge, cancellation charge)
+ * are matched against: the city name the client sent, else the city of the customer's OWN saved
+ * address, else the inline address's city. null when none is recognised — then only all-city
+ * rules apply (see resolveServiceRule). Used only for rule matching; prices are unaffected.
+ */
+export async function resolveCityIdForRules(
+  prisma: any,
+  input: { cityName?: string | null; addressId?: string | null; customerId?: string | null; inlineCity?: string | null },
+): Promise<string | null> {
+  const names: string[] = [];
+  if (input.cityName?.trim()) names.push(input.cityName.trim());
+  if (input.addressId && input.customerId) {
+    const addr = await prisma.address.findUnique({ where: { id: input.addressId }, select: { userId: true, city: true } });
+    if (addr && addr.userId === input.customerId && addr.city?.trim()) names.push(addr.city.trim());
+  }
+  if (input.inlineCity?.trim()) names.push(input.inlineCity.trim());
+  for (const name of names) {
+    const row = await prisma.city.findFirst({ where: { name: { equals: name, mode: 'insensitive' } }, select: { id: true } });
+    if (row?.id) return row.id;
+  }
+  return null;
+}
+
+// ─── Service GST — one source for checkout, extra work and invoices ─────────
+// Checkout used to hardcode 18% in five places while invoices read TaxConfig (empty in
+// production → 0%), so the two never agreed. Both now read the SAME resolver: an admin/CA-
+// configured TaxConfig row (appliesTo SERVICE, by SAC) or Service.gstOverridePercent wins;
+// with nothing configured it falls back to 18%, which is exactly what every checkout path
+// already charged — so live customer prices are unchanged until a CA-approved rate is set.
+export const SERVICE_GST_FALLBACK_RATE = 18;
+export function buildServiceTaxResolver(prisma: any): Promise<TaxRateResolver> {
+  return buildTaxRateResolver(prisma, 'SERVICE', SERVICE_GST_FALLBACK_RATE);
+}
+
+// ─── Minimum service charge (CommissionRule ruleType=MINIMUM_CHARGE) ─────────
+// Business rules (confirmed): applied per SERVICE BOOKING (one child Order = one partner
+// visit); the configured minimum is GST-INCLUSIVE — the customer pays at least that much in
+// total for the booking; commission rules then apply to the raised amount as usual. Separate
+// from the cancellation charge and from partner payout.
+
+/** Highest MINIMUM_CHARGE that applies to any service in this booking (service rule beats
+ * category, city-specific beats all-city — the shared resolveServiceRule()). 0 = none. */
+export async function resolveBookingMinimumCharge(
+  prisma: any,
+  lines: { serviceId: string; categoryId: string }[],
+  cityId?: string | null,
+): Promise<{ minimum: number; ruleId: string | null }> {
+  let best = { minimum: 0, ruleId: null as string | null };
+  for (const l of lines) {
+    const r = await resolveServiceRule(prisma, 'MINIMUM_CHARGE', { serviceId: l.serviceId, categoryId: l.categoryId, cityId, amount: 0 });
+    if (r.ruleId && r.commissionAmount > best.minimum) best = { minimum: r.commissionAmount, ruleId: r.ruleId };
+  }
+  return best;
+}
+
+/**
+ * Pure. Raises a booking's pre-GST line amounts so the booking's GST-inclusive total reaches
+ * `minimumInclusive`. Returns the pre-GST adjustment (0 when the booking already meets it) and
+ * the per-line amounts with the adjustment spread proportionally (all on the first line when
+ * every line is ₹0). `gstRatePercent` is the booking's effective service GST rate.
+ */
+export function applyBookingMinimum(
+  lineAmounts: number[],
+  gstRatePercent: number,
+  minimumInclusive: number,
+): { adjustment: number; lineAmounts: number[] } {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const base = round2(lineAmounts.reduce((s, a) => s + a, 0));
+  if (!(minimumInclusive > 0) || !lineAmounts.length) return { adjustment: 0, lineAmounts };
+  const factor = 1 + (gstRatePercent > 0 ? gstRatePercent : 0) / 100;
+  const currentInclusive = round2(base + round2(base * (factor - 1)));
+  if (currentInclusive >= minimumInclusive) return { adjustment: 0, lineAmounts };
+  const targetBase = round2(minimumInclusive / factor);
+  const adjustment = round2(Math.max(0, targetBase - base));
+  if (adjustment <= 0) return { adjustment: 0, lineAmounts };
+  const out = [...lineAmounts];
+  if (base <= 0) { out[0] = round2(out[0] + adjustment); return { adjustment, lineAmounts: out }; }
+  let allocated = 0;
+  for (let i = 0; i < out.length; i++) {
+    const share = i === out.length - 1 ? round2(adjustment - allocated) : round2((lineAmounts[i] / base) * adjustment);
+    allocated = round2(allocated + share);
+    out[i] = round2(out[i] + share);
+  }
+  return { adjustment, lineAmounts: out };
+}
+
+/**
+ * One single-service booking priced the same way MasterOrdersService.priceCart() prices a
+ * service booking: the shared service GST rate, the minimum charge (GST-inclusive, per
+ * booking), then the EXISTING commission rules on the amount actually charged. Used by the
+ * legacy create(), guest book() and admin-created orders so none of them keeps its own 18%.
+ */
+export async function priceServiceBooking(
+  prisma: any,
+  svc: { id: string; categoryId: string; hsnSac?: string | null; gstOverridePercent?: any },
+  cityId: string | null | undefined,
+  catalogueAmount: number,
+): Promise<{
+  serviceAmount: number; gstRatePercent: number; minimumChargeAdjustment: number; minimumChargeRuleId: string | null;
+  commissionResult: { commissionAmount: number; ruleId: string | null; ruleLabel: string };
+}> {
+  const svcTax = await buildServiceTaxResolver(prisma);
+  const gstRatePercent = svcTax.rateFor(svc.hsnSac, svc.gstOverridePercent);
+  const minimum = await resolveBookingMinimumCharge(prisma, [{ serviceId: svc.id, categoryId: svc.categoryId }], cityId);
+  const topUp = applyBookingMinimum([catalogueAmount], gstRatePercent, minimum.minimum);
+  const serviceAmount = topUp.adjustment > 0 ? topUp.lineAmounts[0] : catalogueAmount;
+  const commissionResult = await resolveCommission(prisma, { serviceId: svc.id, categoryId: svc.categoryId, cityId, amount: serviceAmount });
+  return {
+    serviceAmount, gstRatePercent, commissionResult,
+    minimumChargeAdjustment: topUp.adjustment,
+    minimumChargeRuleId: topUp.adjustment > 0 ? minimum.ruleId : null,
+  };
+}
+
+// ─── Partner arrival evidence ──────────────────────────────────────────────────
+// "I have arrived" captures a fresh location; verification is decided here, server-side, and
+// stored separately from the (unchanged) order status. Thresholds are admin-editable settings
+// (group 'operations'); these code defaults only apply until an admin sets them.
+export const ARRIVAL_SETTING_DEFAULTS = {
+  arrival_verification_radius_m: 300,
+  arrival_max_gps_accuracy_m: 100,
+  arrival_max_fix_age_s: 120,
+} as const;
+
+export type ArrivalVerificationValue =
+  | 'VERIFIED' | 'NOT_VERIFIED_TOO_FAR' | 'NOT_VERIFIED_LOW_ACCURACY'
+  | 'NOT_VERIFIED_NO_LOCATION' | 'NOT_VERIFIED_NO_ADDRESS_COORDINATES'
+  | 'NOT_VERIFIED_MOCK_LOCATION' | 'NOT_VERIFIED_STALE_LOCATION';
+
+/** Order fields cleared when the assigned partner changes — the new partner records their own arrival. */
+export const ARRIVAL_RESET_DATA = {
+  arrivedAt: null, arrivalLatitude: null, arrivalLongitude: null, arrivalAccuracyM: null,
+  arrivalDistanceM: null, arrivalVerification: null, arrivalNote: null,
+} as const;
+
+/**
+ * Pure. Never returns VERIFIED without valid partner AND address coordinates. Device metadata
+ * (isMocked, fixAgeMs) is untrusted client input, so it can only DOWNGRADE the result: a device
+ * reporting a mock or stale fix is not verified, but a device NOT reporting one proves nothing
+ * (older apps and browsers send neither) — this reduces, never eliminates, location spoofing.
+ */
+export function decideArrivalVerification(input: {
+  latitude?: number | null; longitude?: number | null; accuracyM?: number | null;
+  addressLatitude?: number | null; addressLongitude?: number | null;
+  radiusM: number; maxAccuracyM: number;
+  isMocked?: boolean | null; fixAgeMs?: number | null; maxFixAgeS?: number;
+}): { verification: ArrivalVerificationValue; distanceM: number | null } {
+  if (!isValidIndiaCoords(input.latitude ?? null, input.longitude ?? null)) {
+    return { verification: 'NOT_VERIFIED_NO_LOCATION', distanceM: null };
+  }
+  if (!isValidIndiaCoords(input.addressLatitude ?? null, input.addressLongitude ?? null)) {
+    return { verification: 'NOT_VERIFIED_NO_ADDRESS_COORDINATES', distanceM: null };
+  }
+  const distanceM = Math.round(haversineKm(input.latitude!, input.longitude!, input.addressLatitude!, input.addressLongitude!) * 1000);
+  if (input.isMocked === true) return { verification: 'NOT_VERIFIED_MOCK_LOCATION', distanceM };
+  const fixAgeMs = input.fixAgeMs == null ? NaN : Number(input.fixAgeMs);
+  if (Number.isFinite(fixAgeMs) && input.maxFixAgeS && fixAgeMs > input.maxFixAgeS * 1000) {
+    return { verification: 'NOT_VERIFIED_STALE_LOCATION', distanceM };
+  }
+  const accuracy = Number(input.accuracyM);
+  if (!Number.isFinite(accuracy) || accuracy <= 0 || accuracy > input.maxAccuracyM) {
+    return { verification: 'NOT_VERIFIED_LOW_ACCURACY', distanceM };
+  }
+  return { verification: distanceM <= input.radiusM ? 'VERIFIED' : 'NOT_VERIFIED_TOO_FAR', distanceM };
+}
+
+/**
+ * Records the partner's arrival on the order exactly once (atomic claim on arrivedAt), with the
+ * fresh location and the server's verification decision. A repeat call returns the first
+ * record unchanged — no duplicate timeline entries or side effects. Shared by the partner's
+ * "I have arrived" action and the customer-refused report.
+ */
+export async function recordPartnerArrival(
+  prisma: any,
+  order: { id: string; status: string; snapshotLatitude?: number | null; snapshotLongitude?: number | null },
+  input: { latitude?: number | null; longitude?: number | null; accuracyM?: number | null; locationError?: string | null; isMocked?: boolean | null; fixAgeMs?: number | null },
+  actor: { vendorId: string },
+): Promise<{ alreadyRecorded: boolean; arrival: { arrivedAt: Date; arrivalVerification: ArrivalVerificationValue; arrivalDistanceM: number | null; arrivalAccuracyM: number | null; arrivalNote: string | null } }> {
+  const read = async (key: keyof typeof ARRIVAL_SETTING_DEFAULTS) => {
+    const row = await prisma.siteSetting.findUnique({ where: { key } });
+    const n = row ? Number(row.value) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : ARRIVAL_SETTING_DEFAULTS[key];
+  };
+  const [radiusM, maxAccuracyM, maxFixAgeS] = await Promise.all([
+    read('arrival_verification_radius_m'), read('arrival_max_gps_accuracy_m'), read('arrival_max_fix_age_s'),
+  ]);
+  const lat = Number.isFinite(Number(input.latitude)) ? Number(input.latitude) : null;
+  const lng = Number.isFinite(Number(input.longitude)) ? Number(input.longitude) : null;
+  const accuracyM = Number.isFinite(Number(input.accuracyM)) ? Number(input.accuracyM) : null;
+  const decided = decideArrivalVerification({
+    latitude: lat, longitude: lng, accuracyM,
+    addressLatitude: order.snapshotLatitude, addressLongitude: order.snapshotLongitude, radiusM, maxAccuracyM,
+    isMocked: input.isMocked === true, fixAgeMs: Number.isFinite(Number(input.fixAgeMs)) && input.fixAgeMs != null ? Number(input.fixAgeMs) : null, maxFixAgeS,
+  });
+  const note = decided.verification === 'NOT_VERIFIED_NO_LOCATION' && input.locationError
+    ? String(input.locationError).slice(0, 200)
+    : decided.verification === 'NOT_VERIFIED_MOCK_LOCATION'
+      ? 'Device reported a mock/simulated location'
+      : decided.verification === 'NOT_VERIFIED_STALE_LOCATION'
+        ? `Location fix was ${Math.round(Number(input.fixAgeMs) / 1000)} s old`
+        : null;
+  const now = new Date();
+  const claimed = await prisma.order.updateMany({
+    where: { id: order.id, arrivedAt: null },
+    data: {
+      arrivedAt: now,
+      // Coordinates are stored only when they were valid — never fabricated or zero-filled.
+      arrivalLatitude: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : lat,
+      arrivalLongitude: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : lng,
+      arrivalAccuracyM: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : accuracyM,
+      arrivalDistanceM: decided.distanceM,
+      arrivalVerification: decided.verification,
+      arrivalNote: note,
+    },
+  });
+  const current = await prisma.order.findUnique({
+    where: { id: order.id },
+    select: { arrivedAt: true, arrivalVerification: true, arrivalDistanceM: true, arrivalAccuracyM: true, arrivalNote: true },
+  });
+  if (claimed.count === 1) {
+    await writeOrderTimeline(prisma, {
+      orderId: order.id, status: order.status, actorId: actor.vendorId, actorRole: 'SERVICE_VENDOR' as any,
+      note: `Partner arrived — ${decided.verification === 'VERIFIED' ? 'location verified' : 'location NOT verified (' + decided.verification + ')'}${decided.distanceM != null ? ', ' + decided.distanceM + ' m from address' : ''}`,
+    });
+  }
+  return { alreadyRecorded: claimed.count !== 1, arrival: current };
 }
 
 // ─── Bundle offer (product + service checked out together) ──────────────────
@@ -715,6 +996,8 @@ export interface InvoiceBuildInput {
   // still reconciles to what the customer actually paid.
   discount?: number;
   discountReducesTaxableValue?: boolean;
+  /** false = the customer document keeps exact paise (see calculateInvoice roundToRupee). */
+  customerRoundToRupee?: boolean;
 }
 
 export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
@@ -722,6 +1005,7 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
     lines: input.customerLines,
     supplierState: input.customerSupplierState ?? input.remontState,
     placeOfSupply: input.placeOfSupply,
+    roundToRupee: input.customerRoundToRupee,
   });
 
   const vendor = input.vendorLines?.length

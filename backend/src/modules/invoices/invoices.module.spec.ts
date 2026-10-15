@@ -93,20 +93,25 @@ describe('InvoicesService.generateForOrder — routes every transaction type thr
     expect(Number(data.customerSgst)).toBe(90);
   });
 
-  it('matches the corrected Type 1 worked example exactly: ₹499 service, 80/20 split, GST only on the platform fee', async () => {
+  // Updated 2026-10-14 for the confirmed business model: commission is INCLUDED in the service
+  // price (checkout stores serviceAmount = full ₹499 and vendorPayout = serviceAmount −
+  // commission), so it is never added to the customer's total a second time. The old fixture
+  // modelled serviceAmount as the partner's ₹399.20 share with ₹99.80 added on top, which
+  // real checkout data never has (production: serviceAmount 2748, commission 549.60).
+  it('matches the corrected Type 1 worked example exactly: ₹499 service incl. 20% commission, GST on Remont commission only', async () => {
     const { svc, prisma } = makeService();
-    prisma.siteSetting.findUnique.mockResolvedValue({ value: '0' }); // no booking fee, to match the example precisely
     prisma.order.findUnique.mockResolvedValue(baseOrder({
-      serviceAmount: 399.20, remontCommission: 99.80, platformCharges: 0,
+      serviceAmount: 499, remontCommission: 99.80, vendorPayout: 399.20, platformCharges: 0,
+      gstAmount: 89.82, totalAmount: 588.82, // what checkout charged: 499 + 18%
     }));
     await svc.generateForOrder('o1');
     const data = prisma.invoice.create.mock.calls[0][0].data;
 
-    // (1) Partner Service Invoice — the partner's ₹399.20 only, never taxed (unregistered
-    // partner in this fixture), never shown as Remont revenue.
-    expect(Number(data.vendorLabor)).toBe(399.20);
+    // (1) Partner Service Invoice — the partner's service value (₹499, commission included),
+    // never taxed (unregistered partner in this fixture), never shown as Remont revenue.
+    expect(Number(data.vendorLabor)).toBe(499);
     expect(Number(data.vendorCgst)).toBe(0);
-    expect(Number(data.vendorTotal)).toBe(399.20);
+    expect(Number(data.vendorTotal)).toBe(499);
 
     // (2) Remont Platform Fee Invoice — Remont's ₹99.80 only, taxed at 18%: CGST 8.98 +
     // SGST 8.98 = GST ₹17.96 (matches the corrected spec exactly). The pre-rounding total
@@ -120,11 +125,14 @@ describe('InvoicesService.generateForOrder — routes every transaction type thr
     expect(Number(data.remontCgst) + Number(data.remontSgst)).toBe(17.96);
     expect(Number(data.remontTotal)).toBe(118);
 
-    // (3) Customer summary — NOT a formal tax invoice, but shows both components plus
-    // the same GST-on-fee figure (₹17.96), rounded the same way (₹517, roundOff ₹0.04).
+    // (3) Customer payment statement — NOT a formal tax invoice; equals exactly what checkout
+    // charged: the ₹499 service + the ₹89.82 GST collected on it = ₹588.82 (no commission line,
+    // no booking fee, no whole-rupee rounding).
     expect(data.transactionType).toBe('PLATFORM_SERVICE');
-    expect(Number(data.customerCgst) + Number(data.customerSgst)).toBe(17.96);
-    expect(Number(data.customerTotal)).toBe(517);
+    expect(Number(data.customerCgst) + Number(data.customerSgst)).toBe(89.82);
+    expect(Number(data.customerTotal)).toBe(588.82);
+    expect(data.lineItemsSnapshot.customer.map((l: any) => l.description)).not.toContain('Remont Platform Fee');
+    expect(Number(data.bookingFee)).toBe(0);
 
     // Never uses the word "Commission" anywhere in the stored document data.
     expect(JSON.stringify(data)).not.toMatch(/commission invoice|marketplace commission/i);

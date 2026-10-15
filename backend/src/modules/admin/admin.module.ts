@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -63,6 +63,8 @@ export class UpdateProductVendorDto {
   @IsOptional() @IsString() address?: string;
   @IsOptional() @IsString() pickupAddress?: string;
 }
+
+const COMMISSION_RULE_TYPES = ['COMMISSION', 'MINIMUM_CHARGE', 'CANCELLATION_CHARGE'] as const;
 
 @Injectable()
 export class AdminService {
@@ -863,11 +865,10 @@ export class AdminService {
     }
 
     const cityPrice = await this.cities.getServicePrice(city.name, data.serviceId);
-    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
-    const commissionResult = await resolveCommission(this.prisma, {
-      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
-    });
-    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
+    const priced = await priceServiceBooking(this.prisma, svc, city.id, cityPrice !== null ? cityPrice : Number(svc.basePrice));
+    const serviceAmount = priced.serviceAmount;
+    const commissionResult = priced.commissionResult;
+    const gstAmount = Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
 
     const [h, m] = data.slotTime.split(':').map(Number);
     const slotStart = new Date(data.slotDate); slotStart.setHours(h, m || 0, 0, 0);
@@ -891,6 +892,7 @@ export class AdminService {
         couponDiscount: 0, membershipDiscount: 0, walletUsed: 0,
         gstAmount, totalAmount: serviceAmount + gstAmount,
         remontCommission: commissionResult.commissionAmount,
+        minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
         vendorPayout: serviceAmount - commissionResult.commissionAmount,
         commissionRuleId: commissionResult.ruleId,
         commissionRuleLabel: commissionResult.ruleLabel,
@@ -913,17 +915,20 @@ export class AdminService {
     // job.offer.created notification a real service job would. A Service Partner is
     // never the right recipient for a product order — that belongs to the Product's
     // own ProductVendor/Seller (see ProductVendorsService.myOrders()).
-    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true } });
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true, vendorId: true, arrivedAt: true } });
     if (!existing) throw new NotFoundException();
     if (!existing.serviceId) {
       throw new BadRequestException('This order has no service — a Service Partner cannot be assigned to a product-only order.');
     }
+    // A different partner must record their own arrival — the previous partner's is cleared
+    // (it stays in the order timeline). Re-assigning the same partner keeps it.
+    const clearedArrival = !!existing.arrivedAt && existing.vendorId !== vendorId;
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
+      data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED, ...(clearedArrival ? ARRIVAL_RESET_DATA : {}) },
       include: { vendor: { include: { user: { select: { name: true, phone: true } } } }, service: true, address: true },
     });
-    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: 'Force-assigned by admin' });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: clearedArrival ? "Force-assigned by admin — previous partner's arrival record cleared" : 'Force-assigned by admin' });
     // Previously this silently set vendorId with no notification of any kind — the
     // vendor only ever found out by happening to check their job list. Now goes
     // through the same ring/push/WhatsApp-fallback path as auto-routed jobs.
@@ -1918,11 +1923,10 @@ Return JSON with:
   // take effect on the NEXT booking without touching past orders (which keep their
   // snapshotted commissionRuleId/commissionRuleLabel — see Order in schema.prisma).
 
-  async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string) {
+  async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string, ruleType?: string) {
     return this.prisma.commissionRule.findMany({
       where: {
-        // This screen manages commission only — other rule types are never listed or edited here.
-        ruleType: 'COMMISSION',
+        ...(ruleType && COMMISSION_RULE_TYPES.includes(ruleType as any) ? { ruleType: ruleType as any } : {}),
         ...(scope ? { scope: scope as any } : {}),
         ...(categoryId ? { categoryId } : {}),
         ...(serviceId ? { serviceId } : {}),
@@ -1937,25 +1941,109 @@ Return JSON with:
     });
   }
 
-  async createCommissionRule(data: any) {
-    if (data.scope === 'CATEGORY' && !data.categoryId) throw new BadRequestException('categoryId is required for a CATEGORY-scoped rule');
-    if (data.scope === 'SERVICE' && !data.serviceId) throw new BadRequestException('serviceId is required for a SERVICE-scoped rule');
-    return this.prisma.commissionRule.create({ data });
+  /**
+   * Whitelisted, validated CommissionRule data — the request body is never passed to Prisma as
+   * is (it used to be: any column, any value). The same table holds the commission, minimum
+   * charge and cancellation charge rules (ruleType); the two new types are flat ₹ amounts.
+   */
+  private async validateCommissionRuleInput(input: any, existing?: any) {
+    const pick = (k: string) => (input?.[k] !== undefined ? input[k] : existing?.[k]);
+    const data: any = {};
+    for (const k of ['ruleType', 'scope', 'categoryId', 'serviceId', 'cityId', 'commissionType', 'value', 'minimumAmount', 'slabJson', 'priority', 'stackable', 'isActive', 'validFrom', 'validTo']) {
+      if (input?.[k] !== undefined) data[k] = input[k];
+    }
+    const ruleType = pick('ruleType') ?? 'COMMISSION';
+    const scope = pick('scope');
+    const commissionType = pick('commissionType');
+    if (!COMMISSION_RULE_TYPES.includes(ruleType)) throw new BadRequestException(`ruleType must be one of ${COMMISSION_RULE_TYPES.join(', ')}`);
+    if (!['CATEGORY', 'SERVICE'].includes(scope)) throw new BadRequestException('scope must be CATEGORY or SERVICE');
+    if (scope === 'CATEGORY' && !pick('categoryId')) throw new BadRequestException('categoryId is required for a CATEGORY-scoped rule');
+    if (scope === 'SERVICE' && !pick('serviceId')) throw new BadRequestException('serviceId is required for a SERVICE-scoped rule');
+    if (!['PERCENTAGE', 'FLAT', 'SLAB'].includes(commissionType)) throw new BadRequestException('commissionType must be PERCENTAGE, FLAT or SLAB');
+    const value = Number(pick('value') ?? 0);
+    if (!Number.isFinite(value) || value < 0) throw new BadRequestException('value must be a non-negative number');
+    if (commissionType === 'PERCENTAGE' && value > 100) throw new BadRequestException('A percentage rule cannot exceed 100');
+    if (data.priority !== undefined && !Number.isInteger(Number(data.priority))) throw new BadRequestException('priority must be a whole number');
+    const validFrom = pick('validFrom') ? new Date(pick('validFrom')) : null;
+    const validTo = pick('validTo') ? new Date(pick('validTo')) : null;
+    if ((validFrom && isNaN(+validFrom)) || (validTo && isNaN(+validTo))) throw new BadRequestException('validFrom/validTo must be valid dates');
+    if (validFrom && validTo && validTo <= validFrom) throw new BadRequestException('validTo must be after validFrom');
+    // minimumAmount: only for a PERCENTAGE cancellation penalty ("X%, minimum ₹Y").
+    const minimumAmount = pick('minimumAmount');
+    const hasMinimum = minimumAmount !== undefined && minimumAmount !== null && minimumAmount !== '';
+    if (hasMinimum) {
+      if (ruleType !== 'CANCELLATION_CHARGE' || commissionType !== 'PERCENTAGE') {
+        throw new BadRequestException('minimumAmount applies only to a percentage CANCELLATION_CHARGE rule');
+      }
+      if (!Number.isFinite(Number(minimumAmount)) || Number(minimumAmount) < 0) throw new BadRequestException('minimumAmount must be a non-negative number');
+    }
+    if (ruleType !== 'COMMISSION') {
+      // Minimum charge: an admin-approved flat ₹ amount. Cancellation penalty: flat ₹, or a
+      // percentage of the service amount with an optional minimum. ₹0 allowed (= no penalty).
+      // Never stacked — and no two active rules may cover the same target, city and dates.
+      const allowed = ruleType === 'CANCELLATION_CHARGE' ? ['FLAT', 'PERCENTAGE'] : ['FLAT'];
+      if (!allowed.includes(commissionType)) {
+        throw new BadRequestException(ruleType === 'CANCELLATION_CHARGE'
+          ? 'A cancellation penalty must be a flat ₹ amount or a percentage of the service amount'
+          : `${ruleType} rules must be a flat ₹ amount (commissionType FLAT)`);
+      }
+      if (pick('stackable')) throw new BadRequestException(`${ruleType} rules cannot be stackable`);
+      if (pick('isActive') !== false) {
+        const others = await this.prisma.commissionRule.findMany({
+          where: {
+            ruleType, isActive: true, scope,
+            categoryId: scope === 'CATEGORY' ? pick('categoryId') : undefined,
+            serviceId: scope === 'SERVICE' ? pick('serviceId') : undefined,
+            cityId: pick('cityId') || null,
+            ...(existing ? { id: { not: existing.id } } : {}),
+          },
+        });
+        const overlaps = others.some((o: any) => {
+          const aFrom = validFrom ? +validFrom : -Infinity, aTo = validTo ? +validTo : Infinity;
+          const bFrom = o.validFrom ? +new Date(o.validFrom) : -Infinity, bTo = o.validTo ? +new Date(o.validTo) : Infinity;
+          return aFrom < bTo && bFrom < aTo;
+        });
+        if (overlaps) throw new BadRequestException(`Another active ${ruleType} rule already covers this ${scope === 'CATEGORY' ? 'category' : 'service'}, city and dates — end or deactivate it first`);
+      }
+    }
+    if (data.priority !== undefined) data.priority = Number(data.priority);
+    if (data.value !== undefined) data.value = value;
+    if (data.validFrom !== undefined) data.validFrom = validFrom;
+    if (data.validTo !== undefined) data.validTo = validTo;
+    if (data.cityId === '') data.cityId = null;
+    if (data.minimumAmount !== undefined) data.minimumAmount = hasMinimum ? Number(minimumAmount) : null;
+    // switching a cancellation rule to FLAT clears any stale minimum
+    if (existing && commissionType !== 'PERCENTAGE' && existing.minimumAmount != null && data.minimumAmount === undefined) data.minimumAmount = null;
+    return data;
   }
 
-  async updateCommissionRule(id: string, data: any) {
+  async createCommissionRule(input: any, actorId?: string) {
+    const data = await this.validateCommissionRuleInput(input);
+    const created = await this.prisma.commissionRule.create({ data });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_CREATED', targetType: 'CommissionRule', targetId: created.id, metadata: { after: created } });
+    return created;
+  }
+
+  async updateCommissionRule(id: string, input: any, actorId?: string) {
     const existing = await this.prisma.commissionRule.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Commission rule not found');
-    return this.prisma.commissionRule.update({ where: { id }, data });
+    const data = await this.validateCommissionRuleInput(input, existing);
+    const updated = await this.prisma.commissionRule.update({ where: { id }, data });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_UPDATED', targetType: 'CommissionRule', targetId: id, metadata: { before: existing, after: updated } });
+    return updated;
   }
 
-  async deleteCommissionRule(id: string) {
-    return this.prisma.commissionRule.delete({ where: { id } });
+  async deleteCommissionRule(id: string, actorId?: string) {
+    const existing = await this.prisma.commissionRule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Commission rule not found');
+    const deleted = await this.prisma.commissionRule.delete({ where: { id } });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_DELETED', targetType: 'CommissionRule', targetId: id, metadata: { before: existing } });
+    return deleted;
   }
 
   // Admin preview: "This service, this city -> commission = ₹X (rule: ...)" — reuses
   // the exact same resolveCommission() every real order goes through.
-  async previewCommission(serviceId: string, cityName?: string, amount?: number) {
+  async previewCommission(serviceId: string, cityName?: string, amount?: number, ruleType: string = 'COMMISSION') {
     const svc = await this.prisma.service.findUnique({ where: { id: serviceId } });
     if (!svc) throw new NotFoundException('Service not found');
     let cityId: string | null = null;
@@ -1964,8 +2052,9 @@ Return JSON with:
       cityId = city?.id || null;
     }
     const testAmount = amount ?? Number(svc.basePrice);
-    const result = await resolveCommission(this.prisma, { serviceId, categoryId: svc.categoryId, cityId, amount: testAmount });
-    return { serviceName: svc.name, amount: testAmount, ...result };
+    const type = COMMISSION_RULE_TYPES.includes(ruleType as any) ? (ruleType as ServiceRuleTypeValue) : 'COMMISSION';
+    const result = await resolveServiceRule(this.prisma, type, { serviceId, categoryId: svc.categoryId, cityId, amount: testAmount });
+    return { serviceName: svc.name, amount: testAmount, ruleType: type, ...result };
   }
 
   // ─── Product Fee Rules (Phase 7) ──────────────────────────────────────
@@ -2437,6 +2526,9 @@ Return JSON with:
       { key: 'total_vendors', value: '5000', label: 'Total Vendors (shown on homepage)', group: 'stats' },
       { key: 'otp_regen_max_attempts', value: '0', label: 'Max "Request OTP Again" attempts per service (0 = unlimited)', group: 'operations' },
       { key: 'bundle_discount_percent', value: '10', label: 'Bundle Offer — discount % applied to the service when a product is in the same order', group: 'operations' },
+      { key: 'arrival_verification_radius_m', value: '300', label: 'Partner arrival — max distance from the service address to count as verified (metres)', group: 'operations' },
+      { key: 'arrival_max_gps_accuracy_m', value: '100', label: 'Partner arrival — worst acceptable GPS accuracy for verification (metres)', group: 'operations' },
+      { key: 'arrival_max_fix_age_s', value: '120', label: 'Partner arrival — oldest acceptable location fix, as reported by the device (seconds)', group: 'operations' },
       { key: 'ai_web_search_cost', value: '15', label: 'Live Web Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_search_cost', value: '10', label: 'Actual Image Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_generation_cost', value: '20', label: 'AI Image Generation — cost per product (₹)', group: 'ai' },
@@ -3662,14 +3754,14 @@ export class AdminController {
   // Settings
   @Get('commission-rules') listCommissionRules(
     @Query('scope') scope?: string, @Query('categoryId') categoryId?: string,
-    @Query('serviceId') serviceId?: string, @Query('cityId') cityId?: string,
-  ) { return this.admin.listCommissionRules(scope, categoryId, serviceId, cityId); }
-  @Post('commission-rules') createCommissionRule(@Body() b: any) { return this.admin.createCommissionRule(b); }
-  @Patch('commission-rules/:id') updateCommissionRule(@Param('id') id: string, @Body() b: any) { return this.admin.updateCommissionRule(id, b); }
-  @Delete('commission-rules/:id') deleteCommissionRule(@Param('id') id: string) { return this.admin.deleteCommissionRule(id); }
+    @Query('serviceId') serviceId?: string, @Query('cityId') cityId?: string, @Query('ruleType') ruleType?: string,
+  ) { return this.admin.listCommissionRules(scope, categoryId, serviceId, cityId, ruleType); }
+  @Post('commission-rules') createCommissionRule(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.admin.createCommissionRule(b, u.sub); }
+  @Patch('commission-rules/:id') updateCommissionRule(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: any) { return this.admin.updateCommissionRule(id, b, u.sub); }
+  @Delete('commission-rules/:id') deleteCommissionRule(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.deleteCommissionRule(id, u.sub); }
   @Get('commission-rules/preview') previewCommission(
-    @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string,
-  ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined); }
+    @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string, @Query('ruleType') ruleType?: string,
+  ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined, ruleType); }
 
   // Phase 7 — Product Fee Rules (commission/marketing/gateway/other for PRODUCT sellers)
   @Get('product-fee-rules') listProductFeeRules(

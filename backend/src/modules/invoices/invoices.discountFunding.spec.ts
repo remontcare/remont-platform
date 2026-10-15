@@ -96,24 +96,29 @@ describe('InvoicesService.generateForOrder — discount funding (M-04)', () => {
     expect(Number(data.customerTotal)).toBe(900 + 162); // discount already inside taxable value — not subtracted again
   });
 
-  it('PLATFORM_SERVICE — only the partner-value line is discounted, never the Remont platform fee line', async () => {
+  // Updated 2026-10-14: commission is included in the service price and deducted from the
+  // partner, so the customer page has no Remont fee line at all; the coupon reduces the
+  // service value, and GST is shown at the rate checkout charged (shared service resolver,
+  // 18% when nothing is configured — the same 18% checkout applied to the discounted amount).
+  it('PLATFORM_SERVICE — the coupon reduces the service value; no Remont commission line on the customer page', async () => {
     const { svc, prisma } = makeService();
-    prisma.taxConfig.findMany.mockResolvedValue([{ rate: 18, hsnCode: '999799', isActive: true, createdAt: new Date() }]);
+    prisma.taxConfig.findMany.mockResolvedValue([]);
     prisma.order.findUnique.mockResolvedValue(baseOrder({
       serviceAmount: 1000, remontCommission: 100, platformCharges: 0,
       couponDiscount: 100,
     }));
-    prisma.siteSetting.findUnique.mockResolvedValue({ value: '0' }); // no booking fee, keeps the math simple
     await svc.generateForOrder('o1');
     const data = prisma.invoice.create.mock.calls[0][0].data;
     expect(Number(data.discount)).toBe(100);
     const lines = data.lineItemsSnapshot.customer;
     const partnerLine = lines.find((l: any) => l.description === 'AC Repair');
-    const feeLine = lines.find((l: any) => l.description === 'Remont Platform Fee');
-    expect(partnerLine.discount).toBe(100); // the coupon only ever applied to the partner value at checkout
-    expect(feeLine.discount).toBe(0); // Remont's own fee is never discounted by a customer coupon
-    // partner line: 1000 - 100 = 900 taxable @ 0% (this line is informational-only, taxRatePercent 0)
-    expect(partnerLine.amount).toBe(900);
+    expect(lines.find((l: any) => /Remont (Platform Fee|Commission)/.test(l.description))).toBeUndefined();
+    expect(partnerLine.discount).toBe(100); // the coupon only ever applied to the service value at checkout
+    // 1000 - 100 = 900 taxable @ 18% = 162 → 1062 (exactly what checkout charges for this booking)
+    expect(partnerLine.taxableValue).toBe(900);
+    expect(partnerLine.amount).toBe(1062);
+    // Remont's commission is its own document, to the partner, never discounted by the coupon
+    expect(data.lineItemsSnapshot.remont.find((l: any) => l.description === 'Remont Commission').discount).toBe(0);
   });
 
   it('no discount at all — discount field is 0, customerTotal unaffected, byte-for-byte the pre-Phase-3 behaviour', async () => {

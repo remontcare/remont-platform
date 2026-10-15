@@ -31,7 +31,7 @@ function makeService(bundlePercentSetting: string | null = null) {
     },
     commissionRule: { findMany: jest.fn(async () => []) },
     productFeeRule: { findMany: jest.fn(async () => []) },
-    taxConfig: { findMany: jest.fn(async () => TAX_CONFIG_ROWS) },
+    taxConfig: { findMany: jest.fn(async (args?: any) => TAX_CONFIG_ROWS.filter((r: any) => !args?.where?.appliesTo?.has || (r.appliesTo || []).includes(args.where.appliesTo.has))) }, // honours appliesTo like the real DB
     siteSetting: {
       findUnique: jest.fn(async ({ where }: any) =>
         where.key === 'bundle_discount_percent' && bundlePercentSetting !== null

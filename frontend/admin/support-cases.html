@@ -83,7 +83,59 @@ var ISSUE_LABELS = {
   PARTNER_ON_THE_WAY: 'Partner On The Way (cancel)', PARTNER_ARRIVED: 'Partner Arrived (cancel)',
   PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
   SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
+  CUSTOMER_REFUSED_SERVICE: 'Customer Refused Service (partner report)',
 };
+// Service cancellations: charge from the configured rule, admin decides, refund ≤ amount paid.
+var CANCELLATION_ISSUES = ['PARTNER_ON_THE_WAY', 'PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'];
+// Cases the admin settles by cancelling, reassigning, continuing the service or refunding.
+var SERVICE_REVIEW_ISSUES = CANCELLATION_ISSUES.concat(['SERVICE_STARTED_ISSUE']);
+// Recovery FROM the partner is possible only where the partner was actually paid.
+var RECOVERY_ISSUES = SERVICE_REVIEW_ISSUES.concat(['SERVICE_COMPLETED_ISSUE_NOT_FIXED']);
+var REFUND_STATUS_LABEL = { REQUESTED: 'Requested', UNDER_REVIEW: 'Needs attention', PARTNER_RESPONDED: 'Partner responded', ESCALATED: 'Escalated', APPROVED: 'Approved (no money moved)', PARTIALLY_APPROVED: 'Partially approved', REJECTED: 'Rejected', PROCESSED: 'Completed' };
+function reviewPanelHtml(c) {
+  var r = c.review; if (!r) return '';
+  var pen = r.penalty || {};
+  var penText = pen.amount > 0
+    ? fmtCur(pen.amount) + ' — ' + escape(pen.rule || '') + (pen.percent != null ? ' (' + pen.percent + '% = ' + fmtCur(pen.percentAmount) + (pen.minimum != null ? ', minimum ' + fmtCur(pen.minimum) : '') + ')' : '') + (pen.capped ? ' · capped at the booking total' : '')
+    : 'None configured';
+  return '<div style="margin-top:10px;padding:10px;background:#eef2ff;border-radius:8px">' +
+    '<div style="font-weight:700;margin-bottom:4px">Payment &amp; penalty</div>' +
+    '<div>Order status: <strong>' + escape(r.orderStatus) + '</strong> · Start OTP shared: <strong>' + (r.startOtpVerified ? 'Yes — service started' : 'No') + '</strong></div>' +
+    '<div>Payment: ' + escape(r.paymentStatus || '—') + ' · Booking total ' + fmtCur(r.bookingTotal) + ' · <strong>Actually received ' + fmtCur(r.paid) + '</strong></div>' +
+    '<div>Already refunded or in progress (every route): ' + fmtCur(r.alreadyRefunded) + (r.inFlight > 0 ? ' (incl. ' + fmtCur(r.inFlight) + ' pending at the gateway / needing attention)' : '') + ' · <strong>Still refundable ' + fmtCur(r.refundable) + '</strong></div>' +
+    '<div>Cancellation penalty (after arrival): ' + penText + '</div>' +
+    '<div>Suggested refund for this case: <strong>' + fmtCur(r.suggestedRefund) + '</strong> <small style="color:#6b7280">(a suggestion — you approve the amount)</small></div>' +
+    '<div style="color:#6b7280;font-size:12px;margin-top:4px">Partner ' + (r.partnerPaidOut ? 'was paid ' + fmtCur(r.vendorPayout) + ' for this booking' : 'has not been paid for this booking — no recovery possible') + '.</div>' +
+  '</div>';
+}
+function refundsHtml(c) {
+  if (!c.refunds || !c.refunds.length) return '';
+  return '<div style="margin-top:10px"><div style="font-weight:700;margin-bottom:4px">Refunds for this case</div>' +
+    c.refunds.map(function(x) {
+      var amt = x.approvedAmount != null ? fmtCur(x.approvedAmount) : '—';
+      return '<div style="font-size:12px">' + escape(x.id) + ' · ' + escape(REFUND_STATUS_LABEL[x.status] || x.status) + ' · ' + amt +
+        (x.decisionMode ? ' · ' + escape(x.decisionMode.replace(/_/g, ' ')) : '') + (x.gatewayRefundId ? ' · ref ' + escape(x.gatewayRefundId) : '') + '</div>';
+    }).join('') +
+    '<button class="btn btn-outline" style="margin-top:6px;padding:4px 10px;font-size:12px" onclick="scReconcile()">Reconcile refund total</button>' +
+    ' <small style="color:#6b7280">after a refund was completed or rejected in Admin › Refunds</small></div>';
+}
+function scReconcile() {
+  api('POST', '/support/cases/' + currentCase.id + '/reconcile-refund', {}).then(function(r) {
+    var d = (r && r.data) || r || {};
+    toast(d.changed ? 'Refund total updated: ' + fmtCur(d.before) + ' → ' + fmtCur(d.after) : 'Already in line with the refunds processed', 'success');
+    load();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+var ARRIVAL_LABELS = {
+  VERIFIED: ['Arrival verified', 'green'],
+  NOT_VERIFIED_TOO_FAR: ['Not verified — too far from address', 'red'],
+  NOT_VERIFIED_LOW_ACCURACY: ['Not verified — weak GPS accuracy', 'yellow'],
+  NOT_VERIFIED_NO_LOCATION: ['Not verified — no location from phone', 'red'],
+  NOT_VERIFIED_NO_ADDRESS_COORDINATES: ['Not verified — address has no map location', 'yellow'],
+  NOT_VERIFIED_MOCK_LOCATION: ['Not verified — phone reported a mock/fake location', 'red'],
+  NOT_VERIFIED_STALE_LOCATION: ['Not verified — location fix was too old', 'yellow'],
+};
+function arrivalBadge(v) { var a = ARRIVAL_LABELS[v]; return a ? badge(a[0], a[1]) : ''; }
 var STATUS_COLOR = {
   OPEN: 'yellow', IN_REVIEW: 'blue', WAITING_CUSTOMER: 'blue', WAITING_PARTNER: 'blue',
   DISPUTE: 'red', ADMIN_REVIEW: 'red', RESOLVED: 'green', CLOSED: 'gray',
@@ -120,7 +172,8 @@ function renderTable() {
         '<td><strong>' + escape(c.caseNumber) + '</strong></td>' +
         '<td>' + escape(c.customerName || c.customerId) + '<br><small style="color:#6b7280">' + escape(c.customerPhone || '') + '</small></td>' +
         '<td>' + escape(c.orderNumber || '—') + '</td>' +
-        '<td>' + escape(ISSUE_LABELS[c.issueType] || c.issueType) + '</td>' +
+        '<td>' + escape(ISSUE_LABELS[c.issueType] || c.issueType) +
+          (CANCELLATION_ISSUES.indexOf(c.issueType) !== -1 ? '<br>' + (c.arrivedAt ? arrivalBadge(c.arrivalVerification) : '<small style="color:#9ca3af">No arrival recorded</small>') : '') + '</td>' +
         '<td><small style="color:#6b7280">' + escape(c.routeType || '—') + '</small></td>' +
         '<td>' + badge(c.status.replace(/_/g, ' '), STATUS_COLOR[c.status] || 'gray') + '</td>' +
         '<td style="color:#9ca3af;font-size:12px">' + fmtDateShort(c.createdAt) + '</td>' +
@@ -158,7 +211,16 @@ function renderDetail(c) {
       '<div><strong>Customer:</strong> ' + escape(c.customerName || c.customerId) + (c.customerPhone ? ' · ' + escape(c.customerPhone) : '') + '</div>' +
       (c.partnerName ? '<div><strong>Partner:</strong> ' + escape(c.partnerName) + '</div>' : '') +
       '<div style="margin-top:8px"><strong>Issue:</strong> ' + escape(ISSUE_LABELS[c.issueType] || c.issueType) + '</div>' +
-      (c.description ? '<div style="margin-top:4px"><strong>Customer notes:</strong> ' + escape(c.description) + '</div>' : '') +
+      '<div style="margin-top:4px"><strong>Opened by:</strong> ' + (c.openedByRole === 'SERVICE_VENDOR' ? 'Partner' : 'Customer') + '</div>' +
+      (c.description ? '<div style="margin-top:4px"><strong>' + (c.openedByRole === 'SERVICE_VENDOR' ? 'Partner report' : 'Customer notes') + ':</strong> ' + escape(c.description) + '</div>' : '') +
+      (CANCELLATION_ISSUES.indexOf(c.issueType) !== -1 ? arrivalEvidenceHtml(c.order) : '') +
+      (c.customerStatement ? '<div style="margin-top:8px"><strong>Customer response:</strong> ' + escape(c.customerStatement) + '</div>' : '') +
+      (c.appealStatement ? '<div style="margin-top:8px;padding:8px;background:#fef3c7;border-radius:6px"><strong>Customer appeal</strong> (' + fmtDate(c.appealedAt) + '): ' + escape(c.appealStatement) + '</div>' : '') +
+      (Number(c.refundedTotal) > 0 ? '<div style="margin-top:4px"><strong>Already refunded on this case:</strong> ' + fmtCur(c.refundedTotal) + '</div>' : '') +
+      (c.partnerCompensatedAt ? '<div style="margin-top:4px"><strong>Partner compensated:</strong> ' + fmtCur(c.partnerCompensation) + '</div>' : '') +
+      (c.partnerRecoveredAt ? '<div style="margin-top:4px"><strong>Recovered from partner:</strong> ' + fmtCur(c.partnerRecovery) + '</div>' : '') +
+      (c.penaltyAssessedAt ? '<div style="margin-top:4px"><strong>Cancellation penalty:</strong> ' + fmtCur(c.penaltyAssessed) + ' — ' + fmtCur(c.penaltyRetained) + ' retained from payment, <strong>' + fmtCur(c.penaltyPendingCollection) + ' pending collection</strong> (not charged, not collected revenue)</div>' : '') +
+      reviewPanelHtml(c) + refundsHtml(c) +
       '<div style="margin-top:6px">' + evidenceHtml + '</div>' +
       (c.partnerResponse ? '<div style="margin-top:8px"><strong>Partner Response:</strong> ' + escape(c.partnerResponse) + '</div>' : '') +
     '</div>';
@@ -179,7 +241,7 @@ function renderDetail(c) {
         '<select id="sc-resolution" class="form-control" onchange="scResolutionChanged()">' +
           '<option value="FULL_REFUND">Full Refund</option>' +
           '<option value="PARTIAL_REFUND">Partial Refund</option>' +
-          '<option value="REFUND_MINUS_VISIT">Refund - Visit Charge</option>' +
+          '<option value="REFUND_MINUS_VISIT">' + (CANCELLATION_ISSUES.indexOf(c.issueType) !== -1 ? 'Refund minus cancellation charge' : 'Refund - Visit Charge') + '</option>' +
           '<option value="REFUND_MINUS_DIAGNOSIS">Refund - Diagnosis Charge</option>' +
           '<option value="NO_REFUND">No Refund</option>' +
           '<option value="FREE_REVISIT">Free Revisit</option>' +
@@ -193,8 +255,29 @@ function renderDetail(c) {
       '</div>' +
       '<div id="sc-field-amount" class="form-group sc-decision-fields active">' +
         '<label class="form-label">Amount (₹)</label>' +
-        '<input id="sc-amount" type="number" class="form-control" placeholder="' + (c.recommendedAmount != null ? c.recommendedAmount : '0') + '">' +
+        '<input id="sc-amount" type="number" class="form-control" placeholder="' + (c.review ? c.review.suggestedRefund : (c.recommendedAmount != null ? c.recommendedAmount : '0')) + '">' +
       '</div>' +
+      (SERVICE_REVIEW_ISSUES.indexOf(c.issueType) !== -1
+        ? '<div style="font-size:12px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px;margin-bottom:10px">' +
+            '<strong>Decide:</strong> cancel the booking (tick below) · reassign → "Reassign Partner" · continue the service → "No Refund" without cancelling · refund → a refund option. ' +
+            (CANCELLATION_ISSUES.indexOf(c.issueType) !== -1 ? 'On a cancellation request a refund is only possible together with (or after) the cancellation. ' : '') +
+            'Customer refund, partner compensation and partner recovery are separate entries.</div>'
+        : '') +
+      (['PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'].indexOf(c.issueType) !== -1 && c.review && c.review.penalty && c.review.penalty.amount > 0
+        ? '<div class="form-group"><label class="form-label">Cancellation penalty to apply (₹, optional — up to the configured ' + fmtCur(c.review.penalty.amount) + '; only with the cancellation)</label>' +
+            '<input id="sc-penalty" type="number" min="0" max="' + c.review.penalty.amount + '" class="form-control" placeholder="0 = waive"></div>'
+        : '') +
+      // shown only where the partner was actually paid (never for an unpaid job)
+      (RECOVERY_ISSUES.indexOf(c.issueType) !== -1 && !(c.review && !c.review.partnerPaidOut)
+        ? '<div class="form-group"><label class="form-label">Recover from partner (₹, optional — a separate ledger debit, only if the partner was paid)</label>' +
+            '<input id="sc-recovery" type="number" min="0" class="form-control" placeholder="0"' + (c.partnerRecoveredAt ? ' disabled title="Already recovered"' : '') + '></div>'
+        : '') +
+      (SERVICE_REVIEW_ISSUES.indexOf(c.issueType) !== -1
+        ? '<div class="form-group"><label class="form-label">Partner compensation (₹, optional — credited once to the partner ledger)</label>' +
+            '<input id="sc-compensation" type="number" min="0" class="form-control" placeholder="0"' + (c.partnerCompensatedAt ? ' disabled title="Already compensated"' : '') + '></div>' +
+          '<div class="form-group"><label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="sc-cancel-order"' + (c.orderCancelledByCase ? ' disabled checked' : '') + '> Cancel this booking as part of the decision</label>' +
+            '<small style="color:#6b7280">The refund amount is the total the customer gets back for this case (never more than they paid); an appeal decision only refunds any difference.</small></div>'
+        : '') +
       '<div id="sc-field-vendor" class="form-group sc-decision-fields">' +
         '<label class="form-label">New Partner (ServiceVendor ID)</label>' +
         '<input id="sc-new-vendor" class="form-control" placeholder="Vendor ID to reassign to">' +
@@ -228,6 +311,16 @@ function renderDetail(c) {
   if (isActive) scResolutionChanged();
 }
 
+function arrivalEvidenceHtml(o) {
+  if (!o || !o.arrivedAt) return '<div style="margin-top:8px"><strong>Partner arrival:</strong> <span style="color:#9ca3af">not recorded</span></div>';
+  var coords = (o.arrivalLatitude != null && o.arrivalLongitude != null) ? o.arrivalLatitude.toFixed(5) + ', ' + o.arrivalLongitude.toFixed(5) : 'no coordinates';
+  return '<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">' +
+    '<strong>Partner arrival:</strong> ' + arrivalBadge(o.arrivalVerification) + ' · ' + fmtDate(o.arrivedAt) +
+    '<br><small style="color:#6b7280">Distance from address: ' + (o.arrivalDistanceM != null ? o.arrivalDistanceM + ' m' : '—') +
+    ' · GPS accuracy: ' + (o.arrivalAccuracyM != null ? Math.round(o.arrivalAccuracyM) + ' m' : '—') +
+    ' · Location: ' + escape(coords) + (o.arrivalNote ? ' · Phone reported: ' + escape(o.arrivalNote) : '') + '</small></div>';
+}
+
 function scResolutionChanged() {
   var mode = document.getElementById('sc-resolution').value;
   document.getElementById('sc-field-amount').classList.toggle('active', REFUND_MODES.indexOf(mode) !== -1);
@@ -245,6 +338,26 @@ function scDecide() {
   } else if (mode === 'REASSIGN_PARTNER') {
     body.newVendorId = document.getElementById('sc-new-vendor').value.trim();
     if (!body.newVendorId) { toast('Enter the new partner\'s ServiceVendor ID', 'error'); return; }
+  }
+  var compEl = document.getElementById('sc-compensation');
+  if (compEl && compEl.value && !compEl.disabled) {
+    var comp = Number(compEl.value);
+    if (!(comp >= 0)) { toast('Enter a valid compensation amount', 'error'); return; }
+    if (comp > 0) body.partnerCompensation = comp;
+  }
+  var cancelEl = document.getElementById('sc-cancel-order');
+  if (cancelEl && cancelEl.checked && !cancelEl.disabled) body.cancelOrder = true;
+  var penEl = document.getElementById('sc-penalty');
+  if (penEl && penEl.value) {
+    var pen = Number(penEl.value);
+    if (!(pen >= 0)) { toast('Enter a valid penalty amount', 'error'); return; }
+    if (pen > 0) body.penaltyAmount = pen;
+  }
+  var recEl = document.getElementById('sc-recovery');
+  if (recEl && recEl.value && !recEl.disabled) {
+    var rec = Number(recEl.value);
+    if (!(rec >= 0)) { toast('Enter a valid recovery amount', 'error'); return; }
+    if (rec > 0) body.partnerRecovery = rec;
   }
   if (!confirm('Confirm this decision? This cannot be undone.')) return;
   api('POST', '/support/cases/' + currentCase.id + '/decide', body).then(function() {

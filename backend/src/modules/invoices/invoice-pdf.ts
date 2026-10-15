@@ -174,14 +174,18 @@ export function buildInvoiceViewModel(
   if (docKind === 'REMONT') {
     const isMarketplace = invoice.transactionType === 'MARKETPLACE_PRODUCT';
     const sellerVendor = isMarketplace ? order.items?.find((it: any) => it.product?.vendor)?.product?.vendor : null;
+    const isPartnerJob = invoice.transactionType === 'PLATFORM_SERVICE' && !!order.vendor;
     const liveRecipient: PartyBlock = isMarketplace && sellerVendor
       ? { name: sellerVendor.businessName, address: sellerVendor.address, gstin: sellerVendor.gstNumber, state: sellerVendor.state }
-      : customerBlock;
+      // Commission is deducted from the partner, so the partner receives Remont's commission document.
+      : isPartnerJob
+        ? { name: order.vendor.businessName || order.vendor.fullName || 'Partner', gstin: order.vendor.gstin || null }
+        : customerBlock;
     const recipient = frozenParties?.recipient ?? liveRecipient;
     return {
       isTaxInvoice: true,
       docBadge: 'TAX INVOICE',
-      copyTag: isMarketplace ? 'ORIGINAL FOR SELLER — MARKETPLACE COMMISSION' : 'ORIGINAL FOR RECIPIENT — PLATFORM FEE',
+      copyTag: isMarketplace ? 'ORIGINAL FOR SELLER — MARKETPLACE COMMISSION' : isPartnerJob ? 'ORIGINAL FOR PARTNER — REMONT COMMISSION' : 'ORIGINAL FOR RECIPIENT — PLATFORM FEE',
       // C-08 — Remont's own platform-fee/commission document is a legally distinct
       // instrument from the customer's (and, for a marketplace order, the seller's own)
       // tax invoice — never the same number (see Invoice.remontDocumentNumber). Falls

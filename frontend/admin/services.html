@@ -122,7 +122,18 @@
     <!-- ── COMMISSION TAB ────────────────────────────────────────────── -->
     <div id="tab-commission" style="display:none">
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><span class="card-title">Preview Commission</span></div>
+        <div class="card-body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <label class="form-label" style="margin:0">Rule type</label>
+          <select id="comm-ruletype-filter" class="form-control" style="max-width:340px" onchange="onCommRuleTypeChange()">
+            <option value="COMMISSION">Commission (deducted from partner)</option>
+            <option value="MINIMUM_CHARGE">Minimum service charge (customer, incl. GST, per booking)</option>
+            <option value="CANCELLATION_CHARGE">Cancellation charge (applied only after admin approval)</option>
+          </select>
+          <small id="comm-ruletype-help" style="color:#6b7280"></small>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title" id="comm-preview-title">Preview Commission</span></div>
         <div class="card-body">
           <div class="form-row">
             <div class="form-group" style="flex:1">
@@ -143,7 +154,7 @@
 
       <div class="card">
         <div class="card-header" style="flex-wrap:wrap;gap:8px">
-          <span class="card-title">Commission Rules</span>
+          <span class="card-title" id="comm-list-title">Commission Rules</span>
           <button class="btn btn-primary btn-sm" onclick="openCommModal()">+ Add Rule</button>
         </div>
         <div class="table-wrap"><div id="comm-tbl" class="loading">Loading…</div></div>
@@ -160,6 +171,14 @@
       <button class="modal-close" onclick="closeModal('comm-overlay')">×</button>
     </div>
     <input type="hidden" id="comm-id">
+    <div class="form-group">
+      <label class="form-label">Rule type <span style="color:red">*</span></label>
+      <select id="comm-ruletype" class="form-control" onchange="toggleCommTypeFields()">
+        <option value="COMMISSION">Commission (deducted from partner)</option>
+        <option value="MINIMUM_CHARGE">Minimum service charge (customer, incl. GST, per booking)</option>
+        <option value="CANCELLATION_CHARGE">Cancellation charge (admin-approved, never automatic)</option>
+      </select>
+    </div>
     <div class="form-group">
       <label class="form-label">Scope <span style="color:red">*</span></label>
       <select id="comm-scope" class="form-control" onchange="toggleCommScopeFields()">
@@ -181,7 +200,7 @@
     </div>
     <div class="form-row">
       <div class="form-group" style="flex:1">
-        <label class="form-label">Commission Type <span style="color:red">*</span></label>
+        <label class="form-label" id="comm-type-label">Commission Type <span style="color:red">*</span></label>
         <select id="comm-type" class="form-control" onchange="toggleCommTypeFields()">
           <option value="PERCENTAGE">Percentage</option>
           <option value="FLAT">Flat Amount (₹)</option>
@@ -189,8 +208,12 @@
         </select>
       </div>
       <div class="form-group" style="flex:1" id="comm-value-field">
-        <label class="form-label">Value</label>
-        <input id="comm-value" class="form-control" type="number" placeholder="e.g. 15 for 15%, or a flat ₹ amount">
+        <label class="form-label" id="comm-value-label">Value</label>
+        <input id="comm-value" class="form-control" type="number" min="0" placeholder="e.g. 15 for 15%, or a flat ₹ amount">
+      </div>
+      <div class="form-group" style="flex:1;display:none" id="comm-min-field">
+        <label class="form-label">Minimum penalty (₹) <small style="color:#9ca3af">(optional)</small></label>
+        <input id="comm-min" class="form-control" type="number" min="0" placeholder="e.g. 199 — blank = no minimum">
       </div>
     </div>
     <div class="form-group" id="comm-slab-field" style="display:none">
@@ -199,11 +222,21 @@
     </div>
     <div class="form-row">
       <div class="form-group" style="flex:1">
+        <label class="form-label">Effective from <small style="color:#9ca3af">(blank = now)</small></label>
+        <input id="comm-valid-from" class="form-control" type="date">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">Effective until <small style="color:#9ca3af">(blank = no end)</small></label>
+        <input id="comm-valid-to" class="form-control" type="date">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
         <label class="form-label">Priority <small style="color:#9ca3af">(higher wins a tie)</small></label>
         <input id="comm-priority" class="form-control" type="number" value="0">
       </div>
       <div class="form-group" style="flex:1;display:flex;align-items:center;gap:16px;padding-top:22px">
-        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="comm-stackable"> Stackable</label>
+        <label id="comm-stackable-wrap" style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="comm-stackable"> Stackable</label>
         <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="comm-active" checked> Active</label>
       </div>
     </div>
@@ -727,7 +760,7 @@ function loadServices() {
   document.getElementById('svc-tbl').innerHTML = '<div class="loading">Loading…</div>';
   Promise.all([
     api('GET','/admin/services?'+params),
-    commRulesForColumnCache ? Promise.resolve(commRulesForColumnCache) : api('GET','/admin/commission-rules').then(function(r){ commRulesForColumnCache = r||[]; return commRulesForColumnCache; }),
+    commRulesForColumnCache ? Promise.resolve(commRulesForColumnCache) : api('GET','/admin/commission-rules?ruleType=COMMISSION').then(function(r){ commRulesForColumnCache = r||[]; return commRulesForColumnCache; }),
   ]).then(function(results) {
     var svcs = results[0];
     var commRules = results[1] || [];
@@ -977,7 +1010,36 @@ function toggleCommScopeFields() {
   document.getElementById('comm-category-field').style.display = isCat ? '' : 'none';
   document.getElementById('comm-service-field').style.display = isCat ? 'none' : '';
 }
+var COMM_RULE_TYPE_TEXT = {
+  COMMISSION: { list: 'Commission Rules', preview: 'Preview Commission', value: 'Value', help: 'Remont commission, deducted from the partner payout. Never charged to the customer again.' },
+  MINIMUM_CHARGE: { list: 'Minimum Service Charge Rules', preview: 'Preview Minimum Charge', value: 'Minimum amount (₹, incl. GST)', help: 'A booking whose total incl. GST is below this amount is raised to it. Commission still follows the commission rules.' },
+  CANCELLATION_CHARGE: { list: 'Cancellation Penalty Rules', preview: 'Preview Cancellation Penalty', value: 'Penalty (₹)', help: 'Applies when a customer cancels after the partner has arrived: a flat ₹ amount, or a % of the service amount with an optional minimum. Shown to the customer before they confirm; never deducted without admin approval; never more than the booking total. ₹0 = no penalty.' },
+};
+function currentCommRuleType() { return document.getElementById('comm-ruletype-filter').value || 'COMMISSION'; }
+function onCommRuleTypeChange() {
+  var t = COMM_RULE_TYPE_TEXT[currentCommRuleType()];
+  document.getElementById('comm-list-title').textContent = t.list;
+  document.getElementById('comm-preview-title').textContent = t.preview;
+  document.getElementById('comm-ruletype-help').textContent = t.help;
+  document.getElementById('comm-preview-result').style.display = 'none';
+  loadCommissionRules();
+}
 function toggleCommTypeFields() {
+  var ruleType = document.getElementById('comm-ruletype').value;
+  var isCharge = ruleType !== 'COMMISSION';
+  var isPenalty = ruleType === 'CANCELLATION_CHARGE';
+  var typeSel = document.getElementById('comm-type');
+  // Minimum charge: always a flat ₹ amount. Cancellation penalty: flat ₹ or a % of the service
+  // amount (with an optional minimum). Neither ever stacks.
+  if (isCharge) document.getElementById('comm-stackable').checked = false;
+  if (ruleType === 'MINIMUM_CHARGE') typeSel.value = 'FLAT';
+  if (isPenalty && typeSel.value === 'SLAB') typeSel.value = 'FLAT';
+  typeSel.disabled = ruleType === 'MINIMUM_CHARGE';
+  typeSel.querySelector('option[value="SLAB"]').disabled = isCharge;
+  document.getElementById('comm-stackable-wrap').style.display = isCharge ? 'none' : '';
+  var pct = typeSel.value === 'PERCENTAGE';
+  document.getElementById('comm-value-label').textContent = isPenalty && pct ? 'Penalty (% of the service amount)' : COMM_RULE_TYPE_TEXT[ruleType].value;
+  document.getElementById('comm-min-field').style.display = isPenalty && pct ? '' : 'none';
   var isSlab = document.getElementById('comm-type').value === 'SLAB';
   document.getElementById('comm-value-field').style.display = isSlab ? 'none' : '';
   document.getElementById('comm-slab-field').style.display = isSlab ? '' : 'none';
@@ -999,18 +1061,23 @@ function _populateCommDropdowns() {
 
 function loadCommissionRules() {
   document.getElementById('comm-tbl').innerHTML = '<div class="loading">Loading…</div>';
-  Promise.all([_populateCommDropdowns(), api('GET','/admin/commission-rules')]).then(function(results) {
+  var ruleType = currentCommRuleType();
+  Promise.all([_populateCommDropdowns(), api('GET','/admin/commission-rules?ruleType=' + ruleType)]).then(function(results) {
     var rules = results[1] || [];
-    if (!rules.length) { document.getElementById('comm-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><h3>No commission rules yet</h3><p>Falls back to the SiteSetting default (or ₹0) until you add one.</p></div>'; return; }
+    if (!rules.length) {
+      var emptyText = ruleType === 'COMMISSION' ? 'Falls back to the SiteSetting default (or ₹0) until you add one.' : 'No rule means no charge (₹0) — nothing is ever applied by default.';
+      document.getElementById('comm-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><h3>No rules yet</h3><p>' + emptyText + '</p></div>'; return;
+    }
     var rows = rules.map(function(r) {
       var target = r.scope === 'CATEGORY' ? (r.category ? r.category.name : '—') : (r.service ? r.service.name : '—');
-      var valueLabel = r.commissionType === 'SLAB' ? 'Slab' : (r.commissionType === 'FLAT' ? '₹' + r.value : r.value + '%');
+      var valueLabel = r.commissionType === 'SLAB' ? 'Slab' : (r.commissionType === 'FLAT' ? '₹' + r.value : r.value + '%' + (r.minimumAmount != null ? ' (min ₹' + r.minimumAmount + ')' : ''));
       return '<tr>' +
         '<td>' + badge(r.scope, r.scope==='SERVICE'?'blue':'purple') + '</td>' +
         '<td>' + escape(target) + '</td>' +
         '<td>' + escape(r.city ? r.city.name : 'All Cities') + '</td>' +
         '<td>' + escape(valueLabel) + (r.stackable ? ' ' + badge('Stacks','teal') : '') + '</td>' +
         '<td>' + r.priority + '</td>' +
+        '<td style="font-size:12px;color:#6b7280">' + (r.validFrom ? escape(String(r.validFrom).slice(0,10)) : 'now') + ' → ' + (r.validTo ? escape(String(r.validTo).slice(0,10)) : '∞') + '</td>' +
         '<td>' + badge(r.isActive?'Active':'Inactive', r.isActive?'green':'gray') + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick=\'openCommModal(' + JSON.stringify(r) + ')\'>Edit</button>' +
@@ -1018,19 +1085,25 @@ function loadCommissionRules() {
         '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('comm-tbl').innerHTML = '<table><thead><tr><th>Scope</th><th>Applies To</th><th>City</th><th>Value</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.getElementById('comm-tbl').innerHTML = '<table><thead><tr><th>Scope</th><th>Applies To</th><th>City</th><th>Value</th><th>Priority</th><th>Effective</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e){ document.getElementById('comm-tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
 function openCommModal(rule) {
-  document.getElementById('comm-modal-title').textContent = rule ? 'Edit Commission Rule' : 'Add Commission Rule';
+  var ruleType = rule ? (rule.ruleType || 'COMMISSION') : currentCommRuleType();
+  document.getElementById('comm-modal-title').textContent = (rule ? 'Edit ' : 'Add ') + COMM_RULE_TYPE_TEXT[ruleType].list.replace(' Rules', ' Rule');
   document.getElementById('comm-id').value = rule ? rule.id : '';
+  document.getElementById('comm-ruletype').value = ruleType;
+  document.getElementById('comm-ruletype').disabled = !!rule; // a rule's type never changes after creation
+  document.getElementById('comm-valid-from').value = rule && rule.validFrom ? String(rule.validFrom).slice(0,10) : '';
+  document.getElementById('comm-valid-to').value = rule && rule.validTo ? String(rule.validTo).slice(0,10) : '';
   document.getElementById('comm-scope').value = rule ? rule.scope : 'CATEGORY';
   document.getElementById('comm-category').value = rule ? (rule.categoryId||'') : '';
   document.getElementById('comm-service').value = rule ? (rule.serviceId||'') : '';
   document.getElementById('comm-city').value = rule ? (rule.cityId||'') : '';
   document.getElementById('comm-type').value = rule ? rule.commissionType : 'PERCENTAGE';
   document.getElementById('comm-value').value = rule ? rule.value : '';
+  document.getElementById('comm-min').value = rule && rule.minimumAmount != null ? rule.minimumAmount : '';
   document.getElementById('comm-slab').value = rule && rule.slabJson ? JSON.stringify(rule.slabJson) : '';
   document.getElementById('comm-priority').value = rule ? rule.priority : 0;
   document.getElementById('comm-stackable').checked = rule ? !!rule.stackable : false;
@@ -1051,13 +1124,21 @@ function saveCommRule() {
     try { slabJson = JSON.parse(document.getElementById('comm-slab').value || '[]'); }
     catch (e) { toast('Slab JSON is invalid: ' + e.message, 'error'); return; }
   }
+  var validFrom = document.getElementById('comm-valid-from').value;
+  var validTo = document.getElementById('comm-valid-to').value;
   var data = {
+    ruleType: document.getElementById('comm-ruletype').value,
+    validFrom: validFrom ? new Date(validFrom + 'T00:00:00+05:30').toISOString() : null,
+    validTo: validTo ? new Date(validTo + 'T23:59:59+05:30').toISOString() : null,
     scope: scope,
     categoryId: scope === 'CATEGORY' ? document.getElementById('comm-category').value : null,
     serviceId: scope === 'SERVICE' ? document.getElementById('comm-service').value : null,
     cityId: document.getElementById('comm-city').value || null,
     commissionType: type,
     value: parseFloat(document.getElementById('comm-value').value) || 0,
+    // "X%, minimum ₹Y" — only for a percentage cancellation penalty; blank = no minimum
+    minimumAmount: (document.getElementById('comm-ruletype').value === 'CANCELLATION_CHARGE' && type === 'PERCENTAGE' && document.getElementById('comm-min').value !== '')
+      ? parseFloat(document.getElementById('comm-min').value) : null,
     slabJson: slabJson,
     priority: parseInt(document.getElementById('comm-priority').value) || 0,
     stackable: document.getElementById('comm-stackable').checked,
@@ -1067,13 +1148,14 @@ function saveCommRule() {
   p.then(function(){
     toast(id?'Rule updated':'Rule created','success');
     closeModal('comm-overlay');
+    commRulesForColumnCache = null;
     loadCommissionRules();
   }).catch(function(e){ toast(e.message,'error'); });
 }
 
 function deleteCommRule(id) {
   if (!confirm('Delete this commission rule?')) return;
-  api('DELETE','/admin/commission-rules/'+id).then(function(){ toast('Rule deleted','success'); loadCommissionRules(); }).catch(function(e){ toast(e.message,'error'); });
+  api('DELETE','/admin/commission-rules/'+id).then(function(){ toast('Rule deleted','success'); commRulesForColumnCache = null; loadCommissionRules(); }).catch(function(e){ toast(e.message,'error'); });
 }
 
 function previewCommission() {
@@ -1085,13 +1167,15 @@ function previewCommission() {
     var cityRow = adminCitiesForFilter.find(function(c){ return c.id === cityId; });
     cityName = cityRow ? cityRow.name : '';
   }
-  var params = 'serviceId=' + encodeURIComponent(serviceId) + (cityName ? '&city=' + encodeURIComponent(cityName) : '');
+  var ruleType = currentCommRuleType();
+  var params = 'serviceId=' + encodeURIComponent(serviceId) + (cityName ? '&city=' + encodeURIComponent(cityName) : '') + '&ruleType=' + ruleType;
   api('GET','/admin/commission-rules/preview?'+params).then(function(r) {
     var box = document.getElementById('comm-preview-result');
     box.style.display = '';
+    var what = ruleType === 'MINIMUM_CHARGE' ? 'minimum charge (incl. GST)' : (ruleType === 'CANCELLATION_CHARGE' ? 'cancellation charge' : 'commission');
     box.innerHTML = '<strong>' + escape(r.serviceName) + '</strong>' + (cityName ? ' in ' + escape(cityName) : ' (all cities)') +
-      ' → commission = <strong style="color:#c4601a">' + fmtCur(r.commissionAmount) + '</strong>' +
-      ' <span style="color:#6b7280;font-size:12px">(on ₹' + r.amount + ' base) — ' + escape(r.ruleLabel) + '</span>';
+      ' → ' + what + ' = <strong style="color:#c4601a">' + fmtCur(r.commissionAmount) + '</strong>' +
+      (ruleType === 'COMMISSION' ? ' <span style="color:#6b7280;font-size:12px">(on ₹' + r.amount + ' base) — ' : ' <span style="color:#6b7280;font-size:12px">— ') + escape(r.ruleLabel) + '</span>';
   }).catch(function(e){ toast(e.message,'error'); });
 }
 
