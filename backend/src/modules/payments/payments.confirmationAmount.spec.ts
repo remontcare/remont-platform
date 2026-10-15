@@ -70,8 +70,8 @@ describe('PaymentsService.getVerifiedCapturedAmount — re-verifies against Razo
 });
 
 describe('PaymentsService.handleWebhook — order marked PAID only when the captured amount covers its total', () => {
-  it('marks the order PAID/CONFIRMED when the captured amount covers the order total', async () => {
-    const { svc, prisma } = makeService();
+  it('records the capture and hands the order to the order services for the verified, once-only confirmation', async () => {
+    const { svc, prisma, events } = makeService();
     prisma.paymentTransaction.findFirst.mockResolvedValue({
       id: 'tx-1', userId: 'user-1', orderId: 'order-1', isWalletTopup: false,
     });
@@ -83,10 +83,10 @@ describe('PaymentsService.handleWebhook — order marked PAID only when the capt
 
     await svc.handleWebhook(rawBody, signature);
 
-    expect(prisma.order.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'order-1' },
-      data: expect.objectContaining({ paymentStatus: 'PAID', status: 'CONFIRMED' }),
-    }));
+    // The webhook itself never flips an order to PAID: OrdersService/MasterOrdersService confirm it
+    // through confirmPayment() (captured amount re-verified with Razorpay, conditional claim, dispatch).
+    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(events.emit).toHaveBeenCalledWith('payment.order.captured', expect.objectContaining({ orderId: 'order-1', gatewayPaymentId: 'pay_1' }));
   });
 
   it('does NOT mark the order PAID when the captured amount is less than the order total — the core regression this fix closes', async () => {

@@ -1,8 +1,9 @@
 import {
   Optional,
   Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards, Logger,
-  NotFoundException, ForbiddenException, BadRequestException,
+  NotFoundException, ForbiddenException, BadRequestException, UnauthorizedException, ConflictException,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import {
   IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested,
@@ -11,7 +12,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules } from '../../common';
+import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -278,36 +279,46 @@ export class MasterOrdersService {
     await writeOrderTimeline(this.prisma, { orderId, status: 'AWAITING_SELLER' });
   }
 
-  private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
-    if (!user || Number(user.walletBalance) < amount) throw new BadRequestException('Insufficient wallet balance');
-    const newBalance = Number(user.walletBalance) - amount;
-    await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: amount } } });
-    await this.prisma.walletTransaction.create({
+  /**
+   * Debits the wallet of the order's OWN customer, inside the caller's transaction (so the debit
+   * commits or rolls back with the order state it pays for). A single conditional decrement — the
+   * balance check and the decrement are one statement, so two concurrent debits can never take the
+   * wallet below zero.
+   */
+  private async debitWalletForOrder(tx: any, customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
+    const debited = await tx.user.updateMany({
+      where: { id: customerId, walletBalance: { gte: amount } },
+      data: { walletBalance: { decrement: amount } },
+    });
+    if (debited.count !== 1) throw new BadRequestException('Insufficient wallet balance');
+    const after = await tx.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+    await tx.walletTransaction.create({
       data: {
-        userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount, balanceAfter: newBalance,
+        userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount, balanceAfter: after.walletBalance,
         orderId: masterOrderId, notes: `Payment for order ${masterOrderNumber}`,
       },
     });
   }
 
+  /**
+   * Customer-facing cart number, e.g. RM251015-7K3QZP. Previously "count of today's carts + 1",
+   * which two concurrent checkouts computed identically (unique-constraint crash). Now a random
+   * suffix (32^6 ≈ 1.07 billion per day) checked against existing numbers; the @unique column
+   * remains the final guard.
+   */
   async generateMasterOrderNumber(): Promise<string> {
-    const now = new Date();
-    const ymd = now.toISOString().slice(2, 10).replace(/-/g, '');
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-    const countToday = await this.prisma.masterOrder.count({ where: { createdAt: { gte: startOfDay } } });
-    const seq = String(countToday + 1).padStart(3, '0');
-    return `RM${ymd}${seq}`;
+    const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+    const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const bytes = crypto.randomBytes(6);
+      const suffix = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+      const candidate = `RM${ymd}-${suffix}`;
+      if (!(await this.prisma.masterOrder.findUnique({ where: { masterOrderNumber: candidate }, select: { id: true } }))) return candidate;
+    }
+    throw new ConflictException('Could not allocate an order number — please retry');
   }
 
-  /**
-   * The single pricing path for checkout() and quote() — city prices, the minimum service
-   * charge, commission, product GST/fees, delivery, bundle/membership/coupon discounts, GST and
-   * wallet — so the amount a customer is shown is exactly the amount checkout charges.
-   * With persistInlineAddress=false (quote) it writes nothing.
-   */
-  private async priceCart(dto: CreateMasterOrderDto, customerId: string | undefined, persist: { persistInlineAddress: boolean }) {
+  private async priceCart(dto: CreateMasterOrderDto, customerId: string | undefined, persist: { persistInlineAddress: boolean; verifiedCustomer?: boolean }) {
     let orderCityId: string | null = null;
     if (dto.city) {
       const cityRow = await this.cities.getByName(dto.city);
@@ -553,7 +564,9 @@ export class MasterOrdersService {
     const bundleDiscountPercent = isBundleOrder ? await getBundleDiscountPercent(this.prisma) : 0;
     const bundleDiscount = isBundleOrder ? Math.round(((grossServiceAmount * bundleDiscountPercent) / 100) * 100) / 100 : 0;
 
-    const membershipPct = customerId ? await this.memberships.getActiveDiscount(customerId) : 0;
+    // A membership belongs to a verified account: a guest checkout (customer matched only by a
+    // typed phone number) never gets another account's membership discount.
+    const membershipPct = customerId && persist.verifiedCustomer !== false ? await this.memberships.getActiveDiscount(customerId) : 0;
     const membershipDiscount = Math.round(((subtotal * membershipPct) / 100) * 100) / 100;
 
     let couponDiscount = 0;
@@ -659,7 +672,15 @@ export class MasterOrdersService {
     // closes the race for two concurrent requests racing on the same key, not this read alone.
     if (dto.idempotencyKey) {
       const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-      if (existing) return this.resumeCheckoutResponse(existing);
+      if (existing) return this.resumeCheckoutResponse(this.assertSameCheckoutOwner(existing, opts));
+    }
+
+    // WALLET OWNERSHIP — a wallet may only be spent by its verified owner, i.e. a caller whose
+    // customerId came from a verified login (JWT). A guest checkout identifies a customer by a
+    // submitted phone number only, which proves nothing, so it can never use a wallet. Checked
+    // before any row is created or any balance is read.
+    if ((dto.walletAmount || 0) > 0 && !opts.customerId) {
+      throw new UnauthorizedException('Please log in to pay with your Remont wallet');
     }
 
     // Resolve customer — authenticated customerId, or guest find-or-create by phone
@@ -681,7 +702,7 @@ export class MasterOrdersService {
       groupDelivery, deliveryCharge, grossServiceAmount, grossProductAmount, subtotal, isBundleOrder, bundleDiscountPercent,
       bundleDiscount, membershipDiscount, couponDiscount, couponId, couponFundedBy, serviceGstAmount,
       gstAmount, walletUsed, totalAmount,
-    } = await this.priceCart(dto, customerId, { persistInlineAddress: true });
+    } = await this.priceCart(dto, customerId, { persistInlineAddress: true, verifiedCustomer: !!opts.customerId });
 
     // Checked up front, before any rows are created — the actual debit happens later
     // (immediately below for COD, or in confirmPayment() for ONLINE) so an abandoned or
@@ -795,6 +816,7 @@ export class MasterOrdersService {
           channel: dto.channel || BookingChannel.WEBSITE,
           status: confirmUpfront ? MasterOrderStatus.CONFIRMED : MasterOrderStatus.PENDING_PAYMENT,
           paymentStatus: PaymentStatus.PENDING,
+          paymentMethod: confirmUpfront ? 'COD' : 'ONLINE',
           grossServiceAmount, grossProductAmount, subtotal,
           couponCode: dto.couponCode, couponDiscount, membershipDiscount,
           walletUsed, gstAmount, deliveryCharge, totalAmount,
@@ -884,6 +906,8 @@ export class MasterOrdersService {
             startOtp, endOtp,
             status: confirmUpfront ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
             paymentStatus: PaymentStatus.PENDING,
+            // Every job knows how it is being paid (COD shipments, collections and reports read it).
+            paymentMethod: confirmUpfront ? 'COD' : 'ONLINE',
             serviceAmount, productsAmount, subtotal: g.amount,
             productsTaxableAmount: g.type === 'PRODUCT' ? g.productsTaxableAmount : undefined,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
@@ -935,6 +959,13 @@ export class MasterOrdersService {
         childOrders.push(childOrder);
       }
 
+      // The wallet portion is taken now, atomically with the order rows, for COD and ONLINE alike
+      // (an insufficient balance rolls the whole checkout back). If an ONLINE cart is never paid
+      // and gets cancelled, it is returned automatically (releaseUnpaidOrderWallet).
+      if (walletUsed > 0) {
+        await this.debitWalletForOrder(tx, customerId!, walletUsed, masterOrder.id, masterOrderNumber);
+      }
+
       return { masterOrder, childOrders };
       }));
     } catch (e: any) {
@@ -944,7 +975,7 @@ export class MasterOrdersService {
       // returns the winner's order instead of surfacing a raw DB error.
       if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
         const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-        if (existing) return this.resumeCheckoutResponse(existing);
+        if (existing) return this.resumeCheckoutResponse(this.assertSameCheckoutOwner(existing, opts));
       }
       throw e;
     }
@@ -952,12 +983,7 @@ export class MasterOrdersService {
     if (couponId) await this.coupons.recordUsage(couponId, customerId, masterOrder.id, couponDiscount);
     if (dto.crmRef) this.crmSync?.notify(masterOrder.id, 'order.created', dto.crmRef);
 
-    // COD/Cash confirms immediately, so the wallet portion (if any) is real money owed
-    // right now — debit it now. For ONLINE, the wallet debit happens in confirmPayment()
-    // instead, once the online portion has actually been paid.
-    if (confirmUpfront && walletUsed > 0) {
-      await this.debitWalletForOrder(customerId, walletUsed, masterOrder.id, masterOrder.masterOrderNumber);
-    }
+    // Wallet: taken inside the checkout transaction above (COD and ONLINE).
 
     if (confirmUpfront) {
       for (const child of childOrders) {
@@ -1001,6 +1027,13 @@ export class MasterOrdersService {
   // reaching this for one just means "nothing more to do." An ONLINE order still
   // PENDING_PAYMENT needs a fresh gateway order to resume payment (Razorpay/PhonePe orders
   // aren't themselves reusable) — bound to this SAME existing MasterOrder.
+  /** A retried checkout key may only resume the SAME customer's cart — never reveal another's. */
+  private assertSameCheckoutOwner<T extends { customerId: string; guestPhone?: string | null }>(existing: T, opts: CheckoutOpts): T {
+    const same = opts.customerId ? existing.customerId === opts.customerId : !!opts.guestPhone && existing.guestPhone === opts.guestPhone;
+    if (!same) throw new ConflictException('This checkout request key is already used for a different order');
+    return existing;
+  }
+
   private async resumeCheckoutResponse(masterOrder: { id: string; masterOrderNumber: string; totalAmount: any; status: string; customerId: string }) {
     if (masterOrder.status !== MasterOrderStatus.PENDING_PAYMENT) {
       return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount: Number(masterOrder.totalAmount), paymentMethod: 'COD', isCOD: true, alreadyProcessed: true };
@@ -1068,21 +1101,38 @@ export class MasterOrdersService {
       throw new BadRequestException('Payment amount does not cover the order total. Please contact support.');
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.masterOrder.update({ where: { id: masterOrderId }, data: { paymentId, paymentStatus: 'PAID', status: MasterOrderStatus.CONFIRMED } });
+    // The verified gateway row is PAID (the callback used to leave it PENDING without the webhook).
+    await this.prisma.paymentTransaction.updateMany({
+      where: { orderId: masterOrderId, gatewayOrderId: verifiedGatewayOrderId, status: { not: 'PAID' } },
+      data: { status: 'PAID', gatewayPaymentId: paymentId },
+    });
+    // Exactly one confirmation wins: the PENDING_PAYMENT → CONFIRMED claim is a conditional update,
+    // so a retried or concurrent confirm (browser callback + webhook-driven retry, double click)
+    // can never cascade or debit the wallet a second time. The wallet portion — only checked at
+    // checkout, never taken — is debited from the order's own customer in the same transaction.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.masterOrder.updateMany({
+        where: { id: masterOrderId, status: MasterOrderStatus.PENDING_PAYMENT, paymentStatus: { not: 'PAID' } },
+        data: { paymentId, paymentStatus: 'PAID', status: MasterOrderStatus.CONFIRMED },
+      });
+      if (claim.count !== 1) return false;
       for (const child of existing.childOrders) {
-        await tx.order.update({ where: { id: child.id }, data: { paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED } });
+        // The cart payment lives on the master order; each job records its own verified share
+        // (its total at this moment), which is what its balance/collection/earnings read.
+        await tx.order.update({
+          where: { id: child.id },
+          data: { paymentId, paymentStatus: 'PAID', paymentMethod: 'ONLINE', cartPaidAmount: child.totalAmount, status: OrderStatus.CONFIRMED },
+        });
         await tx.orderTimeline.create({ data: { orderId: child.id, status: OrderStatus.CONFIRMED } });
       }
+      // Orders created before wallet-at-checkout only reserved their wallet portion: take it now.
+      if (Number(existing.walletUsed) > 0) {
+        const taken = await tx.walletTransaction.findFirst({ where: { userId: existing.customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', orderId: existing.id }, select: { id: true } });
+        if (!taken) await this.debitWalletForOrder(tx, existing.customerId, Number(existing.walletUsed), existing.id, existing.masterOrderNumber);
+      }
+      return true;
     });
-
-    // The wallet portion (if any) was only reserved-and-checked at checkout time, not
-    // debited — only take the money now that the online payment has actually cleared.
-    // Guarded by the paymentStatus==='PAID' idempotency check above, same as the rest of
-    // this method.
-    if (Number(existing.walletUsed) > 0) {
-      await this.debitWalletForOrder(existing.customerId, Number(existing.walletUsed), existing.id, existing.masterOrderNumber);
-    }
+    if (!won) return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
 
     for (const child of existing.childOrders) {
       // A bundle's SERVICE child (bundleDispatchDeferred) never routes here — see the
@@ -1094,6 +1144,15 @@ export class MasterOrdersService {
     this.notifyPaymentSuccess(existing).catch(() => {});
     this.crmSync?.notify(masterOrderId, 'order.paid');
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
+  }
+
+  /** Razorpay webhook capture for a cart: same verified, once-only confirmation as the callback. */
+  @OnEvent('payment.order.captured', { async: true })
+  async onMasterPaymentCaptured(p: { orderId?: string | null; gatewayPaymentId: string }) {
+    if (!p?.orderId) return;
+    const mo = await this.prisma.masterOrder.findUnique({ where: { id: p.orderId }, select: { id: true, paymentStatus: true } });
+    if (!mo || mo.paymentStatus === 'PAID') return;
+    await this.confirmPayment(mo.id, p.gatewayPaymentId).catch((e) => this.logger.warn(`Webhook cart confirmation ${mo.id}: ${e.message}`));
   }
 
   private async notifyPaymentSuccess(mo: { id: string; customerId: string; guestPhone: string | null; masterOrderNumber: string; totalAmount: any }) {
@@ -1323,8 +1382,14 @@ export class PublicMasterOrderController {
     return this.masterOrders.quote(quoteDto, {});
   }
 
-  @Public() @Post('checkout')
-  checkout(@Body() dto: PublicMasterCheckoutDto) {
+  // Optional login. With a valid token the order belongs to THAT account (identity from the
+  // verified JWT — the submitted name/phone never select an account) and its wallet may be used.
+  // Without a token this is a guest checkout: no wallet. An invalid/expired token → 401.
+  @Public() @UseGuards(OptionalJwtAuthGuard) @Post('checkout')
+  checkout(@CurrentUser() u: JwtPayload | undefined, @Body() dto: PublicMasterCheckoutDto) {
+    if (!u && (dto.walletAmount || 0) > 0) {
+      throw new UnauthorizedException('Please log in to pay with your Remont wallet');
+    }
     const items = dto.items;
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
@@ -1338,6 +1403,7 @@ export class PublicMasterOrderController {
         latitude: dto.latitude, longitude: dto.longitude,
       },
     };
+    if (u) return this.masterOrders.checkout(checkoutDto, { customerId: u.sub, paymentMethod: dto.paymentMethod });
     return this.masterOrders.checkout(checkoutDto, {
       guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email, paymentMethod: dto.paymentMethod,
     });

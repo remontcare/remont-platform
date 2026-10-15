@@ -243,12 +243,14 @@ describe('Audit M5 — the public quote never reveals another person\'s membersh
     expect(q.membershipDiscount).toBeGreaterThan(0);
   });
 
-  it('guest checkout pricing is unchanged (it still prices the account behind the phone, as before)', async () => {
+  it('a guest checkout never gets the membership of the account behind a typed phone number — it pays the non-member price', async () => {
     const t = withMember();
     const own = await t.svc.quote({ items, city: 'Bhopal' } as any, { customerId: 'cust-1' });
+    const anon = await t.svc.quote({ items, city: 'Bhopal' } as any, {});
     const res: any = await t.svc.checkout({ items, city: 'Bhopal', addressId: 'addr-1' } as any,
       { guestPhone: '+919999999999', guestName: 'Guest', paymentMethod: 'COD' } as any);
-    expect(Number(res.totalAmount)).toBe(own.totalAmount);
     expect(own.membershipDiscount).toBeGreaterThan(0);
+    expect(Number(res.totalAmount)).toBe(anon.totalAmount);
+    expect(Number(res.totalAmount)).toBeGreaterThan(own.totalAmount);
   });
 });

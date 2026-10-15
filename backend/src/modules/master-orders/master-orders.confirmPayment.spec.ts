@@ -13,10 +13,10 @@ import { MasterOrdersService } from './master-orders.module';
 function makeService() {
   const prisma: any = {
     masterOrder: { findUnique: jest.fn() },
-    paymentTransaction: { findFirst: jest.fn() },
+    paymentTransaction: { findFirst: jest.fn(), updateMany: jest.fn(async () => ({ count: 1 })) },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
-        masterOrder: { update: jest.fn(async () => ({})) },
+        masterOrder: { update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({ count: 1 })) },
         order: { update: jest.fn(async () => ({})) },
         orderTimeline: { create: jest.fn(async () => ({})) },
       };

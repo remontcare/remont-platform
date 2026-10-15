@@ -52,6 +52,25 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 }
 
+/**
+ * Optional login on a public route: no Authorization header → anonymous (guard passes, no user);
+ * a header that is present but invalid/expired/revoked → 401, never silently treated as anonymous.
+ * When it passes with a header, request.user comes from JwtStrategy (user re-read: verified, not
+ * blocked) — the only trustworthy identity. Same behaviour as the AI chat's OptionalJwtAuthGuard.
+ */
+@Injectable()
+export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
+  canActivate(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    if (!req.headers?.authorization) return true;
+    return super.canActivate(context) as any;
+  }
+  handleRequest(err: any, user: any) {
+    if (err || !user) throw new UnauthorizedException();
+    return user;
+  }
+}
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
@@ -150,6 +169,35 @@ export async function writeOrderTimeline(prisma: any, entry: {
 // Append-only audit trail for job start/completion OTPs — same direct-insert pattern
 // as writeOrderTimeline above, no event bus. Called at initial generation (booking
 // time), on regeneration ("Request OTP Again"), and on successful verification.
+/**
+ * Gives back the wallet amount taken at checkout for an order that was never paid (cancelled
+ * before payment, abandoned online payment) — exactly once (Order.walletReleasedAt claim), and
+ * only if a wallet DEBIT for this order (or its cart) really exists, so an older order whose wallet
+ * portion was merely reserved is never credited money that was not taken. Paid orders go through
+ * the refund workflow instead. Returns true when the wallet was credited.
+ */
+export async function releaseUnpaidOrderWallet(
+  tx: any,
+  order: { id: string; customerId: string; masterOrderId?: string | null; walletUsed: any; paymentStatus: string; cartPaidAmount?: any },
+  note: string,
+): Promise<boolean> {
+  const amount = Number(order.walletUsed || 0);
+  if (amount <= 0) return false;
+  if (['PAID', 'PARTIAL', 'REFUNDED'].includes(order.paymentStatus) || Number(order.cartPaidAmount || 0) > 0) return false;
+  const debit = await tx.walletTransaction.findFirst({
+    where: { userId: order.customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', orderId: { in: [order.id, order.masterOrderId].filter(Boolean) } },
+    select: { id: true },
+  });
+  if (!debit) return false;
+  const claim = await tx.order.updateMany({ where: { id: order.id, walletReleasedAt: null }, data: { walletReleasedAt: new Date() } });
+  if (claim.count !== 1) return false;
+  const u = await tx.user.update({ where: { id: order.customerId }, data: { walletBalance: { increment: amount } }, select: { walletBalance: true } });
+  await tx.walletTransaction.create({
+    data: { userId: order.customerId, type: 'CREDIT', reason: 'REFUND', amount, balanceAfter: u.walletBalance, orderId: order.id, notes: note },
+  });
+  return true;
+}
+
 export async function writeOtpLog(prisma: any, entry: {
   orderId: string;
   otpType: 'START' | 'END';

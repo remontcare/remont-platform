@@ -262,10 +262,10 @@ d('Accounting & invoices (throwaway Postgres)', () => {
 
   it('in-house technician completing a job: no partner earnings, payout, hold or ledger entries (no double counting)', async () => {
     const tech = await partner(undefined, 'IN_HOUSE');
-    const o = await serviceOrder(tech, await category('APPLICABLE'), { status: 'IN_PROGRESS', endOtp: null });
+    const o = await serviceOrder(tech, await category('APPLICABLE'), { status: 'IN_PROGRESS', endOtp: '4321' });
     const stub: any = {};
     const orders = new OrdersService(prisma as any, stub, stub, stub, stub, stub, stub, stub, new PartnerLedgerService(prisma as any), invoices, stub);
-    await orders.complete(tech.userId, o.id, '', []);
+    await orders.complete(tech.userId, o.id, '4321', []);
     const v = await prisma.serviceVendor.findUnique({ where: { id: tech.id } });
     expect(Number(v!.pendingPayout)).toBe(0);
     expect(Number(v!.totalEarnings)).toBe(0);

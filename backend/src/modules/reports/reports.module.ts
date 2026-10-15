@@ -184,7 +184,9 @@ export class ReportsService {
       const own = paymentsByOrder.get(o.id) || [];
       // Test-gateway (DEV_MOCK / RAZORPAY_DEV) payments are not money received.
       const testPaid = own.filter((p) => p.status === 'PAID' && TEST_GATEWAYS.includes(p.gateway)).reduce((s, p) => s + Number(p.amount), 0);
-      const paid = own.filter((p) => p.status === 'PAID' && !p.isWalletTopup && !TEST_GATEWAYS.includes(p.gateway)).reduce((s, p) => s + Number(p.amount), 0);
+      const ownPaid = own.filter((p) => p.status === 'PAID' && !p.isWalletTopup && !TEST_GATEWAYS.includes(p.gateway)).reduce((s, p) => s + Number(p.amount), 0);
+      // a cart job's share of the cart's verified online payment (stored on the master order)
+      const paid = ownPaid + Number((o as any).cartPaidAmount || 0);
       const refunded = Math.round((refundByOrder.get(o.id) || 0) * 100) / 100;
       const remontRevenue = type === 'DIRECT_PROJECT' ? Number(o.subtotal) : Number(o.remontCommission) + Number(o.platformCharges);
       ws.addRow({

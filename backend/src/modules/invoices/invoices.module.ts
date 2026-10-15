@@ -459,7 +459,8 @@ export class InvoicesService {
     const txs = await this.prisma.paymentTransaction.findMany({
       where: {
         status: 'PAID', isWalletTopup: false, refundRequestId: null,
-        OR: [{ orderId: order.id }, ...(order.masterOrderId ? [{ masterOrderId: order.masterOrderId }] : [])],
+        // a cart payment is stored with orderId = MasterOrder.id (masterOrderId set on newer rows)
+        OR: [{ orderId: order.id }, ...(order.masterOrderId ? [{ masterOrderId: order.masterOrderId }, { orderId: order.masterOrderId }] : [])],
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -467,7 +468,7 @@ export class InvoicesService {
     const ownPaid = txs.filter((t) => t.orderId === order.id).reduce((a, t) => a + Number(t.amount), 0);
     // Fully paid (refunds are reversed by credit notes, never by rewriting the invoice).
     const fullyPaid = order.paymentStatus === 'PAID' || order.paymentStatus === 'REFUNDED';
-    const received = fullyPaid ? total : Math.min(total, r2(ownPaid + wallet));
+    const received = fullyPaid ? total : Math.min(total, r2(ownPaid + Number(order.cartPaidAmount || 0) + wallet));
     const refs: string[] = [];
     const tx = txs[0];
     if (tx) {

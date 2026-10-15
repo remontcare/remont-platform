@@ -16,13 +16,12 @@ function makeService() {
       update: jest.fn(async (args: any) => ({ id: 'order-1', ...args.data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
-    $transaction: jest.fn(async (fn: any) => fn({
-      order: prisma.order,
-      serviceVendor: prisma.serviceVendor,
-      partnerLedgerEntry: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
-      partnerHold: { create: jest.fn().mockResolvedValue({}) },
-    })),
+    paymentTransaction: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
+    extraWorkItem: { findMany: jest.fn(async () => []) },
+    partnerLedgerEntry: { count: jest.fn(async () => 0) },
+    $queryRaw: jest.fn(async () => []),
   };
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
   prisma.orderTimeline = { create: jest.fn() };
   prisma.orderOtpLog = { create: jest.fn() };
   const ledger: any = {
@@ -40,7 +39,7 @@ function makeService() {
 function baseOrder(overrides: Record<string, any> = {}) {
   return {
     id: 'order-1', vendorId: 'vendor-1', customerId: 'cust-1', guestPhone: null, orderNumber: 'ORD-1',
-    status: 'STARTED', endOtp: null, endOtpVerified: false,
+    status: 'STARTED', endOtp: '4321', endOtpVerified: false, endOtpFailedAttempts: 0, totalAmount: 1000, walletUsed: 0,
     remontCommission: 100, vendorPayout: 900, leadCostAmount: 0,
     service: { category: null },
     ...overrides,
@@ -60,7 +59,7 @@ describe('OrdersService.complete — auto-invoice generation failure tracking', 
     prisma.order.findUnique.mockResolvedValue(baseOrder());
     invoices.generateForOrder.mockRejectedValue(new Error('Missing GST configuration'));
 
-    const result = await svc.complete('vendor-user-1', 'order-1', '', []);
+    const result = await svc.complete('vendor-user-1', 'order-1', '4321', []);
     await flush();
 
     // complete() itself succeeds — a downstream invoice failure must never undo/block the
@@ -78,7 +77,7 @@ describe('OrdersService.complete — auto-invoice generation failure tracking', 
     prisma.order.findUnique.mockResolvedValue(baseOrder());
     invoices.generateForOrder.mockResolvedValue({ id: 'inv-1', invoiceNumber: 'INV-1' });
 
-    await svc.complete('vendor-user-1', 'order-1', '', []);
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
     await flush();
 
     expect(prisma.order.update).toHaveBeenCalledWith(expect.objectContaining({

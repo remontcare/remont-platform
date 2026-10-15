@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -844,7 +844,13 @@ export class AdminService {
           ? 'Product sale value belongs to the seller — only Remont\'s marketplace commission (if any) is Remont revenue.'
           : 'Remont fulfils this order directly — the full value is Remont revenue.',
     };
-    return { ...order, billing };
+    // Every in-person collection on this job, so admins can see and confirm partner-reported cash.
+    const cashCollections = await this.prisma.paymentTransaction.findMany({
+      where: { orderId, gateway: 'CASH_COLLECTION' },
+      select: { id: true, amount: true, status: true, collectionMode: true, collectedBy: true, collectedLocation: true, createdAt: true, verifiedAt: true, verifiedBy: true, verificationMethod: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { ...order, billing, cashCollections };
   }
 
   async adminCreateOrder(data: {
@@ -938,18 +944,43 @@ export class AdminService {
     return updated;
   }
 
+  /**
+   * Admin status changes are limited to legitimate operational moves. Completion, payment, refund
+   * and start states can only be reached through their real workflows (partner OTP flow, verified
+   * payments, Refunds) — an override must never create a completion, an invoice, earnings or a
+   * "refunded" state without the money and records behind it. CANCELLED goes through the full
+   * cancellation workflow.
+   */
   async adminUpdateStatus(orderId: string, status: string, note?: string, actorId?: string, actorRole?: UserRole) {
     const validStatuses = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED', 'COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'];
     if (!validStatuses.includes(status)) throw new BadRequestException(`Invalid status: ${status}`);
-    const data: any = { status };
-    if (note) data.adminNotes = note;
-    if (status === 'COMPLETED') data.completedAt = new Date();
-    if (status === 'CANCELLED') { data.cancelledAt = new Date(); if (note) data.cancelReason = note; }
-    if (status === 'REFUNDED') data.paymentStatus = 'REFUNDED';
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (status === 'CANCELLED') return this.adminCancelOrder(orderId, note || 'Cancelled by admin', actorId, actorRole);
+    const ALLOWED: Record<string, string[]> = {
+      VENDOR_EN_ROUTE: ['VENDOR_ASSIGNED'], // partner on the way, app could not update
+      CLOSED: ['COMPLETED', 'INVOICED'],     // final closure of a completed job
+    };
+    const WHY: Record<string, string> = {
+      PENDING_PAYMENT: 'payment state is set only by checkout',
+      CONFIRMED: 'an order is confirmed only by a verified payment or a cash-on-service booking',
+      VENDOR_ASSIGNED: 'use "Assign partner"',
+      STARTED: 'a job starts only with the customer\'s start OTP',
+      IN_PROGRESS: 'set by the partner flow',
+      EXTRA_WORK_ADDED: 'set by the partner flow',
+      COMPLETED: 'a job completes only with the customer\'s completion OTP in the partner flow',
+      INVOICED: 'invoices are issued automatically on completion',
+      REFUNDED: 'refunds are processed in Admin › Refunds',
+    };
+    const allowedFrom = ALLOWED[status];
+    if (!allowedFrom) throw new BadRequestException(`Can't set ${status} here — ${WHY[status] || 'not an admin action'}`);
+    if (!allowedFrom.includes(order.status)) throw new BadRequestException(`Can't move from ${order.status} to ${status}`);
+    if (status === 'VENDOR_EN_ROUTE' && !order.vendorId) throw new BadRequestException('No partner is assigned to this order');
+    const moved = await this.prisma.order.updateMany({ where: { id: orderId, status: order.status }, data: { status: status as any, ...(note ? { adminNotes: note } : {}) } });
+    if (moved.count !== 1) throw new BadRequestException('The order changed meanwhile — reload and try again');
     await writeOrderTimeline(this.prisma, { orderId, status, note, actorId, actorRole });
-    if (status === 'COMPLETED') this.autoGenerateInvoice(orderId).catch(() => {});
-    return updated;
+    if (actorId && actorRole) await logAudit(this.prisma, { actorId, actorRole, action: 'ORDER_STATUS_OVERRIDE', targetType: 'Order', targetId: orderId, metadata: { from: order.status, to: status, note: note || null } });
+    return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
   }
 
   private async autoGenerateInvoice(orderId: string) {
@@ -1149,8 +1180,23 @@ export class AdminService {
     // compare-and-swap on leadCostRefunded (rather than a plain read-then-write) is what
     // actually prevents a double-refund if this races the customer cancel path for the same
     // order — see the race-condition fix comment on OrdersService.cancel().
+    if (!order) throw new NotFoundException('Order not found');
+    if (!isProduct && ['COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'].includes(order.status)) {
+      throw new BadRequestException('A completed, invoiced or closed job cannot be cancelled — use Admin › Refunds for money back');
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const cancelled = await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+      // Wallet taken for a never-paid order goes straight back; money actually received becomes a
+      // refund request for review (this cancellation itself moves no money).
+      const walletReturned = await releaseUnpaidOrderWallet(tx, order, `Order ${order.orderNumber} cancelled by Remont before payment`);
+      const received = order.paymentStatus === 'PAID' || order.paymentStatus === 'PARTIAL' || Number(order.cartPaidAmount || 0) > 0
+        || (!walletReturned && Number(order.walletUsed || 0) > 0);
+      if (received) {
+        const open = await tx.refundRequest.findFirst({ where: { orderId, status: { in: ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED'] } }, select: { id: true } });
+        if (!open) {
+          await tx.refundRequest.create({ data: { orderId, customerId: order.customerId, reason: `Order cancelled by Remont: ${reason}`, evidenceUrls: [], partnerId: order.vendorId || undefined, status: 'REQUESTED' } });
+        }
+      }
       if (order?.vendorId && Number(order.leadCostAmount) > 0) {
         const claimed = await tx.order.updateMany({
           where: { id: orderId, leadCostRefunded: false },
@@ -1168,9 +1214,10 @@ export class AdminService {
   }
 
   async refundOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}`, adminNotes: reason } });
-    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.REFUNDED, note: reason, actorId, actorRole });
-    return updated;
+    // Marking an order "refunded" without moving money or issuing a credit note made the books
+    // wrong. Refunds go through Admin › Refunds (money, credit note, partner recovery, audit).
+    void orderId; void reason; void actorId; void actorRole;
+    throw new BadRequestException('Refunds are processed in Admin › Refunds, which returns the money and issues the credit note');
   }
 
   // ─── Cities ─────────────────────────────────────────────────────────

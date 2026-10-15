@@ -117,9 +117,12 @@ describe('Start OTP closes self-service cancellation (approved rule B)', () => {
 });
 
 describe('Cancellation before arrival — money already received is never lost track of', () => {
-  function withRefundStore(t: any, open: any = null) {
+  function withRefundStore(t: any, open: any = null, walletDebit: any = null) {
     t.prisma.refundRequest = { findFirst: jest.fn(async () => open), create: jest.fn(async ({ data }: any) => ({ id: 'rr-auto', ...data })) };
     t.prisma.refundRequestLog = { create: jest.fn(async () => ({})) };
+    // the ORDER_PAYMENT wallet debit taken at checkout (null = older order: wallet only reserved)
+    t.prisma.walletTransaction = { findFirst: jest.fn(async () => walletDebit), create: jest.fn(async ({ data }: any) => ({ id: 'wt-1', ...data })) };
+    t.prisma.user = { update: jest.fn(async ({ data }: any) => ({ walletBalance: 50 + (data.walletBalance?.increment || 0) })) };
   }
   it('a PAID booking cancelled before arrival records a refund REQUEST for admin review (no money moves)', async () => {
     const t = makeService({ status: 'VENDOR_ASSIGNED', paymentStatus: 'PAID', totalAmount: 1180 });
@@ -128,11 +131,20 @@ describe('Cancellation before arrival — money already received is never lost t
     expect(t.prisma.refundRequest.create).toHaveBeenCalledWith({ data: expect.objectContaining({ orderId: 'order-1', customerId: 'cust-1', status: 'REQUESTED' }) });
     expect(t.order.status).toBe('CANCELLED');
   });
-  it('wallet money counts as received too', async () => {
+  it('wallet money counts as received too (older order whose wallet was only reserved → refund request for review)', async () => {
     const t = makeService({ status: 'CONFIRMED', paymentStatus: 'PENDING', walletUsed: 50 });
     withRefundStore(t);
     await t.svc.cancel('cust-1', 'order-1', 'x');
     expect(t.prisma.refundRequest.create).toHaveBeenCalledTimes(1);
+  });
+  it('wallet actually taken for a never-paid order is returned to the wallet automatically, once — no refund request needed', async () => {
+    const t = makeService({ status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', walletUsed: 50, orderNumber: 'REM-W' });
+    withRefundStore(t, null, { id: 'wt-debit' });
+    await t.svc.cancel('cust-1', 'order-1', 'changed my mind');
+    expect(t.prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'cust-1' }, data: { walletBalance: { increment: 50 } } }));
+    expect(t.prisma.walletTransaction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ type: 'CREDIT', reason: 'REFUND', amount: 50, orderId: 'order-1' }) });
+    expect(t.order.walletReleasedAt).toBeInstanceOf(Date);
+    expect(t.prisma.refundRequest.create).not.toHaveBeenCalled();
   });
   it('an unpaid cash booking creates nothing; an already-open request is not duplicated', async () => {
     const unpaid = makeService({ status: 'CONFIRMED', paymentStatus: 'PENDING', walletUsed: 0 });

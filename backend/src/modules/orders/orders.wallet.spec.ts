@@ -8,21 +8,29 @@ import { OrdersService } from './orders.module';
  * to what OrdersService.complete() did before this change.
  */
 function makeService() {
+  // The order as stored: conditional updates (completion claim, earnings claim) apply to it, so
+  // completion → earnings release sees the same state a real database would.
+  const state: Record<string, any> = {};
   const prisma: any = {
     serviceVendor: { findUnique: jest.fn(), update: jest.fn() },
     order: {
-      findUnique: jest.fn(),
-      findUniqueOrThrow: jest.fn(async () => ({ id: 'order-1', status: 'COMPLETED' })),
-      update: jest.fn(async (args: any) => ({ id: 'order-1', ...args.data })),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUnique: jest.fn(async () => ({ ...state, vendor: { id: 'vendor-1', userId: 'vendor-user-1', staffType: 'PARTNER' } })),
+      findUniqueOrThrow: jest.fn(async () => ({ ...state })),
+      update: jest.fn(async (args: any) => { Object.assign(state, args.data); return { ...state }; }),
+      updateMany: jest.fn(async (args: any) => {
+        const w = args.where || {};
+        if (w.earningsStatus !== undefined && state.earningsStatus !== w.earningsStatus) return { count: 0 };
+        for (const [k, v] of Object.entries(args.data)) if (!(v && typeof v === 'object' && 'increment' in (v as any))) state[k] = v;
+        return { count: 1 };
+      }),
     },
-    $transaction: jest.fn(async (fn: any) => fn({
-      order: prisma.order,
-      serviceVendor: prisma.serviceVendor,
-      partnerLedgerEntry: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
-      partnerHold: { create: jest.fn().mockResolvedValue({}) },
-    })),
+    paymentTransaction: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
+    extraWorkItem: { findMany: jest.fn(async () => []) },
+    partnerLedgerEntry: { count: jest.fn(async () => 0) },
+    $queryRaw: jest.fn(async () => []),
   };
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
+  const setOrder = (o: any) => { for (const k of Object.keys(state)) delete state[k]; Object.assign(state, o); };
   prisma.orderTimeline = { create: jest.fn() };
   prisma.orderOtpLog = { create: jest.fn() };
   const ledger: any = {
@@ -37,13 +45,15 @@ function makeService() {
   // autoGenerateInvoice fires-and-forgets against modules not wired up in this unit test —
   // stub it out so it can't throw an unhandled rejection during the test run.
   (svc as any).autoGenerateInvoice = jest.fn().mockResolvedValue(undefined);
-  return { svc, prisma, ledger };
+  return { svc, prisma, ledger, setOrder, state };
 }
 
 function baseOrder(overrides: Record<string, any> = {}) {
   return {
     id: 'order-1', vendorId: 'vendor-1', customerId: 'cust-1', guestPhone: null, orderNumber: 'ORD-1',
-    status: 'STARTED', endOtp: null, endOtpVerified: false,
+    status: 'STARTED', endOtp: '4321', endOtpVerified: false, endOtpFailedAttempts: 0,
+    // prepaid (a verified cart payment covered this job), so earnings are released on completion
+    totalAmount: 1000, walletUsed: 0, paymentStatus: 'PAID', cartPaidAmount: 1000,
     remontCommission: 100, vendorPayout: 900, leadCostAmount: 0,
     service: { category: null },
     ...overrides,
@@ -52,11 +62,11 @@ function baseOrder(overrides: Record<string, any> = {}) {
 
 describe('OrdersService.complete — Vendor Wallet true-up', () => {
   it('leadCostAmount=0 regresses to the pre-existing behavior: full vendorPayout credited, no COMMISSION debit needed beyond the netted JOB_EARNING', async () => {
-    const { svc, prisma, ledger } = makeService();
+    const { svc, prisma, ledger, setOrder } = makeService();
     prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
-    prisma.order.findUnique.mockResolvedValue(baseOrder());
+    setOrder(baseOrder());
 
-    await svc.complete('vendor-user-1', 'order-1', '', []);
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
 
     // grossAmount = vendorPayout(900) + fullCommission(100) = 1000; remainingCommission = 100 - 0 = 100
     expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'JOB_EARNING', 1000, { orderId: 'order-1' });
@@ -69,12 +79,12 @@ describe('OrdersService.complete — Vendor Wallet true-up', () => {
   });
 
   it('trues up the remaining commission when a Lead Cost was already prepaid at accept time', async () => {
-    const { svc, prisma, ledger } = makeService();
+    const { svc, prisma, ledger, setOrder } = makeService();
     prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
     // Commission 100, Lead Cost 50 already deducted -> only 50 more should be debited here.
-    prisma.order.findUnique.mockResolvedValue(baseOrder({ leadCostAmount: 50 }));
+    setOrder(baseOrder({ leadCostAmount: 50 }));
 
-    await svc.complete('vendor-user-1', 'order-1', '', []);
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
 
     expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'JOB_EARNING', 1000, { orderId: 'order-1' });
     expect(ledger.trueUpCommission).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'order-1', 50);
@@ -85,12 +95,12 @@ describe('OrdersService.complete — Vendor Wallet true-up', () => {
   });
 
   it('creates a Warranty Hold for the configured percentage and defers that portion of pendingPayout', async () => {
-    const { svc, prisma, ledger } = makeService();
+    const { svc, prisma, ledger, setOrder } = makeService();
     ledger.getWarrantyDefaults.mockResolvedValue({ days: 7, percent: 15 });
     prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
-    prisma.order.findUnique.mockResolvedValue(baseOrder());
+    setOrder(baseOrder());
 
-    await svc.complete('vendor-user-1', 'order-1', '', []);
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
 
     // completionCredit = 900; 15% hold = 135; released now = 765
     expect(ledger.postHold).toHaveBeenCalledWith(
@@ -103,18 +113,53 @@ describe('OrdersService.complete — Vendor Wallet true-up', () => {
   });
 
   it('rejects a second concurrent completion attempt instead of double-crediting the vendor', async () => {
-    const { svc, prisma, ledger } = makeService();
+    const { svc, prisma, ledger, setOrder } = makeService();
     prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
-    prisma.order.findUnique.mockResolvedValue(baseOrder());
+    setOrder(baseOrder());
     // Simulates a second request racing in after the first already flipped the status —
     // the conditional updateMany's WHERE no longer matches, so count is 0.
     prisma.order.updateMany.mockResolvedValue({ count: 0 });
 
-    await expect(svc.complete('vendor-user-1', 'order-1', '', [])).rejects.toThrow();
+    await expect(svc.complete('vendor-user-1', 'order-1', '4321', [])).rejects.toThrow();
 
     expect(ledger.postEntry).not.toHaveBeenCalled();
     expect(ledger.trueUpCommission).not.toHaveBeenCalled();
     expect(prisma.serviceVendor.update).not.toHaveBeenCalled();
+  });
+  it('an UNPAID job: completion posts no earnings (DEFERRED, nothing withdrawable); a later verified payment releases them exactly once', async () => {
+    const { svc, prisma, ledger, setOrder, state } = makeService();
+    prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
+    setOrder(baseOrder({ paymentStatus: 'PENDING', cartPaidAmount: null }));
+
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
+    expect(state.earningsStatus).toBe('DEFERRED');
+    expect(ledger.postEntry).not.toHaveBeenCalled();
+    expect(prisma.serviceVendor.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingPayout: expect.anything() }) }));
+
+    // the customer's payment is verified later (e.g. cart payment allocated / balance paid online)
+    state.cartPaidAmount = 1000;
+    expect(await svc.releaseJobEarnings('order-1')).toBe(true);
+    expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'JOB_EARNING', 1000, { orderId: 'order-1' });
+    expect(state.earningsStatus).toBe('POSTED');
+    // a retried release (payment webhook + sweep) never posts twice
+    expect(await svc.releaseJobEarnings('order-1')).toBe(false);
+    expect(ledger.postEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('a wrong completion OTP is rejected and counts as an attempt; nothing is posted', async () => {
+    const { svc, prisma, ledger, setOrder } = makeService();
+    prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
+    setOrder(baseOrder());
+    await expect(svc.complete('vendor-user-1', 'order-1', '0000', [])).rejects.toThrow(/Invalid OTP/);
+    expect(ledger.postEntry).not.toHaveBeenCalled();
+  });
+
+  it('an order with no completion OTP is never completed without one (no silent skip)', async () => {
+    const { svc, prisma, ledger, setOrder } = makeService();
+    prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
+    setOrder(baseOrder({ endOtp: null }));
+    await expect(svc.complete('vendor-user-1', 'order-1', '', [])).rejects.toThrow(/request a new OTP/);
+    expect(ledger.postEntry).not.toHaveBeenCalled();
   });
 });
 

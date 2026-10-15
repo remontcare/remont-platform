@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Query, Body, UseGuards,
+  Module, Injectable, Controller, Get, Post, Query, Body, UseGuards, ForbiddenException,
   BadRequestException, Logger, Headers, Req, OnModuleInit,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
@@ -144,13 +144,36 @@ export class PaymentsService implements OnModuleInit {
       notes: { orderId, amcSubscriptionId, userId },
     });
     const tx = await this.prisma.paymentTransaction.create({
-      data: { orderId, amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
+      data: { orderId, masterOrderId: await this.masterOrderIdFor(orderId), amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
     });
     return { gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id, amount, currency: 'INR', keyId: this.razorpayKeyId, txId: tx.id };
   }
 
   /** Legacy alias used by AMC and retry-payment flows */
+  /** A cart (MasterOrder) payment also records masterOrderId, so every reader can find it. */
+  private async masterOrderIdFor(orderId?: string | null): Promise<string | undefined> {
+    if (!orderId) return undefined;
+    const mo = await this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { id: true } });
+    return mo?.id;
+  }
+
   async createOrder(userId: string, amount: number, orderId?: string, amcSubscriptionId?: string) {
+    // Ownership: a client-created payment may only be attached to the caller's own order/cart/AMC
+    // (top-up markers are the caller's own wallet by definition).
+    if (orderId && orderId !== 'WALLET_TOPUP' && orderId !== VENDOR_WALLET_TOPUP_MARKER) {
+      const [o, mo] = await Promise.all([
+        this.prisma.order.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+        this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+      ]);
+      const owner = o?.customerId ?? mo?.customerId;
+      if (!owner) throw new BadRequestException('Unknown order');
+      if (owner !== userId) throw new ForbiddenException();
+    }
+    if (amcSubscriptionId) {
+      const sub = await this.prisma.amcSubscription.findUnique({ where: { id: amcSubscriptionId }, select: { userId: true } });
+      if (!sub) throw new BadRequestException('Unknown subscription');
+      if (sub.userId !== userId) throw new ForbiddenException();
+    }
     return this.createRazorpayOrder(userId, amount, orderId, amcSubscriptionId);
   }
 
@@ -518,41 +541,11 @@ export class PaymentsService implements OnModuleInit {
           where: { id: tx.id },
           data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature, ...gatewayFeeFromPayment(payment) },
         });
-        // tx.orderId is a loose, non-FK string — for a wallet top-up it's the literal
-        // 'WALLET_TOPUP' marker (no Order row exists), and for a master-order checkout
-        // it's actually a MasterOrder.id, not an Order.id. Neither has a corresponding
-        // Order row, so swallow the not-found instead of failing the whole webhook;
-        // wallet credit and master-order confirmation both already happen via the
-        // client-driven confirm-payment HMAC re-verify path, not this webhook.
-        if (tx.orderId) {
-          try {
-            // Never downgrade an order that has already progressed past PENDING_PAYMENT
-            // (e.g. a COD order converting to Online after a vendor is already assigned) —
-            // only flip status to CONFIRMED when it's still awaiting its first confirmation.
-            const existing = await this.prisma.order.findUnique({ where: { id: tx.orderId } });
-            if (existing && existing.paymentStatus !== 'PAID') {
-              // PAYMENT SECURITY — the webhook is Razorpay's own guaranteed-delivery,
-              // HMAC-verified channel, so `payment.amount` here is authoritative (never the
-              // client, never our own PaymentTransaction.amount). A captured payment that
-              // doesn't cover the order's real total must never mark it PAID/CONFIRMED just
-              // because *some* linked transaction captured — this is the same reconciliation
-              // OrdersService.confirmPayment() now performs, applied to the webhook trigger too.
-              const capturedAmount = Number(payment.amount) / 100;
-              if (capturedAmount + 0.01 >= Number(existing.totalAmount)) {
-                await this.prisma.order.update({
-                  where: { id: tx.orderId },
-                  data: {
-                    paymentId: payment.id, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
-                    status: existing.status === 'PENDING_PAYMENT' ? 'CONFIRMED' : existing.status,
-                  },
-                });
-              } else {
-                this.logger.warn(`Webhook: captured amount ₹${capturedAmount} is less than order ${tx.orderId}'s total ₹${existing.totalAmount} — not marking paid`);
-              }
-            }
-          } catch (e) {
-            this.logger.warn(`Webhook: no single Order row for orderId=${tx.orderId} (${e.message})`);
-          }
+        // Order / cart follow-up (confirm + dispatch for a first payment, balance + earnings for a
+        // later one) is done by OrdersService / MasterOrdersService, which listen for this event and
+        // apply the same verified, once-only logic as the browser callback.
+        if (tx.orderId && !tx.isWalletTopup && tx.orderId !== VENDOR_WALLET_TOPUP_MARKER) {
+          this.events.emit('payment.order.captured', { paymentTransactionId: tx.id, orderId: tx.orderId, gatewayPaymentId: payment.id });
         }
         if (tx.amcSubscriptionId) {
           const sub = await this.prisma.amcSubscription.findUnique({ where: { id: tx.amcSubscriptionId }, include: { plan: true } });

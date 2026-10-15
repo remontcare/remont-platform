@@ -1989,6 +1989,23 @@ model Order {
   // pattern as the existing login-OTP User.otpLastSentAt below.
   startOtpLastSentAt DateTime?
   endOtpLastSentAt   DateTime?
+  // Wrong-OTP counters (start / completion / extra-work) — locked after OTP_MAX_FAILED_ATTEMPTS
+  // until a new code is sent to the customer, which resets them.
+  startOtpFailedAttempts Int @default(0)
+  endOtpFailedAttempts   Int @default(0)
+  extraOtpFailedAttempts Int @default(0)
+  // A re-sent OTP is valid only until these (the code generated at booking has no expiry).
+  startOtpExpiresAt  DateTime?
+  endOtpExpiresAt    DateTime?
+  // Cart (MasterOrder) online payment allocated to this child order when that payment was
+  // verified — the gateway row lives on the master order, so this is this job's prepaid share.
+  cartPaidAmount     Decimal?  @db.Decimal(10, 2)
+  // Partner earnings for this job: DEFERRED at completion until the customer's payment is
+  // verified, then POSTED once (JOB_EARNING/COMMISSION/HOLD). Null = legacy/not applicable.
+  earningsStatus     String?
+  earningsPostedAt   DateTime?
+  // Wallet amount returned to the customer when an unpaid order was cancelled (once).
+  walletReleasedAt   DateTime?
   startedAt          DateTime?
   completedAt        DateTime?
   cancelledAt        DateTime?
@@ -2599,6 +2616,11 @@ model PaymentTransaction {
   // with input GST. Null until known.
   gatewayFee      Decimal? @db.Decimal(10, 2)
   gatewayFeeTax   Decimal? @db.Decimal(10, 2)
+  // Cash a partner reports collecting stays PENDING until confirmed — by the customer's completion
+  // OTP, the customer themselves, or an admin. Who/when confirmed it:
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  verificationMethod String? // COMPLETION_OTP | CUSTOMER | ADMIN
 
   @@index([orderId])
   @@index([masterOrderId])

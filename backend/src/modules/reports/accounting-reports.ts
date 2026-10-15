@@ -67,7 +67,8 @@ export class AccountingReportsService {
   async testOrderIds(orderIds: string[], masterIds: string[] = []): Promise<Set<string>> {
     if (!orderIds.length) return new Set();
     const pays = await this.prisma.paymentTransaction.findMany({
-      where: { status: 'PAID', isWalletTopup: false, refundRequestId: null, OR: [{ orderId: { in: orderIds } }, ...(masterIds.length ? [{ masterOrderId: { in: masterIds } }] : [])] },
+      // cart payments are stored with orderId = MasterOrder.id (masterOrderId set on newer rows)
+      where: { status: 'PAID', isWalletTopup: false, refundRequestId: null, OR: [{ orderId: { in: orderIds } }, ...(masterIds.length ? [{ masterOrderId: { in: masterIds } }, { orderId: { in: masterIds } }] : [])] },
       select: { orderId: true, masterOrderId: true, gateway: true },
     });
     const real = new Set<string>(); const test = new Set<string>();
@@ -356,7 +357,7 @@ export class AccountingReportsService {
     const masterIds = [...new Set(invoices.map((i) => i.order.masterOrderId).filter(Boolean))] as string[];
     const test = await this.testOrderIds(orderIds, masterIds);
     const pays = orderIds.length ? await this.prisma.paymentTransaction.findMany({
-      where: { status: 'PAID', isWalletTopup: false, refundRequestId: null, gateway: { notIn: TEST_GATEWAYS }, OR: [{ orderId: { in: orderIds } }, ...(masterIds.length ? [{ masterOrderId: { in: masterIds } }] : [])] },
+      where: { status: 'PAID', isWalletTopup: false, refundRequestId: null, gateway: { notIn: TEST_GATEWAYS }, OR: [{ orderId: { in: orderIds } }, ...(masterIds.length ? [{ masterOrderId: { in: masterIds } }, { orderId: { in: masterIds } }] : [])] },
       select: { orderId: true, masterOrderId: true, amount: true, gatewayFee: true },
     }) : [];
     const siblings = masterIds.length ? await this.prisma.order.findMany({ where: { masterOrderId: { in: masterIds } }, select: { id: true, masterOrderId: true, totalAmount: true } }) : [];
@@ -373,7 +374,7 @@ export class AccountingReportsService {
       for (const p of pays) {
         let share = 0;
         if (p.orderId === o.id) share = 1;
-        else if (o.masterOrderId && p.masterOrderId === o.masterOrderId) share = n(o.totalAmount) / (masterTotal.get(o.masterOrderId) || 1);
+        else if (o.masterOrderId && (p.masterOrderId === o.masterOrderId || p.orderId === o.masterOrderId)) share = n(o.totalAmount) / (masterTotal.get(o.masterOrderId) || 1);
         if (!share) continue;
         if (p.gatewayFee == null) feeMissing = true; else gatewayFee += n(p.gatewayFee) * share;
       }
