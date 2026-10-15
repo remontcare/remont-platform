@@ -141,6 +141,7 @@
       <div class="detail-box"><label>Routing</label><div class="val" id="detail-routing">—</div></div>
       <div class="detail-box"><label>Commission</label><div class="val" id="detail-commission">—</div></div>
     </div>
+    <div id="detail-cash" style="margin-bottom:14px"></div>
 
     <!-- Vendor Assignment — Service Partners only; a product-only order has no service to
          assign a Service Partner to, so this whole section is hidden for it (see openDetail). -->
@@ -357,6 +358,32 @@ function load() {
 
 // ── ORDER DETAIL ──────────────────────────────────────────────────────
 
+// Cash/UPI/card a partner reported collecting stays PENDING until confirmed (by the customer's
+// completion OTP, the customer, or here by an admin with written evidence).
+function renderCashCollections(o) {
+  var el = document.getElementById('detail-cash');
+  var rows = o.cashCollections || [];
+  if (!rows.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase">In-person collections</div>' +
+    rows.map(function(c) {
+      var pending = c.status === 'PENDING';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid ' + (pending ? '#fed7aa' : '#e5e7eb') + ';border-radius:8px;margin-bottom:6px;background:' + (pending ? '#fff7ed' : '#fff') + '">' +
+        '<div style="font-size:13px"><b>' + fmtCur(c.amount) + '</b> · ' + escape(c.collectionMode || 'CASH') + ' · ' + fmtDateShort(c.createdAt) +
+          '<br><small style="color:#6b7280">' + (pending ? 'Reported by partner — awaiting confirmation' : 'Confirmed (' + escape(c.verificationMethod || 'legacy') + ')' + (c.verifiedAt ? ' ' + fmtDateShort(c.verifiedAt) : '')) + '</small></div>' +
+        (pending ? '<button class="btn btn-xs btn-primary" onclick="confirmCash(\'' + o.id + '\',\'' + c.id + '\')">Confirm cash received</button>' : badge(c.status, c.status === 'PAID' ? 'green' : 'gray')) +
+      '</div>';
+    }).join('');
+}
+function confirmCash(orderId, paymentId) {
+  var evidence = prompt('How was this cash confirmed? (e.g. "Called customer 15 Oct 10:30, confirmed ₹354 paid in cash") — recorded in the audit log:');
+  if (evidence === null) return;
+  if (evidence.trim().length < 10) { toast('Please describe how it was confirmed (at least 10 characters)', 'error'); return; }
+  api('POST', '/orders/' + orderId + '/cash-collections/' + paymentId + '/confirm', { evidence: evidence.trim() }).then(function() {
+    toast('Cash confirmed — payment and partner ledger updated', 'success');
+    openDetail(orderId);
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
 function openDetail(orderId) {
   document.getElementById('detail-overlay').style.display='flex';
   document.getElementById('detail-order-num').textContent='Loading…';
@@ -457,6 +484,8 @@ function openDetail(orderId) {
     // Payment
     document.getElementById('detail-payment').innerHTML = badge(o.paymentStatus||'PENDING',o.paymentStatus==='PAID'?'green':'yellow')+
       (o.couponDiscount>0?' <small>-'+fmtCur(o.couponDiscount)+' coupon</small>':'');
+
+    renderCashCollections(o);
 
     // Admin notes
     document.getElementById('detail-notes').value = o.adminNotes||'';

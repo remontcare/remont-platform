@@ -1251,6 +1251,7 @@ function renderJfStep(){
       ${extraTotal ? `<div class="cc-detail-row"><span class="cdl">Extra Work (pending approval)</span><span class="cdr">${fmtMoney(extraTotal)}</span></div>` : ''}
       <div class="cc-detail-row"><span class="cdl">Order Total</span><span class="cdr">${fmtMoney(total)}</span></div>
       ${alreadyPaid ? `<div class="cc-detail-row" style="color:#16a34a"><span class="cdl">Already Paid</span><span class="cdr">-${fmtMoney(alreadyPaid)}</span></div>` : ''}
+      ${bal && Number(bal.pendingVerificationAmount) > 0 ? `<div class="cc-detail-row" style="color:#b45309"><span class="cdl">Reported, awaiting customer confirmation</span><span class="cdr">-${fmtMoney(Number(bal.pendingVerificationAmount))}</span></div>` : ''}
       <div class="cc-detail-row" style="font-size:15px"><span class="cdl">Balance Due</span><span class="cdr" style="color:var(--sienna)">${fmtMoney(balanceDue)}</span></div></div>
       ${balanceDue<=0 ? '<div class="demo-note">Already fully paid — nothing to collect. Just verify the completion OTP below.</div>' : `
       <div class="pay-option" id="pay-cod" onclick="selectPay('cod')"><div class="po-icon">💵</div><div><div class="po-name">Cash / UPI / Card in person</div><div class="po-sub">Confirm payment received on-site</div></div></div>
@@ -1454,11 +1455,14 @@ function confirmPayment(){
     if(code!=='1234'){ alert('Incorrect OTP. Try 1234 for this demo.'); btn.disabled=false; btn.textContent='Confirm & Complete Job →'; return; }
     jfGoto(9); return;
   }
-  apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify({otp:code, photosAfter: jfState.photosAfter})})
+  var dueNow = jfState.balance ? Number(jfState.balance.balanceDue) : 0;
+  var completeBody = {otp:code, photosAfter: jfState.photosAfter};
+  // Cash taken now is recorded WITH the completion: the customer's completion OTP confirms it.
+  if (dueNow > 0 && jfState.payMethod === 'cod') completeBody.collection = { mode: 'CASH' };
+  apiFetch('/orders/'+jfState.orderId+'/complete', {method:'POST', body: JSON.stringify(completeBody)})
     .then(function(order){
       jfState.completedOrder=order;
-      var balanceDue = jfState.balance ? Number(jfState.balance.balanceDue) : 0;
-      if (balanceDue <= 0) { jfGoto(9); return; }
+      if (dueNow <= 0 || jfState.payMethod === 'cod') { jfGoto(9); return; }
       return jfCollectBalancePayment(btn);
     })
     .catch(function(e){

@@ -9343,7 +9343,9 @@ window.RemontMedia = (function () {
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
 
     try {
+      payload.idempotencyKey = (window._bmIdemKey = window._bmIdemKey || _newRequestKey());
       var res = await bmBookingRequest(payload);
+      window._bmIdemKey = null; // booked — the next booking is a new request
       var r = res && res.data ? res.data : res;
 
       if (r.requiresPayment) {
@@ -10729,6 +10731,10 @@ var _coCoupon = null;      // { code, discountAmount } once applied
 var _coWalletBalance = 0;  // logged-in customer's wallet balance, fetched on open
 var _coBundleDiscountPercent = 10; // admin-configurable (SiteSetting 'bundle_discount_percent'), refetched on every modal open — server-side checkout() is always the source of truth for the actual charged amount, this is a preview only
 
+function _newRequestKey() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}
 function openCheckoutModal() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showToast('Cart is empty', 'error'); return; }
@@ -11410,16 +11416,25 @@ function submitCheckoutOrder() {
     gstin:           gstin || undefined,
     gstBusinessName: gstBusinessName || undefined,
     paymentMethod:   paymentMethod,
-    crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })()
+    crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })(),
+    // Same key for every retry of THIS checkout attempt — the server then returns the order it
+    // already created instead of booking twice (double click, flaky network).
+    idempotencyKey:  (window._coIdemKey = window._coIdemKey || _newRequestKey())
   };
 
+  // The wallet can only be spent by its logged-in owner: the server takes the account from this
+  // token, never from the name/phone typed above. Without wallet use the checkout stays a guest one.
+  var coHeaders = { 'Content-Type': 'application/json' };
+  var coToken = localStorage.getItem('remont_token');
+  if (walletAmount && coToken) coHeaders['Authorization'] = 'Bearer ' + coToken;
   fetch((API_BASE || '') + '/api/v1/master-orders/public/checkout', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: coHeaders,
     body: JSON.stringify(payload)
   })
   .then(function(r) {
     return r.json().then(function(d) {
+      if (r.status === 401 && walletAmount) throw new Error('Please log in again to pay with your Remont wallet');
       if (!r.ok) throw new Error(d.message || 'Order placement failed');
       return d;
     });
@@ -11429,6 +11444,7 @@ function submitCheckoutOrder() {
     var orderNumber = d.masterOrderNumber;
     var totalAmount = Number(d.totalAmount || 0);
     _checkoutOrderId = d.masterOrderId;
+    window._coIdemKey = null; // next checkout is a new request
     try { localStorage.removeItem('remont_crm_ref'); } catch (e) {}
     _checkoutOrderNumber = orderNumber;
     _checkoutTotalAmount = totalAmount;
@@ -12119,6 +12135,12 @@ function openPaymentDetailModal(orderId) {
   document.getElementById('pd-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>';
   loadPaymentDetail();
 }
+function pdConfirmCash(paymentId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+  apiPost('/api/v1/orders/' + _pdOrderId + '/cash-collections/' + paymentId + '/confirm', {})
+    .then(function() { showToast('Thank you — payment confirmed', 'success'); loadPaymentDetail(); })
+    .catch(function() { showToast('Could not confirm the payment. Please try again.', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Yes, I paid'; } });
+}
 function closePaymentDetailModal() {
   document.getElementById('payment-detail-modal').style.display = 'none';
   document.body.style.overflow = '';
@@ -12152,6 +12174,12 @@ function renderPaymentDetail(bal, txns) {
   }
 
   html += '<div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Transaction History</div>';
+  var pendingCash = (txns || []).filter(function(t) { return t.status === 'PENDING' && t.gateway === 'CASH_COLLECTION'; });
+  pendingCash.forEach(function(t) {
+    html += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px;margin-bottom:12px;font-size:13px">' +
+      'Your service partner reported collecting <b>₹' + Number(t.amount).toLocaleString('en-IN') + '</b> in person. Please confirm only if you paid it.' +
+      '<button onclick="pdConfirmCash(\'' + t.id + '\', this)" style="display:block;width:100%;margin-top:8px;padding:10px;background:#16a34a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Yes, I paid ₹' + Number(t.amount).toLocaleString('en-IN') + '</button></div>';
+  });
   if (!txns.length) {
     html += '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px 0">No transactions yet</div>';
   } else {
