@@ -163,6 +163,7 @@ enum LedgerEntryType {
   HOLD // Vendor Wallet: debit posted when money moves into ANY PartnerHold (warranty/admin-manual)
   HOLD_RELEASE // Vendor Wallet: credit posted when a PartnerHold is released (auto or admin)
   TOP_UP // Vendor Wallet: partner-initiated Razorpay top-up, credited only after server-side payment verification — see WithdrawalService.confirmVendorTopup()
+  CASH_DEPOSIT // In-house technician: verified deposit with Remont of cash collected on a job (clears the COD_COLLECTION debit for that order)
   COD_COLLECTION // Vendor Wallet: debit posted when a vendor collects cash/UPI/card directly from a customer on Remont's behalf — see OrdersService.collectBalance()/collectCod(). The job's own JOB_EARNING credit already reflects the vendor's rightful payout; this debit nets out the cash they're physically holding so pendingPayout never double-counts money the vendor already has in hand.
 }
 
@@ -876,6 +877,11 @@ model ServiceCategory {
   // withheld for any category still null here, since s.52(1)'s proviso means TCS and
   // s.9(5) liability are mutually exclusive for the same supply.
   gstSection95Status String? // 'APPLICABLE' | 'NOT_APPLICABLE' | null = CA_REVIEW_REQUIRED
+  // Who supplies this category's services, fixed at checkout (the customer pays before anyone is
+  // assigned): IN_HOUSE = Remont's salaried technicians, one Remont invoice (service + GST);
+  // PARTNER_MARKETPLACE = external partners only: partner's share + Remont platform fee + GST on
+  // the fee (+ the partner's GST if registered, or Remont's under 9(5)). Dispatch follows it.
+  serviceModel       String  @default("PARTNER_MARKETPLACE")
 
   services        Service[]
   subCategories   SubCategory[]
@@ -2003,6 +2009,13 @@ model Order {
   // Partner earnings for this job: DEFERRED at completion until the customer's payment is
   // verified, then POSTED once (JOB_EARNING/COMMISSION/HOLD). Null = legacy/not applicable.
   earningsStatus     String?
+  // Pricing model frozen at checkout from the category: 'IN_HOUSE' | 'MARKETPLACE'. Null = legacy
+  // pricing (GST on the full service, commission inside the price) — older orders keep it.
+  serviceModel       String?
+  // MARKETPLACE only: GST on Remont's platform fee, and GST on the partner's share (the partner's
+  // own GST when registered, Remont's under 9(5)). gstAmount = their sum.
+  platformFeeGst     Decimal   @default(0) @db.Decimal(10, 2)
+  partnerServiceGst  Decimal   @default(0) @db.Decimal(10, 2)
   earningsPostedAt   DateTime?
   // Wallet amount returned to the customer when an unpaid order was cancelled (once).
   walletReleasedAt   DateTime?
@@ -3107,6 +3120,7 @@ model PartnerLedgerEntry {
   withdrawalRequestId String?
   notes               String?
   createdBy           String? // admin/agency-owner userId, when manually posted
+  reference           String? // external reference, e.g. a cash-deposit receipt number (unique per technician, enforced in code)
   createdAt           DateTime        @default(now())
 
   vendor ServiceVendor @relation(fields: [vendorId], references: [id])

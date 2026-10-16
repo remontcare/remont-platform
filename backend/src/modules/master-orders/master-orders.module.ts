@@ -12,7 +12,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules } from '../../common';
+import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, marketplaceServiceBreakdown, type OrderServiceModel } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -247,6 +247,14 @@ interface PricedGroup {
   serviceGstRatePercent?: number;
   minimumChargeAdjustment?: number;
   minimumChargeRuleId?: string | null;
+  // SERVICE groups — pricing model from the category (null = legacy), the summed commission, and
+  // (once discounts are allocated) this booking's own GST split.
+  serviceModel?: OrderServiceModel | null;
+  section95Status?: string | null;
+  commission?: number;
+  serviceGst?: number;
+  platformFeeGst?: number;
+  partnerServiceGst?: number;
 }
 
 // ─── Service ───
@@ -335,7 +343,7 @@ export class MasterOrdersService {
     const serviceIds = Array.from(new Set(dto.items.filter((i) => i.type === 'SERVICE').map((i) => i.serviceId).filter(Boolean))) as string[];
     const productIds = Array.from(new Set(dto.items.filter((i) => i.type === 'PRODUCT').map((i) => i.productId).filter(Boolean))) as string[];
     const [services, products] = await Promise.all([
-      this.prisma.service.findMany({ where: { id: { in: serviceIds } } }),
+      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true } } } }),
       this.prisma.product.findMany({ where: { id: { in: productIds } } }),
     ]);
     const serviceMap = new Map(services.map((s) => [s.id, s]));
@@ -417,6 +425,9 @@ export class MasterOrdersService {
           type: 'SERVICE', amount: topUp.adjustment > 0 ? Math.round((amount + topUp.adjustment) * 100) / 100 : amount,
           categoryId: g.categoryId, items,
           serviceGstRatePercent: effRate,
+          serviceModel: orderServiceModelFor((serviceMap.get(items[0].serviceId!) as any)?.category?.serviceModel),
+          section95Status: (serviceMap.get(items[0].serviceId!) as any)?.category?.gstSection95Status ?? null,
+          commission: Math.round(items.reduce((sum, it) => sum + (commissionByService.get(it.serviceId!)?.commissionAmount || 0), 0) * 100) / 100,
           minimumChargeAdjustment: topUp.adjustment,
           minimumChargeRuleId: topUp.adjustment > 0 ? minimum.ruleId : null,
         });
@@ -605,7 +616,30 @@ export class MasterOrdersService {
       : svcRateList.every((r) => r === svcRateList[0]) || svcRateBase <= 0
         ? svcRateList[0]
         : svcGroupsForRate.reduce((sum, g, k) => sum + g.amount * svcRateList[k], 0) / svcRateBase;
-    const serviceGstAmount = Math.round(discountedServiceAmount * (effectiveServiceGstRate / 100) * 100) / 100;
+    let serviceGstAmount = Math.round(discountedServiceAmount * (effectiveServiceGstRate / 100) * 100) / 100;
+    // Service models (ServiceCategory.serviceModel): GST per booking. IN_HOUSE = Remont's own supply,
+    // GST on the discounted service. MARKETPLACE = GST on Remont's platform fee, plus GST on the
+    // partner's share only under 9(5) here (a registered partner's GST is added once they accept).
+    // Same discount allocation checkout() uses for each child order.
+    if (svcGroupsForRate.some((g) => g.serviceModel)) {
+      const discounts = allocateAcrossGroups(pricedGroups.map((g) => g.amount), subtotal, membershipDiscount + couponDiscount);
+      const svcIdx = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
+      const bundles = bundleDiscount > 0 ? allocateAcrossGroups(svcIdx.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount) : [];
+      const feeRate = (await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE)).rateFor(null, null);
+      serviceGstAmount = 0;
+      svcIdx.forEach((i, k) => {
+        const g = pricedGroups[i];
+        const discount = (discounts[i] || 0) + (bundles[k] || 0);
+        const rate = g.serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE;
+        if (g.serviceModel === 'MARKETPLACE') {
+          const b = marketplaceServiceBreakdown({ serviceAmount: g.amount, commission: g.commission || 0, discount, serviceRatePercent: rate, feeRatePercent: feeRate, partnerGstApplies: g.section95Status === 'APPLICABLE' });
+          g.serviceGst = b.gstAmount; g.platformFeeGst = b.platformFeeGst; g.partnerServiceGst = b.partnerServiceGst;
+        } else {
+          g.serviceGst = Math.round(Math.max(0, g.amount - discount) * (rate / 100) * 100) / 100;
+        }
+        serviceGstAmount = Math.round((serviceGstAmount + g.serviceGst) * 100) / 100;
+      });
+    }
     const productGstOnTop = pricedGroups.filter((g) => g.type === 'PRODUCT').reduce((s, g) => s + (g.productGstOnTop || 0), 0);
     const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
     const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount + deliveryCharge);
@@ -780,6 +814,7 @@ export class MasterOrdersService {
     const serviceGstShares = allocateAcrossGroups(gstWeights, gstWeights.reduce((sum, w) => sum + w, 0), serviceGstAmount);
     const groupGst = pricedGroups.map((g, i) => {
       if (g.type === 'PRODUCT') return g.productGstOnTop || 0;
+      if (g.serviceGst != null) return g.serviceGst; // service models: priced per booking in priceCart()
       return serviceGstShares[serviceGroupIndices.indexOf(i)] || 0;
     });
 
@@ -916,6 +951,7 @@ export class MasterOrdersService {
             bundleDispatchDeferred: deferDispatchForBundle,
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
+            ...(g.type === 'SERVICE' && g.serviceModel ? { serviceModel: g.serviceModel, platformFeeGst: g.platformFeeGst || 0, partnerServiceGst: g.partnerServiceGst || 0 } : {}),
             minimumChargeAdjustment: g.type === 'SERVICE' ? (g.minimumChargeAdjustment || 0) : 0,
             minimumChargeRuleId: g.type === 'SERVICE' ? (g.minimumChargeRuleId || undefined) : undefined,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,

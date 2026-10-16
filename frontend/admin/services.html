@@ -280,6 +280,12 @@
         <div class="form-group" style="flex:1"><label class="form-label">Warranty Hold %</label><input id="cat-warranty-pct" class="form-control" type="number" min="0" max="100" step="0.1" placeholder="Blank = platform default"></div>
       </div>
       <small style="color:#9ca3af;font-size:11px">Vendor Wallet: % of a completed job's payout in this category held back for this many days before auto-release. Leave both blank to use the platform-wide default from Settings → Vendor Wallet.</small>
+      <div class="form-group" style="margin-top:10px"><label class="form-label">Who provides these services</label>
+        <select id="cat-model" class="form-control">
+          <option value="PARTNER_MARKETPLACE">External partners (marketplace)</option>
+          <option value="IN_HOUSE">Remont in-house technicians</option>
+        </select>
+        <small style="color:#9ca3af;font-size:11px">Fixes the price at checkout and who gets the job. <b>Partners:</b> customer pays the partner's share + Remont platform fee + GST on the fee (+ the partner's GST if they are GST-registered); jobs go only to external partners. <b>In-house:</b> one Remont invoice for the service + GST; jobs go only to Remont's technicians (none online → admin queue). Applies to new bookings only.</small></div>
       <div class="form-group" style="margin-top:10px"><label class="form-label">GST Section 9(5)</label>
         <select id="cat-sec95" class="form-control">
           <option value="">CA review required — not treated as 9(5)</option>
@@ -557,6 +563,7 @@ function loadCategories() {
         '<td>' + c.sortOrder + '</td>' +
         '<td>' + badge(c.isActive?'Active':'Inactive',c.isActive?'green':'gray') + (c.isPremium?' '+badge('Premium','purple'):'') +
           // Section 9(5) is opt-in per category: anything not CA-approved is flagged for review
+          ' ' + (c.serviceModel === 'IN_HOUSE' ? badge('In-house','blue') : badge('Partners','purple')) +
           ' ' + (c.gstSection95Status === 'APPLICABLE' ? badge('9(5) applicable','green') : c.gstSection95Status === 'NOT_APPLICABLE' ? badge('9(5) not applicable','gray') : badge('9(5): CA review','yellow')) + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick=\'openCatModal(' + escape(JSON.stringify(c)) + ')\'>Edit</button>' +
@@ -588,6 +595,7 @@ function openCatModal(cat) {
   document.getElementById('cat-active').checked = cat ? cat.isActive : true;
   document.getElementById('cat-warranty-days').value = (cat && cat.warrantyDays != null) ? cat.warrantyDays : '';
   document.getElementById('cat-sec95').value = (cat && cat.gstSection95Status) || '';
+  document.getElementById('cat-model').value = (cat && cat.serviceModel) || 'PARTNER_MARKETPLACE';
   document.getElementById('cat-warranty-pct').value = (cat && cat.warrantyHoldPercent != null) ? cat.warrantyHoldPercent : '';
   document.getElementById('cat-slug').value = cat ? (cat.slug||'') : '';
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
@@ -622,6 +630,7 @@ function saveCategory() {
   var warrantyPctVal = document.getElementById('cat-warranty-pct').value.trim();
   data.warrantyDays = warrantyDaysVal === '' ? null : parseInt(warrantyDaysVal);
   data.gstSection95Status = document.getElementById('cat-sec95').value || null;
+  data.serviceModel = document.getElementById('cat-model').value || 'PARTNER_MARKETPLACE';
   data.warrantyHoldPercent = warrantyPctVal === '' ? null : parseFloat(warrantyPctVal);
   if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
   var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);

@@ -9,7 +9,7 @@ import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorS
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, ARRIVAL_RESET_DATA } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, ARRIVAL_RESET_DATA, staffAllowedForModel, recalculateMarketplaceOrder } from '../../common';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -252,6 +252,8 @@ export class ServiceVendorsService {
     // any order by category, regardless of city/GPS.
     const skill = rawSkill ? normalizeSkillKey(rawSkill) : null;
     if (!skill || !vendor.skills.includes(skill)) return false;
+    // In-house jobs only for Remont's technicians, marketplace jobs only for external partners.
+    if (!staffAllowedForModel(order.serviceModel, vendor.staffType)) return false;
     // Shared with DispatchService's own fallback and AdminService.listActiveVendors (manual
     // assignment) — see isVendorLocationEligible's own comment for why this must be one
     // function instead of three independently-drifting copies.
@@ -449,6 +451,8 @@ export class ServiceVendorsService {
         await this.ledger.postLeadCost(tx, v.id, orderId, leadCostAmount);
         await tx.serviceVendor.update({ where: { id: v.id }, data: { pendingPayout: { decrement: leadCostAmount } } });
       }
+      // A registered partner's GST on their share becomes payable now (marketplace only).
+      await recalculateMarketplaceOrder(tx, orderId);
     });
     const updated = await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId },
@@ -472,11 +476,13 @@ export class ServiceVendorsService {
       throw new BadRequestException('Cannot reject job in its current state');
     }
 
-    return this.prisma.order.update({
+    const released = await this.prisma.order.update({
       where: { id: orderId },
       // The next partner must record their own arrival — never inherit this partner's.
       data: { vendorId: null, status: 'CONFIRMED', ...ARRIVAL_RESET_DATA },
     });
+    // No partner any more: drop a registered partner's GST until the next one accepts.
+    return (await recalculateMarketplaceOrder(this.prisma, orderId)) ? this.prisma.order.findUniqueOrThrow({ where: { id: orderId } }) : released;
   }
 
   // NOTE: job status transitions (en-route/verify-otp/complete) and extra-work items are

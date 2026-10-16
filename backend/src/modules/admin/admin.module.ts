@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, staffAllowedForModel, recalculateMarketplaceOrder, serviceBookingGst } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -65,6 +65,13 @@ export class UpdateProductVendorDto {
 }
 
 const COMMISSION_RULE_TYPES = ['COMMISSION', 'MINIMUM_CHARGE', 'CANCELLATION_CHARGE'] as const;
+
+/** ServiceCategory.serviceModel: who supplies the category's services (fixes checkout pricing). */
+function assertServiceModel(data: any) {
+  if (data?.serviceModel !== undefined && !['IN_HOUSE', 'PARTNER_MARKETPLACE'].includes(data.serviceModel)) {
+    throw new BadRequestException('serviceModel must be IN_HOUSE or PARTNER_MARKETPLACE');
+  }
+}
 
 @Injectable()
 export class AdminService {
@@ -858,7 +865,7 @@ export class AdminService {
     guestName: string; guestPhone: string; guestEmail?: string;
     fullAddress: string; notes?: string; channel?: string; leadId?: string;
   }) {
-    const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId } });
+    const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId }, include: { category: { select: { serviceModel: true, gstSection95Status: true } } } });
     if (!svc) throw new NotFoundException('Service not found');
     const city = await this.prisma.city.findUnique({ where: { id: data.cityId } });
     if (!city) throw new NotFoundException('City not found');
@@ -874,7 +881,8 @@ export class AdminService {
     const priced = await priceServiceBooking(this.prisma, svc, city.id, cityPrice !== null ? cityPrice : Number(svc.basePrice));
     const serviceAmount = priced.serviceAmount;
     const commissionResult = priced.commissionResult;
-    const gstAmount = Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
+    const svcGst = await serviceBookingGst(this.prisma, (svc as any).category, { serviceAmount, commission: commissionResult.commissionAmount, serviceRatePercent: priced.gstRatePercent });
+    const gstAmount = svcGst.gstAmount;
 
     const [h, m] = data.slotTime.split(':').map(Number);
     const slotStart = new Date(data.slotDate); slotStart.setHours(h, m || 0, 0, 0);
@@ -898,6 +906,7 @@ export class AdminService {
         couponDiscount: 0, membershipDiscount: 0, walletUsed: 0,
         gstAmount, totalAmount: serviceAmount + gstAmount,
         remontCommission: commissionResult.commissionAmount,
+        ...(svcGst.serviceModel ? { serviceModel: svcGst.serviceModel, platformFeeGst: svcGst.platformFeeGst, partnerServiceGst: svcGst.partnerServiceGst } : {}),
         minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
         vendorPayout: serviceAmount - commissionResult.commissionAmount,
         commissionRuleId: commissionResult.ruleId,
@@ -921,7 +930,7 @@ export class AdminService {
     // job.offer.created notification a real service job would. A Service Partner is
     // never the right recipient for a product order — that belongs to the Product's
     // own ProductVendor/Seller (see ProductVendorsService.myOrders()).
-    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true, vendorId: true, arrivedAt: true } });
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true, vendorId: true, arrivedAt: true, serviceModel: true } });
     if (!existing) throw new NotFoundException();
     if (!existing.serviceId) {
       throw new BadRequestException('This order has no service — a Service Partner cannot be assigned to a product-only order.');
@@ -929,11 +938,22 @@ export class AdminService {
     // A different partner must record their own arrival — the previous partner's is cleared
     // (it stays in the order timeline). Re-assigning the same partner keeps it.
     const clearedArrival = !!existing.arrivedAt && existing.vendorId !== vendorId;
+    // The booking was priced for one service model at checkout — only matching staff can take it.
+    if (existing.serviceModel) {
+      const target = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId }, select: { staffType: true } });
+      if (!target) throw new NotFoundException('Partner not found');
+      if (!staffAllowedForModel(existing.serviceModel, target.staffType)) {
+        throw new BadRequestException(existing.serviceModel === 'IN_HOUSE'
+          ? 'This is an in-house service — assign one of Remont\'s own technicians.'
+          : 'This is a partner marketplace service — assign an external partner, not an in-house technician.');
+      }
+    }
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED, ...(clearedArrival ? ARRIVAL_RESET_DATA : {}) },
       include: { vendor: { include: { user: { select: { name: true, phone: true } } } }, service: true, address: true },
     });
+    await recalculateMarketplaceOrder(this.prisma, orderId); // a registered partner's GST, if any
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: clearedArrival ? "Force-assigned by admin — previous partner's arrival record cleared" : 'Force-assigned by admin' });
     // Previously this silently set vendorId with no notification of any kind — the
     // vendor only ever found out by happening to check their job list. Now goes
@@ -1303,6 +1323,7 @@ export class AdminService {
   }
 
   async createCategory(data: any) {
+    assertServiceModel(data);
     assertNoNewInlineImages([data.logoUrl, data.imageUrl]);
     const slug = data.slug || slugify(data.name);
     const created = await this.prisma.serviceCategory.create({ data: { ...data, slug, seoKeywords: data.seoKeywords || [] } });
@@ -1313,6 +1334,7 @@ export class AdminService {
   async updateCategory(id: string, data: any) {
     const existing = await this.prisma.serviceCategory.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Category not found');
+    assertServiceModel(data);
     assertNoNewInlineImages([data.logoUrl, data.imageUrl], [existing.logoUrl, existing.imageUrl]);
     if (data.name && !data.slug) data.slug = slugify(data.name);
     const updated = await this.prisma.serviceCategory.update({ where: { id }, data });

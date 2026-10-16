@@ -243,7 +243,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
       expect(buf.slice(0, 2).toString()).toBe('PK'); // xlsx (zip)
     }
     expect((await reports.testPayments()).summary.paidCount).toBeGreaterThan(0);
-  });
+  }, 60_000); // builds every workbook over the whole (growing) throwaway database
 
   it('partner payout reconciliation: an unposted pre-ledger job explains the gap; correction needs the reviewed figure, posts ADJUSTMENT only, audited', async () => {
     const v = await partner();
@@ -262,7 +262,7 @@ d('Accounting & invoices (throwaway Postgres)', () => {
     expect(Number((await prisma.serviceVendor.findUnique({ where: { id: v.id } }))!.pendingPayout)).toBe(2144.29); // payout untouched
     expect(await prisma.auditLog.count({ where: { action: 'PARTNER_LEDGER_RECONCILIATION_ADJUSTMENT', targetId: v.id } })).toBe(1);
     expect((await reports.partnerPayoutReconciliation()).vendors.find((x: any) => x.vendorId === v.id)).toBeUndefined();
-  });
+  }, 60_000); // reconciles every partner on the (growing) throwaway database
 
   it('in-house technician completing a job: no partner earnings, payout, hold or ledger entries (no double counting)', async () => {
     const tech = await partner(undefined, 'IN_HOUSE');

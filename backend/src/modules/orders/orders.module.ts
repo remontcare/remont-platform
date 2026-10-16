@@ -11,7 +11,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, releaseUnpaidOrderWallet, logAudit } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, releaseUnpaidOrderWallet, logAudit, serviceBookingGst, recalculateMarketplaceOrder, isValidGstinFormat } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -142,6 +142,9 @@ export class DispatchService {
     // candidates even when a perfectly eligible vendor is online right next door.
     const skill = normalizeSkillKey(order.service.category.key);
     const hasOrderCoords = isValidIndiaCoords(lat, lng);
+    // Service model: a MARKETPLACE job is offered only to external partners, an IN_HOUSE job only to
+    // Remont's own technicians (legacy orders: anyone, as before).
+    const staffFilter = order.serviceModel === 'MARKETPLACE' ? { staffType: 'PARTNER' as const } : order.serviceModel === 'IN_HOUSE' ? { staffType: 'IN_HOUSE' as const } : {};
 
     // Production incident: a verified, ACTIVE, online, correct-skill, same-city vendor
     // (Mayank, Bhopal, WATERPROOFING) never received an order with valid GPS coordinates,
@@ -170,6 +173,7 @@ export class DispatchService {
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
+          ...staffFilter,
           currentLatitude: { gte: box.minLat, lte: box.maxLat },
           currentLongitude: { gte: box.minLng, lte: box.maxLng },
           lastLocationUpdate: { gte: new Date(Date.now() - LOCATION_STALE_AFTER_MS) },
@@ -196,6 +200,7 @@ export class DispatchService {
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
+          ...staffFilter,
           baseCity: { equals: order.address.city, mode: 'insensitive' },
           ...NOT_FROZEN_MEMBER_FILTER,
           OR: [
@@ -343,7 +348,15 @@ export class RoutingService {
       orderBy: { rating: 'desc' },
     }) : [];
 
-    const chosen = candidates.find((v) => v.staffType === 'IN_HOUSE');
+    // Service model (frozen on the order from its category): a MARKETPLACE job goes only to external
+    // partners, an IN_HOUSE job only to Remont's own technicians. Legacy orders: in-house first.
+    const chosen = order.serviceModel === 'MARKETPLACE' ? undefined : candidates.find((v) => v.staffType === 'IN_HOUSE');
+    if (!chosen && order.serviceModel === 'IN_HOUSE') {
+      await this.prisma.order.update({ where: { id: orderId }, data: { needsAdminReview: true, routingDecision: 'IN_HOUSE_UNAVAILABLE' } });
+      await writeOrderTimeline(this.prisma, { orderId, status: order.status, note: 'No in-house technician available — sent to the admin queue (in-house service)' });
+      this.logger.log('📋 ' + order.orderNumber + ' in-house service, no in-house technician online — admin queue');
+      return;
+    }
 
     if (chosen) {
       await this.prisma.order.update({
@@ -466,6 +479,8 @@ class ExtraWorkService {
   }
 
   private async recalc(orderId: string) {
+    // Partner marketplace: GST on the fee + partner share (+ the partner's GST if registered).
+    if (await recalculateMarketplaceOrder(this.prisma, orderId)) return;
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { extraWorkItems: { where: { customerApproved: true } }, service: true },
@@ -476,8 +491,13 @@ class ExtraWorkService {
     const svcRate = order.service
       ? (await buildServiceTaxResolver(this.prisma)).rateFor(order.service.hsnSac, order.service.gstOverridePercent)
       : SERVICE_GST_FALLBACK_RATE;
-    const gst = Math.round(subtotal * (svcRate / 100) * 100) / 100;
-    const discount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.walletUsed);
+    // In-house: Remont's own supply, GST on the discounted value (as at checkout). Legacy orders keep
+    // their original formula unchanged.
+    const priceDiscount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.bundleDiscountAmount || 0);
+    const gst = order.serviceModel === 'IN_HOUSE'
+      ? Math.round(Math.max(0, subtotal - priceDiscount) * (svcRate / 100) * 100) / 100
+      : Math.round(subtotal * (svcRate / 100) * 100) / 100;
+    const discount = (order.serviceModel === 'IN_HOUSE' ? priceDiscount : Number(order.couponDiscount) + Number(order.membershipDiscount)) + Number(order.walletUsed);
     const total = Math.max(0, subtotal + gst - discount);
     // Commission was already resolved once and snapshotted at confirmation time (Task 9) —
     // extra work changes the payout (more serviceAmount-equivalent to pay the vendor for)
@@ -543,11 +563,13 @@ export class OrdersService {
     let serviceGstRatePercent = SERVICE_GST_FALLBACK_RATE;
     let minimumChargeAdjustment = 0;
     let minimumChargeRuleId: string | null = null;
+    let serviceCategory: { serviceModel?: string | null; gstSection95Status?: string | null } | null = null;
     const itemInputs: any[] = [];
 
     if (dto.serviceId) {
-      const svc = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
+      const svc = await this.prisma.service.findUnique({ where: { id: dto.serviceId }, include: { category: { select: { serviceModel: true, gstSection95Status: true } } } });
       if (!svc) throw new NotFoundException('Service not found');
+      serviceCategory = (svc as any).category;
       let cityRowId: string | null = null;
       // City-wise price override
       if (dto.city) {
@@ -652,7 +674,11 @@ export class OrdersService {
       ? Math.round(((serviceAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
       : 0;
     const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
-    const serviceGstAmount = Math.round(discountedServiceAmount * (serviceGstRatePercent / 100) * 100) / 100;
+    // Service model from the category (a booking mixing products keeps the legacy pricing).
+    const svcGst = await serviceBookingGst(this.prisma, dto.items?.length ? null : serviceCategory, {
+      serviceAmount, commission: commissionResult.commissionAmount, discount: serviceDiscountShare, serviceRatePercent: serviceGstRatePercent,
+    });
+    const serviceGstAmount = svcGst.gstAmount;
 
     // Phase 3 (C-02/C-03) — a SELLER-funded coupon reduces the PRODUCT taxable base/GST by
     // its share of the combined discount, exactly like the SERVICE share above already
@@ -701,7 +727,7 @@ export class OrdersService {
       : undefined;
 
 
-    return { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown };
+    return { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown, serviceModel: svcGst.serviceModel, platformFeeGst: svcGst.platformFeeGst, partnerServiceGst: svcGst.partnerServiceGst };
   }
 
   /** What POST /orders would charge for this cart, without creating anything. */
@@ -718,6 +744,10 @@ export class OrdersService {
       gstAmount: p.gstAmount,
       walletUsed: p.walletUsed,
       totalAmount: p.totalAmount,
+      // MARKETPLACE: Remont's platform fee (inside serviceAmount) and the GST split; a registered
+      // partner's GST on their share is added once they accept the job.
+      serviceModel: p.serviceModel, platformFee: p.serviceModel === 'MARKETPLACE' ? p.commissionResult.commissionAmount : 0,
+      platformFeeGst: p.platformFeeGst, partnerServiceGst: p.partnerServiceGst,
     };
   }
 
@@ -741,7 +771,7 @@ export class OrdersService {
       }
     }
 
-    const { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown } = await this.priceOrder(customerId, dto);
+    const { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown, serviceModel, platformFeeGst, partnerServiceGst } = await this.priceOrder(customerId, dto);
 
     // Resolve addressId: if an inline address is provided and no addressId, create one
     let resolvedAddressId = dto.addressId;
@@ -806,6 +836,7 @@ export class OrdersService {
             productFeeBreakdown: productFeeBreakdown as any,
             couponCode: dto.couponCode, couponDiscount, membershipDiscount,
             walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
+            ...(serviceModel ? { serviceModel, platformFeeGst, partnerServiceGst } : {}),
             commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
             minimumChargeAdjustment, minimumChargeRuleId: minimumChargeRuleId || undefined,
             aiSessionId: dto.aiSessionId, leadId: dto.leadId,
@@ -1346,6 +1377,33 @@ export class OrdersService {
       const completionCredit = grossAmount - remainingCommission; // == vendorPayout + leadCostPaid
       const { days, percent } = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
       const holdAmount = percent > 0 ? Math.round(completionCredit * percent) / 100 : 0;
+      if (order.serviceModel === 'MARKETPLACE') {
+        // Partner marketplace: the customer paid Remont's platform fee (+ its GST) directly, so the
+        // partner is credited their share, never charged commission. A registered partner also gets
+        // the GST on their share that the customer paid (theirs to remit); under 9(5) Remont is the
+        // liable person and keeps it. Lead cost (an advance against commission) is returned.
+        const payout = Number(order.vendorPayout);
+        const registered = !!order.vendor.gstin && isValidGstinFormat(String(order.vendor.gstin));
+        const partnerGst = registered ? Number(order.partnerServiceGst) : 0;
+        let leadReturned = 0;
+        if (leadCostPaid > 0) {
+          const claimLead = await tx.order.updateMany({ where: { id: orderId, leadCostRefunded: false }, data: { leadCostRefunded: true } });
+          if (claimLead.count === 1) leadReturned = leadCostPaid;
+        }
+        await tx.serviceVendor.update({
+          where: { id: order.vendor.id },
+          data: { totalEarnings: { increment: payout }, pendingPayout: { increment: payout + leadReturned + partnerGst - holdAmount } },
+        });
+        await this.ledger.postEntry(tx, order.vendor.id, 'JOB_EARNING', payout, { orderId, notes: 'Partner share of the service (platform fee paid by the customer)' });
+        if (leadReturned > 0) await this.ledger.postEntry(tx, order.vendor.id, 'LEAD_COST', leadReturned, { orderId, notes: 'Lead cost returned — the platform fee was paid by the customer' });
+        if (partnerGst > 0) await this.ledger.postEntry(tx, order.vendor.id, 'GST', partnerGst, { orderId, notes: "Your GST on this service, collected from the customer — yours to remit" });
+        if (holdAmount > 0) {
+          const releaseDueAt = new Date();
+          releaseDueAt.setDate(releaseDueAt.getDate() + days);
+          await this.ledger.postHold(tx, order.vendor.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
+        }
+        return true;
+      }
       // GST on Remont's commission is invoiced to the partner (commission invoice). Whether the
       // partner ledger also recovers it is a CA/accounting decision — configurable, OFF by default
       // (the approved behaviour: the ledger recovers the commission only).
@@ -1874,8 +1932,9 @@ export class GuestBookingService {
     const serviceAmount = priced.serviceAmount;
     const commissionResult = priced.commissionResult;
 
-    const gstAmount = Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
-    const totalAmount = serviceAmount + gstAmount;
+    const svcGst = await serviceBookingGst(this.prisma, (svc as any).category, { serviceAmount, commission: commissionResult.commissionAmount, serviceRatePercent: priced.gstRatePercent });
+    const gstAmount = svcGst.gstAmount;
+    const totalAmount = Math.round((serviceAmount + gstAmount) * 100) / 100;
 
     // Parse slot datetime as IST (UTC+5:30) to avoid local-timezone drift
     const paddedTime = dto.slotTime.length === 5 ? dto.slotTime : `${dto.slotTime}:00`;
@@ -1944,6 +2003,7 @@ export class GuestBookingService {
           gstAmount,
           totalAmount,
           remontCommission: commissionResult.commissionAmount,
+          ...(svcGst.serviceModel ? { serviceModel: svcGst.serviceModel, platformFeeGst: svcGst.platformFeeGst, partnerServiceGst: svcGst.partnerServiceGst } : {}),
           minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
           vendorPayout: serviceAmount - commissionResult.commissionAmount,
           commissionRuleId: commissionResult.ruleId,

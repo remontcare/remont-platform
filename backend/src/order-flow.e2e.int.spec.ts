@@ -152,11 +152,11 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     const created = await api('POST', '/orders', { as: cust, body: { type: 'SERVICE', serviceId: ids.svcA.id, inlineAddress: { fullAddress: '1 Lake View', city: 'Bhopal', state: 'Madhya Pradesh', pincode: '462001', latitude: 23.2156, longitude: 77.4304 } } });
     expect(created.status).toBe(201);
     const o = created.data;
-    expect(Number(o.totalAmount)).toBe(590); // 500 + 18% GST
+    expect(Number(o.totalAmount)).toBe(518); // marketplace: ₹400 partner + ₹100 Remont fee + 18% GST on the fee
     // the app creates the gateway order for its own order only
     const stranger = await mkUser('CUSTOMER');
-    expect((await api('POST', '/payments/create-order', { as: stranger, body: { amount: 590, orderId: o.id } })).status).toBe(403);
-    const rzo = await api('POST', '/payments/create-order', { as: cust, body: { amount: 590, orderId: o.id } });
+    expect((await api('POST', '/payments/create-order', { as: stranger, body: { amount: 518, orderId: o.id } })).status).toBe(403);
+    const rzo = await api('POST', '/payments/create-order', { as: cust, body: { amount: 518, orderId: o.id } });
     expect(rzo.status).toBe(201);
     const pay = customerPays(rzo.data.id || rzo.data.gatewayOrderId);
     const conf = await api('POST', `/orders/${o.id}/confirm-payment`, { as: cust, body: { paymentId: pay.paymentId, gatewayOrderId: rzo.data.id || rzo.data.gatewayOrderId, signature: pay.signature } });
@@ -174,7 +174,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     // economics: 500 − 20% commission = 400 (lead cost at accept is part of the commission; a warranty hold only defers)
     expect(r2(ledger.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0))).toBe(400);
     const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: o.id } }), (i) => !!i, 'invoice');
-    expect(Number(inv!.customerTotal)).toBe(590);
+    expect(Number(inv!.customerTotal)).toBe(518);
     const pdf = await fetch(`${base}/invoices/orders/${o.id}/pdf?docKind=ALL`, { headers: { Authorization: `Bearer ${token(cust)}` } });
     expect(pdf.status).toBe(200);
     expect(Buffer.from(await pdf.arrayBuffer()).slice(0, 4).toString()).toBe('%PDF');
@@ -196,7 +196,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     expect(mo.childOrders).toHaveLength(2);
     expect(mo.childOrders.every((c) => c.paymentMethod === 'ONLINE')).toBe(true);
     expect(Number((await prisma.user.findUniqueOrThrow({ where: { id: cust.id } })).walletBalance)).toBe(0); // wallet taken at checkout
-    expect(Number(mo.totalAmount)).toBe(r2(944 - 200)); // (500+300)×1.18 − 200 wallet
+    expect(Number(mo.totalAmount)).toBe(r2(518 + 310.8 - 200)); // (500 + 18% of ₹100 fee) + (300 + 18% of ₹60 fee) − 200 wallet
     const ptx = await prisma.paymentTransaction.findFirstOrThrow({ where: { orderId: mo.id } });
     expect(ptx.masterOrderId).toBe(mo.id);
 
@@ -204,13 +204,13 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     const confirm = () => api('POST', '/master-orders/public/confirm-payment', { body: { dbOrderId: mo.id, gatewayOrderId: co.data.gatewayOrderId, paymentId: pay.paymentId, signature: pay.signature } });
     const results = await Promise.all([confirm(), confirm(), confirm()]);
     expect(results.every((r) => r.status === 201)).toBe(true);
-    const wh = await webhook('payment.captured', { id: pay.paymentId, order_id: co.data.gatewayOrderId, amount: Math.round(744 * 100), fee: 236, tax: 36 });
+    const wh = await webhook('payment.captured', { id: pay.paymentId, order_id: co.data.gatewayOrderId, amount: Math.round(628.8 * 100), fee: 236, tax: 36 });
     if (wh.status >= 300) throw new Error('webhook: ' + JSON.stringify(wh.raw));
     await sleep(800);
     const paid = await prisma.masterOrder.findUniqueOrThrow({ where: { id: mo.id }, include: { childOrders: true } });
     expect(paid.paymentStatus).toBe('PAID');
     expect(paid.childOrders.every((c) => c.paymentStatus === 'PAID' && c.paymentMethod === 'ONLINE' && Number(c.cartPaidAmount) === Number(c.totalAmount))).toBe(true);
-    expect(r2(paid.childOrders.reduce((a, c) => a + Number(c.cartPaidAmount), 0))).toBe(744);
+    expect(r2(paid.childOrders.reduce((a, c) => a + Number(c.cartPaidAmount), 0))).toBe(628.8);
     expect(await prisma.walletTransaction.count({ where: { userId: cust.id, type: 'DEBIT' } })).toBe(1);
     expect(await prisma.orderTimeline.count({ where: { orderId: paid.childOrders[0].id, status: 'CONFIRMED' } })).toBe(1);
 
@@ -238,22 +238,22 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     expect(child.paymentMethod).toBe('COD');
     const before = Number((await vendorRow(ids.pB.vendor.id)).pendingPayout);
     const run = await partnerRunsJob(child.id, ids.pB, { collection: { mode: 'CASH' } });
-    expect(run.balance.balanceDue).toBe(354); // 300 + 18%
+    expect(run.balance.balanceDue).toBe(310.8); // 300 + 18% GST on the ₹60 Remont fee
     expect(run.complete.status).toBe(201);
     const pts = await prisma.paymentTransaction.findMany({ where: { orderId: child.id } });
     expect(pts).toHaveLength(1);
     expect(pts[0]).toEqual(expect.objectContaining({ status: 'PAID', gateway: 'CASH_COLLECTION', verificationMethod: 'COMPLETION_OTP' }));
-    expect(Number(pts[0].amount)).toBe(354);
+    expect(Number(pts[0].amount)).toBe(310.8);
     const o = await order(child.id);
     expect(o.paymentStatus).toBe('PAID');
     expect(o.earningsStatus).toBe('POSTED');
-    // economics: +240 earning (300 − 60 commission) − 354 cash in hand = −114 (owes commission + GST);
+    // economics: +240 partner share − 310.80 cash in hand = −70.80 (owes Remont's ₹60 fee + ₹10.80 GST);
     // the lead cost paid at accept is part of the commission, a warranty hold only defers money
     const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
-    expect(r2(entries.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0))).toBe(-114);
-    expect(entries.filter((e) => e.type === 'COD_COLLECTION').map((e) => Number(e.amount))).toEqual([-354]);
+    expect(r2(entries.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0))).toBe(-70.8);
+    expect(entries.filter((e) => e.type === 'COD_COLLECTION').map((e) => Number(e.amount))).toEqual([-310.8]);
     const held = r2(entries.filter((e) => e.type === 'HOLD').reduce((a, e) => a + Number(e.amount), 0));
-    expect(r2(Number((await vendorRow(ids.pB.vendor.id)).pendingPayout) - before)).toBe(r2(-114 + held));
+    expect(r2(Number((await vendorRow(ids.pB.vendor.id)).pendingPayout) - before)).toBe(r2(-70.8 + held));
   });
 
   it('10. older-app flow: completed without collection → nothing withdrawable; reported cash is pending until the customer confirms', async () => {
@@ -282,7 +282,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     expect(o.paymentStatus).toBe('PAID');
     expect(o.earningsStatus).toBe('POSTED');
     const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
-    expect(r2(entries.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0))).toBe(r2(400 - 590)); // −190
+    expect(r2(entries.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0))).toBe(r2(400 - 518)); // −118: partner share − cash held (owes Remont's fee + its GST)
   });
 
   // ── 5: failed / pending online payment; unpaid wallet returned on cancel ──
@@ -331,7 +331,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
 
     const paidCust = ids.onlineCustomer;
     const o2 = await api('POST', '/orders', { as: paidCust, body: { type: 'SERVICE', serviceId: ids.svcB.id, inlineAddress: { fullAddress: '9 Hill', city: 'Bhopal', state: 'Madhya Pradesh', pincode: '462001', latitude: 23.2, longitude: 77.4 } } });
-    const rzo = await api('POST', '/payments/create-order', { as: paidCust, body: { amount: 354, orderId: o2.data.id } });
+    const rzo = await api('POST', '/payments/create-order', { as: paidCust, body: { amount: 310.8, orderId: o2.data.id } });
     const pay = customerPays(rzo.data.id || rzo.data.gatewayOrderId);
     await api('POST', `/orders/${o2.data.id}/confirm-payment`, { as: paidCust, body: { paymentId: pay.paymentId, gatewayOrderId: rzo.data.id || rzo.data.gatewayOrderId, signature: pay.signature } });
     expect((await api('PATCH', `/orders/${o2.data.id}/cancel`, { as: paidCust, body: { reason: 'not needed' } })).status).toBe(200);
@@ -348,7 +348,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     const decided = await api('POST', `/refunds/${raised.data.id}/decide`, { as: ids.admin, body: { decisionMode: 'WALLET_CREDIT', approvedAmount: 100, adminNotes: 'partial goodwill refund' } });
     expect(decided.status).toBeLessThan(300);
     const inv = await prisma.invoice.findUniqueOrThrow({ where: { orderId }, include: { creditNotes: true } });
-    expect(Number(inv.customerTotal)).toBe(590);
+    expect(Number(inv.customerTotal)).toBe(518);
     expect(inv.creditNotes).toHaveLength(1);
     expect(Number(inv.creditNotes[0].totalReversed)).toBe(100);
     expect(Number((await prisma.user.findUniqueOrThrow({ where: { id: cust.id } })).walletBalance)).toBe(100);
@@ -435,7 +435,7 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     // no evidence → refused; a customer of another order → refused
     expect((await api('POST', `/orders/${child.id}/cash-collections/${pending.id}/confirm`, { as: ids.admin, body: {} })).status).toBe(400);
     expect((await api('POST', `/orders/${child.id}/cash-collections/${pending.id}/confirm`, { as: await mkUser('CUSTOMER') })).status).toBe(403);
-    const ok = await api('POST', `/orders/${child.id}/cash-collections/${pending.id}/confirm`, { as: ids.admin, body: { evidence: 'Called customer 16 Oct, confirmed ₹354 cash paid' } });
+    const ok = await api('POST', `/orders/${child.id}/cash-collections/${pending.id}/confirm`, { as: ids.admin, body: { evidence: 'Called customer 16 Oct, confirmed ₹310.80 cash paid' } });
     expect(ok.status).toBe(201);
     const again = await api('POST', `/orders/${child.id}/cash-collections/${pending.id}/confirm`, { as: ids.admin, body: { evidence: 'Repeat click on the same confirmation' } });
     expect(again.status).toBe(201);
@@ -465,5 +465,217 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     const mo = await prisma.masterOrder.findUniqueOrThrow({ where: { id: ids.cartMaster }, include: { childOrders: true } });
     const paidRow = await prisma.paymentTransaction.findFirstOrThrow({ where: { orderId: mo.id, status: 'PAID' } });
     expect(r2(mo.childOrders.reduce((a, c) => a + Number(c.cartPaidAmount), 0))).toBe(Number(paidRow.amount));
+  });
+  // ══ SERVICE MODELS — partner marketplace vs Remont in-house (₹100 service, 20% commission, 18%) ══
+  describe('service models', () => {
+    const pages = (b: Buffer) => (b.toString('latin1').match(/\/Type \/Page\b/g) || []).length;
+    const pdf = async (orderId: string, as: any) => {
+      const res = await fetch(`${base}/invoices/orders/${orderId}/pdf?docKind=ALL`, { headers: { Authorization: `Bearer ${token(as)}` } });
+      return { status: res.status, pages: res.status === 200 ? pages(Buffer.from(await res.arrayBuffer())) : 0 };
+    };
+    const netOf = (entries: any[]) => r2(entries.filter((e) => !['HOLD', 'HOLD_RELEASE'].includes(e.type)).reduce((a, e) => a + Number(e.amount), 0));
+    const m: Record<string, any> = {};
+
+    beforeAll(async () => {
+      const tag = Date.now().toString(36).toUpperCase();
+      const mkCat = async (k: string, extra: any) => {
+        const cat = await prisma.serviceCategory.create({ data: { key: `E2E${k}${tag}`, name: `Model ${k}`, icon: 'x', slug: `e2e-${k.toLowerCase()}-${tag.toLowerCase()}`, ...extra } as any });
+        const svc = await prisma.service.create({ data: { categoryId: cat.id, name: `Service ${k}`, slug: `e2e-svc-${k.toLowerCase()}-${tag.toLowerCase()}`, basePrice: 100, hsnSac: '998719', isActive: true } as any });
+        await prisma.commissionRule.create({ data: { ruleType: 'COMMISSION', scope: 'CATEGORY', categoryId: cat.id, commissionType: 'PERCENTAGE', value: 20, isActive: true } as any });
+        return { cat, svc };
+      };
+      m.mkt = await mkCat('MKT', { serviceModel: 'PARTNER_MARKETPLACE' });
+      m.s95 = await mkCat('S95', { serviceModel: 'PARTNER_MARKETPLACE', gstSection95Status: 'APPLICABLE' });
+      m.inh = await mkCat('INH', { serviceModel: 'IN_HOUSE' });
+      m.pUnreg = await mkPartner(m.mkt.cat.key);
+      m.pReg = await mkPartner(m.mkt.cat.key);
+      await prisma.serviceVendor.update({ where: { id: m.pReg.vendor.id }, data: { gstin: '23ABCDE1234F1Z5' } });
+      m.pS95 = await mkPartner(m.s95.cat.key);
+      // a partner who has the in-house category's skill — must never be offered in-house jobs
+      m.pInhSkill = await mkPartner(m.inh.cat.key);
+      // in-house routing takes any online in-house technician in the city: keep only this run's online
+      await prisma.serviceVendor.updateMany({ where: { staffType: 'IN_HOUSE' }, data: { isOnline: false } });
+      m.tech = await mkPartner(m.inh.cat.key);
+      await prisma.serviceVendor.update({ where: { id: m.tech.vendor.id }, data: { staffType: 'IN_HOUSE', fullName: 'Ravi Technician' } });
+    });
+
+    async function paidCart(serviceId: string) {
+      const cust = await mkUser('CUSTOMER');
+      const co = await api('POST', '/master-orders/public/checkout', { as: cust, body: cartBody([{ type: 'SERVICE', serviceId }], { phone: cust.phone, paymentMethod: 'ONLINE' }) });
+      expect(co.status).toBe(201);
+      const pay = customerPays(co.data.gatewayOrderId);
+      expect((await api('POST', '/master-orders/public/confirm-payment', { body: { dbOrderId: co.data.masterOrderId, gatewayOrderId: co.data.gatewayOrderId, paymentId: pay.paymentId, signature: pay.signature } })).status).toBe(201);
+      const child = await prisma.order.findFirstOrThrow({ where: { masterOrderId: co.data.masterOrderId } });
+      return { cust, child, master: await prisma.masterOrder.findUniqueOrThrow({ where: { id: co.data.masterOrderId } }) };
+    }
+    async function codCart(serviceId: string) {
+      const cust = await mkUser('CUSTOMER');
+      const co = await api('POST', '/master-orders/public/checkout', { body: cartBody([{ type: 'SERVICE', serviceId }], { phone: cust.phone, paymentMethod: 'COD' }) });
+      expect(co.status).toBe(201);
+      return { cust, child: await prisma.order.findFirstOrThrow({ where: { masterOrderId: co.data.masterOrderId } }) };
+    }
+
+    it('M1. marketplace, unregistered partner, paid online: ₹80 + ₹20 + ₹3.60 = ₹103.60; partner earns ₹80 once; Remont fee invoice to the customer, never to the partner', async () => {
+      const quote = await api('POST', '/master-orders/public/quote', { body: { items: [{ type: 'SERVICE', serviceId: m.mkt.svc.id }], city: 'Bhopal' } });
+      expect(quote.data.totalAmount).toBe(103.6);
+      const { cust, child, master } = await paidCart(m.mkt.svc.id);
+      expect([Number(master.totalAmount), Number(child.totalAmount), Number(child.gstAmount)]).toEqual([103.6, 103.6, 3.6]);
+      expect([child.serviceModel, Number(child.platformFeeGst), Number(child.partnerServiceGst), Number(child.vendorPayout), Number(child.remontCommission)]).toEqual(['MARKETPLACE', 3.6, 0, 80, 20]);
+      expect(Number((await prisma.paymentTransaction.findFirstOrThrow({ where: { orderId: master.id, status: 'PAID' } })).amount)).toBe(103.6);
+
+      const run = await partnerRunsJob(child.id, m.pUnreg);
+      expect(run.balance.balanceDue).toBe(0);
+      expect(run.complete.status).toBe(201);
+      await orders_releaseOnce(child.id);
+      const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
+      expect(entries.filter((e) => e.type === 'JOB_EARNING').map((e) => Number(e.amount))).toEqual([80]);
+      expect(entries.filter((e) => e.type === 'COMMISSION' || e.type === 'GST')).toHaveLength(0); // the fee was the customer's to pay
+      expect(netOf(entries)).toBe(80);
+
+      const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: child.id } }), (i) => !!i, 'invoice');
+      const parties = (inv!.lineItemsSnapshot as any).parties;
+      expect([Number(inv!.vendorLabor), Number(inv!.vendorCgst) + Number(inv!.vendorSgst), Number(inv!.vendorTotal)]).toEqual([80, 0, 80]);
+      expect([Number(inv!.platformCommission), r2(Number(inv!.remontCgst) + Number(inv!.remontSgst) + Number(inv!.remontIgst)), Number(inv!.remontTotal)]).toEqual([20, 3.6, 23.6]);
+      expect(Number(inv!.customerTotal)).toBe(103.6);
+      expect(parties.remont.recipient.name).toBe(parties.customer.recipient.name); // fee billed to the customer
+      expect(parties.vendor.supplier.name).toBe(m.pUnreg.vendor.businessName); // partner supplies the service
+      expect(parties.remont.supplier.gstin).toBe(inv!.supplierGstin || parties.remont.supplier.gstin);
+      // customer: summary + partner document + Remont fee invoice; partner: only their own document
+      expect(await pdf(child.id, cust)).toEqual({ status: 200, pages: 3 });
+      expect(await pdf(child.id, m.pUnreg.user)).toEqual({ status: 200, pages: 1 });
+      m.onlineMkt = child.id;
+    });
+
+    it('M2. marketplace, GST-registered partner: their GST (₹14.40) is added when they accept → ₹118; collected, passed to the partner, invoiced by the partner', async () => {
+      const { child } = await paidCart(m.mkt.svc.id);
+      expect(Number(child.totalAmount)).toBe(103.6); // nobody known at checkout
+      const run = await partnerRunsJob(child.id, m.pReg, { collection: { mode: 'CASH' } });
+      expect(run.balance.balanceDue).toBe(14.4); // only the partner's GST is still due
+      expect(run.complete.status).toBe(201);
+      const o = await order(child.id);
+      expect([Number(o.totalAmount), Number(o.partnerServiceGst), Number(o.platformFeeGst), o.paymentStatus]).toEqual([118, 14.4, 3.6, 'PAID']);
+      await orders_releaseOnce(child.id);
+      const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
+      expect(entries.filter((e) => e.type === 'GST').map((e) => Number(e.amount))).toEqual([14.4]); // the partner's own GST, theirs to remit
+      expect(netOf(entries)).toBe(80); // +80 share +14.40 GST −14.40 cash in hand
+      const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: child.id } }), (i) => !!i, 'invoice');
+      expect([Number(inv!.vendorLabor), r2(Number(inv!.vendorCgst) + Number(inv!.vendorSgst)), Number(inv!.vendorTotal)]).toEqual([80, 14.4, 94.4]);
+      expect(Number(inv!.customerTotal)).toBe(118);
+      expect(Number(inv!.remontTotal)).toBe(23.6);
+      expect((inv!.lineItemsSnapshot as any).parties.vendor.supplier.gstin).toBe('23ABCDE1234F1Z5');
+    });
+
+    it('M3. marketplace cash: partner collects ₹103.60, earns ₹80, owes Remont exactly ₹23.60 — one cash entry, no commission deduction', async () => {
+      const { child } = await codCart(m.mkt.svc.id);
+      const run = await partnerRunsJob(child.id, m.pUnreg, { collection: { mode: 'CASH' } });
+      expect(run.balance.balanceDue).toBe(103.6);
+      expect(run.complete.status).toBe(201);
+      await orders_releaseOnce(child.id);
+      const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
+      expect(entries.filter((e) => e.type === 'COD_COLLECTION').map((e) => Number(e.amount))).toEqual([-103.6]);
+      expect(entries.filter((e) => e.type === 'JOB_EARNING').map((e) => Number(e.amount))).toEqual([80]);
+      expect(entries.filter((e) => e.type === 'COMMISSION')).toHaveLength(0);
+      expect(netOf(entries)).toBe(-23.6);
+    });
+
+    it('M4. Section 9(5) category, unregistered partner: ₹80 + ₹14.40 (Remont liable) + ₹20 + ₹3.60 = ₹118; Remont issues the service tax invoice; partner earns ₹80', async () => {
+      const { child } = await paidCart(m.s95.svc.id);
+      expect([Number(child.totalAmount), Number(child.partnerServiceGst), Number(child.platformFeeGst)]).toEqual([118, 14.4, 3.6]);
+      const run = await partnerRunsJob(child.id, m.pS95);
+      expect(run.balance.balanceDue).toBe(0);
+      await orders_releaseOnce(child.id);
+      const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
+      expect(entries.filter((e) => e.type === 'GST')).toHaveLength(0); // Remont is the liable person — it keeps that GST
+      expect(netOf(entries)).toBe(80);
+      const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: child.id } }), (i) => !!i, 'invoice');
+      expect(inv!.section95).toBe(true);
+      expect([Number(inv!.customerSubtotal), r2(Number(inv!.customerCgst) + Number(inv!.customerSgst)), Number(inv!.customerTotal)]).toEqual([80, 14.4, 94.4]);
+      expect(Number(inv!.remontTotal)).toBe(23.6);
+      expect(Number(inv!.vendorCgst) + Number(inv!.vendorSgst)).toBe(0);
+    });
+
+    it('M5. in-house: ₹100 + ₹18 = ₹118 on one Remont invoice naming the technician; only in-house staff get the job; cash ₹118 is the technician\'s to deposit; partial and duplicate deposits handled; salary separate', async () => {
+      const quote = await api('POST', '/master-orders/public/quote', { body: { items: [{ type: 'SERVICE', serviceId: m.inh.svc.id }], city: 'Bhopal' } });
+      expect(quote.data.totalAmount).toBe(118);
+      const { child } = await codCart(m.inh.svc.id);
+      expect(child.serviceModel).toBe('IN_HOUSE');
+      const assigned = await until(() => order(child.id), (o) => !!o.vendorId, 'in-house routing');
+      expect(assigned.vendorId).toBe(m.tech.vendor.id); // not the partner with the same skill
+      expect((await api('GET', '/vendors/service/me/available-jobs', { as: m.pInhSkill.user })).data?.some?.((j: any) => j.id === child.id) ?? false).toBe(false);
+      const techPayoutBefore = Number((await vendorRow(m.tech.vendor.id)).pendingPayout);
+
+      expect((await api('PATCH', `/orders/${child.id}/en-route`, { as: m.tech.user })).status).toBeLessThan(300);
+      expect((await api('PATCH', `/orders/${child.id}/arrived`, { as: m.tech.user, body: { latitude: 23.2156, longitude: 77.4304, accuracyM: 12 } })).status).toBeLessThan(300);
+      expect((await api('POST', `/orders/${child.id}/verify-otp`, { as: m.tech.user, body: { otp: (await order(child.id)).startOtp } })).status).toBeLessThan(300);
+      const done = await api('POST', `/orders/${child.id}/complete`, { as: m.tech.user, body: { otp: (await order(child.id)).endOtp, photosAfter: [], collection: { mode: 'CASH' } } });
+      expect(done.status).toBe(201);
+      const o = await order(child.id);
+      expect([o.paymentStatus, o.earningsStatus]).toEqual(['PAID', 'NOT_APPLICABLE']);
+      const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
+      expect(entries.map((e) => [e.type, Number(e.amount)])).toEqual([['COD_COLLECTION', -118]]); // cash held for Remont — no earning, no commission
+
+      const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: child.id } }), (i) => !!i, 'invoice');
+      expect([inv!.transactionType, Number(inv!.customerSubtotal), r2(Number(inv!.customerCgst) + Number(inv!.customerSgst)), Number(inv!.customerTotal)]).toEqual(['DIRECT_PROJECT', 100, 18, 118]);
+      expect([inv!.vendorDocumentNumber, inv!.remontDocumentNumber]).toEqual([null, null]);
+      expect((inv!.lineItemsSnapshot as any).partnerDocument.technician).toBe('Ravi Technician');
+
+      const rowsOf = async () => (await api('GET', '/admin/accounting/employee-cash/rows', { as: ids.admin })).data.find((r: any) => r.orderId === child.id);
+      expect(await rowsOf()).toEqual(expect.objectContaining({ technician: 'Ravi Technician', collected: 118, deposited: 0, outstanding: 118, invoiceNumber: inv!.invoiceNumber }));
+      const deposit = (amount: number, reference: string) => api('POST', '/admin/accounting/employee-cash/deposits', { as: ids.admin, body: { vendorId: m.tech.vendor.id, orderId: child.id, amount, reference } });
+      expect((await deposit(50, 'DEP-1')).data).toEqual(expect.objectContaining({ recorded: true, outstandingAfter: 68 }));
+      expect((await deposit(50, 'DEP-1')).data).toEqual(expect.objectContaining({ alreadyRecorded: true })); // retry
+      expect((await deposit(20, 'DEP-1')).status).toBe(409); // same receipt, different amount
+      expect((await deposit(100, 'DEP-2')).status).toBe(400); // more than outstanding
+      const [a, b] = await Promise.all([deposit(68, 'DEP-2'), deposit(68, 'DEP-3')]); // concurrent: only one fits
+      expect([a.status, b.status].sort()).toEqual([201, 400]);
+      expect(await rowsOf()).toEqual(expect.objectContaining({ deposited: 118, outstanding: 0 }));
+      expect(netOf(await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } }))).toBe(0);
+      expect(r2(Number((await vendorRow(m.tech.vendor.id)).pendingPayout) - techPayoutBefore)).toBe(0);
+      expect((await deposit(1, 'DEP-9')).status).toBe(400); // nothing left
+      // a partner's cash is never "deposited" this way
+      expect((await api('POST', '/admin/accounting/employee-cash/deposits', { as: ids.admin, body: { vendorId: m.pUnreg.vendor.id, orderId: m.onlineMkt, amount: 1, reference: 'X' } })).status).toBe(400);
+      const xlsx = await fetch(`${base}/admin/accounting/employee-cash`, { headers: { Authorization: `Bearer ${token(ids.admin)}` } });
+      expect(Buffer.from(await xlsx.arrayBuffer()).slice(0, 2).toString()).toBe('PK');
+
+      // salary: an expense on its own, no GST, no ITC, never touches the technician's cash ledger
+      const salaryWithGst = await api('POST', '/admin/accounting/purchases', { as: ids.admin, body: { category: 'SALARY', supplierName: 'Ravi Technician', invoiceNumber: 'SAL-2026-10', invoiceDate: '2026-10-31', taxableValue: 15000, cgst: 1350, sgst: 1350 } });
+      expect(salaryWithGst.status).toBe(400);
+      const salary = await api('POST', '/admin/accounting/purchases', { as: ids.admin, body: { category: 'SALARY', supplierName: 'Ravi Technician', invoiceNumber: 'SAL-2026-10', invoiceDate: '2026-10-31', taxableValue: 15000 } });
+      expect(salary.status).toBe(201);
+      expect([salary.data.category, salary.data.itcEligible, Number(salary.data.totalValue)]).toEqual(['SALARY', false, 15000]);
+      expect(await prisma.partnerLedgerEntry.count({ where: { vendorId: m.tech.vendor.id } })).toBe(entries.length + 2);
+      m.inhOrder = child.id;
+    });
+
+    it('M6. reports: in-house GST and the marketplace fee GST are Remont output tax; 9(5) is ECO tax; partner documents are not Remont supplies', async () => {
+      const { AccountingReportsService } = require('./modules/reports/accounting-reports');
+      const rows = await app.get(AccountingReportsService).documentRows({});
+      const forOrder = (id: string) => rows.filter((r: any) => r.orderId === id && !r.isCreditNote);
+      const inh = forOrder(m.inhOrder);
+      expect(inh.map((r: any) => [r.remontIsSupplier, r2(r.cgst + r.sgst + r.igst)])).toEqual([[true, 18]]);
+      const mkt = forOrder(m.onlineMkt);
+      const fee = mkt.find((r: any) => /PLATFORM FEE INVOICE \(to customer\)/.test(r.docType));
+      expect([fee.remontIsSupplier, r2(fee.cgst + fee.sgst + fee.igst), fee.total]).toEqual([true, 3.6, 23.6]);
+      expect(fee.recipientGstin).toBe('');
+      expect(mkt.filter((r: any) => r.remontIsSupplier && r.isTaxDocument)).toHaveLength(1); // the summary and partner document are not Remont's supplies
+    });
+
+    it('M7. a booking priced for one model is never assigned to the other kind of staff', async () => {
+      const mkt = await codCart(m.mkt.svc.id);
+      expect((await api('PATCH', `/admin/orders/${mkt.child.id}/assign-vendor`, { as: ids.admin, body: { vendorId: m.tech.vendor.id } })).status).toBe(400);
+      const inh = await codCart(m.inh.svc.id);
+      await until(() => order(inh.child.id), (o) => !!o.vendorId, 'in-house routing');
+      expect((await api('PATCH', `/admin/orders/${inh.child.id}/assign-vendor`, { as: ids.admin, body: { vendorId: m.pInhSkill.vendor.id } })).status).toBe(400);
+      expect((await api('POST', `/vendors/service/me/jobs/${mkt.child.id}/accept`, { as: m.tech.user })).status).toBe(403);
+    });
+
+    /** Earnings post once (the completion already did) — a further release or sweep never posts again. */
+    async function orders_releaseOnce(orderId: string) {
+      const { OrdersService } = require('./modules/orders/orders.module');
+      const svc = app.get(OrdersService);
+      const again = await Promise.all([svc.releaseJobEarnings(orderId), svc.releaseJobEarnings(orderId)]);
+      expect(again).toEqual([false, false]);
+      expect(await prisma.partnerLedgerEntry.count({ where: { orderId, type: 'JOB_EARNING' } })).toBeLessThanOrEqual(1);
+    }
   });
 });

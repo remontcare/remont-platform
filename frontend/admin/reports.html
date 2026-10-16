@@ -119,6 +119,7 @@
           <button class="btn btn-outline btn-sm" onclick="accDownload('accounting','refunds')">Refunds &amp; credit notes</button>
           <button class="btn btn-outline btn-sm" onclick="accDownload('accounting','settlements')">Settlements</button>
           <button class="btn btn-outline btn-sm" onclick="accDownload('accounting','gateway-fees')">Gateway fees</button>
+          <button class="btn btn-outline btn-sm" onclick="accDownload('accounting','employee-cash')">In-house technician cash</button>
           <button class="btn btn-outline btn-sm" onclick="accDownload('reports','gst')">GST report (legacy)</button>
           <button class="btn btn-outline btn-sm" onclick="accDownload('reports','accounting')">Accounting report</button>
           <button class="btn btn-outline btn-sm" onclick="accDownload('reports','ledger')">Party ledgers</button>
@@ -128,7 +129,8 @@
       <div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">Purchase bills (input GST)</span></div>
         <div style="padding:16px">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
-            <input id="pr-supplier" class="form-control" placeholder="Supplier name">
+            <select id="pr-category" class="form-control"><option value="GENERAL">Purchase bill</option><option value="SALARY">Salary (in-house staff, no GST)</option></select>
+            <input id="pr-supplier" class="form-control" placeholder="Supplier / employee name">
             <input id="pr-gstin" class="form-control" placeholder="Supplier GSTIN">
             <input id="pr-number" class="form-control" placeholder="Bill number">
             <input id="pr-date" class="form-control" type="date">
@@ -152,6 +154,11 @@
         </div></div>
       <div class="card" style="margin-bottom:16px;border:1px solid #fecaca"><div class="card-header"><span class="card-title">e-Invoice &amp; e-Way Bill</span></div>
         <div style="padding:16px" id="acc-einv"><div class="loading">Loading…</div></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">In-house technician cash</span></div>
+        <div style="padding:16px">
+          <small style="color:#6b7280">Cash Remont's own technicians collected from customers (verified), what they have deposited with Remont, and what is still outstanding. Record a deposit only once the cash is actually received. This is not salary and not partner earnings.</small>
+          <div id="acc-empcash" style="margin-top:10px"><div class="loading">Loading…</div></div>
+        </div></div>
       <div class="card"><div class="card-header"><span class="card-title">Partner payout reconciliation</span></div>
         <div style="padding:16px"><div id="acc-payout" class="loading">Loading…</div></div></div>
     </div>
@@ -365,8 +372,34 @@ function loadAccounting() {
       '<p style="font-size:13px;margin-top:8px">' + escape(st.message) + '</p>' +
       '<p style="font-size:12px;color:#6b7280">e-Invoice records: ' + escape(cnt(st.eInvoiceRecords)) + ' · e-Way Bill records: ' + escape(cnt(st.eWayBillRecords)) + '</p>';
   }).catch(function(e) { document.getElementById('acc-einv').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
+  api('GET', '/admin/accounting/employee-cash/rows' + q).then(renderEmployeeCash)
+    .catch(function(e) { document.getElementById('acc-empcash').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
   api('GET', '/admin/accounting/partner-payout-reconciliation').then(renderPayoutRecon)
     .catch(function(e) { document.getElementById('acc-payout').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
+}
+var employeeCash = [];
+function renderEmployeeCash(rows) {
+  employeeCash = rows || [];
+  var el = document.getElementById('acc-empcash');
+  if (!employeeCash.length) { el.innerHTML = '<p style="color:#6b7280;font-size:13px">No cash collected by in-house technicians in this period.</p>'; return; }
+  el.innerHTML = '<table class="data-table"><thead><tr><th>Technician</th><th>Order</th><th>Invoice</th><th>Collected</th><th>Deposited</th><th>Outstanding</th><th></th></tr></thead><tbody>' +
+    employeeCash.map(function(r, i) {
+      return '<tr><td>' + escape(r.technician) + '</td><td>' + escape(r.orderNumber) + '<br><small>' + fmtDateShort(r.serviceDate) + '</small></td><td>' + escape(r.invoiceNumber || '—') + '</td>' +
+        '<td>' + fmtCur(r.collected) + '<br><small>' + escape(r.method || '') + (r.verification ? ' · ' + escape(r.verification) : '') + '</small></td>' +
+        '<td>' + fmtCur(r.deposited) + (r.depositRefs ? '<br><small>' + escape(r.depositRefs) + '</small>' : '') + '</td>' +
+        '<td>' + (r.outstanding > 0 ? '<b style="color:#dc2626">' + fmtCur(r.outstanding) + '</b>' : fmtCur(0)) + '</td>' +
+        '<td>' + (r.outstanding > 0 ? '<button class="btn btn-xs btn-outline" onclick="recordCashDeposit(' + i + ')">Record deposit</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function recordCashDeposit(i) {
+  var r = employeeCash[i];
+  var amount = prompt('Cash received from ' + r.technician + ' for ' + r.orderNumber + ' (outstanding ₹' + r.outstanding + '):', r.outstanding);
+  if (amount === null) return;
+  var reference = prompt('Deposit reference (receipt or bank slip number):');
+  if (!reference || !reference.trim()) { toast('A deposit reference is required', 'error'); return; }
+  api('POST', '/admin/accounting/employee-cash/deposits', { vendorId: r.technicianId, orderId: r.orderId, amount: Number(amount), reference: reference.trim() })
+    .then(function(res) { toast(res.alreadyRecorded ? 'This deposit was already recorded' : 'Deposit recorded', 'success'); loadAccounting(); })
+    .catch(function(e) { toast(e.message, 'error'); });
 }
 var payoutRecon = [];
 function renderPayoutRecon(r) {
@@ -394,7 +427,7 @@ function savePurchase() {
   var v = function(id) { return document.getElementById(id).value.trim(); };
   api('POST', '/admin/accounting/purchases', {
     supplierName: v('pr-supplier'), supplierGstin: v('pr-gstin') || undefined, invoiceNumber: v('pr-number'), invoiceDate: v('pr-date'),
-    description: v('pr-desc') || undefined, hsnSac: v('pr-hsn') || undefined,
+    description: v('pr-desc') || undefined, hsnSac: v('pr-hsn') || undefined, category: v('pr-category') || 'GENERAL',
     taxableValue: Number(v('pr-taxable')), cgst: Number(v('pr-cgst') || 0), sgst: Number(v('pr-sgst') || 0), igst: Number(v('pr-igst') || 0),
   }).then(function() {
     toast('Purchase bill recorded', 'success');

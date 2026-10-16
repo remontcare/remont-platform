@@ -7,7 +7,7 @@ import {
   JwtAuthGuard, CurrentUser, JwtPayload,
   buildInvoiceBreakdown, resolveBillingTransactionType, buildTaxRateResolver, getBillingCompanyConfig,
   stateFromGstin, PLATFORM_FEE_DEFAULT_RATE, PLATFORM_FEE_DEFAULT_SAC, distributeInvoiceDiscount, buildServiceTaxResolver,
-  nextInvoiceDocumentNumber, isValidGstinFormat, logAudit, Roles, RolesGuard,
+  nextInvoiceDocumentNumber, isValidGstinFormat, logAudit, Roles, RolesGuard, marketplaceServiceBreakdown,
   type BillingLineInput, type BillingTransactionTypeValue,
 } from '../../common';
 import { renderInvoiceBundlePdf, buildInvoiceViewModel, type InvoiceDocKind, type InvoicePdfPage, type InvoicePaymentInfo } from './invoice-pdf';
@@ -201,6 +201,8 @@ export class InvoicesService {
       // silently pricing every line at full rate while `discount` sat hardcoded at 0.
       customerLines = distributeInvoiceDiscount(customerLines, orderDiscount);
       discountReducesTaxableValue = true;
+      // The Remont employee who performed the service, printed on Remont's invoice.
+      if (order.vendor) partnerDocument = { technician: order.vendor.fullName || order.vendor.businessName || null };
     } else if (transactionType === 'PLATFORM_SERVICE') {
       // Type 1 — a partner fulfils the job. TWO separate legal billing documents are
       // always kept apart, never merged into one Remont invoice:
@@ -287,6 +289,31 @@ export class InvoicesService {
           ...(commissionAmount > 0 ? [{ description: 'Remont Commission', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: commissionAmount, taxRatePercent: feeRate }] : []),
           ...(customerFeeAmount > 0 ? [{ description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: customerFeeAmount, taxRatePercent: feeRate }] : []),
         ];
+      }
+      if (order.serviceModel === 'MARKETPLACE') {
+        // Partner marketplace (priced at checkout as partner share + Remont platform fee + GST on the
+        // fee + GST on the share only when someone is liable). Three documents, none mixing suppliers:
+        // the partner's document for their share; Remont's platform fee invoice to the CUSTOMER (who
+        // paid it); and the customer page — a booking summary of everything paid, or under 9(5)
+        // Remont's tax invoice as e-commerce operator for the partner's service only.
+        const b = marketplaceServiceBreakdown({
+          serviceAmount: Number(order.serviceAmount), commission: commissionAmount,
+          discount: Number(order.couponDiscount || 0) + Number(order.membershipDiscount || 0) + Number(order.bundleDiscountAmount || 0),
+          extraWork: partnerAmount - Number(order.serviceAmount),
+          serviceRatePercent: serviceRate, feeRatePercent: feeRate, partnerGstApplies: partnerRegistered || section95,
+        });
+        // GST charged on the share with nobody liable (e.g. the category left 9(5) after booking) → review.
+        taxReviewRequired = !section95 && !partnerRegistered && Number(order.partnerServiceGst || 0) > 0;
+        const shareLine: BillingLineInput = { description: order.service?.name || 'Service', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: b.partnerGross, discount: b.partnerDiscount, taxRatePercent: serviceRate };
+        const feeLine: BillingLineInput = { description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: b.commission, discount: b.feeDiscount, taxRatePercent: feeRate };
+        vendorLines = b.partnerGross > 0 ? [shareLine] : [];
+        remontLines = b.commission > 0 ? [feeLine] : [];
+        customerLines = section95
+          ? [shareLine]
+          : [{ ...shareLine, taxRatePercent: partnerRegistered ? serviceRate : 0 }, ...(b.commission > 0 ? [feeLine] : [])];
+        customerSupplierGstin = section95 ? company.gstin : null;
+        remontPlaceOfSupply = placeOfSupply;
+        partnerDocument = { ...partnerDocument, model: 'MARKETPLACE', feeRecipient: 'CUSTOMER', commission: { amount: b.commission, base: Number(order.serviceAmount), ruleLabel: order.commissionRuleLabel || null, gstRatePercent: feeRate } };
       }
     } else {
       // Type 3 — marketplace product sale. The seller is the invoicing entity for the
@@ -492,8 +519,10 @@ export class InvoicesService {
     const issued = this.issuedDocuments(order.invoice);
     const kinds = new Set<InvoiceDocKind>();
     const marketplace = order.invoice.transactionType === 'MARKETPLACE_PRODUCT';
-    if (order.customerId === userId) { kinds.add('CUSTOMER'); kinds.add('VENDOR'); }
-    if (order.vendor?.userId === userId) { kinds.add('VENDOR'); kinds.add('REMONT'); }
+    // Marketplace jobs: Remont's platform fee invoice is addressed to the customer, not the partner.
+    const feeToCustomer = (order.invoice.lineItemsSnapshot as any)?.partnerDocument?.feeRecipient === 'CUSTOMER';
+    if (order.customerId === userId) { kinds.add('CUSTOMER'); kinds.add('VENDOR'); if (feeToCustomer) kinds.add('REMONT'); }
+    if (order.vendor?.userId === userId) { kinds.add('VENDOR'); if (!feeToCustomer) kinds.add('REMONT'); }
     if (order.items?.some((it: any) => it.product?.vendor?.userId === userId)) { kinds.add('CUSTOMER'); if (marketplace) kinds.add('REMONT'); }
     return issued.filter((k) => kinds.has(k));
   }

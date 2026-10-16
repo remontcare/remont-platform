@@ -143,12 +143,14 @@ export class AccountingReportsService {
       }
       if (inv.remontDocumentNumber || n(inv.remontTotal) > 0) {
         const rec = parties.remont?.recipient;
-        const recipientGstin = rec?.gstin || (t === 'MARKETPLACE_PRODUCT' ? seller?.gstNumber : t === 'PLATFORM_SERVICE' ? o.vendor?.gstin : customerGstin) || '';
+        const feeToCustomer = snap?.partnerDocument?.feeRecipient === 'CUSTOMER';
+        // the frozen recipient is authoritative (a customer with no GSTIN must not inherit the partner's)
+        const recipientGstin = (rec ? rec.gstin : (t === 'MARKETPLACE_PRODUCT' ? seller?.gstNumber : t === 'PLATFORM_SERVICE' && !feeToCustomer ? o.vendor?.gstin : customerGstin)) || '';
         out.push({
           docNo: inv.remontDocumentNumber || inv.invoiceNumber + '-FEE', date: inv.generatedAt, orderId: o.id, orderNumber: o.orderNumber, transactionType: t,
-          docType: t === 'MARKETPLACE_PRODUCT' ? 'REMONT COMMISSION INVOICE (to seller)' : t === 'PLATFORM_SERVICE' ? 'REMONT COMMISSION INVOICE (to partner)' : 'REMONT FEE INVOICE',
+          docType: t === 'MARKETPLACE_PRODUCT' ? 'REMONT COMMISSION INVOICE (to seller)' : t === 'PLATFORM_SERVICE' ? (feeToCustomer ? 'REMONT PLATFORM FEE INVOICE (to customer)' : 'REMONT COMMISSION INVOICE (to partner)') : 'REMONT FEE INVOICE',
           supplierName: company.legalName, supplierGstin: company.gstin, remontIsSupplier: true, isTaxDocument: true,
-          recipientName: rec?.name || (t === 'MARKETPLACE_PRODUCT' ? seller?.businessName : t === 'PLATFORM_SERVICE' ? partnerName : customerName) || '',
+          recipientName: rec?.name || (t === 'MARKETPLACE_PRODUCT' ? seller?.businessName : t === 'PLATFORM_SERVICE' && !feeToCustomer ? partnerName : customerName) || '',
           recipientGstin, placeOfSupply: rec?.state || (recipientGstin ? stateFromGstin(recipientGstin) : '') || inv.placeOfSupply || '',
           interState: n(inv.remontIgst) > 0, section95: false,
           taxable: r2(n(inv.platformCommission) + n(inv.bookingFee)), cgst: n(inv.remontCgst), sgst: n(inv.remontSgst), igst: n(inv.remontIgst), total: n(inv.remontTotal),
@@ -594,6 +596,9 @@ export class AccountingReportsService {
     if (igst > 0 && (cgst > 0 || sgst > 0)) throw new BadRequestException('A bill carries either IGST or CGST+SGST, not both');
     const gstin = b.supplierGstin ? String(b.supplierGstin).trim().toUpperCase() : null;
     if (gstin && !isValidGstinFormat(gstin)) throw new BadRequestException('Supplier GSTIN is not valid');
+    // Salary of Remont's in-house technicians: an employee expense, recorded separately from service
+    // accounting — never GST, never input tax credit, never netted against cash they collected.
+    if (b.category === 'SALARY' && (cgst > 0 || sgst > 0 || igst > 0 || gstin)) throw new BadRequestException('Salary carries no GST and no supplier GSTIN');
     const date = new Date(b.invoiceDate);
     if (isNaN(date.getTime())) throw new BadRequestException('invoiceDate is not a valid date');
     const rec = await this.prisma.purchaseRecord.create({ data: {
@@ -601,9 +606,108 @@ export class AccountingReportsService {
       invoiceNumber: String(b.invoiceNumber).trim(), invoiceDate: date, category: b.category || 'GENERAL', description: b.description || null, hsnSac: b.hsnSac || null,
       taxableValue: taxable, cgst, sgst, igst, totalValue: r2(taxable + cgst + sgst + igst),
       // ITC needs the supplier's GSTIN on the bill.
-      itcEligible: b.itcEligible === false ? false : !!gstin, createdBy: actorId,
+      itcEligible: b.category === 'SALARY' || b.itcEligible === false ? false : !!gstin, createdBy: actorId,
     } });
     return rec;
+  }
+
+  // ─── In-house technicians: cash collected on Remont's behalf, and its deposit ───────────
+  // Verified cash on an in-house job is already a COD_COLLECTION debit on that technician's ledger
+  // (OrdersService.applyVerifiedCashTx) — the cash they hold for Remont. A verified deposit is a
+  // CASH_DEPOSIT credit against the same order. Never salary, never partner earnings or commission.
+
+  private async employeeCashByOrder(client: any, vendorId: string, orderIds?: string[]) {
+    const rows = await client.partnerLedgerEntry.findMany({
+      where: { vendorId, type: { in: ['COD_COLLECTION', 'CASH_DEPOSIT'] }, orderId: orderIds ? { in: orderIds } : { not: null } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    const m = new Map<string, { collected: number; deposited: number; collectedAt: Date | null; deposits: { amount: number; reference: string | null; at: Date; by: string | null }[] }>();
+    for (const e of rows) {
+      const a = m.get(e.orderId) || { collected: 0, deposited: 0, collectedAt: null, deposits: [] };
+      if (e.type === 'COD_COLLECTION') { a.collected = r2(a.collected - n(e.amount)); a.collectedAt = a.collectedAt || e.createdAt; }
+      else { a.deposited = r2(a.deposited + n(e.amount)); a.deposits.push({ amount: n(e.amount), reference: e.reference, at: e.createdAt, by: e.createdBy }); }
+      m.set(e.orderId, a);
+    }
+    return m;
+  }
+
+  /** Admin records a verified cash deposit by an in-house technician against one job. */
+  async recordEmployeeCashDeposit(actor: { sub: string; role: UserRole }, b: { vendorId: string; orderId: string; amount: number; reference: string; note?: string }) {
+    const amount = r2(Number(b?.amount));
+    const reference = String(b?.reference || '').trim();
+    if (!(amount > 0)) throw new BadRequestException('Enter the deposited amount');
+    if (!reference) throw new BadRequestException('A deposit reference (receipt / bank slip number) is required');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ServiceVendor" WHERE id = ${b.vendorId} FOR UPDATE`;
+      const vendor = await tx.serviceVendor.findUnique({ where: { id: b.vendorId }, select: { id: true, staffType: true } });
+      if (!vendor) throw new NotFoundException('Technician not found');
+      if (vendor.staffType !== 'IN_HOUSE') throw new BadRequestException('Cash deposits are recorded for in-house technicians only — partner cash is settled through the partner wallet');
+      const order = await tx.order.findUnique({ where: { id: b.orderId }, select: { id: true, vendorId: true, orderNumber: true } });
+      if (!order || order.vendorId !== vendor.id) throw new BadRequestException('This job was not done by this technician');
+      // the same receipt never counts twice (a retried request returns the deposit already recorded)
+      const dup = await tx.partnerLedgerEntry.findFirst({ where: { vendorId: vendor.id, type: 'CASH_DEPOSIT', reference } });
+      if (dup) {
+        if (dup.orderId === order.id && r2(n(dup.amount)) === amount) return { alreadyRecorded: true, entryId: dup.id };
+        throw new ConflictException(`Deposit reference ${reference} is already recorded`);
+      }
+      const pos = (await this.employeeCashByOrder(tx, vendor.id, [order.id])).get(order.id) || { collected: 0, deposited: 0 };
+      const outstanding = r2(pos.collected - pos.deposited);
+      if (outstanding <= 0) throw new BadRequestException('No verified cash is outstanding on this job');
+      if (amount > outstanding) throw new BadRequestException(`Deposit exceeds the cash outstanding on this job (₹${outstanding})`);
+      const entry = await this.ledger.postEntry(tx, vendor.id, 'CASH_DEPOSIT' as any, amount, {
+        orderId: order.id, reference, createdBy: actor.sub,
+        notes: `Cash deposited with Remont for ${order.orderNumber} (ref ${reference})${b.note ? ': ' + String(b.note).trim() : ''}`,
+      });
+      await tx.serviceVendor.update({ where: { id: vendor.id }, data: { pendingPayout: { increment: amount } } });
+      await logAudit(tx, { actorId: actor.sub, actorRole: actor.role, action: 'EMPLOYEE_CASH_DEPOSIT', targetType: 'Order', targetId: order.id, metadata: { vendorId: vendor.id, amount, reference, ledgerEntryId: entry.id } });
+      return { recorded: true, entryId: entry.id, outstandingAfter: r2(outstanding - amount) };
+    }, { timeout: 15000, maxWait: 10000 });
+  }
+
+  /** Every in-house job with cash collected: collected, deposited, outstanding (rows, for screen and workbook). */
+  async employeeCashRows(range: DateRange) {
+    const techs = await this.prisma.serviceVendor.findMany({ where: { staffType: 'IN_HOUSE' }, select: { id: true, fullName: true } });
+    const out: any[] = [];
+    for (const t of techs) {
+      const byOrder = await this.employeeCashByOrder(this.prisma, t.id);
+      if (!byOrder.size) continue;
+      const orders = await this.prisma.order.findMany({
+        where: { id: { in: [...byOrder.keys()] } },
+        select: { id: true, orderNumber: true, completedAt: true, slotStart: true, paymentMethod: true, invoice: { select: { invoiceNumber: true } } },
+      });
+      const pays = await this.prisma.paymentTransaction.findMany({
+        where: { orderId: { in: [...byOrder.keys()] }, gateway: 'CASH_COLLECTION' },
+        select: { orderId: true, collectionMode: true, status: true, verificationMethod: true },
+      });
+      for (const o of orders) {
+        const a = byOrder.get(o.id)!;
+        if (range.from && a.collectedAt && a.collectedAt < range.from) continue;
+        if (range.to && a.collectedAt && a.collectedAt > range.to) continue;
+        const p = pays.filter((x) => x.orderId === o.id);
+        out.push({
+          technicianId: t.id, technician: t.fullName, orderId: o.id, orderNumber: o.orderNumber,
+          serviceDate: o.completedAt || o.slotStart, invoiceNumber: o.invoice?.invoiceNumber || '',
+          collected: a.collected, collectedAt: a.collectedAt,
+          method: [...new Set(p.map((x) => x.collectionMode).filter(Boolean))].join(', ') || o.paymentMethod || '',
+          verification: [...new Set(p.filter((x) => x.status === 'PAID').map((x) => x.verificationMethod).filter(Boolean))].join(', '),
+          deposited: a.deposited, depositRefs: a.deposits.map((x) => x.reference).filter(Boolean).join(', '),
+          outstanding: r2(a.collected - a.deposited),
+        });
+      }
+    }
+    return out.sort((x, y) => String(x.technician).localeCompare(String(y.technician)) || +new Date(x.collectedAt) - +new Date(y.collectedAt));
+  }
+
+  async employeeCashReport(range: DateRange) {
+    const rows = await this.employeeCashRows(range);
+    const wb = new Excel.Workbook();
+    addSheet(wb, 'Employee cash', [['Technician', 'technician', 22], ['Technician ID', 'technicianId', 28], ['Order', 'orderNumber', 24], ['Service date', 'serviceDate', 12], ['Invoice', 'invoiceNumber', 24], ['Collected', 'collected'], ['Collected on', 'collectedAt', 12], ['Method', 'method', 12], ['Verified by', 'verification', 14], ['Deposited', 'deposited'], ['Deposit refs', 'depositRefs', 24], ['Outstanding', 'outstanding']],
+      rows.map((r) => ({ ...r, serviceDate: d(r.serviceDate), collectedAt: d(r.collectedAt) })),
+      'Cash collected by Remont\'s in-house technicians on Remont\'s behalf, and its verified deposit. Not salary, not partner earnings.');
+    const byTech = new Map<string, any>();
+    for (const r of rows) { const a = byTech.get(r.technicianId) || { technician: r.technician, jobs: 0, collected: 0, deposited: 0, outstanding: 0 }; a.jobs++; a.collected = r2(a.collected + r.collected); a.deposited = r2(a.deposited + r.deposited); a.outstanding = r2(a.outstanding + r.outstanding); byTech.set(r.technicianId, a); }
+    addSheet(wb, 'By technician', [['Technician', 'technician', 22], ['Jobs', 'jobs', 8], ['Collected', 'collected'], ['Deposited', 'deposited'], ['Outstanding', 'outstanding']], [...byTech.values()]);
+    return toBuffer(wb);
   }
 
   listPurchases(range: DateRange) {
@@ -644,6 +748,11 @@ export class AccountingReportsController {
   @Post('partner-payout-reconciliation/:vendorId/correct')
   correct(@CurrentUser() u: JwtPayload, @Param('vendorId') id: string, @Body() b: { amount: number; expectedDifference: number; reason: string; orderId?: string }) {
     return this.r.correctPartnerLedger({ sub: u.sub, role: u.role }, id, b);
+  }
+  @Get('employee-cash') async employeeCash(@Query('from') f: string, @Query('to') t: string, @Res() res: Response) { send(res, await this.r.employeeCashReport(parseRange(f, t)), `employee-cash_${tag(f, t)}.xlsx`); }
+  @Get('employee-cash/rows') employeeCashRows(@Query('from') f: string, @Query('to') t: string) { return this.r.employeeCashRows(parseRange(f, t)); }
+  @Post('employee-cash/deposits') employeeCashDeposit(@CurrentUser() u: JwtPayload, @Body() b: { vendorId: string; orderId: string; amount: number; reference: string; note?: string }) {
+    return this.r.recordEmployeeCashDeposit({ sub: u.sub, role: u.role }, b);
   }
   @Get('purchases') listPurchases(@Query('from') f: string, @Query('to') t: string) { return this.r.listPurchases(parseRange(f, t)); }
   @Post('purchases') createPurchase(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.r.createPurchase(u.sub, b); }

@@ -506,6 +506,124 @@ export async function priceServiceBooking(
   };
 }
 
+// ─── Service models: in-house vs partner marketplace ──────────────────────────
+// The customer pays before anyone is assigned, so the pricing model comes from the service's
+// category (ServiceCategory.serviceModel) and is frozen on the order (Order.serviceModel).
+export type OrderServiceModel = 'IN_HOUSE' | 'MARKETPLACE';
+
+/** Category setting → order model. Anything else (no category row) = legacy pricing (null). */
+export function orderServiceModelFor(categoryServiceModel?: string | null): OrderServiceModel | null {
+  if (categoryServiceModel === 'IN_HOUSE') return 'IN_HOUSE';
+  if (categoryServiceModel === 'PARTNER_MARKETPLACE') return 'MARKETPLACE';
+  return null;
+}
+
+/** Which staff a category's jobs may go to (dispatch, acceptance, admin assignment). Legacy = any. */
+export function staffAllowedForModel(model: string | null | undefined, staffType: string | null | undefined): boolean {
+  if (model === 'IN_HOUSE') return staffType === 'IN_HOUSE';
+  if (model === 'MARKETPLACE') return staffType !== 'IN_HOUSE';
+  return true;
+}
+
+/**
+ * Marketplace customer price for one service booking. The catalogue price includes Remont's
+ * commission; the customer is charged the partner's share + Remont's platform fee (the commission)
+ * + GST on the fee + GST on the partner's share only when someone is liable for it (a registered
+ * partner, or Remont under 9(5)). A platform-funded discount reduces Remont's fee first; any excess
+ * reduces the partner's line (the partner is still paid their full share). E.g. ₹100 incl. ₹20
+ * commission, 18%/18%: ₹80 + ₹20 + ₹3.60 = ₹103.60; with partner GST ₹14.40 = ₹118.
+ */
+export function marketplaceServiceBreakdown(i: {
+  serviceAmount: number; commission: number; discount?: number; extraWork?: number;
+  serviceRatePercent: number; feeRatePercent: number; partnerGstApplies: boolean;
+}) {
+  const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const commission = r2(Math.max(0, Math.min(Number(i.commission) || 0, Number(i.serviceAmount) || 0)));
+  const discount = r2(Math.max(0, Number(i.discount) || 0));
+  const feeDiscount = Math.min(discount, commission);
+  const feeTaxable = r2(commission - feeDiscount);
+  const partnerGross = r2(Number(i.serviceAmount) - commission + (Number(i.extraWork) || 0));
+  const partnerDiscount = Math.min(r2(discount - feeDiscount), partnerGross);
+  const partnerTaxable = r2(partnerGross - partnerDiscount);
+  const platformFeeGst = r2((feeTaxable * i.feeRatePercent) / 100);
+  const partnerServiceGst = i.partnerGstApplies ? r2((partnerTaxable * i.serviceRatePercent) / 100) : 0;
+  return {
+    commission, feeDiscount, feeTaxable, partnerGross, partnerDiscount, partnerTaxable, platformFeeGst, partnerServiceGst,
+    gstAmount: r2(platformFeeGst + partnerServiceGst),
+    customerTotal: r2(partnerTaxable + partnerServiceGst + feeTaxable + platformFeeGst),
+  };
+}
+
+/**
+ * GST for one service booking at checkout, by the category's model (no partner is known yet):
+ * legacy/IN_HOUSE = GST on the (discounted) service; MARKETPLACE = GST on Remont's fee, plus GST
+ * on the partner's share only under 9(5). Shared by single-order, guest and admin-created bookings.
+ */
+export async function serviceBookingGst(
+  prisma: any,
+  category: { serviceModel?: string | null; gstSection95Status?: string | null } | null | undefined,
+  p: { serviceAmount: number; commission: number; discount?: number; serviceRatePercent: number },
+): Promise<{ serviceModel: OrderServiceModel | null; gstAmount: number; platformFeeGst: number; partnerServiceGst: number }> {
+  const serviceModel = orderServiceModelFor(category?.serviceModel);
+  if (serviceModel !== 'MARKETPLACE') {
+    const taxable = Math.max(0, p.serviceAmount - (p.discount || 0));
+    return { serviceModel, gstAmount: Math.round(taxable * (p.serviceRatePercent / 100) * 100) / 100, platformFeeGst: 0, partnerServiceGst: 0 };
+  }
+  const feeRatePercent = (await buildTaxRateResolver(prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE)).rateFor(null, null);
+  const b = marketplaceServiceBreakdown({
+    serviceAmount: p.serviceAmount, commission: p.commission, discount: p.discount, serviceRatePercent: p.serviceRatePercent,
+    feeRatePercent, partnerGstApplies: category?.gstSection95Status === 'APPLICABLE',
+  });
+  return { serviceModel, gstAmount: b.gstAmount, platformFeeGst: b.platformFeeGst, partnerServiceGst: b.partnerServiceGst };
+}
+
+/** GST on the partner's share applies only to a registered partner, or to Remont under 9(5). */
+export function partnerGstApplies(vendor: { staffType?: string | null; gstin?: string | null } | null | undefined, section95Status?: string | null): boolean {
+  const registered = !!vendor?.gstin && isValidGstinFormat(String(vendor.gstin));
+  if (registered) return true;
+  return section95Status === 'APPLICABLE';
+}
+
+/**
+ * Recomputes a MARKETPLACE service order's GST and totals from its frozen inputs (price,
+ * commission, discounts, wallet) and its CURRENT partner — called when approved extra work or the
+ * assigned partner changes (a registered partner's GST is only known once they accept). A no-op
+ * for other orders. Never touches money already received: a total that rises past what was paid
+ * becomes a balance due through the existing balance flow.
+ */
+export async function recalculateMarketplaceOrder(client: any, orderId: string): Promise<boolean> {
+  const order = await client.order.findUnique({
+    where: { id: orderId },
+    include: { extraWorkItems: { where: { customerApproved: true } }, vendor: true, service: { include: { category: true } } },
+  });
+  if (!order || order.serviceModel !== 'MARKETPLACE' || order.type !== 'SERVICE') return false;
+  const svcTax = await buildServiceTaxResolver(client);
+  const feeTax = await buildTaxRateResolver(client, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+  const extraWork = order.extraWorkItems.reduce((s: number, e: any) => s + Number(e.amount), 0);
+  const b = marketplaceServiceBreakdown({
+    serviceAmount: Number(order.serviceAmount), commission: Number(order.remontCommission),
+    discount: Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.bundleDiscountAmount || 0),
+    extraWork,
+    serviceRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent),
+    feeRatePercent: feeTax.rateFor(null, null),
+    partnerGstApplies: partnerGstApplies(order.vendor, order.service?.category?.gstSection95Status),
+  });
+  const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const totalAmount = Math.max(0, r2(b.customerTotal - Number(order.walletUsed || 0)));
+  const rose = totalAmount > Number(order.totalAmount) + 0.009;
+  await client.order.update({
+    where: { id: orderId },
+    data: {
+      extraWorkAmount: extraWork, subtotal: r2(Number(order.serviceAmount) + extraWork),
+      gstAmount: b.gstAmount, platformFeeGst: b.platformFeeGst, partnerServiceGst: b.partnerServiceGst, totalAmount,
+      vendorPayout: r2(Number(order.serviceAmount) + extraWork - Number(order.remontCommission)),
+      // fully paid at the old total → now part-paid; the balance flow collects the difference
+      ...(rose && order.paymentStatus === 'PAID' ? { paymentStatus: 'PARTIAL' } : {}),
+    },
+  });
+  return true;
+}
+
 // ─── Partner arrival evidence ──────────────────────────────────────────────────
 // "I have arrived" captures a fresh location; verification is decided here, server-side, and
 // stored separately from the (unchanged) order status. Thresholds are admin-editable settings

@@ -170,11 +170,13 @@ export function buildInvoiceViewModel(
   // Model 1 (partner job issued after the two-document fix): issuance mode + commission basis
   // frozen at issue. Absent on older invoices, which keep rendering exactly as they were issued.
   const partnerDoc = lineSnapshot.partnerDocument as
-    | { issuance: 'STATEMENT' | 'ON_BEHALF'; partnerRegistered: boolean; serviceDate: string | null; commission: { amount: number; base: number; ruleLabel: string | null; gstRatePercent: number } }
+    | { issuance: 'STATEMENT' | 'ON_BEHALF'; partnerRegistered: boolean; serviceDate: string | null; commission: { amount: number; base: number; ruleLabel: string | null; gstRatePercent: number }; model?: 'MARKETPLACE'; feeRecipient?: 'CUSTOMER'; technician?: string | null }
     | undefined;
   const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString('en-IN') : null);
 
-  if (docKind === 'VENDOR' && partnerDoc) {
+  const feeToCustomer = partnerDoc?.feeRecipient === 'CUSTOMER';
+
+  if (docKind === 'VENDOR' && partnerDoc?.issuance) {
     // Invoice A — the partner's supply of the service to the customer. The partner is the supplier;
     // Remont never appears as the supplier. Whether this page is the partner's tax invoice depends on
     // the issuance authority frozen at issue (see InvoicesService.partnerInvoiceIssuance).
@@ -197,6 +199,7 @@ export function buildInvoiceViewModel(
     else notes.push(`Prepared by ${company.legalName} for the service supplied to you by ${partnerName}. ${company.legalName} is not the supplier of this service.${registered ? ` The partner (GSTIN ${gstin}) issues its own tax invoice for this service and is liable for the GST shown.` : ''}`);
     if (invoice.section95) notes.push(`The partner is not registered under GST and charges no GST. GST on this service is paid by ${company.legalName} as electronic commerce operator under ${SECTION_95_BASIS} (customer tax invoice ${invoice.invoiceNumber}).`);
     else if (!registered) notes.push('The partner is not registered under GST and charges no GST on this document.');
+    if (feeToCustomer && invoice.remontDocumentNumber) notes.push(`${company.legalName}'s platform fee for this booking is on its own tax invoice ${invoice.remontDocumentNumber}.`);
     const isTax = registered && onBehalf;
     return {
       isTaxInvoice: isTax,
@@ -249,7 +252,7 @@ export function buildInvoiceViewModel(
   if (docKind === 'REMONT') {
     const isMarketplace = invoice.transactionType === 'MARKETPLACE_PRODUCT';
     const sellerVendor = isMarketplace ? order.items?.find((it: any) => it.product?.vendor)?.product?.vendor : null;
-    const isPartnerJob = invoice.transactionType === 'PLATFORM_SERVICE' && !!order.vendor;
+    const isPartnerJob = invoice.transactionType === 'PLATFORM_SERVICE' && !!order.vendor && !feeToCustomer;
     const liveRecipient: PartyBlock = isMarketplace && sellerVendor
       ? { name: sellerVendor.businessName, address: sellerVendor.address, gstin: sellerVendor.gstNumber, state: sellerVendor.state }
       // Commission is deducted from the partner, so the partner receives Remont's commission document.
@@ -260,7 +263,7 @@ export function buildInvoiceViewModel(
     return {
       isTaxInvoice: true,
       docBadge: 'TAX INVOICE',
-      copyTag: isMarketplace ? 'ORIGINAL FOR SELLER — MARKETPLACE COMMISSION' : isPartnerJob ? 'ORIGINAL FOR PARTNER — REMONT COMMISSION' : 'ORIGINAL FOR RECIPIENT — PLATFORM FEE',
+      copyTag: isMarketplace ? 'ORIGINAL FOR SELLER — MARKETPLACE COMMISSION' : isPartnerJob ? 'ORIGINAL FOR PARTNER — REMONT COMMISSION' : feeToCustomer ? 'ORIGINAL FOR RECIPIENT — REMONT PLATFORM FEE' : 'ORIGINAL FOR RECIPIENT — PLATFORM FEE',
       // C-08 — Remont's own platform-fee/commission document is a legally distinct
       // instrument from the customer's (and, for a marketplace order, the seller's own)
       // tax invoice — never the same number (see Invoice.remontDocumentNumber). Falls
@@ -275,6 +278,14 @@ export function buildInvoiceViewModel(
       discount: 0, roundOff: 0, total: Number(invoice.remontTotal), received: 0, bank,
       termsAndConditions: company.invoiceTerms, // Remont is always the supplier on this page
       // Invoice B (Model 1): linked to the order and the partner's document, with the commission basis.
+      ...(feeToCustomer && partnerDoc
+        ? {
+            referenceLine: `Order ${order.orderNumber}${invoice.vendorDocumentNumber ? ` · Partner document ${invoice.vendorDocumentNumber}` : ''}`,
+            notes: [
+              `${company.legalName}'s platform fee for arranging this service through the Remont platform. The service itself is supplied by ${partnerName}${invoice.vendorDocumentNumber ? ` (partner document ${invoice.vendorDocumentNumber})` : ''}.`,
+            ],
+          }
+        : {}),
       ...(isPartnerJob && partnerDoc
         ? {
             referenceLine: `Order ${order.orderNumber} · Partner document ${invoice.vendorDocumentNumber || '—'}`,
@@ -326,7 +337,14 @@ export function buildInvoiceViewModel(
 
   function customerNotes(): string[] {
     if (isSection95) {
-      return [`Tax invoice issued by ${company.legalName} as electronic commerce operator under ${SECTION_95_BASIS} for a service supplied through the Remont platform. Service performed by ${partnerName}, who is not registered under GST.`];
+      return [`Tax invoice issued by ${company.legalName} as electronic commerce operator under ${SECTION_95_BASIS} for a service supplied through the Remont platform. Service performed by ${partnerName}, who is not registered under GST.`
+        + (feeToCustomer && invoice.remontDocumentNumber ? ` The Remont platform fee is on tax invoice ${invoice.remontDocumentNumber}.` : '')];
+    }
+    if (invoice.transactionType === 'DIRECT_PROJECT' && partnerDoc?.technician) {
+      return [`Service performed by ${partnerDoc.technician}, an employee of ${company.legalName}.`];
+    }
+    if (isSummaryOnly && feeToCustomer) {
+      return [`This is a booking summary, not a GST tax invoice. The service is supplied by ${partnerName}${partnerDoc?.partnerRegistered ? ` (GSTIN ${String(order.vendor?.gstin).trim().toUpperCase()}), who is liable for the GST on it` : ', who is not registered under GST'}${invoice.vendorDocumentNumber ? ` — partner document ${invoice.vendorDocumentNumber}` : ''}. The Remont platform fee and its GST are on ${company.legalName}'s tax invoice${invoice.remontDocumentNumber ? ' ' + invoice.remontDocumentNumber : ''}.`];
     }
     if (!isSummaryOnly) return [];
     const fee = (lineSnapshot.customer || []).some((l: any) => /platform fee/i.test(l.description || ''));

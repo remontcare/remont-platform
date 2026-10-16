@@ -207,7 +207,8 @@ d('Model 1 partner invoicing (throwaway Postgres)', () => {
     expect(inv.vendorDocumentNumber).toBeNull();
     expect(inv.remontDocumentNumber).toBeNull();
     expect(Number(inv.customerTotal)).toBe(118);
-    expect((inv.lineItemsSnapshot as any).partnerDocument).toBeUndefined();
+    // the technician who did the work is printed on Remont's invoice; no partner document data
+    expect((inv.lineItemsSnapshot as any).partnerDocument).toEqual({ technician: tech.fullName });
     expect(pdfPages(await invoices.getPdfBufferAdmin(o.id, 'ALL'))).toBe(1);
   });
 
