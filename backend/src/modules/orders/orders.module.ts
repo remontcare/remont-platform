@@ -1346,13 +1346,25 @@ export class OrdersService {
       const completionCredit = grossAmount - remainingCommission; // == vendorPayout + leadCostPaid
       const { days, percent } = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
       const holdAmount = percent > 0 ? Math.round(completionCredit * percent) / 100 : 0;
-      const releasedNow = completionCredit - holdAmount;
+      // GST on Remont's commission is invoiced to the partner (commission invoice). Whether the
+      // partner ledger also recovers it is a CA/accounting decision — configurable, OFF by default
+      // (the approved behaviour: the ledger recovers the commission only).
+      const gstRecovery = (await tx.siteSetting.findUnique({ where: { key: 'partner_commission_gst_recovery' } }))?.value === 'true';
+      let commissionGst = 0;
+      if (gstRecovery && fullCommission > 0) {
+        const feeTax = await buildTaxRateResolver(tx, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+        commissionGst = r2m((fullCommission * feeTax.rateFor(null, null)) / 100);
+      }
+      const releasedNow = completionCredit - holdAmount - commissionGst;
       await tx.serviceVendor.update({
         where: { id: order.vendor.id },
         data: { totalEarnings: { increment: Number(order.vendorPayout) }, pendingPayout: { increment: releasedNow } },
       });
       await this.ledger.postEntry(tx, order.vendor.id, 'JOB_EARNING', grossAmount, { orderId });
       await this.ledger.trueUpCommission(tx, order.vendor.id, orderId, remainingCommission);
+      if (commissionGst > 0) {
+        await this.ledger.postEntry(tx, order.vendor.id, 'GST', -commissionGst, { orderId, notes: 'GST on Remont commission (as invoiced to the partner)' });
+      }
       if (holdAmount > 0) {
         const releaseDueAt = new Date();
         releaseDueAt.setDate(releaseDueAt.getDate() + days);

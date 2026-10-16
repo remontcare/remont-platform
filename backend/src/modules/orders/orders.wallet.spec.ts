@@ -27,6 +27,7 @@ function makeService() {
     paymentTransaction: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
     extraWorkItem: { findMany: jest.fn(async () => []) },
     partnerLedgerEntry: { count: jest.fn(async () => 0) },
+    siteSetting: { findUnique: jest.fn(async () => null) }, // commission-GST recovery off (default)
     $queryRaw: jest.fn(async () => []),
   };
   prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
@@ -234,5 +235,28 @@ describe('OrdersService.cancel — Lead Cost refund', () => {
     await svc.cancel('cust-1', 'order-1', 'racing duplicate attempt');
 
     expect(ledger.refundLeadCost).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OrdersService.releaseJobEarnings — configurable commission GST recovery', () => {
+  function withSetting(value: string | null, rate = 18) {
+    const t = makeService();
+    t.prisma.siteSetting = { findUnique: jest.fn(async ({ where }: any) => (where.key === 'partner_commission_gst_recovery' && value !== null ? { value } : null)) };
+    t.prisma.taxConfig = { findMany: jest.fn(async () => (rate !== 18 ? [{ rate, appliesTo: ['PLATFORM_FEE'], isActive: true, type: 'GST' }] : [])) };
+    t.prisma.serviceVendor.findUnique.mockResolvedValue({ id: 'vendor-1', userId: 'vendor-user-1' });
+    t.setOrder(baseOrder());
+    return t;
+  }
+  it('default (setting absent): the ledger recovers the commission only — unchanged behaviour', async () => {
+    const { svc, ledger, prisma } = withSetting(null);
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
+    expect(ledger.postEntry).not.toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'GST', expect.anything(), expect.anything());
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingPayout: { increment: 900 } }) }));
+  });
+  it('enabled: GST on the commission (18% of ₹100) is also recovered, as its own ledger entry', async () => {
+    const { svc, ledger, prisma } = withSetting('true');
+    await svc.complete('vendor-user-1', 'order-1', '4321', []);
+    expect(ledger.postEntry).toHaveBeenCalledWith(expect.anything(), 'vendor-1', 'GST', -18, expect.objectContaining({ orderId: 'order-1' }));
+    expect(prisma.serviceVendor.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pendingPayout: { increment: 882 } }) }));
   });
 });

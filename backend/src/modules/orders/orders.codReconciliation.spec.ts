@@ -53,6 +53,7 @@ function makeService(initialOrder: Record<string, any>, initialPayments: any[] =
     },
     extraWorkItem: { findMany: jest.fn(async () => []) },
     partnerLedgerEntry: { count: jest.fn(async () => ledgerEntries.filter((e) => e.type === 'JOB_EARNING').length) },
+    siteSetting: { findUnique: jest.fn(async () => null) }, // commission-GST recovery off (default)
     $queryRaw: jest.fn(async () => []),
   };
   prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
