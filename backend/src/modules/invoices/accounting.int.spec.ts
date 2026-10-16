@@ -213,6 +213,10 @@ d('Accounting & invoices (throwaway Postgres)', () => {
     await invoices.autoIssueProductInvoice(ok.id);
     const inv = await prisma.invoice.findUnique({ where: { orderId: ok.id } });
     expect(Number(inv!.customerTotal)).toBe(1180);
+    // products follow the marketplace rules — never a service section 9(5) supply
+    expect(inv!.transactionType).toBe('MARKETPLACE_PRODUCT');
+    expect(inv!.section95).toBe(false);
+    expect(inv!.taxReviewRequired).toBe(false);
     await invoices.autoIssueProductInvoice(ok.id); // idempotent
     expect(await prisma.invoice.count({ where: { orderId: ok.id } })).toBe(1);
     const early = await mk('AWAITING_SELLER');
