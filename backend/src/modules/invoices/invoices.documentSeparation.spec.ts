@@ -13,6 +13,7 @@ import { billingFindMany } from '../../common/billing-fixture.test';
 
 function makeService() {
   const prisma: any = {
+    partnerRegistration: { findFirst: jest.fn(async () => null) }, // no approved registration on file
     order: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })) },
     invoice: {
       findUnique: jest.fn(async () => null),

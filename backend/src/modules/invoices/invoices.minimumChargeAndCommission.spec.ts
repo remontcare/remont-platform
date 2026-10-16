@@ -19,6 +19,7 @@ function baseOrder(o: any = {}) {
 }
 function makeService() {
   const prisma: any = {
+    partnerRegistration: { findFirst: jest.fn(async () => null) }, // no approved registration on file
     order: { findUnique: jest.fn(), update: jest.fn(async (a: any) => ({ id: a.where.id, ...a.data })) },
     invoice: { findUnique: jest.fn(async () => null), create: jest.fn(async (a: any) => ({ id: 'inv-1', ...a.data })) },
     siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => ({ value: '49' })) }, // a booking-fee setting must NOT be printed

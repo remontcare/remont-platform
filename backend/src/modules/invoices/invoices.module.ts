@@ -69,14 +69,25 @@ export class InvoicesService {
     // issuer/recipient — C-08) and only get their own number when that page actually
     // exists for this order, so an order with no partner line or no Remont commission
     // never wastes a sequence slot on a document that was never issued.
-    const invoice = await this.prisma.$transaction(async (tx) => {
-      const customerDocumentNumber = await nextInvoiceDocumentNumber(tx, 'CUSTOMER_TAX_INVOICE');
-      const vendorDocumentNumber = hasVendorDoc ? await nextInvoiceDocumentNumber(tx, 'PARTNER_SETTLEMENT_INVOICE') : null;
-      const remontDocumentNumber = hasRemontDoc ? await nextInvoiceDocumentNumber(tx, 'PLATFORM_FEE_INVOICE') : null;
-      return tx.invoice.create({
-        data: { orderId, ...breakdown, section95, taxReviewRequired, invoiceNumber: customerDocumentNumber, vendorDocumentNumber, remontDocumentNumber },
+    let invoice;
+    try {
+      invoice = await this.prisma.$transaction(async (tx) => {
+        const customerDocumentNumber = await nextInvoiceDocumentNumber(tx, 'CUSTOMER_TAX_INVOICE');
+        const vendorDocumentNumber = hasVendorDoc ? await nextInvoiceDocumentNumber(tx, 'PARTNER_SETTLEMENT_INVOICE') : null;
+        const remontDocumentNumber = hasRemontDoc ? await nextInvoiceDocumentNumber(tx, 'PLATFORM_FEE_INVOICE') : null;
+        return tx.invoice.create({
+          data: { orderId, ...breakdown, section95, taxReviewRequired, invoiceNumber: customerDocumentNumber, vendorDocumentNumber, remontDocumentNumber },
+        });
       });
-    });
+    } catch (e: any) {
+      // A concurrent call issued this order's invoice first (unique orderId): its transaction —
+      // and the numbers it took — rolled back, so the one issued invoice is returned instead.
+      if (e?.code === 'P2002') {
+        const winner = await this.prisma.invoice.findUnique({ where: { orderId } });
+        if (winner) return winner;
+      }
+      throw e;
+    }
     if (!order.billingTransactionType) {
       await this.prisma.order.update({ where: { id: orderId }, data: { billingTransactionType: transactionType } });
     }
@@ -98,7 +109,28 @@ export class InvoicesService {
       },
     });
     if (!order) throw new NotFoundException('Order not found');
-    return order;
+    // The partner's registered address/state live on their approved registration (ServiceVendor
+    // has none) — read once here so the partner document carries the supplier's real details.
+    const partnerProfile = order.vendor?.userId
+      ? await this.prisma.partnerRegistration.findFirst({
+          where: { userId: order.vendor.userId, status: 'APPROVED' }, orderBy: { updatedAt: 'desc' },
+          select: { fullAddress: true, city: true, state: true, pincode: true },
+        })
+      : null;
+    return Object.assign(order, { partnerProfile });
+  }
+
+  /**
+   * How the partner's document to the customer is issued (Model 1). Remont must not issue a tax
+   * invoice in a partner's name without the partner's written authorisation, so the default is
+   * STATEMENT: a partner service statement prepared by Remont (not a tax invoice; a registered
+   * partner issues its own tax invoice). ON_BEHALF — Remont issues the partner's tax invoice on
+   * the partner's behalf — is set only once the partner agreement carries that authorisation
+   * (SiteSetting `partner_invoice_issuance`). Frozen on each invoice at issue.
+   */
+  private async partnerInvoiceIssuance(): Promise<'STATEMENT' | 'ON_BEHALF'> {
+    const s = await this.prisma.siteSetting.findUnique({ where: { key: 'partner_invoice_issuance' } });
+    return s?.value === 'ON_BEHALF' ? 'ON_BEHALF' : 'STATEMENT';
   }
 
   /**
@@ -135,6 +167,9 @@ export class InvoicesService {
     let remontLines: BillingLineInput[] = [];
     let remontPlaceOfSupply = placeOfSupply;
     let bookingFee = 0;
+    // Model 1 only: how the partner document is issued and how the commission was derived,
+    // frozen into the snapshot so later setting/rule edits never change an issued document.
+    let partnerDocument: Record<string, unknown> | null = null;
 
     if (transactionType === 'DIRECT_PROJECT') {
       // Type 2 — Remont's own team fulfils the work. Full project value, one tax invoice.
@@ -234,9 +269,16 @@ export class InvoicesService {
       // Under 9(5) the customer document IS Remont's tax invoice, so it carries Remont's GSTIN.
       customerSupplierGstin = section95 ? company.gstin : null;
 
-      vendorLines = partnerAmount > 0
-        ? [{ description: order.service?.name || 'Partner Service Value', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: partnerAmount, taxRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent) }]
-        : [];
+      // The partner's document is addressed to the customer, so it carries exactly the service
+      // value the customer was charged (after any discount) — the same line as the customer page,
+      // never the undiscounted price with a GST figure the customer never paid.
+      vendorLines = partnerAmount > 0 ? [partnerLine] : [];
+      partnerDocument = {
+        issuance: await this.partnerInvoiceIssuance(),
+        partnerRegistered,
+        serviceDate: order.completedAt || order.slotStart || null,
+        commission: { amount: commissionAmount, base: partnerAmount, ruleLabel: order.commissionRuleLabel || null, gstRatePercent: feeRate },
+      };
 
       // Remont's own document: the commission it earns from the partner (recipient = partner,
       // see invoice-pdf.ts), plus any customer fee actually charged.
@@ -313,7 +355,8 @@ export class InvoicesService {
       customerSupplierState,
       customerSupplierGstin,
       vendorLines,
-      vendorGstin: order.vendor?.gstin,
+      // only a validated GSTIN makes the partner document carry GST (stateFromGstin reads just the prefix)
+      vendorGstin: partnerDocument && !partnerDocument.partnerRegistered ? null : order.vendor?.gstin,
       remontLines,
       remontPlaceOfSupply,
       discount: orderDiscount,
@@ -331,6 +374,7 @@ export class InvoicesService {
     // this frozen block over re-reading the seller's/customer's/Remont's CURRENT master
     // data, so an issued invoice's legal party details can never silently change after the
     // fact just because someone edits a profile/business listing later.
+    if (partnerDocument) (breakdown as any).lineItemsSnapshot = { ...(breakdown.lineItemsSnapshot as any), partnerDocument };
     const partySnapshotSource = { ...breakdown, section95, taxReviewRequired, generatedAt: new Date() };
     const parties: Record<string, { supplier: unknown; recipient: unknown }> = {};
     for (const [key, docKind] of [['customer', 'CUSTOMER'], ['vendor', 'VENDOR'], ['remont', 'REMONT']] as [string, InvoiceDocKind][]) {

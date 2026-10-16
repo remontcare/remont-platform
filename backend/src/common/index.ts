@@ -1061,6 +1061,8 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
         lines: input.vendorLines,
         supplierState: stateFromGstin(input.vendorGstin), // null (unregistered) => no GST fabricated
         placeOfSupply: input.placeOfSupply,
+        // same paise rule as the customer document: these PDFs print no round-off line
+        roundToRupee: input.customerRoundToRupee,
       })
     : null;
 
@@ -1071,6 +1073,7 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
       : remontLines,
     supplierState: input.remontState,
     placeOfSupply: input.remontPlaceOfSupply || input.placeOfSupply,
+    roundToRupee: input.customerRoundToRupee,
   });
 
   const discount = Math.round(((input.discount || 0) + Number.EPSILON) * 100) / 100;

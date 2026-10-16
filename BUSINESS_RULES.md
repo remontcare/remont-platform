@@ -25,7 +25,7 @@ Remont runs two businesses through one platform. They share customers, checkout 
 
 | Supplier | Invoice | GST |
 |---|---|---|
-| External partner, GST-registered | Booking summary to the customer. The partner's own tax invoice carries the GST. | Partner's liability |
+| External partner, GST-registered | Booking summary to the customer, plus the partner's service document (§2.5). The partner's tax invoice carries the GST. | Partner's liability |
 | External partner, not registered, category **APPLICABLE** for 9(5) | Remont tax invoice to the customer for the full service value | Remont pays it as the e-commerce operator (§3) |
 | External partner, not registered, category not approved | Booking summary, flagged **tax review required** | CA decision |
 | In-house employee | Remont tax invoice for the full service amount | Remont's own supply; never 9(5) |
@@ -57,6 +57,46 @@ Remont runs two businesses through one platform. They share customers, checkout 
 
 - **Start and completion codes:** 5 wrong attempts lock the code until a new one is sent to the customer. A re-sent code expires after 15 minutes. A job never completes without the customer's completion code.
 - **Admin status changes** are limited to "partner on the way" and "closed". Completion, payment, refunds and starting a job happen only through their real workflows. Cancelling goes through the cancellation workflow.
+
+### 2.5 External partner jobs: two documents (Model 1)
+
+Every external-partner job gets two separate documents. They are never merged into one invoice with two suppliers.
+
+| | A. Partner service document | B. Remont commission invoice |
+|---|---|---|
+| Supplier | The partner (name, registered address, GSTIN if registered) | Remont India Pvt Ltd (Admin › Settings › Billing) |
+| Recipient | The customer (with the customer's GSTIN on a business booking) | The partner |
+| Number series | PSI | PFI |
+| Value | The service as charged to the customer, after any discount | Remont's commission, plus GST at the platform-fee rate |
+| References | Order number, service date | Order number, partner document number, how the commission was calculated |
+| Who can download it | Customer, partner, admin | Partner, admin (never the customer) |
+
+The customer also gets the booking summary: their payment statement, or Remont's tax invoice under Section 9(5) (§3).
+
+**Who issues document A** (setting `partner_invoice_issuance`, frozen on each invoice when it is issued):
+
+| Setting | Document A is | Use when |
+|---|---|---|
+| `STATEMENT` (default) | A partner service statement prepared by Remont. It is *not* a tax invoice. A registered partner issues its own tax invoice to the customer. | Until the partner agreement authorises Remont to issue invoices on the partner's behalf |
+| `ON_BEHALF` | The registered partner's tax invoice, issued by Remont on the partner's behalf (the document says so) | Only after legal confirms the authorisation and partners have accepted it |
+
+**Today's partner agreement does not include that authorisation.** It covers only the commission structure. So the setting stays `STATEMENT`.
+
+An unregistered partner's document never shows GST. It is a receipt in every mode, and it never says the partner is GST-free when Section 9(5) applies.
+
+**Example (illustrative, not hardcoded):** a ₹100 service with a 20% commission and 18% GST on the commission, by an unregistered partner, in a category with 0% service GST configured.
+
+| | Amount |
+|---|---|
+| Customer pays | ₹100 |
+| Document A | ₹100, no GST |
+| Document B | ₹20 + ₹3.60 GST = ₹23.60, billed to the partner |
+| Remont commission revenue | ₹20 |
+| Remont output GST | ₹3.60 |
+| Partner ledger | +₹100 earning, −₹20 commission. With `partner_commission_gst_recovery` on, also −₹3.60 GST. |
+| Partner nets | ₹80 (setting off) or ₹76.40 (setting on) |
+
+A customer total of ₹103.60 would require charging the customer a separate Remont fee plus its GST. That is a different pricing model, and its invoice would be addressed to the customer. It is not configured (see §6).
 
 ## 3. Section 9(5): configuration plan
 
@@ -118,6 +158,11 @@ New test transactions on live Razorpay keys are real gateway transactions. Prefe
 3. GST rates for products that have none configured. These are blocked from sale until set.
 4. When a tax invoice must be issued for a completed job that was never paid, and how it is cancelled.
 5. Whether e-invoicing (IRN) and e-way bills are mandatory. This is simulation-only until a GSP/IRP is connected.
+6. **Partner invoicing authority.** Whether Remont may issue a registered partner's tax invoice on the partner's behalf, and with what written authorisation, numbering per partner and declarations. Until then, document A is a statement (§2.5).
+7. **Commission GST and the invoice total.** With `partner_commission_gst_recovery` off, the commission invoice bills the partner ₹23.60, but the ledger recovers only ₹20, so Remont bears the ₹3.60. Decide: turn recovery on, or treat the commission as GST-inclusive.
+8. **Customer-facing fee model.** Whether Remont should instead charge the customer a fee plus GST (customer total ₹103.60 in the example), with that invoice addressed to the customer.
+9. **Platform-funded discounts on partner jobs.** The customer pays the discounted price, but the partner is paid on the full price less commission. Decide how Remont's funding of the difference is documented.
+10. **Commission on refunded jobs.** A refund issues a credit note against the customer document only. Remont's commission invoice to the partner is not reversed automatically; partner recoveries are decided by an admin.
 
 ## 7. Settings reference
 
@@ -126,6 +171,7 @@ New test transactions on live Razorpay keys are real gateway transactions. Prefe
 | `ServiceCategory.gstSection95Status` | Admin › Services › category | CA review required (no 9(5)) |
 | Commission rules | Admin › Commission | none (₹0; configure every category) |
 | `partner_commission_gst_recovery` | Admin › Settings | off |
+| `partner_invoice_issuance` | Admin › Settings | `STATEMENT` (Remont does not issue tax invoices in a partner's name) |
 | Product GST rate | Product form / Admin › Taxes | none (product not sellable) |
 | Billing identity (legal name, GSTIN, address) | Admin › Settings › Billing | required before invoicing |
 | `gstr1_b2cl_threshold` | Admin › Settings | ₹1,00,000 |

@@ -17,6 +17,7 @@ function baseOrder(overrides: any = {}) {
 
 function makeService() {
   const prisma: any = {
+    partnerRegistration: { findFirst: jest.fn(async () => null) }, // no approved registration on file
     order: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })) },
     invoice: {
       findUnique: jest.fn(async () => null),
@@ -115,16 +116,14 @@ describe('InvoicesService.generateForOrder — routes every transaction type thr
     expect(Number(data.vendorTotal)).toBe(499);
 
     // (2) Remont Platform Fee Invoice — Remont's ₹99.80 only, taxed at 18%: CGST 8.98 +
-    // SGST 8.98 = GST ₹17.96 (matches the corrected spec exactly). The pre-rounding total
-    // is ₹117.76; per standard Indian tax-invoice convention (same rounding already
-    // validated against the reference invoice — ₹2,999.99 displayed as a clean ₹3,000)
-    // this is a REGISTERED tax invoice, so it rounds to a clean ₹118, with the 24 paise
-    // difference visible in roundOff rather than silently absorbed.
+    // SGST 8.98 = GST ₹17.96 (matches the corrected spec exactly). Total ₹117.76 in exact
+    // paise, like every service document: the commission invoice prints no round-off line, and
+    // the partner ledger recovers exactly these figures — a rounded ₹118 reconciled with neither.
     expect(Number(data.platformCommission)).toBe(99.80);
     expect(Number(data.remontCgst)).toBe(8.98);
     expect(Number(data.remontSgst)).toBe(8.98);
     expect(Number(data.remontCgst) + Number(data.remontSgst)).toBe(17.96);
-    expect(Number(data.remontTotal)).toBe(118);
+    expect(Number(data.remontTotal)).toBe(117.76);
 
     // (3) Customer payment statement — NOT a formal tax invoice; equals exactly what checkout
     // charged: the ₹499 service + the ₹89.82 GST collected on it = ₹588.82 (no commission line,

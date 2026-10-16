@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type { BillingCompanyConfig } from '../../common';
+import { stateFromGstin } from '../../common/billing-engine';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Invoice PDF rendering — one shared layout (this file), fed by a view model
@@ -65,6 +66,8 @@ interface InvoiceViewModel {
   payment?: { received: number; reference: string | null } | null;
   numberLabel?: string;
   dateLabel?: string;
+  /** Who signs. Defaults to the supplier; a statement Remont only prepared is never signed in the partner's name. */
+  signatory?: string;
   /** e.g. "Against invoice INV-CTI-2026-000012 dated 01/10/2026" on a credit note */
   referenceLine?: string | null;
 }
@@ -90,8 +93,11 @@ function threeDigitsToWords(n: number): string {
 /** Indian numbering (Lakh/Crore) amount-in-words, matching the reference invoice's
  * "Three Thousand Rupees" style footer. */
 export function amountInWords(amount: number): string {
-  const rupees = Math.round(amount);
-  if (rupees === 0) return 'Zero Rupees Only';
+  const totalPaise = Math.round(Number(amount) * 100);
+  const rupees = Math.floor(totalPaise / 100);
+  const paise = totalPaise % 100;
+  if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
+  if (rupees === 0) return `${twoDigitsToWords(paise)} Paise Only`;
   const parts: string[] = [];
   let n = rupees;
   const crore = Math.floor(n / 10000000); n %= 10000000;
@@ -102,7 +108,7 @@ export function amountInWords(amount: number): string {
   if (lakh) parts.push(threeDigitsToWords(lakh) + ' Lakh');
   if (thousand) parts.push(threeDigitsToWords(thousand) + ' Thousand');
   if (hundred) parts.push(threeDigitsToWords(hundred));
-  return parts.join(' ') + ' Rupees Only';
+  return parts.join(' ') + ' Rupees' + (paise ? ` and ${twoDigitsToWords(paise)} Paise` : '') + ' Only';
 }
 
 function rupees(n: number): string {
@@ -161,6 +167,58 @@ export function buildInvoiceViewModel(
     ? `This service carries a ${warrantyDays}-day workmanship warranty from the date of completion, covering workmanship only.`
     : null;
 
+  // Model 1 (partner job issued after the two-document fix): issuance mode + commission basis
+  // frozen at issue. Absent on older invoices, which keep rendering exactly as they were issued.
+  const partnerDoc = lineSnapshot.partnerDocument as
+    | { issuance: 'STATEMENT' | 'ON_BEHALF'; partnerRegistered: boolean; serviceDate: string | null; commission: { amount: number; base: number; ruleLabel: string | null; gstRatePercent: number } }
+    | undefined;
+  const fmtDate = (d: any) => (d ? new Date(d).toLocaleDateString('en-IN') : null);
+
+  if (docKind === 'VENDOR' && partnerDoc) {
+    // Invoice A — the partner's supply of the service to the customer. The partner is the supplier;
+    // Remont never appears as the supplier. Whether this page is the partner's tax invoice depends on
+    // the issuance authority frozen at issue (see InvoicesService.partnerInvoiceIssuance).
+    const registered = partnerDoc.partnerRegistered;
+    const onBehalf = partnerDoc.issuance === 'ON_BEHALF';
+    const p = order.partnerProfile;
+    const gstin = registered ? String(order.vendor?.gstin).trim().toUpperCase() : null;
+    const liveSupplier: PartyBlock = {
+      name: order.vendor?.businessName || order.vendor?.fullName || 'Partner',
+      address: p ? [p.fullAddress, p.city, p.pincode].filter(Boolean).join(', ') || null : null,
+      gstin,
+      state: stateFromGstin(gstin) || p?.state || null,
+    };
+    const taxable = Number(invoice.vendorLabor), cgst = Number(invoice.vendorCgst), sgst = Number(invoice.vendorSgst);
+    const total = Number(invoice.vendorTotal);
+    // IGST has no column of its own; it is whatever the stored total holds beyond taxable + CGST + SGST.
+    const igst = Math.max(0, Math.round((total - taxable - cgst - sgst) * 100) / 100);
+    const notes: string[] = [];
+    if (onBehalf) notes.push(`Issued by ${company.legalName} on behalf of ${partnerName}, the supplier of this service, under the partner's authorisation. ${company.legalName} is not the supplier of this service.`);
+    else notes.push(`Prepared by ${company.legalName} for the service supplied to you by ${partnerName}. ${company.legalName} is not the supplier of this service.${registered ? ` The partner (GSTIN ${gstin}) issues its own tax invoice for this service and is liable for the GST shown.` : ''}`);
+    if (invoice.section95) notes.push(`The partner is not registered under GST and charges no GST. GST on this service is paid by ${company.legalName} as electronic commerce operator under ${SECTION_95_BASIS} (customer tax invoice ${invoice.invoiceNumber}).`);
+    else if (!registered) notes.push('The partner is not registered under GST and charges no GST on this document.');
+    const isTax = registered && onBehalf;
+    return {
+      isTaxInvoice: isTax,
+      isInformationalSummary: registered && !onBehalf,
+      docBadge: isTax ? 'TAX INVOICE' : registered ? 'PARTNER SERVICE STATEMENT — NOT A TAX INVOICE' : 'PARTNER SERVICE RECEIPT — NO GST CHARGED',
+      copyTag: onBehalf ? 'ORIGINAL FOR RECIPIENT — ISSUED ON BEHALF OF THE PARTNER' : 'SERVICE SUPPLIED BY THE PARTNER',
+      numberLabel: isTax ? 'Invoice No.' : 'Document No.',
+      dateLabel: isTax ? 'Invoice Date' : 'Date',
+      signatory: onBehalf ? `For ${partnerName} — issued by ${company.legalName} on the partner's behalf` : `Prepared by ${company.legalName} — not signed on behalf of the partner`,
+      invoiceNumber: invoice.vendorDocumentNumber || invoice.invoiceNumber, invoiceDate: invoice.generatedAt,
+      referenceLine: `Order ${order.orderNumber}${partnerDoc.serviceDate ? ` · Service date ${fmtDate(partnerDoc.serviceDate)}` : ''}`,
+      placeOfSupply: invoice.placeOfSupply || customerBlock.state || '',
+      supplier: frozenParties?.supplier ?? liveSupplier,
+      recipient: frozenParties?.recipient ?? customerBlock,
+      lines: lineSnapshot.vendor || [],
+      taxableValue: taxable, cgst, sgst, igst,
+      discount: 0, roundOff: 0, total, received: 0, bank: null,
+      termsAndConditions: [],
+      notes,
+    };
+  }
+
   if (docKind === 'VENDOR') {
     // Partner Service Invoice — issued in the partner's own name for the partner's
     // share only. Never assumed to be a GST tax invoice: an unregistered partner (the
@@ -216,6 +274,16 @@ export function buildInvoiceViewModel(
       cgst: Number(invoice.remontCgst), sgst: Number(invoice.remontSgst), igst: Number(invoice.remontIgst),
       discount: 0, roundOff: 0, total: Number(invoice.remontTotal), received: 0, bank,
       termsAndConditions: company.invoiceTerms, // Remont is always the supplier on this page
+      // Invoice B (Model 1): linked to the order and the partner's document, with the commission basis.
+      ...(isPartnerJob && partnerDoc
+        ? {
+            referenceLine: `Order ${order.orderNumber} · Partner document ${invoice.vendorDocumentNumber || '—'}`,
+            notes: [
+              `Commission on the service value of ${rupees(partnerDoc.commission.base)}${partnerDoc.commission.ruleLabel ? ` (${partnerDoc.commission.ruleLabel})` : ''}: ${rupees(partnerDoc.commission.amount)}, plus GST at ${partnerDoc.commission.gstRatePercent}%.`,
+              `Remont's charge to the partner for the use of the platform on this order. It is not part of the service supplied to the customer.`,
+            ],
+          }
+        : {}),
     };
   }
 
@@ -266,7 +334,10 @@ export function buildInvoiceViewModel(
     if (invoice.taxReviewRequired) {
       return ['This is a booking summary, not a GST tax invoice. It shows the amounts you paid, including the GST collected at booking; ' + company.legalName + ' will issue the applicable tax document for that GST.' + feeNote];
     }
-    if (order.vendor?.gstin) {
+    if (partnerDoc?.partnerRegistered) {
+      return [`This is a booking summary, not a GST tax invoice. The service is supplied by ${partnerName} (GSTIN ${String(order.vendor?.gstin).trim().toUpperCase()}), who is liable for the GST shown above${partnerDoc.issuance === 'ON_BEHALF' ? ` — see the partner's tax invoice ${invoice.vendorDocumentNumber}` : ` and issues its own tax invoice for it (summarised in partner document ${invoice.vendorDocumentNumber})`}.` + feeNote];
+    }
+    if (order.vendor?.gstin && !partnerDoc) {
       return [`This is a booking summary, not a GST tax invoice. The service is supplied by ${partnerName} (GSTIN ${order.vendor.gstin}), whose tax invoice${invoice.vendorDocumentNumber ? ' ' + invoice.vendorDocumentNumber : ''} carries the GST shown above.` + feeNote];
     }
     return ['This is a booking summary, not a GST tax invoice. It shows the amounts you paid for this booking.' + feeNote];
@@ -497,5 +568,5 @@ function drawInvoicePage(doc: PDFKit.PDFDocument, vm: InvoiceViewModel) {
     y += 10;
   }
 
-  doc.fontSize(8).fillColor('#111').text(`Authorised Signatory for ${vm.supplier.name}`, 40, y + 30, { width: pageWidth, align: 'right' });
+  doc.fontSize(8).fillColor('#111').text(vm.signatory ?? `Authorised Signatory for ${vm.supplier.name}`, 40, y + 30, { width: pageWidth, align: 'right' });
 }

@@ -83,11 +83,11 @@ function render() {
     var orderId = inv.order && inv.order.id;
     var type = inv.transactionType;
     var actions = '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'ALL\')">All documents (PDF)</button> ' +
-      '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">Customer PDF</button> ' +
+      '<button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'CUSTOMER\')">Customer summary / invoice</button> ' +
       '<button class="btn btn-xs btn-outline" onclick="openHistory(\'' + orderId + '\')">History / Correct</button>';
     if (type === 'PLATFORM_SERVICE') {
-      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Platform Fee Invoice</button>' +
-        ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')">Partner Service Invoice</button>';
+      actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')" title="Remont India to partner: commission + GST">Remont commission invoice (to partner)</button>' +
+        ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'VENDOR\')" title="Partner to customer: the service itself">Partner service document (to customer)</button>';
     } else if (type === 'MARKETPLACE_PRODUCT') {
       actions += ' <button class="btn btn-xs btn-outline" onclick="downloadPdf(\'' + orderId + '\',\'REMONT\')">Commission Invoice</button>';
     }
