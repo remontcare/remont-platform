@@ -6,13 +6,13 @@ import {
 import { OnEvent } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import {
-  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested,
+  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested, IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, marketplaceServiceBreakdown, type OrderServiceModel } from '../../common';
+import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, priceServiceBookingSnapshot, orderFieldsFromSnapshot, type OrderServiceModel } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -160,6 +160,8 @@ export class CreateMasterOrderDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() gstin?: string;
   @IsOptional() @IsString() gstBusinessName?: string;
+  // Emergency visit requested (only an EMERGENCY fee rule reads it; no rule = no fee).
+  @IsOptional() @IsBoolean() emergency?: boolean;
   // Phase 1 hardening (M-06) — optional client-supplied dedupe token (e.g. a UUID generated
   // once per "Place Order" press, resent unchanged on any automatic retry). Omit entirely for
   // byte-for-byte today's behaviour; see MasterOrder.idempotencyKey's schema comment.
@@ -191,6 +193,7 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsString() gstBusinessName?: string;
   @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
+  @IsOptional() @IsBoolean() emergency?: boolean;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
 }
 
@@ -205,6 +208,8 @@ export class PublicMasterQuoteDto {
   @IsOptional() @IsNumber() latitude?: number;
   @IsOptional() @IsNumber() longitude?: number;
   @IsOptional() @IsString() couponCode?: string;
+  @IsOptional() @IsDateString() slotStart?: string;
+  @IsOptional() @IsBoolean() emergency?: boolean;
 }
 
 interface CheckoutOpts {
@@ -253,8 +258,10 @@ interface PricedGroup {
   section95Status?: string | null;
   commission?: number;
   serviceGst?: number;
-  platformFeeGst?: number;
-  partnerServiceGst?: number;
+  feesTotal?: number;
+  lineAmounts?: number[];
+  // the pricing engine's confirmed calculation for this booking (stored on the child order)
+  snapshot?: any;
 }
 
 // ─── Service ───
@@ -343,7 +350,7 @@ export class MasterOrdersService {
     const serviceIds = Array.from(new Set(dto.items.filter((i) => i.type === 'SERVICE').map((i) => i.serviceId).filter(Boolean))) as string[];
     const productIds = Array.from(new Set(dto.items.filter((i) => i.type === 'PRODUCT').map((i) => i.productId).filter(Boolean))) as string[];
     const [services, products] = await Promise.all([
-      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true } } } }),
+      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } } } }),
       this.prisma.product.findMany({ where: { id: { in: productIds } } }),
     ]);
     const serviceMap = new Map(services.map((s) => [s.id, s]));
@@ -428,6 +435,7 @@ export class MasterOrdersService {
           serviceModel: orderServiceModelFor((serviceMap.get(items[0].serviceId!) as any)?.category?.serviceModel),
           section95Status: (serviceMap.get(items[0].serviceId!) as any)?.category?.gstSection95Status ?? null,
           commission: Math.round(items.reduce((sum, it) => sum + (commissionByService.get(it.serviceId!)?.commissionAmount || 0), 0) * 100) / 100,
+          lineAmounts: items.map((_, k) => (topUp.adjustment > 0 ? topUp.lineAmounts[k] : items[k].totalPrice)),
           minimumChargeAdjustment: topUp.adjustment,
           minimumChargeRuleId: topUp.adjustment > 0 ? minimum.ruleId : null,
         });
@@ -617,40 +625,47 @@ export class MasterOrdersService {
         ? svcRateList[0]
         : svcGroupsForRate.reduce((sum, g, k) => sum + g.amount * svcRateList[k], 0) / svcRateBase;
     let serviceGstAmount = Math.round(discountedServiceAmount * (effectiveServiceGstRate / 100) * 100) / 100;
-    // Service models (ServiceCategory.serviceModel): GST per booking. IN_HOUSE = Remont's own supply,
-    // GST on the discounted service. MARKETPLACE = GST on Remont's platform fee, plus GST on the
-    // partner's share only under 9(5) here (a registered partner's GST is added once they accept).
-    // Same discount allocation checkout() uses for each child order.
+    // Service models (ServiceCategory.serviceModel): each booking is priced by the pricing engine —
+    // the same rules, frozen into the snapshot stored on the child order — with that booking's share
+    // of the discounts (the same allocation checkout() uses). Missing, unapproved or conflicting
+    // configuration blocks the checkout instead of guessing a rate.
+    let serviceFeesTotal = 0;
     if (svcGroupsForRate.some((g) => g.serviceModel)) {
       const discounts = allocateAcrossGroups(pricedGroups.map((g) => g.amount), subtotal, membershipDiscount + couponDiscount);
       const svcIdx = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
       const bundles = bundleDiscount > 0 ? allocateAcrossGroups(svcIdx.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount) : [];
-      const feeRate = (await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE)).rateFor(null, null);
       serviceGstAmount = 0;
-      svcIdx.forEach((i, k) => {
+      for (const [k, i] of svcIdx.entries()) {
         const g = pricedGroups[i];
         const discount = (discounts[i] || 0) + (bundles[k] || 0);
-        const rate = g.serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE;
-        if (g.serviceModel === 'MARKETPLACE') {
-          const b = marketplaceServiceBreakdown({ serviceAmount: g.amount, commission: g.commission || 0, discount, serviceRatePercent: rate, feeRatePercent: feeRate, partnerGstApplies: g.section95Status === 'APPLICABLE' });
-          g.serviceGst = b.gstAmount; g.platformFeeGst = b.platformFeeGst; g.partnerServiceGst = b.partnerServiceGst;
+        const first = serviceMap.get(g.items[0].serviceId!) as any;
+        const snap = await priceServiceBookingSnapshot(this.prisma, {
+          lines: g.items.map((it, n) => ({ service: serviceMap.get(it.serviceId!) as any, amount: g.lineAmounts?.[n] ?? it.totalPrice })),
+          category: first?.category, cityId: orderCityId, discount,
+          slotStart: (dto as any).slotStart || null, emergency: !!(dto as any).emergency,
+        });
+        if (snap) {
+          g.snapshot = snap;
+          g.serviceGst = snap.result.gstAmount;
+          g.feesTotal = snap.result.feesTotal;
         } else {
-          g.serviceGst = Math.round(Math.max(0, g.amount - discount) * (rate / 100) * 100) / 100;
+          g.serviceGst = Math.round(Math.max(0, g.amount - discount) * ((g.serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE) / 100) * 100) / 100;
         }
         serviceGstAmount = Math.round((serviceGstAmount + g.serviceGst) * 100) / 100;
-      });
+        serviceFeesTotal = Math.round((serviceFeesTotal + (g.feesTotal || 0)) * 100) / 100;
+      }
     }
     const productGstOnTop = pricedGroups.filter((g) => g.type === 'PRODUCT').reduce((s, g) => s + (g.productGstOnTop || 0), 0);
     const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
-    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount + deliveryCharge);
-    const totalAmount = Math.max(0, discountedSubtotal + gstAmount + deliveryCharge - walletUsed);
+    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + serviceFeesTotal + gstAmount + deliveryCharge);
+    const totalAmount = Math.max(0, discountedSubtotal + serviceFeesTotal + gstAmount + deliveryCharge - walletUsed);
 
 
     return {
       orderCityId, services, products, groups, pricedGroups, commissionByService, resolvedAddressId, resolvedAddress,
       groupDelivery, deliveryCharge, grossServiceAmount, grossProductAmount, subtotal, isBundleOrder, bundleDiscountPercent,
       bundleDiscount, membershipDiscount, couponDiscount, couponId, couponFundedBy, discountedSubtotal, serviceGstAmount,
-      productGstOnTop, gstAmount, walletUsed, totalAmount,
+      productGstOnTop, gstAmount, walletUsed, totalAmount, serviceFeesTotal,
     };
   }
 
@@ -676,6 +691,12 @@ export class MasterOrdersService {
         type: g.type,
         amount: round2(g.amount),
         minimumChargeAdjustment: g.minimumChargeAdjustment || 0,
+        // service bookings priced by the pricing engine: every charge the customer pays, with its GST
+        ...(g.snapshot ? {
+          serviceModel: g.snapshot.params.model,
+          charges: g.snapshot.result.components.map((c: any) => ({ label: c.label, code: c.code, amount: c.taxable, gstRatePercent: c.ratePercent, gst: c.gst })),
+          total: g.snapshot.result.customerTotal,
+        } : {}),
         items: g.items.map((it) => ({
           serviceId: it.serviceId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice,
         })),
@@ -686,6 +707,7 @@ export class MasterOrdersService {
       membershipDiscount: p.membershipDiscount,
       couponDiscount: p.couponDiscount,
       serviceGstAmount: p.serviceGstAmount,
+      serviceFeesTotal: p.serviceFeesTotal,
       productGstAmount: round2(p.productGstOnTop),
       gstAmount: p.gstAmount,
       deliveryCharge: p.deliveryCharge,
@@ -881,7 +903,7 @@ export class MasterOrdersService {
         const childDelivery = groupDelivery[i];
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
-        const childTotal = Math.max(0, g.amount - totalChildDiscount + childGst + childDelivery.charge - childWallet);
+        const childTotal = Math.max(0, g.amount - totalChildDiscount + (g.feesTotal || 0) + childGst + childDelivery.charge - childWallet);
         // A bundle's SERVICE child never gets a partner assigned at checkout — see the
         // dispatch-deferral loops below (confirmPayment()/switchToCod()/the COD branch here),
         // which skip RoutingService.route() for it, and ShipmentService.onShipmentDelivered()
@@ -951,7 +973,8 @@ export class MasterOrdersService {
             bundleDispatchDeferred: deferDispatchForBundle,
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
-            ...(g.type === 'SERVICE' && g.serviceModel ? { serviceModel: g.serviceModel, platformFeeGst: g.platformFeeGst || 0, partnerServiceGst: g.partnerServiceGst || 0 } : {}),
+            // the pricing engine's confirmed calculation (commission/partner share/GST split + rule IDs)
+            ...(g.type === 'SERVICE' && g.snapshot ? { ...orderFieldsFromSnapshot(g.snapshot), gstAmount: childGst, isEmergency: !!(dto as any).emergency, commissionRuleId: g.snapshot.params.lines[0]?.commission.ruleId ?? null, commissionRuleLabel: g.snapshot.params.lines[0]?.commission.label ?? null } : {}),
             minimumChargeAdjustment: g.type === 'SERVICE' ? (g.minimumChargeAdjustment || 0) : 0,
             minimumChargeRuleId: g.type === 'SERVICE' ? (g.minimumChargeRuleId || undefined) : undefined,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
@@ -1409,7 +1432,7 @@ export class PublicMasterOrderController {
   @Public() @Post('quote')
   quote(@Body() dto: PublicMasterQuoteDto) {
     const quoteDto: CreateMasterOrderDto = {
-      items: dto.items, couponCode: dto.couponCode, city: dto.city,
+      items: dto.items, couponCode: dto.couponCode, city: dto.city, slotStart: dto.slotStart, emergency: dto.emergency,
       inlineAddress: dto.fullAddress || dto.latitude != null
         ? { fullAddress: dto.fullAddress || '', city: dto.city, state: dto.state, pincode: dto.pincode, latitude: dto.latitude, longitude: dto.longitude }
         : undefined,
@@ -1430,7 +1453,7 @@ export class PublicMasterOrderController {
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
       walletAmount: dto.walletAmount, gstin: dto.gstin, gstBusinessName: dto.gstBusinessName,
-      idempotencyKey: dto.idempotencyKey, crmRef: dto.crmRef,
+      idempotencyKey: dto.idempotencyKey, crmRef: dto.crmRef, emergency: dto.emergency,
       // An order placed from a CRM WhatsApp cart link is a WhatsApp-channel order.
       ...(dto.crmRef ? { channel: BookingChannel.WHATSAPP } : {}),
       slotStart: dto.slotStart, slotEnd: dto.slotEnd, city: dto.city,

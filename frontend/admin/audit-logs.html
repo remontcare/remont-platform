@@ -30,6 +30,13 @@
             <option value="USER_UNBLOCKED">User Unblocked</option>
             <option value="DELETE_REQUEST_APPROVED">Delete Request Approved</option>
             <option value="DELETE_REQUEST_REJECTED">Delete Request Rejected</option>
+            <option value="TAX_RULE_CREATED">Tax rule created</option>
+            <option value="TAX_RULE_UPDATED">Tax rule changed</option>
+            <option value="TAX_RULE_APPROVED">Tax rule approved (CA)</option>
+            <option value="TAX_RULE_DELETED">Tax rule deleted</option>
+            <option value="COMMISSION_RULE_CREATED">Pricing rule created</option>
+            <option value="COMMISSION_RULE_UPDATED">Pricing rule changed</option>
+            <option value="COMMISSION_RULE_DELETED">Pricing rule deleted</option>
           </select>
           <button class="btn btn-outline btn-sm" onclick="load()">↺ Refresh</button>
         </div>
@@ -41,7 +48,8 @@
 
 <script src="./common.js"></script>
 <script>
-renderSidebar('audit-logs');
+renderSidebar(new URLSearchParams(location.search).get('action') ? 'rule-history' : 'audit-logs');
+(function() { var a = new URLSearchParams(location.search).get('action'); if (a) document.getElementById('filter-action').value = a; })();
 requireAuth();
 
 function load() {

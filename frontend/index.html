@@ -10184,6 +10184,7 @@ function cartCheckout() {
         <div id="co-bundle-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>🎁 Bundle offer (<span id="co-bundle-line-pct">10</span>% off service)</span><span id="co-bundle-line-amt">−₹0</span>
         </div>
+        <div id="co-charges"></div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>GST</span><span id="co-gst">₹0</span>
         </div>
@@ -10228,8 +10229,8 @@ function cartCheckout() {
           style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
       </div>
       <div id="co-slot-row" style="display:none;gap:10px;margin-bottom:16px">
-        <input id="co-date" type="date" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
-        <select id="co-time" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
+        <input id="co-date" type="date" onchange="recalcTotals()" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
+        <select id="co-time" onchange="recalcTotals()" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
           <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
           <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
           <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
@@ -10238,6 +10239,9 @@ function cartCheckout() {
           <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
           <option value="19:00">7:00 PM</option>
         </select>
+      </div>
+      <div id="co-emergency-row" style="display:none;margin:-8px 0 16px;font-size:13px;color:#374151">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="co-emergency" onchange="recalcTotals()"> Emergency visit <span style="color:#6b7280">(an emergency fee applies where configured — shown below before you pay)</span></label>
       </div>
       <p id="co-slot-hint" style="display:none;font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
       <div id="co-delivery-estimate" style="display:none;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600">
@@ -11010,7 +11014,25 @@ function _coQuoteBody() {
     longitude: savedLoc && savedLoc.longitude ? savedLoc.longitude : undefined,
     state: savedLoc ? (savedLoc.state || undefined) : undefined,
     pincode: savedLoc ? (savedLoc.pincode || undefined) : undefined,
+    slotStart: _coSlotStart(),
+    emergency: (document.getElementById('co-emergency') || {}).checked || undefined,
   };
+}
+function _coSlotStart() {
+  var d = (document.getElementById('co-date') || {}).value, t = (document.getElementById('co-time') || {}).value;
+  return d && t ? d + 'T' + t + ':00+05:30' : undefined;
+}
+function _coRenderCharges(q) {
+  // every extra charge the server priced, each on its own line (GST shown in the GST line)
+  var el = document.getElementById('co-charges'); if (!el) return;
+  var html = '';
+  (q && q.bookings || []).forEach(function(b) {
+    (b.charges || []).forEach(function(c) {
+      if (c.code === 'FEE') html += '<div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px"><span>' + escHtml(c.label) + '</span><span>₹' + Number(c.amount).toLocaleString('en-IN') + '</span></div>';
+      if (c.code === 'PLATFORM_FEE') html += '<div style="display:flex;justify-content:space-between;font-size:12px;color:#9ca3af;margin-bottom:6px"><span>incl. Remont platform fee (' + c.gstRatePercent + '% GST)</span><span>₹' + Number(c.amount).toLocaleString('en-IN') + '</span></div>';
+    });
+  });
+  el.innerHTML = html;
 }
 function _coQuoteKey() { try { return JSON.stringify(_coQuoteBody()); } catch (e) { return ''; } }
 function _coScheduleQuote(key) {
@@ -11083,9 +11105,13 @@ function recalcTotals() {
     _coDeliveryCharge = _coQuote.deliveryCharge || 0;
     preWalletTotal = _coQuote.totalAmount;
     minimumCharge = _coQuote.minimumChargeAdjustment || 0;
+    _coRenderCharges(_coQuote);
   } else {
+    _coRenderCharges(null);
     _coScheduleQuote(quoteKey);
   }
+  var emRow = document.getElementById('co-emergency-row');
+  if (emRow) emRow.style.display = (document.getElementById('co-slot-row') || {}).style && document.getElementById('co-slot-row').style.display !== 'none' ? 'block' : 'none';
   var minLine = document.getElementById('co-min-line');
   if (minLine) {
     minLine.style.display = minimumCharge > 0 ? 'flex' : 'none';
@@ -11404,6 +11430,7 @@ function submitCheckoutOrder() {
     latitude:        savedLoc ? (savedLoc.latitude  || 0) : 0,
     longitude:       savedLoc ? (savedLoc.longitude || 0) : 0,
     slotStart:       slotStart,
+    emergency:       (document.getElementById('co-emergency') || {}).checked || undefined,
     slotEnd:         slotStart,
     couponCode:      _coCoupon ? _coCoupon.code : undefined,
     walletAmount:    walletAmount,

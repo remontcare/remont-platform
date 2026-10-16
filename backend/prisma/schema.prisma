@@ -710,11 +710,14 @@ enum CommissionType {
 //   MINIMUM_CHARGE      — minimum GST-inclusive amount a customer pays for one service booking
 //   CANCELLATION_CHARGE — the charge an admin MAY approve when a customer cancels/refuses
 //                         after the partner arrived; never deducted automatically
+//   ADDITIONAL_FEE      — a named customer fee (emergency, night visit, convenience, inspection…)
+//                         added only when its condition holds; its own GST (see fee* fields)
 // Existing rows default to COMMISSION, so every current rule keeps working unchanged.
 enum ServiceRuleType {
   COMMISSION
   MINIMUM_CHARGE
   CANCELLATION_CHARGE
+  ADDITIONAL_FEE
 }
 
 model CommissionRule {
@@ -733,6 +736,17 @@ model CommissionRule {
   // (penalty = max(value% of the service amount, minimumAmount)). null = no minimum.
   minimumAmount  Decimal?       @db.Decimal(10, 2)
   slabJson       Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
+
+  // ADDITIONAL_FEE only. One fee per name per booking (the most specific rule wins; an equal tie is
+  // a configuration conflict and blocks pricing). PERCENTAGE is of the discounted service value.
+  feeName        String? // internal key, e.g. EMERGENCY
+  feeDisplayName String? // what the customer sees, e.g. "Emergency service fee"
+  feeCondition   String? // ALWAYS | NIGHT | EMERGENCY
+  feeAppliesTo   String? // ALL | IN_HOUSE | MARKETPLACE (supplier model)
+  feeBeneficiary String? // REMONT (Remont's own charge, taxed by feeSac) | PARTNER (part of the partner's service)
+  feeSac         String? // SAC whose PLATFORM_FEE tax rule taxes a REMONT fee (blank = the platform fee SAC)
+  nightStartHour Int? // NIGHT window in IST, e.g. 21 → 6 (wraps midnight)
+  nightEndHour   Int?
 
   // Higher priority wins when more than one rule matches at the same specificity level.
   // A `stackable` rule ADDS its own amount on top of whichever single rule already won —
@@ -882,6 +896,10 @@ model ServiceCategory {
   // PARTNER_MARKETPLACE = external partners only: partner's share + Remont platform fee + GST on
   // the fee (+ the partner's GST if registered, or Remont's under 9(5)). Dispatch follows it.
   serviceModel       String  @default("PARTNER_MARKETPLACE")
+  // Marketplace only — which partners may take this category's jobs, so the customer's price is final
+  // at checkout: UNREGISTERED_ONLY (no partner GST; 9(5) per gstSection95Status) or REGISTERED_ONLY
+  // (the partner's GST is charged at checkout; only GST-registered partners are dispatched).
+  partnerGstProfile  String  @default("UNREGISTERED_ONLY")
 
   services        Service[]
   subCategories   SubCategory[]
@@ -2016,6 +2034,12 @@ model Order {
   // own GST when registered, Remont's under 9(5)). gstAmount = their sum.
   platformFeeGst     Decimal   @default(0) @db.Decimal(10, 2)
   partnerServiceGst  Decimal   @default(0) @db.Decimal(10, 2)
+  // The confirmed price calculation (pricing engine): frozen rates, commission, fees, every component's
+  // taxable value and GST, and the rule IDs used. Invoices and later recalculations reuse it — a rule
+  // changed after booking never alters this booking. Null = booked before the engine.
+  pricingSnapshot    Json?
+  // Customer chose an emergency visit at checkout (only an EMERGENCY fee rule reads it).
+  isEmergency        Boolean   @default(false)
   earningsPostedAt   DateTime?
   // Wallet amount returned to the customer when an unpaid order was cancelled (once).
   walletReleasedAt   DateTime?
@@ -3878,6 +3902,13 @@ model TaxConfig {
   // updateTaxConfig, and reused by the ProductFeeRule bulk-import's conflict detection).
   validFrom DateTime?
   validTo   DateTime?
+
+  // CA/legal verification. A new or changed rule is PENDING_CA and is never used for pricing until a
+  // super admin records the approval. LEGACY = configured before approvals existed (still used, flagged).
+  approvalStatus String    @default("LEGACY") // LEGACY | PENDING_CA | APPROVED
+  approvedBy     String?
+  approvedAt     DateTime?
+  approvalNote   String?
 
   updatedAt DateTime @default(now()) @updatedAt
 

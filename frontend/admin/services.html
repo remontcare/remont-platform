@@ -39,7 +39,7 @@
       <button class="tab active" id="tab-btn-cat" onclick="showTab('cat')">Categories</button>
       <button class="tab" id="tab-btn-subcat" onclick="showTab('subcat')">Sub-Categories</button>
       <button class="tab" id="tab-btn-svc" onclick="showTab('svc')">Services</button>
-      <button class="tab" id="tab-btn-commission" onclick="showTab('commission')">Commission</button>
+      <button class="tab" id="tab-btn-commission" onclick="showTab('commission')">Commission, Fees &amp; Charges</button>
     </div>
 
     <!-- ── CATEGORIES TAB ─────────────────────────────────────────────── -->
@@ -128,6 +128,7 @@
             <option value="COMMISSION">Commission (deducted from partner)</option>
             <option value="MINIMUM_CHARGE">Minimum service charge (customer, incl. GST, per booking)</option>
             <option value="CANCELLATION_CHARGE">Cancellation charge (applied only after admin approval)</option>
+            <option value="ADDITIONAL_FEE">Additional fees (emergency, night visit, convenience…)</option>
           </select>
           <small id="comm-ruletype-help" style="color:#6b7280"></small>
         </div>
@@ -177,7 +178,24 @@
         <option value="COMMISSION">Commission (deducted from partner)</option>
         <option value="MINIMUM_CHARGE">Minimum service charge (customer, incl. GST, per booking)</option>
         <option value="CANCELLATION_CHARGE">Cancellation charge (admin-approved, never automatic)</option>
+        <option value="ADDITIONAL_FEE">Additional fee (emergency, night visit, convenience…)</option>
       </select>
+    </div>
+    <div id="comm-fee-fields" style="display:none;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:12px">
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Fee key <span style="color:red">*</span></label><input id="comm-fee-name" class="form-control" placeholder="e.g. EMERGENCY"></div>
+        <div class="form-group" style="flex:2"><label class="form-label">Name customers see <span style="color:red">*</span></label><input id="comm-fee-display" class="form-control" placeholder="e.g. Emergency service fee"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Charged when</label><select id="comm-fee-cond" class="form-control" onchange="toggleCommTypeFields()"><option value="ALWAYS">Always</option><option value="NIGHT">Night slot</option><option value="EMERGENCY">Customer asks for an emergency visit</option></select></div>
+        <div class="form-group" style="flex:1" id="comm-fee-night"><label class="form-label">Night (IST hours)</label><div style="display:flex;gap:6px"><input id="comm-fee-ns" class="form-control" type="number" min="0" max="23" placeholder="from, e.g. 21"><input id="comm-fee-ne" class="form-control" type="number" min="0" max="23" placeholder="to, e.g. 6"></div></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label class="form-label">Service model</label><select id="comm-fee-applies" class="form-control"><option value="ALL">All</option><option value="MARKETPLACE">Partner marketplace only</option><option value="IN_HOUSE">In-house only</option></select></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Whose charge</label><select id="comm-fee-benef" class="form-control"><option value="REMONT">Remont (own invoice, its own GST)</option><option value="PARTNER">Partner (part of the partner's service)</option></select></div>
+        <div class="form-group" style="flex:1"><label class="form-label">SAC <small style="color:#9ca3af">(Remont fee; blank = platform fee SAC)</small></label><input id="comm-fee-sac" class="form-control" placeholder="e.g. 999799"></div>
+      </div>
+      <small style="color:#6b7280">One fee per key per booking (a service rule beats a category rule; a city rule beats all-city). Its GST comes from a CA-approved rule in Admin › Taxes — with none, bookings that would carry the fee are blocked, never taxed at a guessed rate. Shown to the customer as its own line before they pay.</small>
     </div>
     <div class="form-group">
       <label class="form-label">Scope <span style="color:red">*</span></label>
@@ -286,6 +304,12 @@
           <option value="IN_HOUSE">Remont in-house technicians</option>
         </select>
         <small style="color:#9ca3af;font-size:11px">Fixes the price at checkout and who gets the job. <b>Partners:</b> customer pays the partner's share + Remont platform fee + GST on the fee (+ the partner's GST if they are GST-registered); jobs go only to external partners. <b>In-house:</b> one Remont invoice for the service + GST; jobs go only to Remont's technicians (none online → admin queue). Applies to new bookings only.</small></div>
+      <div class="form-group" style="margin-top:10px"><label class="form-label">Partner GST profile <small style="color:#9ca3af">(partner categories)</small></label>
+        <select id="cat-gstprofile" class="form-control">
+          <option value="UNREGISTERED_ONLY">Partners NOT registered for GST — no partner GST in the price</option>
+          <option value="REGISTERED_ONLY">GST-registered partners only — the partner's GST is in the price</option>
+        </select>
+        <small style="color:#9ca3af;font-size:11px">Fixes the price at checkout: jobs go only to partners whose GST registration matches, so nothing is added after the customer pays.</small></div>
       <div class="form-group" style="margin-top:10px"><label class="form-label">GST Section 9(5)</label>
         <select id="cat-sec95" class="form-control">
           <option value="">CA review required — not treated as 9(5)</option>
@@ -507,7 +531,8 @@
 
 <script src="./common.js"></script>
 <script>
-renderSidebar('services');
+renderSidebar(new URLSearchParams(location.search).get('tab') === 'commission' ? 'pricing-rules' : 'services');
+if (new URLSearchParams(location.search).get('tab') === 'commission') setTimeout(function() { showTab('commission'); }, 0);
 requireAuth();
 
 var categories = [];
@@ -563,7 +588,7 @@ function loadCategories() {
         '<td>' + c.sortOrder + '</td>' +
         '<td>' + badge(c.isActive?'Active':'Inactive',c.isActive?'green':'gray') + (c.isPremium?' '+badge('Premium','purple'):'') +
           // Section 9(5) is opt-in per category: anything not CA-approved is flagged for review
-          ' ' + (c.serviceModel === 'IN_HOUSE' ? badge('In-house','blue') : badge('Partners','purple')) +
+          ' ' + (c.serviceModel === 'IN_HOUSE' ? badge('In-house','blue') : badge(c.partnerGstProfile === 'REGISTERED_ONLY' ? 'Partners (GST-registered)' : 'Partners (unregistered)','purple')) +
           ' ' + (c.gstSection95Status === 'APPLICABLE' ? badge('9(5) applicable','green') : c.gstSection95Status === 'NOT_APPLICABLE' ? badge('9(5) not applicable','gray') : badge('9(5): CA review','yellow')) + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
           '<button class="btn btn-xs btn-outline" onclick=\'openCatModal(' + escape(JSON.stringify(c)) + ')\'>Edit</button>' +
@@ -596,6 +621,7 @@ function openCatModal(cat) {
   document.getElementById('cat-warranty-days').value = (cat && cat.warrantyDays != null) ? cat.warrantyDays : '';
   document.getElementById('cat-sec95').value = (cat && cat.gstSection95Status) || '';
   document.getElementById('cat-model').value = (cat && cat.serviceModel) || 'PARTNER_MARKETPLACE';
+  document.getElementById('cat-gstprofile').value = (cat && cat.partnerGstProfile) || 'UNREGISTERED_ONLY';
   document.getElementById('cat-warranty-pct').value = (cat && cat.warrantyHoldPercent != null) ? cat.warrantyHoldPercent : '';
   document.getElementById('cat-slug').value = cat ? (cat.slug||'') : '';
   document.getElementById('cat-seo-title').value = cat ? (cat.seoTitle||'') : '';
@@ -631,6 +657,7 @@ function saveCategory() {
   data.warrantyDays = warrantyDaysVal === '' ? null : parseInt(warrantyDaysVal);
   data.gstSection95Status = document.getElementById('cat-sec95').value || null;
   data.serviceModel = document.getElementById('cat-model').value || 'PARTNER_MARKETPLACE';
+  data.partnerGstProfile = document.getElementById('cat-gstprofile').value || 'UNREGISTERED_ONLY';
   data.warrantyHoldPercent = warrantyPctVal === '' ? null : parseFloat(warrantyPctVal);
   if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
   var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);
@@ -1031,9 +1058,10 @@ function toggleCommScopeFields() {
   document.getElementById('comm-service-field').style.display = isCat ? 'none' : '';
 }
 var COMM_RULE_TYPE_TEXT = {
-  COMMISSION: { list: 'Commission Rules', preview: 'Preview Commission', value: 'Value', help: 'Remont commission, deducted from the partner payout. Never charged to the customer again.' },
+  COMMISSION: { list: 'Commission Rules', preview: 'Preview Commission', value: 'Value', help: 'Remont commission on the discounted service value. Partner-marketplace categories: charged to the customer as the Remont platform fee (plus its GST) and never deducted from the partner again. Bookings made before the service models: deducted from the partner.' },
   MINIMUM_CHARGE: { list: 'Minimum Service Charge Rules', preview: 'Preview Minimum Charge', value: 'Minimum amount (₹, incl. GST)', help: 'A booking whose total incl. GST is below this amount is raised to it. Commission still follows the commission rules.' },
   CANCELLATION_CHARGE: { list: 'Cancellation Penalty Rules', preview: 'Preview Cancellation Penalty', value: 'Penalty (₹)', help: 'Applies when a customer cancels after the partner has arrived: a flat ₹ amount, or a % of the service amount with an optional minimum. Shown to the customer before they confirm; never deducted without admin approval; never more than the booking total. ₹0 = no penalty.' },
+  ADDITIONAL_FEE: { list: 'Additional Fee Rules', preview: 'Preview Fee', value: 'Fee (₹ or % of the discounted service value)', help: 'Named customer fees, added only when their condition holds (always, night slot, emergency request). Each is its own line with its own GST from Admin › Taxes. No rule = no fee.' },
 };
 function currentCommRuleType() { return document.getElementById('comm-ruletype-filter').value || 'COMMISSION'; }
 function onCommRuleTypeChange() {
@@ -1048,12 +1076,15 @@ function toggleCommTypeFields() {
   var ruleType = document.getElementById('comm-ruletype').value;
   var isCharge = ruleType !== 'COMMISSION';
   var isPenalty = ruleType === 'CANCELLATION_CHARGE';
+  var isFee = ruleType === 'ADDITIONAL_FEE';
+  document.getElementById('comm-fee-fields').style.display = isFee ? '' : 'none';
+  document.getElementById('comm-fee-night').style.display = isFee && document.getElementById('comm-fee-cond').value === 'NIGHT' ? '' : 'none';
   var typeSel = document.getElementById('comm-type');
   // Minimum charge: always a flat ₹ amount. Cancellation penalty: flat ₹ or a % of the service
   // amount (with an optional minimum). Neither ever stacks.
   if (isCharge) document.getElementById('comm-stackable').checked = false;
   if (ruleType === 'MINIMUM_CHARGE') typeSel.value = 'FLAT';
-  if (isPenalty && typeSel.value === 'SLAB') typeSel.value = 'FLAT';
+  if ((isPenalty || isFee) && typeSel.value === 'SLAB') typeSel.value = 'FLAT';
   typeSel.disabled = ruleType === 'MINIMUM_CHARGE';
   typeSel.querySelector('option[value="SLAB"]').disabled = isCharge;
   document.getElementById('comm-stackable-wrap').style.display = isCharge ? 'none' : '';
@@ -1095,7 +1126,7 @@ function loadCommissionRules() {
         '<td>' + badge(r.scope, r.scope==='SERVICE'?'blue':'purple') + '</td>' +
         '<td>' + escape(target) + '</td>' +
         '<td>' + escape(r.city ? r.city.name : 'All Cities') + '</td>' +
-        '<td>' + escape(valueLabel) + (r.stackable ? ' ' + badge('Stacks','teal') : '') + '</td>' +
+        '<td>' + (r.ruleType === 'ADDITIONAL_FEE' ? '<strong>' + escape(r.feeDisplayName || r.feeName || '') + '</strong><br><small>' + escape((r.feeCondition || 'ALWAYS') + (r.feeCondition === 'NIGHT' ? ' ' + r.nightStartHour + '–' + r.nightEndHour + 'h' : '') + ' · ' + (r.feeBeneficiary || 'REMONT') + ' · ' + (r.feeAppliesTo || 'ALL')) + '</small><br>' : '') + escape(valueLabel) + (r.stackable ? ' ' + badge('Stacks','teal') : '') + '</td>' +
         '<td>' + r.priority + '</td>' +
         '<td style="font-size:12px;color:#6b7280">' + (r.validFrom ? escape(String(r.validFrom).slice(0,10)) : 'now') + ' → ' + (r.validTo ? escape(String(r.validTo).slice(0,10)) : '∞') + '</td>' +
         '<td>' + badge(r.isActive?'Active':'Inactive', r.isActive?'green':'gray') + '</td>' +
@@ -1128,6 +1159,14 @@ function openCommModal(rule) {
   document.getElementById('comm-priority').value = rule ? rule.priority : 0;
   document.getElementById('comm-stackable').checked = rule ? !!rule.stackable : false;
   document.getElementById('comm-active').checked = rule ? rule.isActive : true;
+  document.getElementById('comm-fee-name').value = rule && rule.feeName ? rule.feeName : '';
+  document.getElementById('comm-fee-display').value = rule && rule.feeDisplayName ? rule.feeDisplayName : '';
+  document.getElementById('comm-fee-cond').value = rule && rule.feeCondition ? rule.feeCondition : 'ALWAYS';
+  document.getElementById('comm-fee-ns').value = rule && rule.nightStartHour != null ? rule.nightStartHour : '';
+  document.getElementById('comm-fee-ne').value = rule && rule.nightEndHour != null ? rule.nightEndHour : '';
+  document.getElementById('comm-fee-applies').value = rule && rule.feeAppliesTo ? rule.feeAppliesTo : 'ALL';
+  document.getElementById('comm-fee-benef').value = rule && rule.feeBeneficiary ? rule.feeBeneficiary : 'REMONT';
+  document.getElementById('comm-fee-sac').value = rule && rule.feeSac ? rule.feeSac : '';
   toggleCommScopeFields();
   toggleCommTypeFields();
   document.getElementById('comm-overlay').style.display = 'flex';
@@ -1164,6 +1203,11 @@ function saveCommRule() {
     stackable: document.getElementById('comm-stackable').checked,
     isActive: document.getElementById('comm-active').checked,
   };
+  if (data.ruleType === 'ADDITIONAL_FEE') {
+    var gv = function(x) { return document.getElementById(x).value.trim(); };
+    Object.assign(data, { feeName: gv('comm-fee-name'), feeDisplayName: gv('comm-fee-display'), feeCondition: gv('comm-fee-cond'), feeAppliesTo: gv('comm-fee-applies'), feeBeneficiary: gv('comm-fee-benef'), feeSac: gv('comm-fee-sac') || null,
+      nightStartHour: gv('comm-fee-ns') === '' ? null : parseInt(gv('comm-fee-ns')), nightEndHour: gv('comm-fee-ne') === '' ? null : parseInt(gv('comm-fee-ne')) });
+  }
   var p = id ? api('PATCH','/admin/commission-rules/'+id, data) : api('POST','/admin/commission-rules', data);
   p.then(function(){
     toast(id?'Rule updated':'Rule created','success');

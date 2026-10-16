@@ -7,7 +7,7 @@ import {
   JwtAuthGuard, CurrentUser, JwtPayload,
   buildInvoiceBreakdown, resolveBillingTransactionType, buildTaxRateResolver, getBillingCompanyConfig,
   stateFromGstin, PLATFORM_FEE_DEFAULT_RATE, PLATFORM_FEE_DEFAULT_SAC, distributeInvoiceDiscount, buildServiceTaxResolver,
-  nextInvoiceDocumentNumber, isValidGstinFormat, logAudit, Roles, RolesGuard, marketplaceServiceBreakdown,
+  nextInvoiceDocumentNumber, isValidGstinFormat, logAudit, Roles, RolesGuard,
   type BillingLineInput, type BillingTransactionTypeValue,
 } from '../../common';
 import { renderInvoiceBundlePdf, buildInvoiceViewModel, type InvoiceDocKind, type InvoicePdfPage, type InvoicePaymentInfo } from './invoice-pdf';
@@ -138,6 +138,11 @@ export class InvoicesService {
    * issue and by an authorised reissue, so a corrected invoice is computed exactly like a new one.
    */
   async computeInvoice(order: BillingOrder) {
+    // Bookings priced by the pricing engine: invoice exactly the confirmed calculation (the frozen
+    // components), never a second, independently re-derived one.
+    const snap: any = (order as any).pricingSnapshot;
+    const snapLines = (pred: (c: any) => boolean): BillingLineInput[] => (snap?.result?.components || []).filter(pred)
+      .map((c: any) => ({ description: c.label, hsnSac: c.sac || null, qty: 1, rate: Number(c.taxable), taxRatePercent: Number(c.ratePercent) }));
     // Section 9(5) — set in the PLATFORM_SERVICE branch below.
     let section95 = false;
     let taxReviewRequired = false;
@@ -171,7 +176,12 @@ export class InvoicesService {
     // frozen into the snapshot so later setting/rule edits never change an issued document.
     let partnerDocument: Record<string, unknown> | null = null;
 
-    if (transactionType === 'DIRECT_PROJECT') {
+    if (transactionType === 'DIRECT_PROJECT' && snap?.params?.model === 'IN_HOUSE') {
+      // In-house booking priced by the engine: every component is Remont's own supply.
+      customerLines = snapLines(() => true);
+      discountReducesTaxableValue = true; // component values are already net of the discount
+      if (order.vendor) partnerDocument = { technician: order.vendor.fullName || order.vendor.businessName || null };
+    } else if (transactionType === 'DIRECT_PROJECT') {
       // Type 2 — Remont's own team fulfils the work. Full project value, one tax invoice.
       // Each line resolves its OWN GST rate by its own HSN/SAC — different services
       // legitimately sit in different GST slabs, so this is never a single blanket rate.
@@ -290,30 +300,21 @@ export class InvoicesService {
           ...(customerFeeAmount > 0 ? [{ description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: customerFeeAmount, taxRatePercent: feeRate }] : []),
         ];
       }
-      if (order.serviceModel === 'MARKETPLACE') {
-        // Partner marketplace (priced at checkout as partner share + Remont platform fee + GST on the
-        // fee + GST on the share only when someone is liable). Three documents, none mixing suppliers:
+      if (snap?.params?.model === 'MARKETPLACE') {
+        // Partner marketplace, from the confirmed calculation. Three documents, none mixing suppliers:
         // the partner's document for their share; Remont's platform fee invoice to the CUSTOMER (who
         // paid it); and the customer page — a booking summary of everything paid, or under 9(5)
         // Remont's tax invoice as e-commerce operator for the partner's service only.
-        const b = marketplaceServiceBreakdown({
-          serviceAmount: Number(order.serviceAmount), commission: commissionAmount,
-          discount: Number(order.couponDiscount || 0) + Number(order.membershipDiscount || 0) + Number(order.bundleDiscountAmount || 0),
-          extraWork: partnerAmount - Number(order.serviceAmount),
-          serviceRatePercent: serviceRate, feeRatePercent: feeRate, partnerGstApplies: partnerRegistered || section95,
-        });
-        // GST charged on the share with nobody liable (e.g. the category left 9(5) after booking) → review.
-        taxReviewRequired = !section95 && !partnerRegistered && Number(order.partnerServiceGst || 0) > 0;
-        const shareLine: BillingLineInput = { description: order.service?.name || 'Service', hsnSac: order.service?.hsnSac || svcTax.defaultHsn, qty: 1, rate: b.partnerGross, discount: b.partnerDiscount, taxRatePercent: serviceRate };
-        const feeLine: BillingLineInput = { description: 'Remont Platform Fee', hsnSac: feeTax.defaultHsn || PLATFORM_FEE_DEFAULT_SAC, qty: 1, rate: b.commission, discount: b.feeDiscount, taxRatePercent: feeRate };
-        vendorLines = b.partnerGross > 0 ? [shareLine] : [];
-        remontLines = b.commission > 0 ? [feeLine] : [];
-        customerLines = section95
-          ? [shareLine]
-          : [{ ...shareLine, taxRatePercent: partnerRegistered ? serviceRate : 0 }, ...(b.commission > 0 ? [feeLine] : [])];
+        section95 = !!snap.params.section95 && !partnerRegistered;
+        taxReviewRequired = false;
+        const partnerLines = snapLines((c) => c.supplier === 'PARTNER');
+        vendorLines = partnerLines;
+        remontLines = snapLines((c) => c.supplier === 'REMONT');
+        customerLines = section95 ? partnerLines : snapLines(() => true);
         customerSupplierGstin = section95 ? company.gstin : null;
         remontPlaceOfSupply = placeOfSupply;
-        partnerDocument = { ...partnerDocument, model: 'MARKETPLACE', feeRecipient: 'CUSTOMER', commission: { amount: b.commission, base: Number(order.serviceAmount), ruleLabel: order.commissionRuleLabel || null, gstRatePercent: feeRate } };
+        const result = snap.result;
+        partnerDocument = { ...partnerDocument, model: 'MARKETPLACE', feeRecipient: 'CUSTOMER', commission: { amount: result.commission, base: result.discounted, ruleLabel: snap.params.lines?.[0]?.commission?.label || null, gstRatePercent: snap.params.platformFee?.ratePercent } };
       }
     } else {
       // Type 3 — marketplace product sale. The seller is the invoicing entity for the

@@ -31,16 +31,16 @@ Worked examples (illustrative; every rate comes from configuration): a ₹100 se
 |---|---|---|---|
 | **In-house** (`IN_HOUSE`) | ₹100 + ₹18 = **₹118** | One Remont tax invoice, naming the technician who did the work | Remont (own supply); never 9(5) |
 | **Partner marketplace** (`PARTNER_MARKETPLACE`, the default), unregistered partner | ₹80 + ₹20 fee + ₹3.60 = **₹103.60** | Partner's document ₹80 (no GST); Remont platform fee invoice ₹23.60 **to the customer**; booking summary | Remont on its fee; no GST on the partner's share |
-| Partner marketplace, GST-registered partner | ₹80 + ₹14.40 + ₹20 + ₹3.60 = **₹118** | As above; the partner's ₹80 carries their GST | Partner on ₹14.40; Remont on ₹3.60 |
+| Partner marketplace, category set to **GST-registered partners** | ₹80 + ₹14.40 + ₹20 + ₹3.60 = **₹118** | As above; the partner's ₹80 carries their GST | Partner on ₹14.40; Remont on ₹3.60 |
 | Partner marketplace, unregistered partner, category **APPLICABLE** for 9(5) | ₹80 + ₹14.40 + ₹20 + ₹3.60 = **₹118** | Remont's tax invoice as e-commerce operator for the ₹80 service (₹94.40); Remont fee invoice ₹23.60; partner's receipt | Remont on both (§3) |
 
-**A registered partner's GST is known only when they accept the job.** Checkout charges what is known (₹103.60). When a GST-registered partner accepts, the booking rises to ₹118 and the extra ₹14.40 becomes a balance due, collected through the normal balance flow (online, or cash confirmed by the completion code). If that partner later drops the job, it is recalculated again.
+**The price is final at checkout.** Each partner category also has a **partner GST profile** (Admin › Services › category): *partners not registered for GST* (the default — no partner GST in the price) or *GST-registered partners only* (the partner's GST is in the price). Dispatch, partner acceptance and admin assignment only allow partners whose GST registration matches, so nothing is ever added after the customer pays.
 
 ### 2.2 Platform fee (commission)
 
-- Remont's commission comes from Admin › Commission rules (per category or service, optionally per city). **No default percentage is invented:** a category with no rule has no fee.
+- Remont's commission comes from Admin › Commission rules (per category or service, optionally per city). A category with no rule uses the `default_commission_pct` setting if one is set; otherwise there is no fee.
 - **Partner marketplace:** the catalogue price includes the commission. The customer pays it as Remont's platform fee, with GST at the platform-fee rate, on Remont's own tax invoice addressed to the customer. The partner is credited their share (price − commission) and is **never** charged commission or its GST.
-- A platform-funded discount (coupon, membership, bundle) reduces Remont's fee first. Any excess reduces the partner's line; the partner is still paid their full share, so Remont funds it.
+- **Discounts are shared.** Commission is calculated on the discounted service value, so Remont and the partner share every discount in proportion. Example: ₹150 − ₹50 discount = ₹100; 20% commission = ₹20; partner ₹80; GST on the fee ₹3.60; customer pays ₹103.60.
 - `partner_commission_gst_recovery` and the commission invoice to the partner apply only to bookings made before this change.
 
 ### 2.3 Payment and cash
@@ -106,6 +106,23 @@ The existing warranty hold and its automatic release apply unchanged.
 - The *In-house technician cash* report (Excel) lists, per technician and job: collected, method, verification, deposited, references and outstanding.
 - **Salary** is recorded separately as an expense: Admin › Reports › Accounting › Purchase bills › *Salary*. It never carries GST or input tax credit and is never netted against cash collected.
 
+### 2.7 How prices are configured (Admin › Finance & Configuration)
+
+One backend pricing engine prices every service booking: checkout, the quote, guest and admin bookings, extra work, invoices and the admin preview. The website and apps show the server's quote and never calculate tax themselves.
+
+| Setting | Where |
+|---|---|
+| GST rules (by SAC/HSN, effective dates) | Tax Configuration |
+| Commission, minimum charge, cancellation charge, **additional fees** | Commission, Fees & Charges |
+| Service model, partner GST profile, Section 9(5) | Services › category |
+| What a booking would cost, with the rules used | Price Calculation Preview (writes nothing) |
+| Who changed which rule, and when | Rule History (audit log) |
+
+- **CA approval.** A new GST rule, or a change to its rate, SAC, scope or dates, is *Pending CA approval* and is not used. A super admin records the CA's verification (a written note) before it applies. Rules set up before approvals existed show as *Legacy* and are still used until approved or replaced.
+- **Nothing is guessed.** If a service, the platform fee or a Remont fee has no approved GST rule, that service **cannot be booked**. The customer sees "can't be booked yet" and the admin preview names exactly what's missing. Conflicting rules (two fees of the same name at the same level and priority) also block the booking, and are refused when saved.
+- **Additional fees** (emergency, night visit, convenience, inspection…) are rules of type *Additional fee*: a key and customer-facing name, a flat amount or % of the discounted value, a condition (always / night slot in IST / customer asks for an emergency visit), which model it applies to, and whose charge it is. A *Remont* fee is its own line on Remont's invoice, taxed by the GST rule for its SAC. A *partner* fee is part of the partner's service and taxed with it. Each appears as its own line before the customer pays. A fee is never charged if its condition isn't met, and the same fee is never added twice.
+- **Every confirmed booking stores its calculation** (`Order.pricingSnapshot`): rates, commission, fees, each component's taxable value and GST, and the IDs of the rules used. Invoices and extra-work changes reuse it, so a rule changed later never alters a confirmed booking. Bookings made before this keep their original pricing.
+
 ## 3. Section 9(5): configuration plan
 
 Section 9(5) of the CGST Act applies only to **notified services** supplied through an e-commerce operator, and only where the supplier is not liable to register. It must not be applied to every category.
@@ -166,8 +183,8 @@ New test transactions on live Razorpay keys are real gateway transactions. Prefe
 3. When a tax invoice must be issued for a completed job that was never paid, and how it is cancelled.
 4. Whether e-invoicing (IRN) and e-way bills are mandatory. This is simulation-only until a GSP/IRP is connected.
 5. **Partner invoicing authority.** Whether Remont may issue a registered partner's tax invoice on their behalf, with what written authorisation, per-partner numbering and declarations. Until then, document A is a statement (§2.5).
-6. **A registered partner's GST added after booking.** The customer is quoted ₹103.60 and asked for ₹14.40 more once a registered partner accepts. Confirm this is acceptable to show customers, and how they are told at checkout.
-7. **Platform-funded discounts.** They reduce Remont's fee first, then the partner's line, while Remont pays the partner their full share. Confirm the documentation of Remont's funding.
+6. **GST rules to approve before go-live.** Every active service SAC and the platform fee (SAC 999799) need a CA-approved GST rule, or those services can't be booked (§2.7).
+7. **Partner-supplied fees.** Whether surcharges such as night or emergency charges are the partner's supply or Remont's is configured per fee rule; confirm the treatment for each fee you create.
 8. **Refunds on partner marketplace jobs.** A refund issues a credit note against the customer's booking summary or 9(5) invoice. Whether Remont's fee invoice to the customer and the partner's document should also be credited, and in what proportion, is not automated. Partner recoveries remain an admin decision.
 9. Bookings made before this change still follow the old model (GST on the full service, commission deducted from the partner, `partner_commission_gst_recovery`).
 
@@ -176,6 +193,9 @@ New test transactions on live Razorpay keys are real gateway transactions. Prefe
 | Setting | Where | Default |
 |---|---|---|
 | `ServiceCategory.serviceModel` | Admin › Services › category › "Who provides these services" | `PARTNER_MARKETPLACE` (external partners) |
+| `ServiceCategory.partnerGstProfile` | Admin › Services › category | `UNREGISTERED_ONLY` (no partner GST in the price) |
+| GST rule approval (`TaxConfig.approvalStatus`) | Admin › Tax Configuration | new rules `PENDING_CA`; older rules `LEGACY` |
+| Additional fees | Admin › Commission, Fees & Charges | none (no fee) |
 | `ServiceCategory.gstSection95Status` | Admin › Services › category | CA review required (no 9(5)) |
 | Commission rules | Admin › Commission | none (₹0; configure every category) |
 | `partner_commission_gst_recovery` | Admin › Settings | off (bookings made before the service models only) |

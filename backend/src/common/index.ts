@@ -268,7 +268,7 @@ type CommissionRuleRow = {
   stackable: boolean;
 };
 
-function computeRuleAmount(rule: CommissionRuleRow, amount: number): number {
+export function computeRuleAmount(rule: CommissionRuleRow, amount: number): number {
   if (rule.commissionType === 'FLAT') return Number(rule.value);
   if (rule.commissionType === 'PERCENTAGE') return (amount * Number(rule.value)) / 100;
   if (rule.commissionType === 'SLAB') {
@@ -296,7 +296,7 @@ export async function resolveCommission(
 }
 
 /** What a CommissionRule row prices — see ServiceRuleType in schema.prisma. */
-export type ServiceRuleTypeValue = 'COMMISSION' | 'MINIMUM_CHARGE' | 'CANCELLATION_CHARGE';
+export type ServiceRuleTypeValue = 'COMMISSION' | 'MINIMUM_CHARGE' | 'CANCELLATION_CHARGE' | 'ADDITIONAL_FEE';
 
 /**
  * The existing commission resolution (service beats category, city-specific beats all-city,
@@ -526,98 +526,27 @@ export function staffAllowedForModel(model: string | null | undefined, staffType
 }
 
 /**
- * Marketplace customer price for one service booking. The catalogue price includes Remont's
- * commission; the customer is charged the partner's share + Remont's platform fee (the commission)
- * + GST on the fee + GST on the partner's share only when someone is liable for it (a registered
- * partner, or Remont under 9(5)). A platform-funded discount reduces Remont's fee first; any excess
- * reduces the partner's line (the partner is still paid their full share). E.g. ₹100 incl. ₹20
- * commission, 18%/18%: ₹80 + ₹20 + ₹3.60 = ₹103.60; with partner GST ₹14.40 = ₹118.
+ * Recomputes a service booking priced by the pricing engine (Order.pricingSnapshot) after approved
+ * extra work changes — with the rates, commission and fees FROZEN at checkout (a rule changed since
+ * never alters a confirmed booking). A no-op (false) for bookings without a snapshot. A total that
+ * rises past what was paid becomes a balance due through the existing balance flow.
  */
-export function marketplaceServiceBreakdown(i: {
-  serviceAmount: number; commission: number; discount?: number; extraWork?: number;
-  serviceRatePercent: number; feeRatePercent: number; partnerGstApplies: boolean;
-}) {
-  const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-  const commission = r2(Math.max(0, Math.min(Number(i.commission) || 0, Number(i.serviceAmount) || 0)));
-  const discount = r2(Math.max(0, Number(i.discount) || 0));
-  const feeDiscount = Math.min(discount, commission);
-  const feeTaxable = r2(commission - feeDiscount);
-  const partnerGross = r2(Number(i.serviceAmount) - commission + (Number(i.extraWork) || 0));
-  const partnerDiscount = Math.min(r2(discount - feeDiscount), partnerGross);
-  const partnerTaxable = r2(partnerGross - partnerDiscount);
-  const platformFeeGst = r2((feeTaxable * i.feeRatePercent) / 100);
-  const partnerServiceGst = i.partnerGstApplies ? r2((partnerTaxable * i.serviceRatePercent) / 100) : 0;
-  return {
-    commission, feeDiscount, feeTaxable, partnerGross, partnerDiscount, partnerTaxable, platformFeeGst, partnerServiceGst,
-    gstAmount: r2(platformFeeGst + partnerServiceGst),
-    customerTotal: r2(partnerTaxable + partnerServiceGst + feeTaxable + platformFeeGst),
-  };
-}
-
-/**
- * GST for one service booking at checkout, by the category's model (no partner is known yet):
- * legacy/IN_HOUSE = GST on the (discounted) service; MARKETPLACE = GST on Remont's fee, plus GST
- * on the partner's share only under 9(5). Shared by single-order, guest and admin-created bookings.
- */
-export async function serviceBookingGst(
-  prisma: any,
-  category: { serviceModel?: string | null; gstSection95Status?: string | null } | null | undefined,
-  p: { serviceAmount: number; commission: number; discount?: number; serviceRatePercent: number },
-): Promise<{ serviceModel: OrderServiceModel | null; gstAmount: number; platformFeeGst: number; partnerServiceGst: number }> {
-  const serviceModel = orderServiceModelFor(category?.serviceModel);
-  if (serviceModel !== 'MARKETPLACE') {
-    const taxable = Math.max(0, p.serviceAmount - (p.discount || 0));
-    return { serviceModel, gstAmount: Math.round(taxable * (p.serviceRatePercent / 100) * 100) / 100, platformFeeGst: 0, partnerServiceGst: 0 };
-  }
-  const feeRatePercent = (await buildTaxRateResolver(prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE)).rateFor(null, null);
-  const b = marketplaceServiceBreakdown({
-    serviceAmount: p.serviceAmount, commission: p.commission, discount: p.discount, serviceRatePercent: p.serviceRatePercent,
-    feeRatePercent, partnerGstApplies: category?.gstSection95Status === 'APPLICABLE',
-  });
-  return { serviceModel, gstAmount: b.gstAmount, platformFeeGst: b.platformFeeGst, partnerServiceGst: b.partnerServiceGst };
-}
-
-/** GST on the partner's share applies only to a registered partner, or to Remont under 9(5). */
-export function partnerGstApplies(vendor: { staffType?: string | null; gstin?: string | null } | null | undefined, section95Status?: string | null): boolean {
-  const registered = !!vendor?.gstin && isValidGstinFormat(String(vendor.gstin));
-  if (registered) return true;
-  return section95Status === 'APPLICABLE';
-}
-
-/**
- * Recomputes a MARKETPLACE service order's GST and totals from its frozen inputs (price,
- * commission, discounts, wallet) and its CURRENT partner — called when approved extra work or the
- * assigned partner changes (a registered partner's GST is only known once they accept). A no-op
- * for other orders. Never touches money already received: a total that rises past what was paid
- * becomes a balance due through the existing balance flow.
- */
-export async function recalculateMarketplaceOrder(client: any, orderId: string): Promise<boolean> {
-  const order = await client.order.findUnique({
-    where: { id: orderId },
-    include: { extraWorkItems: { where: { customerApproved: true } }, vendor: true, service: { include: { category: true } } },
-  });
-  if (!order || order.serviceModel !== 'MARKETPLACE' || order.type !== 'SERVICE') return false;
-  const svcTax = await buildServiceTaxResolver(client);
-  const feeTax = await buildTaxRateResolver(client, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+export async function recalculateServiceOrder(client: any, orderId: string): Promise<boolean> {
+  const order = await client.order.findUnique({ where: { id: orderId }, include: { extraWorkItems: { where: { customerApproved: true } } } });
+  const snap: any = order?.pricingSnapshot;
+  if (!order || order.type !== 'SERVICE' || !snap?.params) return false;
   const extraWork = order.extraWorkItems.reduce((s: number, e: any) => s + Number(e.amount), 0);
-  const b = marketplaceServiceBreakdown({
-    serviceAmount: Number(order.serviceAmount), commission: Number(order.remontCommission),
-    discount: Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.bundleDiscountAmount || 0),
-    extraWork,
-    serviceRatePercent: svcTax.rateFor(order.service?.hsnSac, order.service?.gstOverridePercent),
-    feeRatePercent: feeTax.rateFor(null, null),
-    partnerGstApplies: partnerGstApplies(order.vendor, order.service?.category?.gstSection95Status),
-  });
+  const next = pricingSnapshot(snap.params, { lineAmounts: snap.amounts.lineAmounts, discount: snap.amounts.discount, extraWork });
   const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-  const totalAmount = Math.max(0, r2(b.customerTotal - Number(order.walletUsed || 0)));
+  const res = next.result;
+  const totalAmount = Math.max(0, r2(res.customerTotal - Number(order.walletUsed || 0)));
   const rose = totalAmount > Number(order.totalAmount) + 0.009;
   await client.order.update({
     where: { id: orderId },
     data: {
       extraWorkAmount: extraWork, subtotal: r2(Number(order.serviceAmount) + extraWork),
-      gstAmount: b.gstAmount, platformFeeGst: b.platformFeeGst, partnerServiceGst: b.partnerServiceGst, totalAmount,
-      vendorPayout: r2(Number(order.serviceAmount) + extraWork - Number(order.remontCommission)),
-      // fully paid at the old total → now part-paid; the balance flow collects the difference
+      gstAmount: res.gstAmount, platformFeeGst: res.platformFeeGst, partnerServiceGst: res.partnerServiceGst, totalAmount,
+      vendorPayout: res.partnerShare, pricingSnapshot: { ...next, previous: snap.computedAt } as any,
       ...(rose && order.paymentStatus === 'PAID' ? { paymentStatus: 'PARTIAL' } : {}),
     },
   });
@@ -1120,6 +1049,8 @@ export function addressSnapshotFields(addr?: {
 // this replaces: three drifting hardcoded-9%+9% copies, one of which — the admin
 // "Generate Invoice" button — didn't even share code with the other two).
 export * from './billing-engine';
+export * from './pricing-engine';
+import { pricingSnapshot } from './pricing-engine';
 import {
   calculateInvoice, stateFromGstin, normalizeState, isValidGstinFormat,
   type BillingTransactionTypeValue, type BillingLineInput,
@@ -1420,6 +1351,8 @@ export interface TaxRateResolver {
   /** true when a rate was actually configured (override, HSN/category row or blanket row) —
    * false means rateFor() is only returning the unconfigured default. */
   hasConfiguredRate?(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): boolean;
+  /** Which configuration produced the rate: 'OVERRIDE', a TaxConfig id, or null (unconfigured). */
+  sourceFor?(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): string | null;
 }
 export async function buildTaxRateResolver(
   prisma: any,
@@ -1430,6 +1363,8 @@ export async function buildTaxRateResolver(
   const rows = await prisma.taxConfig.findMany({
     where: {
       isActive: true, type: 'GST', appliesTo: { has: appliesTo },
+      // a rule still waiting for CA approval is never used (LEGACY = configured before approvals existed)
+      approvalStatus: { in: ['APPROVED', 'LEGACY'] },
       AND: [
         { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
         { OR: [{ validTo: null }, { validTo: { gte: now } }] },
@@ -1471,6 +1406,11 @@ export async function buildTaxRateResolver(
       // Only a genuine blanket row (no HSN, no category) configures everything else — another
       // category's row must not silently price this product (resolveRow's legacy fallback would).
       return rows.some((r: any) => !r.hsnCode && !r.productCategoryId);
+    },
+    sourceFor(hsnSac, overridePercent, categoryId) {
+      if (overridePercent !== undefined && overridePercent !== null && !Number.isNaN(Number(overridePercent))) return 'OVERRIDE';
+      if (!this.hasConfiguredRate!(hsnSac, overridePercent, categoryId)) return null;
+      return resolveRow(hsnSac, categoryId)?.id ?? null;
     },
     priceTypeFor(hsnSac, categoryId, overrideInclusive) {
       if (overrideInclusive !== undefined && overrideInclusive !== null) {

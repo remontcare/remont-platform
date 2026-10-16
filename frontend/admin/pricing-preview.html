@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Price Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Price Calculation Preview</h1><p>The real pricing engine — nothing is booked, charged, invoiced or posted</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+          <div class="form-group"><label class="form-label">Service</label><select id="pv-svc" class="form-control"><option value="">Loading…</option></select></div>
+          <div class="form-group"><label class="form-label">City</label><select id="pv-city" class="form-control"><option value="">All cities</option></select></div>
+          <div class="form-group"><label class="form-label">Service price (₹) <small style="color:#9ca3af">blank = catalogue/city price</small></label><input id="pv-amount" class="form-control" type="number" min="0" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Discount (₹)</label><input id="pv-discount" class="form-control" type="number" min="0" step="0.01" value="0"></div>
+          <div class="form-group"><label class="form-label">Additional work (₹)</label><input id="pv-extra" class="form-control" type="number" min="0" step="0.01" value="0"></div>
+          <div class="form-group"><label class="form-label">Visit slot</label><input id="pv-slot" class="form-control" type="datetime-local"></div>
+          <div class="form-group"><label class="form-label">Who provides it <small style="color:#9ca3af">(what-if)</small></label><select id="pv-model" class="form-control"><option value="">As configured</option><option value="PARTNER_MARKETPLACE">External partners</option><option value="IN_HOUSE">Remont in-house</option></select></div>
+          <div class="form-group"><label class="form-label">Partner GST <small style="color:#9ca3af">(what-if)</small></label><select id="pv-profile" class="form-control"><option value="">As configured</option><option value="UNREGISTERED_ONLY">Not GST-registered</option><option value="REGISTERED_ONLY">GST-registered</option></select></div>
+          <div class="form-group" style="display:flex;align-items:flex-end"><label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="pv-emergency"> Emergency visit</label></div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="runPreview()">Calculate</button>
+      </div>
+    </div>
+    <div id="pv-out"></div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+renderSidebar('pricing-preview');
+requireAuth();
+api('GET', '/admin/services?limit=500').then(function(list) {
+  document.getElementById('pv-svc').innerHTML = '<option value="">Select a service…</option>' + (list || []).map(function(s) { return '<option value="' + s.id + '">' + escape(s.name) + '</option>'; }).join('');
+}).catch(function(e) { toast(e.message, 'error'); });
+api('GET', '/admin/cities').then(function(list) {
+  document.getElementById('pv-city').innerHTML = '<option value="">All cities</option>' + (list || []).map(function(c) { return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
+}).catch(function() {});
+
+function runPreview() {
+  var v = function(id) { return document.getElementById(id).value; };
+  if (!v('pv-svc')) { toast('Select a service', 'error'); return; }
+  var body = {
+    serviceId: v('pv-svc'), cityId: v('pv-city') || undefined,
+    amount: v('pv-amount') ? Number(v('pv-amount')) : undefined,
+    discount: Number(v('pv-discount') || 0), extraWork: Number(v('pv-extra') || 0),
+    slotStart: v('pv-slot') ? new Date(v('pv-slot') + ':00+05:30').toISOString() : undefined,
+    emergency: document.getElementById('pv-emergency').checked,
+    serviceModel: v('pv-model') || undefined, partnerGstProfile: v('pv-profile') || undefined,
+  };
+  document.getElementById('pv-out').innerHTML = '<div class="loading">Calculating…</div>';
+  api('POST', '/admin/pricing/preview', body).then(render).catch(function(e) {
+    document.getElementById('pv-out').innerHTML = '<div class="card"><div class="card-body" style="color:#dc2626">' + escape(e.message) + '</div></div>';
+  });
+}
+
+function render(r) {
+  var html = '';
+  if (r.problems && r.problems.length) {
+    html += '<div class="card" style="margin-bottom:16px;border:1px solid #fecaca"><div class="card-body"><b style="color:#dc2626">This booking would be blocked at checkout:</b><ul style="margin:8px 0 0 18px">' +
+      r.problems.map(function(p) { return '<li>' + escape(p) + '</li>'; }).join('') + '</ul></div></div>';
+  }
+  if (!r.result) { document.getElementById('pv-out').innerHTML = html; return; }
+  var res = r.result, p = r.params;
+  var rows = res.components.map(function(c) {
+    return '<tr><td>' + escape(c.label) + '</td><td>' + badge(c.supplier === 'REMONT' ? 'Remont' : 'Partner', c.supplier === 'REMONT' ? 'blue' : 'purple') + '</td><td>' + escape(c.sac || '—') + '</td><td>' + fmtCur(c.taxable) + '</td><td>' + c.ratePercent + '%</td><td>' + fmtCur(c.gst) + '</td><td>' + (c.remontLiable && c.gst > 0 ? 'Remont' : c.gst > 0 ? 'Partner' : '—') + '</td></tr>';
+  }).join('');
+  var line = function(k, v) { return '<tr><td>' + k + '</td><td style="text-align:right"><b>' + v + '</b></td></tr>'; };
+  html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">Charges (' + escape(p.model === 'IN_HOUSE' ? 'Remont in-house' : 'Partner marketplace — ' + (p.partnerGstProfile === 'REGISTERED_ONLY' ? 'GST-registered partner' : 'unregistered partner' + (p.section95 ? ', Section 9(5)' : ''))) + ')</span></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Component</th><th>Supplier</th><th>SAC</th><th>Taxable</th><th>GST rate</th><th>GST</th><th>GST payable by</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  html += '<div class="card" style="margin-bottom:16px"><div class="card-body"><table style="width:100%;max-width:520px">' +
+    line('Service value', fmtCur(res.serviceAmount)) + line('Discount', '−' + fmtCur(res.discount)) + line('Discounted value', fmtCur(res.discounted)) +
+    (p.model === 'MARKETPLACE' ? line('Commission (Remont platform fee) — ' + escape((p.lines[0] && p.lines[0].commission.label) || ''), fmtCur(res.commission)) + line('Partner share', fmtCur(res.partnerShare)) : '') +
+    line('Additional fees', fmtCur(res.feesTotal)) + line('GST', fmtCur(res.gstAmount)) +
+    line('<b>Customer pays</b>', fmtCur(res.customerTotal)) + line('Remont revenue (excl. GST)', fmtCur(res.remontRevenue)) +
+    line('GST Remont owes', fmtCur(res.remontGstLiability)) + (p.model === 'MARKETPLACE' ? line('Partner payable', fmtCur(res.partnerPayable)) : '') +
+    (r.minimumChargeAdjustment > 0 ? line('Minimum-charge top-up included', fmtCur(r.minimumChargeAdjustment)) : '') +
+    '</table></div></div>';
+  var rules = ['Service GST rule: ' + (p.lines || []).map(function(l) { return escape(l.name) + ' → ' + escape(l.taxRule || 'none') + ' (' + l.ratePercent + '%)'; }).join(', '),
+    'Platform fee GST rule: ' + escape(p.platformFee.taxRule || 'none') + ' (' + p.platformFee.ratePercent + '%, SAC ' + escape(p.platformFee.sac) + ')',
+    'Commission rule: ' + escape((p.lines[0] && p.lines[0].commission.ruleId) || 'none')].concat((p.fees || []).map(function(f) { return 'Fee ' + escape(f.displayName) + ': rule ' + escape(f.ruleId) + ', ' + escape(f.beneficiary) + ', ' + f.ratePercent + '% GST'; }));
+  html += '<div class="card"><div class="card-header"><span class="card-title">Rules used</span></div><div class="card-body" style="font-size:13px">' + rules.join('<br>') + '<p style="color:#6b7280;margin-top:8px">' + escape(r.note || '') + '</p></div></div>';
+  document.getElementById('pv-out').innerHTML = html;
+}
+</script>
+</body>
+</html>

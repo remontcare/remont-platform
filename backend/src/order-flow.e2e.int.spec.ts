@@ -139,6 +139,10 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     ids.pA = await mkPartner(`E2EA${tag}`);
     ids.pB = await mkPartner(`E2EB${tag}`);
     ids.admin = await mkUser('SUPER_ADMIN');
+    // the pricing engine never guesses a rate: approved rules for the service SAC and the platform fee
+    for (const [appliesTo, hsnCode] of [['SERVICE', '998719'], ['PLATFORM_FEE', '999799']]) {
+      await prisma.taxConfig.create({ data: { name: `E2E ${appliesTo} 18%`, rate: 18, hsnCode, appliesTo: [appliesTo], approvalStatus: 'APPROVED', approvedBy: ids.admin.id, approvedAt: new Date(), approvalNote: 'e2e fixture' } as any });
+    }
   });
 
   afterAll(async () => {
@@ -487,9 +491,16 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
       m.mkt = await mkCat('MKT', { serviceModel: 'PARTNER_MARKETPLACE' });
       m.s95 = await mkCat('S95', { serviceModel: 'PARTNER_MARKETPLACE', gstSection95Status: 'APPLICABLE' });
       m.inh = await mkCat('INH', { serviceModel: 'IN_HOUSE' });
+      m.reg = await mkCat('REG', { serviceModel: 'PARTNER_MARKETPLACE', partnerGstProfile: 'REGISTERED_ONLY' });
+      m.nosac = await mkCat('NOSAC', { serviceModel: 'PARTNER_MARKETPLACE' });
+      m.sac = '99' + String(Date.now()).slice(-4); // a SAC no rule covers yet (unique per run)
+      await prisma.service.update({ where: { id: m.nosac.svc.id }, data: { hsnSac: m.sac } });
       m.pUnreg = await mkPartner(m.mkt.cat.key);
-      m.pReg = await mkPartner(m.mkt.cat.key);
+      m.pReg = await mkPartner(m.reg.cat.key);
       await prisma.serviceVendor.update({ where: { id: m.pReg.vendor.id }, data: { gstin: '23ABCDE1234F1Z5' } });
+      m.pRegUnreg = await mkPartner(m.reg.cat.key); // same skill, not GST-registered
+      m.pMktReg = await mkPartner(m.mkt.cat.key);
+      await prisma.serviceVendor.update({ where: { id: m.pMktReg.vendor.id }, data: { gstin: '27ABCDE1234F1Z5' } });
       m.pS95 = await mkPartner(m.s95.cat.key);
       // a partner who has the in-house category's skill — must never be offered in-house jobs
       m.pInhSkill = await mkPartner(m.inh.cat.key);
@@ -546,23 +557,26 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
       m.onlineMkt = child.id;
     });
 
-    it('M2. marketplace, GST-registered partner: their GST (₹14.40) is added when they accept → ₹118; collected, passed to the partner, invoiced by the partner', async () => {
-      const { child } = await paidCart(m.mkt.svc.id);
-      expect(Number(child.totalAmount)).toBe(103.6); // nobody known at checkout
-      const run = await partnerRunsJob(child.id, m.pReg, { collection: { mode: 'CASH' } });
-      expect(run.balance.balanceDue).toBe(14.4); // only the partner's GST is still due
-      expect(run.complete.status).toBe(201);
-      const o = await order(child.id);
-      expect([Number(o.totalAmount), Number(o.partnerServiceGst), Number(o.platformFeeGst), o.paymentStatus]).toEqual([118, 14.4, 3.6, 'PAID']);
+    it('M2. GST-registered-partner category: ₹80 + ₹14.40 + ₹20 + ₹3.60 = ₹118 charged at checkout; only a registered partner can take it; their GST is passed to them', async () => {
+      const { child } = await paidCart(m.reg.svc.id);
+      expect([Number(child.totalAmount), Number(child.partnerServiceGst), Number(child.platformFeeGst)]).toEqual([118, 14.4, 3.6]);
+      // nothing is added after payment — and an unregistered partner can't take a job priced with partner GST
+      await until(() => order(child.id), (o) => o.dispatchAttempts >= 1, 'dispatch');
+      expect((await api('POST', `/vendors/service/me/jobs/${child.id}/accept`, { as: m.pRegUnreg.user })).status).toBe(403);
+      const run = await partnerRunsJob(child.id, m.pReg);
+      expect(run.balance.balanceDue).toBe(0);
+      expect(Number((await order(child.id)).totalAmount)).toBe(118);
       await orders_releaseOnce(child.id);
       const entries = await prisma.partnerLedgerEntry.findMany({ where: { orderId: child.id } });
-      expect(entries.filter((e) => e.type === 'GST').map((e) => Number(e.amount))).toEqual([14.4]); // the partner's own GST, theirs to remit
-      expect(netOf(entries)).toBe(80); // +80 share +14.40 GST −14.40 cash in hand
+      expect(entries.filter((e) => e.type === 'GST').map((e) => Number(e.amount))).toEqual([14.4]); // theirs to remit
+      expect(netOf(entries)).toBe(94.4);
       const inv = await until(() => prisma.invoice.findUnique({ where: { orderId: child.id } }), (i) => !!i, 'invoice');
-      expect([Number(inv!.vendorLabor), r2(Number(inv!.vendorCgst) + Number(inv!.vendorSgst)), Number(inv!.vendorTotal)]).toEqual([80, 14.4, 94.4]);
-      expect(Number(inv!.customerTotal)).toBe(118);
-      expect(Number(inv!.remontTotal)).toBe(23.6);
-      expect((inv!.lineItemsSnapshot as any).parties.vendor.supplier.gstin).toBe('23ABCDE1234F1Z5');
+      expect([Number(inv!.vendorLabor), r2(Number(inv!.vendorCgst) + Number(inv!.vendorSgst)), Number(inv!.vendorTotal), Number(inv!.customerTotal), Number(inv!.remontTotal)]).toEqual([80, 14.4, 94.4, 118, 23.6]);
+      // the booking keeps its confirmed calculation and the rules used
+      const snap: any = (await order(child.id)).pricingSnapshot;
+      expect(snap.params.lines[0].taxRule).toBeTruthy();
+      expect(snap.params.lines[0].commission.ruleId).toBeTruthy();
+      expect(snap.result.customerTotal).toBe(118);
     });
 
     it('M3. marketplace cash: partner collects ₹103.60, earns ₹80, owes Remont exactly ₹23.60 — one cash entry, no commission deduction', async () => {
@@ -667,6 +681,50 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
       await until(() => order(inh.child.id), (o) => !!o.vendorId, 'in-house routing');
       expect((await api('PATCH', `/admin/orders/${inh.child.id}/assign-vendor`, { as: ids.admin, body: { vendorId: m.pInhSkill.vendor.id } })).status).toBe(400);
       expect((await api('POST', `/vendors/service/me/jobs/${mkt.child.id}/accept`, { as: m.tech.user })).status).toBe(403);
+      expect((await api('PATCH', `/admin/orders/${mkt.child.id}/assign-vendor`, { as: ids.admin, body: { vendorId: m.pMktReg.vendor.id } })).status).toBe(400);
+    });
+
+    it('M8. no approved GST rule → the booking is blocked with an admin-actionable reason; a new rule stays unused until a super admin records the CA approval', async () => {
+      const quote = () => api('POST', '/master-orders/public/quote', { body: { items: [{ type: 'SERVICE', serviceId: m.nosac.svc.id }], city: 'Bhopal' } });
+      const blocked = await quote();
+      expect(blocked.status).toBe(400);
+      expect(JSON.stringify(blocked.raw)).toMatch(new RegExp(`no CA-approved GST rule for service .*SAC ${m.sac}`));
+      const created = await api('POST', '/admin/taxes', { as: ids.admin, body: { name: `SAC ${m.sac} 18%`, rate: 18, hsnCode: m.sac, appliesTo: ['SERVICE'], approvalStatus: 'APPROVED' } });
+      expect(created.status).toBe(201);
+      expect(created.data.approvalStatus).toBe('PENDING_CA'); // never self-approved through the request
+      expect((await quote()).status).toBe(400);
+      const admin2 = await mkUser('ADMIN');
+      expect((await api('POST', `/admin/taxes/${created.data.id}/approve`, { as: admin2, body: { note: 'CA confirmed 18% for this SAC' } })).status).toBe(403); // super admin only
+      expect((await api('POST', `/admin/taxes/${created.data.id}/approve`, { as: ids.admin, body: { note: 'short' } })).status).toBe(400);
+      expect((await api('POST', `/admin/taxes/${created.data.id}/approve`, { as: ids.admin, body: { note: 'CA confirmed 18% for this SAC on 16 Oct' } })).status).toBe(201);
+      expect((await quote()).data.totalAmount).toBe(103.6);
+      // changing the rate needs approval again
+      expect((await api('PATCH', `/admin/taxes/${created.data.id}`, { as: ids.admin, body: { rate: 12 } })).data.approvalStatus).toBe('PENDING_CA');
+      expect((await quote()).status).toBe(400);
+      const audit = await prisma.auditLog.findMany({ where: { targetId: created.data.id }, orderBy: { createdAt: 'asc' } });
+      expect(audit.map((a) => a.action)).toEqual(['TAX_RULE_CREATED', 'TAX_RULE_APPROVED', 'TAX_RULE_UPDATED']);
+    });
+
+    it('M9. named fees: an emergency fee is added only when asked for, shown as its own line with its own GST; a duplicate rule is refused; the admin preview matches and writes nothing', async () => {
+      const feeBody = { ruleType: 'ADDITIONAL_FEE', scope: 'CATEGORY', categoryId: m.mkt.cat.id, commissionType: 'FLAT', value: 50, feeName: 'emergency', feeDisplayName: 'Emergency service fee', feeCondition: 'EMERGENCY', feeAppliesTo: 'ALL', feeBeneficiary: 'REMONT' };
+      const rule = await api('POST', '/admin/commission-rules', { as: ids.admin, body: feeBody });
+      expect(rule.status).toBe(201);
+      expect(rule.data.feeName).toBe('EMERGENCY');
+      expect((await api('POST', '/admin/commission-rules', { as: ids.admin, body: { ...feeBody, value: 70 } })).status).toBe(400); // same fee, same scope
+      expect((await api('POST', '/admin/commission-rules', { as: ids.admin, body: { ...feeBody, feeName: 'NIGHT', feeCondition: 'NIGHT' } })).status).toBe(400); // night needs its hours
+      const q = (emergency?: boolean) => api('POST', '/master-orders/public/quote', { body: { items: [{ type: 'SERVICE', serviceId: m.mkt.svc.id }], city: 'Bhopal', ...(emergency ? { emergency: true } : {}) } });
+      expect((await q()).data.totalAmount).toBe(103.6);
+      const em = (await q(true)).data;
+      expect(em.totalAmount).toBe(r2(103.6 + 50 + 9));
+      expect(em.bookings[0].charges.find((c: any) => c.code === 'FEE')).toEqual(expect.objectContaining({ label: 'Emergency service fee', amount: 50, gst: 9 }));
+      const ordersBefore = await prisma.order.count();
+      const prev = await api('POST', '/admin/pricing/preview', { as: ids.admin, body: { serviceId: m.mkt.svc.id, emergency: true } });
+      expect(prev.data.valid).toBe(true);
+      expect(prev.data.result.customerTotal).toBe(em.totalAmount);
+      expect(await prisma.order.count()).toBe(ordersBefore);
+      // what-if: the same service as a GST-registered-partner booking
+      expect((await api('POST', '/admin/pricing/preview', { as: ids.admin, body: { serviceId: m.mkt.svc.id, partnerGstProfile: 'REGISTERED_ONLY' } })).data.result.customerTotal).toBe(118);
+      await api('PATCH', `/admin/commission-rules/${rule.data.id}`, { as: ids.admin, body: { isActive: false } }); // leave M-scenario prices unchanged
     });
 
     /** Earnings post once (the completion already did) — a further release or sweep never posts again. */
