@@ -271,6 +271,17 @@ export async function resolveServicePricingParams(prisma: any, i: PricingInput):
   return { params, problems };
 }
 
+/**
+ * Go-live switch (SiteSetting). Off (the default): every booking keeps the pricing in force before the
+ * engine — so deploying never changes live prices or blocks bookings — while admins configure and
+ * preview. A super admin turns it on only once every active service can be priced (admin readiness check).
+ */
+export const PRICING_ENGINE_SETTING = 'service_pricing_engine_enabled';
+export async function pricingEngineEnabled(prisma: any): Promise<boolean> {
+  const s = await prisma.siteSetting.findUnique({ where: { key: PRICING_ENGINE_SETTING } });
+  return s?.value === 'true';
+}
+
 /** What gets stored on the booking (Order.pricingSnapshot). */
 export function pricingSnapshot(params: FrozenPricingParams, amounts: PricingAmounts) {
   const a = { lineAmounts: amounts.lineAmounts.map((x) => r2(Number(x) || 0)), discount: r2(amounts.discount || 0), extraWork: r2(amounts.extraWork || 0) };
@@ -282,6 +293,8 @@ export function pricingSnapshot(params: FrozenPricingParams, amounts: PricingAmo
  * unapproved or conflicting configuration blocks the booking (PricingConfigError lists it all).
  */
 export async function priceServiceBookingSnapshot(prisma: any, i: PricingInput) {
+  if (!common.orderServiceModelFor(i.category?.serviceModel) || !i.lines.length) return null; // legacy category
+  if (!(await pricingEngineEnabled(prisma))) return null; // not switched on yet: today's pricing
   const { params, problems } = await resolveServicePricingParams(prisma, i);
   if (problems.length) throw new PricingConfigError(problems);
   if (!params) return null;

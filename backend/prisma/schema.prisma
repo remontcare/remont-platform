@@ -2424,6 +2424,10 @@ model CreditNote {
   // REFUND (a refund after issue) or INVOICE_CANCELLATION (reverses an invoice that was reissued)
   kind                  String  @default("REFUND")
   originalInvoiceNumber String?
+  // Which document of the invoice this note credits: CUSTOMER (the customer page), VENDOR (the partner's
+  // document) or REMONT (Remont's fee/commission invoice). Partner-marketplace refunds credit each
+  // supplier's own document; older notes are all CUSTOMER.
+  documentKind          String  @default("CUSTOMER")
 
   @@index([orderId])
   @@index([refundRequestId])

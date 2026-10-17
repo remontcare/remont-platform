@@ -20,3 +20,6 @@ ALTER TABLE "TaxConfig" ADD COLUMN "approvalStatus" TEXT NOT NULL DEFAULT 'LEGAC
 ALTER TABLE "TaxConfig" ADD COLUMN "approvedBy" TEXT;
 ALTER TABLE "TaxConfig" ADD COLUMN "approvedAt" TIMESTAMP(3);
 ALTER TABLE "TaxConfig" ADD COLUMN "approvalNote" TEXT;
+
+-- A credit note records which document of the invoice it credits (older notes: the customer page).
+ALTER TABLE "CreditNote" ADD COLUMN "documentKind" TEXT NOT NULL DEFAULT 'CUSTOMER';

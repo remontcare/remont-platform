@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, vendorAllowedForOrder, priceServiceBookingSnapshot, orderFieldsFromSnapshot, resolveServicePricingParams, computeServicePricing, resolveBookingMinimumCharge, applyBookingMinimum } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, vendorAllowedForOrder, priceServiceBookingSnapshot, orderFieldsFromSnapshot, resolveServicePricingParams, computeServicePricing, resolveBookingMinimumCharge, applyBookingMinimum, pricingEngineEnabled, PRICING_ENGINE_SETTING } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -2866,6 +2866,31 @@ Return JSON with:
     return updated;
   }
 
+  /** Can every active service be priced by the engine? (missing/unapproved GST rules, conflicts) */
+  async pricingReadiness() {
+    const services = await this.prisma.service.findMany({ where: { isActive: true }, include: { category: true }, orderBy: { name: 'asc' } });
+    const blocked: { serviceId: string; service: string; category: string; problems: string[] }[] = [];
+    for (const svc of services) {
+      const { problems } = await resolveServicePricingParams(this.prisma, { lines: [{ service: svc as any, amount: Number(svc.basePrice) }], category: (svc as any).category });
+      if (problems.length) blocked.push({ serviceId: svc.id, service: svc.name, category: (svc as any).category?.name || '', problems });
+    }
+    const categories = await this.prisma.serviceCategory.findMany({ where: { isActive: true }, select: { id: true, name: true, serviceModel: true, partnerGstProfile: true, gstSection95Status: true }, orderBy: { name: 'asc' } });
+    return { enabled: await pricingEngineEnabled(this.prisma), ready: blocked.length === 0, activeServices: services.length, blocked, categories };
+  }
+
+  /** Super admin turns the engine on (only when ready) or off (always allowed). Audited. */
+  async setPricingEngine(actor: { sub: string; role: UserRole }, enabled: boolean, reason: string) {
+    if (!reason || String(reason).trim().length < 10) throw new BadRequestException('Give a reason (at least 10 characters)');
+    if (enabled) {
+      const r = await this.pricingReadiness();
+      if (!r.ready) throw new BadRequestException(`Not ready: ${r.blocked.length} active service(s) can't be priced yet — e.g. ${r.blocked[0].service}: ${r.blocked[0].problems[0]}`);
+    }
+    const before = await pricingEngineEnabled(this.prisma);
+    await this.prisma.siteSetting.upsert({ where: { key: PRICING_ENGINE_SETTING }, update: { value: String(enabled) }, create: { key: PRICING_ENGINE_SETTING, value: String(enabled), group: 'pricing' } as any });
+    await logAudit(this.prisma, { actorId: actor.sub, actorRole: actor.role, action: enabled ? 'PRICING_ENGINE_ENABLED' : 'PRICING_ENGINE_DISABLED', targetType: 'SiteSetting', targetId: PRICING_ENGINE_SETTING, metadata: { before, after: enabled, reason: String(reason).trim() } });
+    return { enabled };
+  }
+
   /**
    * Admin calculation preview — the real pricing engine, nothing written (no booking, payment, invoice
    * or ledger entry). What-if overrides for the supplier model and partner GST profile are allowed.
@@ -3993,6 +4018,9 @@ export class AdminController {
   @Roles(UserRole.SUPER_ADMIN)
   @Post('taxes/:id/approve') approveTax(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note: string }) { return this.admin.approveTax(id, { sub: u.sub, role: u.role }, b?.note); }
   @Post('pricing/preview') previewPricing(@Body() b: any) { return this.admin.previewPricing(b); }
+  @Get('pricing/readiness') pricingReadiness() { return this.admin.pricingReadiness(); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('pricing/engine') setPricingEngine(@CurrentUser() u: JwtPayload, @Body() b: { enabled: boolean; reason: string }) { return this.admin.setPricingEngine({ sub: u.sub, role: u.role }, b?.enabled === true, b?.reason); }
 
   // Seasonal Ads
   @Get('ads') ads(@Query('type') type?: string) { return this.admin.listAds(type); }

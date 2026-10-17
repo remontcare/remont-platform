@@ -372,7 +372,8 @@ export function buildCreditNoteViewModel(
   invoice: any,
   ctx: { company: BillingCompanyConfig; order: any },
 ): InvoiceViewModel {
-  const base = buildInvoiceViewModel(invoice, 'CUSTOMER', { company: ctx.company, order: ctx.order });
+  // the credited document's own supplier, recipient and tax status (partner document, Remont fee invoice…)
+  const base = buildInvoiceViewModel(invoice, (creditNote.documentKind || 'CUSTOMER') as InvoiceDocKind, { company: ctx.company, order: ctx.order });
   const taxable = Number(creditNote.taxableValueReversed);
   const cgst = Number(creditNote.cgstReversed), sgst = Number(creditNote.sgstReversed), igst = Number(creditNote.igstReversed);
   const total = Number(creditNote.totalReversed);

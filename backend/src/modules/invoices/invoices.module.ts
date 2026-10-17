@@ -426,6 +426,17 @@ export class InvoicesService {
     if (refundAmount <= 0) return null;
     const invoice = await this.prisma.invoice.findUnique({ where: { orderId } });
     if (!invoice) return null;
+    // One refund → its credit notes exactly once (a retried finalisation returns what was issued).
+    if (refundRequestId) {
+      const issued = await this.prisma.creditNote.findMany({ where: { refundRequestId, invoiceId: invoice.id }, orderBy: { issuedAt: 'asc' } });
+      if (issued.length) return issued.find((c) => c.documentKind !== 'REMONT') || issued[0];
+    }
+    // Partner marketplace (Remont's fee invoiced to the customer): each supplier's own document is
+    // credited — Remont's fee invoice (reversing Remont's GST) and the partner's document (or, under
+    // 9(5), Remont's own tax invoice for the service) — in proportion to what the customer paid.
+    if ((invoice.lineItemsSnapshot as any)?.partnerDocument?.feeRecipient === 'CUSTOMER') {
+      return this.issueMarketplaceCreditNotes(invoice, orderId, refundRequestId, refundAmount, reason);
+    }
     const invoiceTotal = Number(invoice.customerTotal);
     if (invoiceTotal <= 0) return null;
 
@@ -446,6 +457,37 @@ export class InvoicesService {
           kind: 'REFUND', originalInvoiceNumber: invoice.invoiceNumber,
         },
       });
+    });
+  }
+
+  private async issueMarketplaceCreditNotes(invoice: any, orderId: string, refundRequestId: string | undefined, refundAmount: number, reason: string) {
+    const n = (v: any) => Number(v || 0);
+    // what the customer was charged across both suppliers' documents
+    const serviceDoc = invoice.section95
+      ? { kind: 'CUSTOMER', number: invoice.invoiceNumber, taxable: n(invoice.customerSubtotal), cgst: n(invoice.customerCgst), sgst: n(invoice.customerSgst), igst: n(invoice.customerIgst), total: n(invoice.customerTotal) }
+      : { kind: 'VENDOR', number: invoice.vendorDocumentNumber, taxable: n(invoice.vendorLabor), cgst: n(invoice.vendorCgst), sgst: n(invoice.vendorSgst), igst: r2(n(invoice.vendorTotal) - n(invoice.vendorLabor) - n(invoice.vendorCgst) - n(invoice.vendorSgst)), total: n(invoice.vendorTotal) };
+    const feeDoc = { kind: 'REMONT', number: invoice.remontDocumentNumber, taxable: r2(n(invoice.platformCommission) + n(invoice.bookingFee)), cgst: n(invoice.remontCgst), sgst: n(invoice.remontSgst), igst: n(invoice.remontIgst), total: n(invoice.remontTotal) };
+    const charged = r2(serviceDoc.total + feeDoc.total);
+    if (charged <= 0) return null;
+    const ratio = Math.min(1, refundAmount / charged);
+    const refund = r2(Math.min(refundAmount, charged));
+    const part = (d: typeof feeDoc, total: number) => {
+      const k = d.total > 0 ? total / d.total : 0;
+      const cgst = r2(d.cgst * k), sgst = r2(d.sgst * k), igst = r2(d.igst * k);
+      return { taxableValueReversed: r2(total - cgst - sgst - igst), cgstReversed: cgst, sgstReversed: sgst, igstReversed: igst, totalReversed: total };
+    };
+    const feeShare = feeDoc.number ? r2(Math.min(feeDoc.total, feeDoc.total * ratio)) : 0;
+    const serviceShare = r2(refund - feeShare); // the remainder, so the notes add up to the refund exactly
+    return this.prisma.$transaction(async (tx) => {
+      const created: any[] = [];
+      for (const [d, total] of [[serviceDoc, serviceShare], [feeDoc, feeShare]] as const) {
+        if (!(total > 0) || !d.number) continue;
+        created.push(await tx.creditNote.create({ data: {
+          creditNoteNumber: await nextInvoiceDocumentNumber(tx, 'CREDIT_NOTE'), invoiceId: invoice.id, orderId, refundRequestId, reason,
+          ...part(d, total), kind: 'REFUND', originalInvoiceNumber: d.number, documentKind: d.kind,
+        } }));
+      }
+      return created.find((c) => c.documentKind !== 'REMONT') || created[0] || null;
     });
   }
 
@@ -749,7 +791,8 @@ export class InvoicesService {
     const payment = docKinds.includes('CUSTOMER') ? await this.paymentInfoFor(order, Number(order.invoice.customerTotal)) : null;
     const pages: InvoicePdfPage[] = docKinds.map((docKind) => ({ kind: 'INVOICE' as const, invoice: order.invoice, docKind }));
     if (withCreditNotes && docKinds.includes('CUSTOMER')) {
-      const notes = await this.prisma.creditNote.findMany({ where: { invoiceId: order.invoice.id }, orderBy: { issuedAt: 'asc' } });
+      // only notes against documents this party receives
+      const notes = await this.prisma.creditNote.findMany({ where: { invoiceId: order.invoice.id, documentKind: { in: docKinds } }, orderBy: { issuedAt: 'asc' } });
       for (const creditNote of notes) pages.push({ kind: 'CREDIT_NOTE', invoice: order.invoice, creditNote });
     }
     return renderInvoiceBundlePdf(pages, { company, order, payment });

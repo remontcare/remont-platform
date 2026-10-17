@@ -12,7 +12,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, priceServiceBookingSnapshot, orderFieldsFromSnapshot, type OrderServiceModel } from '../../common';
+import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, priceServiceBookingSnapshot, orderFieldsFromSnapshot, pricingEngineEnabled, type OrderServiceModel } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -630,7 +630,7 @@ export class MasterOrdersService {
     // of the discounts (the same allocation checkout() uses). Missing, unapproved or conflicting
     // configuration blocks the checkout instead of guessing a rate.
     let serviceFeesTotal = 0;
-    if (svcGroupsForRate.some((g) => g.serviceModel)) {
+    if (svcGroupsForRate.some((g) => g.serviceModel) && (await pricingEngineEnabled(this.prisma))) {
       const discounts = allocateAcrossGroups(pricedGroups.map((g) => g.amount), subtotal, membershipDiscount + couponDiscount);
       const svcIdx = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
       const bundles = bundleDiscount > 0 ? allocateAcrossGroups(svcIdx.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount) : [];

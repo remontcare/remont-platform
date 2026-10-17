@@ -19,6 +19,7 @@
     </div>
   </div>
   <div class="content">
+    <div class="card" style="margin-bottom:16px"><div class="card-header"><span class="card-title">Go-live status</span></div><div class="card-body" id="golive"><div class="loading">Checking…</div></div></div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-body">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
@@ -49,6 +50,23 @@ api('GET', '/admin/services?limit=500').then(function(list) {
 api('GET', '/admin/cities').then(function(list) {
   document.getElementById('pv-city').innerHTML = '<option value="">All cities</option>' + (list || []).map(function(c) { return '<option value="' + c.id + '">' + escape(c.name) + '</option>'; }).join('');
 }).catch(function() {});
+
+function loadGoLive() {
+  api('GET', '/admin/pricing/readiness').then(function(r) {
+    var html = '<p>' + (r.enabled ? badge('Pricing engine ON — new bookings use these rules', 'green') : badge('Pricing engine OFF — new bookings use the previous pricing', 'yellow')) + '</p>' +
+      '<p style="font-size:13px;margin-top:8px">' + r.activeServices + ' active service(s); ' + (r.ready ? '<b style="color:#15803d">all can be priced</b>' : '<b style="color:#dc2626">' + r.blocked.length + ' cannot be priced yet</b>') + '.</p>';
+    if (r.blocked.length) html += '<div style="max-height:220px;overflow:auto;font-size:12px;margin-top:6px"><table class="data-table"><thead><tr><th>Service</th><th>Category</th><th>What is missing</th></tr></thead><tbody>' +
+      r.blocked.map(function(b) { return '<tr><td>' + escape(b.service) + '</td><td>' + escape(b.category) + '</td><td>' + b.problems.map(escape).join('<br>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    if (isSuperAdmin()) html += '<button class="btn btn-sm ' + (r.enabled ? 'btn-outline' : 'btn-primary') + '" style="margin-top:10px" onclick="setEngine(' + (!r.enabled) + ')"' + (!r.enabled && !r.ready ? ' disabled title="Every active service must be priceable first"' : '') + '>' + (r.enabled ? 'Turn OFF (back to previous pricing)' : 'Turn ON') + '</button>';
+    document.getElementById('golive').innerHTML = html;
+  }).catch(function(e) { document.getElementById('golive').innerHTML = '<p style="color:#dc2626">' + escape(e.message) + '</p>'; });
+}
+function setEngine(on) {
+  var reason = prompt(on ? 'Why are you turning the pricing engine ON? (e.g. CA approved all GST rules on …)' : 'Why are you turning it OFF?');
+  if (!reason) return;
+  api('POST', '/admin/pricing/engine', { enabled: on, reason: reason }).then(function() { toast(on ? 'Pricing engine is ON' : 'Pricing engine is OFF', 'success'); loadGoLive(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+loadGoLive();
 
 function runPreview() {
   var v = function(id) { return document.getElementById(id).value; };

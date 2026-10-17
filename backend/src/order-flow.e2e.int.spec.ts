@@ -140,6 +140,8 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     ids.pB = await mkPartner(`E2EB${tag}`);
     ids.admin = await mkUser('SUPER_ADMIN');
     // the pricing engine never guesses a rate: approved rules for the service SAC and the platform fee
+    // these scenarios exercise the pricing engine: switch it on (M10 covers it being off)
+    await prisma.siteSetting.upsert({ where: { key: 'service_pricing_engine_enabled' }, update: { value: 'true' }, create: { key: 'service_pricing_engine_enabled', value: 'true', group: 'pricing' } as any });
     for (const [appliesTo, hsnCode] of [['SERVICE', '998719'], ['PLATFORM_FEE', '999799']]) {
       await prisma.taxConfig.create({ data: { name: `E2E ${appliesTo} 18%`, rate: 18, hsnCode, appliesTo: [appliesTo], approvalStatus: 'APPROVED', approvedBy: ids.admin.id, approvedAt: new Date(), approvalNote: 'e2e fixture' } as any });
     }
@@ -353,8 +355,14 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
     expect(decided.status).toBeLessThan(300);
     const inv = await prisma.invoice.findUniqueOrThrow({ where: { orderId }, include: { creditNotes: true } });
     expect(Number(inv.customerTotal)).toBe(518);
-    expect(inv.creditNotes).toHaveLength(1);
-    expect(Number(inv.creditNotes[0].totalReversed)).toBe(100);
+    // partner marketplace: each supplier's own document is credited, in proportion to what was paid
+    // (₹400 partner document + ₹118 Remont fee invoice = ₹518), adding up to the refund exactly
+    expect(inv.creditNotes.map((c) => c.documentKind).sort()).toEqual(['REMONT', 'VENDOR']);
+    expect(r2(inv.creditNotes.reduce((a, c) => a + Number(c.totalReversed), 0))).toBe(100);
+    const fee = inv.creditNotes.find((c) => c.documentKind === 'REMONT')!;
+    expect(Number(fee.totalReversed)).toBe(r2((118 * 100) / 518));
+    expect(r2(Number(fee.cgstReversed) + Number(fee.sgstReversed))).toBe(r2(Number(fee.totalReversed) - Number(fee.taxableValueReversed)));
+    expect(fee.originalInvoiceNumber).toBe(inv.remontDocumentNumber);
     expect(Number((await prisma.user.findUniqueOrThrow({ where: { id: cust.id } })).walletBalance)).toBe(100);
   });
 
@@ -725,6 +733,52 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
       // what-if: the same service as a GST-registered-partner booking
       expect((await api('POST', '/admin/pricing/preview', { as: ids.admin, body: { serviceId: m.mkt.svc.id, partnerGstProfile: 'REGISTERED_ONLY' } })).data.result.customerTotal).toBe(118);
       await api('PATCH', `/admin/commission-rules/${rule.data.id}`, { as: ids.admin, body: { isActive: false } }); // leave M-scenario prices unchanged
+    });
+
+    it('M10. go-live switch: off = the previous pricing for new bookings; it can only be turned on when every active service can be priced; changes are audited', async () => {
+      const q = () => api('POST', '/master-orders/public/quote', { body: { items: [{ type: 'SERVICE', serviceId: m.mkt.svc.id }], city: 'Bhopal' } });
+      expect((await q()).data.totalAmount).toBe(103.6);
+      await prisma.siteSetting.update({ where: { key: 'service_pricing_engine_enabled' }, data: { value: 'false' } });
+      try {
+        const legacy = (await q()).data;
+        expect([legacy.totalAmount, legacy.gstAmount, legacy.bookings[0].charges]).toEqual([118, 18, undefined]); // exactly today's live pricing
+        const ready = await api('GET', '/admin/pricing/readiness', { as: ids.admin });
+        expect(ready.data.enabled).toBe(false);
+        expect(ready.data.blocked.some((b: any) => b.serviceId === m.nosac.svc.id || b.problems.length)).toBe(true);
+        const admin2 = await mkUser('ADMIN');
+        expect((await api('POST', '/admin/pricing/engine', { as: admin2, body: { enabled: true, reason: 'trying to switch on' } })).status).toBe(403);
+        const refused = await api('POST', '/admin/pricing/engine', { as: ids.admin, body: { enabled: true, reason: 'CA approved everything' } });
+        expect(refused.status).toBe(400);
+        expect(JSON.stringify(refused.raw)).toMatch(/Not ready/);
+        expect((await api('POST', '/admin/pricing/engine', { as: ids.admin, body: { enabled: false, reason: 'keep previous pricing for now' } })).status).toBe(201);
+        expect(await prisma.auditLog.count({ where: { action: 'PRICING_ENGINE_DISABLED', actorId: ids.admin.id } })).toBeGreaterThan(0);
+      } finally {
+        await prisma.siteSetting.update({ where: { key: 'service_pricing_engine_enabled' }, data: { value: 'true' } });
+      }
+    });
+
+    it('M11. refund on a marketplace booking: credit notes against Remont\'s fee invoice (its GST reversed) and the partner\'s document, adding up to the refund; never duplicated', async () => {
+      const orderId = m.onlineMkt; // ₹80 partner document + ₹23.60 Remont fee invoice
+      const owner = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { customer: true } });
+      const raised = await api('POST', '/refunds', { as: owner.customer, body: { orderId, reason: 'half the job redone by us' } });
+      expect(raised.status).toBe(201);
+      expect((await api('POST', `/refunds/${raised.data.id}/decide`, { as: ids.admin, body: { decisionMode: 'WALLET_CREDIT', approvedAmount: 51.8, adminNotes: 'half refund' } })).status).toBeLessThan(300);
+      const notes = await prisma.creditNote.findMany({ where: { orderId, refundRequestId: raised.data.id } });
+      const byKind = Object.fromEntries(notes.map((c) => [c.documentKind, c]));
+      expect(Object.keys(byKind).sort()).toEqual(['REMONT', 'VENDOR']);
+      expect([Number(byKind.REMONT.totalReversed), Number(byKind.REMONT.taxableValueReversed), r2(Number(byKind.REMONT.cgstReversed) + Number(byKind.REMONT.sgstReversed))]).toEqual([11.8, 10, 1.8]);
+      expect([Number(byKind.VENDOR.totalReversed), Number(byKind.VENDOR.cgstReversed) + Number(byKind.VENDOR.sgstReversed)]).toEqual([40, 0]);
+      // a retried finalisation never issues them twice
+      const { InvoicesService } = require('./modules/invoices/invoices.module');
+      await app.get(InvoicesService).issueCreditNote(orderId, raised.data.id, 51.8, 'retry');
+      expect(await prisma.creditNote.count({ where: { orderId, refundRequestId: raised.data.id } })).toBe(2);
+      // Remont's GST reversal lands in Remont's own outward documents (GST reports); the partner's does not
+      const { AccountingReportsService } = require('./modules/reports/accounting-reports');
+      const rows = (await app.get(AccountingReportsService).documentRows({})).filter((r: any) => r.orderId === orderId && r.isCreditNote);
+      expect(rows.filter((r: any) => r.remontIsSupplier && r.isTaxDocument).map((r: any) => r2(r.cgst + r.sgst + r.igst))).toEqual([-1.8]);
+      // the customer's combined PDF carries both notes; the partner sees only the note on their document
+      expect((await pdf(orderId, owner.customer)).pages).toBe(5);
+      expect((await pdf(orderId, m.pUnreg.user)).pages).toBe(1);
     });
 
     /** Earnings post once (the completion already did) — a further release or sweep never posts again. */

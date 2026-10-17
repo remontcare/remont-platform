@@ -163,7 +163,10 @@ export class AccountingReportsService {
     const rows: DocRow[] = [];
     for (const inv of invoices) for (const pg of pages(inv)) rows.push({ ...pg, isCreditNote: false, testOrder: test.has(inv.orderId) });
     for (const c of notes) {
-      const cust = pages(c.invoice)[0];
+      // the credited document (a partner-marketplace refund credits each supplier's own document)
+      const docs = pages(c.invoice);
+      const docNoFor: Record<string, any> = { VENDOR: c.invoice.vendorDocumentNumber, REMONT: c.invoice.remontDocumentNumber || c.invoice.invoiceNumber + '-FEE' };
+      const cust = (c.documentKind && c.documentKind !== 'CUSTOMER' && docs.find((d) => d.docNo === docNoFor[c.documentKind])) || docs[0];
       rows.push({
         ...cust, docNo: c.creditNoteNumber, date: c.issuedAt,
         docType: c.kind === 'INVOICE_CANCELLATION' ? 'CREDIT NOTE — invoice cancellation' : cust.isTaxDocument ? 'CREDIT NOTE — refund' : 'REFUND NOTE (against booking summary)',

@@ -9128,8 +9128,6 @@ window.RemontMedia = (function () {
     var price = window._bmPriceNum;
     var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
     var subtotal = Math.max(0, price - couponDiscount);
-    var gst = Math.round(subtotal * 0.18);
-    var total = subtotal + gst;
 
     // Items list
     var svcId = document.getElementById('bm-svc-id').value;
@@ -9149,11 +9147,10 @@ window.RemontMedia = (function () {
     } else {
       discRow.style.display = 'none';
     }
-    document.getElementById('bs-gst').textContent = '₹' + gst.toLocaleString('en-IN');
-    document.getElementById('bs-total').textContent = '₹' + total.toLocaleString('en-IN');
-    window._bmTotal = total;
-    window._bmGst = gst;
-    window._bmSubtotal = subtotal;
+    // GST and the total come only from the server quote (the amount the booking is charged).
+    document.getElementById('bs-gst').textContent = 'Calculating…';
+    document.getElementById('bs-total').textContent = 'Calculating…';
+    window._bmTotal = null; window._bmGst = null; window._bmSubtotal = subtotal;
     bmRefreshServerQuote();
   }
 
@@ -9165,10 +9162,16 @@ window.RemontMedia = (function () {
     if (!svcId) return;
     var body = JSON.stringify({ items: [{ type: 'SERVICE', serviceId: svcId, quantity: 1 }], city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined });
     fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(res) {
-        var q = res && (res.data || res);
-        if (!q || typeof q.totalAmount !== 'number') return;
+      .then(function(r) { return r.json().catch(function() { return null; }).then(function(j) { return { ok: r.ok, j: j }; }); })
+      .then(function(rr) {
+        var res = rr && rr.j;
+        var q = rr && rr.ok ? (res && (res.data || res)) : null;
+        if (!q || typeof q.totalAmount !== 'number') {
+          var why = (res && (res.message || (res.error && res.error.message))) || 'Price unavailable right now — please try again.';
+          ['bs-gst', 'bs-total', 'bp-gst', 'bp-total'].forEach(function(id) { var el = document.getElementById(id); if (el) el.textContent = '—'; });
+          showToast(Array.isArray(why) ? why.join('; ') : String(why), 'error');
+          return;
+        }
         var fmt = function(n) { return '₹' + Number(n).toLocaleString('en-IN'); };
         [['bs-service', q.subtotal], ['bs-gst', q.gstAmount], ['bs-total', q.totalAmount], ['bp-subtotal', q.subtotal], ['bp-gst', q.gstAmount], ['bp-total', q.totalAmount]]
           .forEach(function(pair) { var el = document.getElementById(pair[0]); if (el) el.textContent = fmt(pair[1]); });
@@ -9181,18 +9184,14 @@ window.RemontMedia = (function () {
   function bmBuildPayRecap() {
     var price = window._bmPriceNum;
     var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
-    var subtotal = Math.max(0, price - couponDiscount);
-    var gst = Math.round(subtotal * 0.18);
-    var total = subtotal + gst;
     document.getElementById('bp-subtotal').textContent = '₹' + price.toLocaleString('en-IN');
     var discRow = document.getElementById('bp-disc-row');
     if (couponDiscount > 0) {
       discRow.style.display = '';
       document.getElementById('bp-disc').textContent = '-₹' + couponDiscount.toLocaleString('en-IN');
     } else { discRow.style.display = 'none'; }
-    document.getElementById('bp-gst').textContent = '₹' + gst.toLocaleString('en-IN');
-    document.getElementById('bp-total').textContent = '₹' + total.toLocaleString('en-IN');
-    window._bmTotal = total;
+    document.getElementById('bp-gst').textContent = window._bmGst != null ? '₹' + Number(window._bmGst).toLocaleString('en-IN') : 'Calculating…';
+    document.getElementById('bp-total').textContent = window._bmTotal != null ? '₹' + Number(window._bmTotal).toLocaleString('en-IN') : 'Calculating…';
     bmRefreshServerQuote();
   }
 
@@ -11091,8 +11090,11 @@ function recalcTotals() {
 
   var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal - bundleDiscount) : 0;
   var discounted = Math.max(0, subtotal - couponDiscount - bundleDiscount);
-  var gst = Math.round(discounted * 0.18 * 100) / 100;
-  var preWalletTotal = discounted + gst + _coDeliveryCharge;
+  // GST and the payable total come only from the server quote; until it arrives they show as
+  // 'Calculating…' (no client-side tax estimate).
+  var gst = 0;
+  var preWalletTotal = discounted + _coDeliveryCharge;
+  var hasQuote = false;
   var minimumCharge = 0;
   // The server quote is produced by the SAME pricing checkout charges with (minimum charge,
   // configured GST, coupon, bundle, delivery) — once it arrives it replaces the estimate above.
@@ -11105,6 +11107,7 @@ function recalcTotals() {
     _coDeliveryCharge = _coQuote.deliveryCharge || 0;
     preWalletTotal = _coQuote.totalAmount;
     minimumCharge = _coQuote.minimumChargeAdjustment || 0;
+    hasQuote = true;
     _coRenderCharges(_coQuote);
   } else {
     _coRenderCharges(null);
@@ -11138,7 +11141,7 @@ function recalcTotals() {
   } else {
     couponLine.style.display = 'none';
   }
-  document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+  document.getElementById('co-gst').textContent = hasQuote ? '₹' + gst.toLocaleString('en-IN') : 'Calculating…';
   var deliveryLine = document.getElementById('co-delivery-line');
   if (_coDeliveryCharge > 0) {
     deliveryLine.style.display = 'flex';
@@ -11153,8 +11156,8 @@ function recalcTotals() {
   } else {
     walletLine.style.display = 'none';
   }
-  document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
-  return { subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
+  document.getElementById('co-total').textContent = hasQuote ? '₹' + total.toLocaleString('en-IN') : 'Calculating…';
+  return { quoted: hasQuote, subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
 }
 
 // Fetches a PREVIEW delivery charge for the current cart + whatever address info is
@@ -11412,6 +11415,12 @@ function submitCheckoutOrder() {
   var coHasServiceItem = cart.some(function(i){ return i.type === 'service'; });
   var slotStart = (coHasServiceItem && slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
   var totals = recalcTotals();
+  // never place an order on a price the customer hasn't seen from the server
+  if (!totals.quoted) {
+    btn.disabled = false; btn.textContent = paymentMethod === 'COD' ? 'Place Order (Cash) →' : 'Pay Online →';
+    showCoMsg('Calculating the final price — please try again in a moment');
+    return;
+  }
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletAmount = (useWalletEl && useWalletEl.checked && paymentMethod === 'ONLINE') ? totals.walletApplied : undefined;
   var gstin = document.getElementById('co-gstin').value.trim();
