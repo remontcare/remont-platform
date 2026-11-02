@@ -146,7 +146,9 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<!-- Loaded without blocking first paint; display=swap already shows fallback text until it arrives. -->
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+<noscript><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" /></noscript>
 <style>
   :root {
     --cream:    #F5F0E8;
@@ -12997,7 +12999,8 @@ document.getElementById('support-case-modal').addEventListener('click', function
   // Cart badge on header already works. No extra action needed.
 
   // ── Try to load real products from API ────────────────────────
-  fetch(API_BASE + '/api/v1/products?take=6').then(function(r){return r.json();}).then(function(res){
+  // `limit` is the list endpoint's size parameter; `take` was ignored, so this fetched the default 50.
+  fetch(API_BASE + '/api/v1/products?limit=6').then(function(r){return r.json();}).then(function(res){
     var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
     if (!list || list.length < 2) return; // fallback data is fine
     [svcProdScroll, prodGrid].forEach(function(container, isGrid) {
