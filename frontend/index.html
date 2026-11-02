@@ -11559,13 +11559,15 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
       if (nameEl) prefillName = nameEl.value.trim();
       if (phoneEl) prefillPhone = '+91' + phoneEl.value.replace(/\D/g, '');
 
+      // The admin-set site logo when there is one, else the app icon (/admin/logo.png never existed).
+      var logoEl = document.getElementById('header-logo-img');
       var options = {
         key: keyId,
         amount: Math.round(totalAmount * 100),
         currency: 'INR',
         name: 'Remont India',
         description: 'Home Services Payment',
-        image: '/admin/logo.png',
+        image: (logoEl && logoEl.getAttribute('src')) || window.location.origin + '/icon-512.png',
         order_id: payment.gatewayOrderId,
         handler: function(response) {
           btn.textContent = 'Confirming payment…'; btn.disabled = true;
