@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "node scripts/stamp-sw.js",
   "outputDirectory": "frontend",
   "cleanUrls": true,
   "trailingSlash": false,

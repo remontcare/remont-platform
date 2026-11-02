@@ -7,7 +7,7 @@
  * Never cached: /api/* (prices, stock, OTP, auth, payments, orders), staff and partner portals,
  * and the payment-return page. Those always go straight to the network.
  */
-// BUILD_ID is replaced at deploy time (scripts/stamp-sw.js), so each deployment is a new worker.
+// BUILD_ID is replaced at deploy time (frontend/stamp-sw.js), so each deployment is a new worker.
 var CACHE_VERSION = 'remont-v1-__BUILD_ID__';
 var STATIC_CACHE = CACHE_VERSION + '-static';
 var PAGE_CACHE = CACHE_VERSION + '-pages';
