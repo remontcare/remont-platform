@@ -43,8 +43,10 @@
   .m-bottom-nav { display: none !important; }
   #mobile-app { padding-bottom: 0 !important; }
 
-  /* An off-canvas drawer stays out of the page width until it is opened. */
+  /* An off-canvas drawer stays out of the page width until it is opened (the closed cart
+   * drawer's shadow otherwise shows as a grey band along the right edge). */
   .mobile-nav:not(.open) { visibility: hidden; }
+  #cartDrawer:not(.open) { visibility: hidden; box-shadow: none !important; }
 
   /* Header */
   header { background: #fff; padding-top: max(10px, env(safe-area-inset-top)); }

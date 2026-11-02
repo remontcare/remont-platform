@@ -80,6 +80,124 @@
     });
   }
 
+  // ─── Back navigation ───
+  // Every overlay (modal, drawer, sheet, inner screen) gets one history entry while it is open,
+  // so the Android Back button, the browser's Back and an on-screen back arrow all close the
+  // top overlay instead of leaving the app. Each entry stores its depth; on popstate, every
+  // overlay deeper than the entry we landed on is closed. An overlay closed by its own button
+  // removes its entry again (a "silent" back that the popstate handler ignores).
+  var Nav = (function () {
+    var stack = []; // { id, depth, close, back }
+    var silent = 0;
+    var queued = []; // opened while a silent back was still in flight
+    var popping = false;
+    var depthNow = function () { return (window.history.state && window.history.state.asDepth) || 0; };
+    function open(id, close, back) {
+      if (stack.some(function (e) { return e.id === id; })) return;
+      // history.back() is asynchronous: pushing now would let that back remove this new entry.
+      if (silent > 0) { queued.push([id, close, back]); return; }
+      var depth = depthNow() + 1;
+      stack.push({ id: id, depth: depth, close: close, back: back });
+      window.history.pushState({ asDepth: depth, asId: id }, '');
+    }
+    // Called when an overlay was closed by anything other than Back.
+    function closed(id) {
+      var i = -1;
+      stack.forEach(function (e, n) { if (e.id === id) i = n; });
+      if (i === -1 || popping) return;
+      var wasTop = i === stack.length - 1;
+      stack.splice(i, 1);
+      if (wasTop && depthNow() > 0) { silent++; window.history.back(); }
+    }
+    function isOpen(id) { return stack.some(function (e) { return e.id === id; }); }
+    window.addEventListener('popstate', function () {
+      if (silent > 0) {
+        silent--;
+        if (!silent) queued.splice(0).forEach(function (q) { open(q[0], q[1], q[2]); });
+        return;
+      }
+      var landed = depthNow();
+      popping = true;
+      try {
+        while (stack.length && stack[stack.length - 1].depth > landed) {
+          var top = stack[stack.length - 1];
+          // An overlay with steps (the booking form) goes back one step first, keeping its entry.
+          if (top.back && top.back()) { window.history.pushState({ asDepth: top.depth, asId: top.id }, ''); break; }
+          stack.pop();
+          try { top.close(); } catch (e) { /* the page's own close failed; the entry is gone either way */ }
+        }
+      } finally { popping = false; }
+    });
+    return { open: open, closed: closed, isOpen: isOpen };
+  })();
+  window.RemontNav = Nav;
+
+  // The page's existing overlays, each with the function the page already uses to close it.
+  // They are watched rather than edited, so every way of opening one (buttons, search, AI chat
+  // actions, deep links) gets Back support without touching those call sites.
+  var OVERLAYS = [
+    { el: 'booking-modal', close: 'closeBookingModal', back: function () { if (window._bmStep > 1 && fn('bmGoStep')) { window.bmGoStep(window._bmStep - 1); return true; } return false; } },
+    { el: 'cartDrawer', close: 'closeCart', visible: function (el) { return el.classList.contains('open'); } },
+    { el: 'checkout-modal', close: 'closeCheckoutModal' },
+    { el: 'auth-modal', close: 'closeAuthModal' },
+    { el: 'account-modal', close: 'closeAccountModal' },
+    { el: 'my-orders-modal', close: 'closeMyOrdersModal' },
+    { el: 'order-details-modal', close: 'closeOrderDetailsModal' },
+    { el: 'order-success-modal', close: 'closeOrderSuccessModal' },
+    { el: 'payment-detail-modal', close: 'closePaymentDetailModal' },
+    { el: 'rate-order-modal', close: 'closeRateModal' },
+    { el: 'support-case-modal', close: 'closeSupportModal' },
+    { el: 'tracking-modal', close: 'closeTrackingModal' },
+    { el: 'wallet-topup-modal', close: 'closeWalletTopupModal' },
+    { el: 'remi-chat-modal', close: 'closeRemiChat' },
+    { el: 'svc-detail-overlay', close: 'closeSvcDetail' },
+    { el: 'mobile-catalog-overlay', close: 'closeMobileCatalog' },
+    { el: 'city-unavail-modal', close: 'closeCityUnavailModal' },
+    { el: 'loc-modal-overlay', close: 'closeLocModal' },
+    // These fade in, so the class is the reliable signal (opacity is still 0 at that moment).
+    { el: 'cityModal', close: 'closeCityModal', visible: function (el) { return el.classList.contains('open'); } },
+    { el: 'quoteModal', close: 'closeQuotationModal', visible: function (el) { return el.classList.contains('open'); } },
+    { el: 'premiumLeadModal', close: 'closePremiumLeadModal', visible: function (el) { return el.classList.contains('open'); } },
+    { el: 'booking-success', close: 'closeBookingSuccess' },
+  ];
+  // Some modals stay display:flex and fade in with opacity and pointer-events instead.
+  function shown(el) {
+    var s = getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0' && s.pointerEvents !== 'none' && el.getClientRects().length > 0;
+  }
+  function watchOverlays() {
+    OVERLAYS.forEach(function (o) {
+      var el = document.getElementById(o.el);
+      if (!el) return;
+      var was = false;
+      var check = function () {
+        var now = o.visible ? o.visible(el) : shown(el);
+        if (now === was) return;
+        was = now;
+        if (now) Nav.open(o.el, function () { var f = fn(o.close); if (f) f(); else el.style.display = 'none'; }, o.back);
+        else Nav.closed(o.el);
+      };
+      new MutationObserver(check).observe(el, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+      check();
+    });
+  }
+
+  // Installed app on the home screen: the first Back with nothing open asks before leaving.
+  function guardExit() {
+    if (!isStandalone || !isHomePage()) return;
+    var armed = false;
+    var arm = function () { if (!window.history.state || !window.history.state.asGuard) window.history.pushState({ asDepth: 1, asGuard: true }, ''); };
+    window.history.replaceState({ asDepth: 0 }, '');
+    arm();
+    window.addEventListener('popstate', function () {
+      if (window.history.state && window.history.state.asDepth) return; // still inside the app
+      if (armed) return; // second Back: let it leave
+      armed = true;
+      var t = notice('<strong>Press Back again to exit</strong>', [], 'as-toast');
+      setTimeout(function () { armed = false; if (t) t.remove(); arm(); }, 2000);
+    });
+  }
+
   // The full-screen chat follows the on-screen keyboard: Android Chrome only shrinks the visual
   // viewport, so without this the message box would sit under the keyboard.
   function fitChatToKeyboard() {
@@ -129,6 +247,7 @@
   function closeOffers() {
     if (offersEl) offersEl.classList.remove('open');
     setActive('home');
+    Nav.closed('offers');
   }
   function openOffers() {
     if (!offersEl) {
@@ -141,7 +260,7 @@
       document.body.appendChild(offersEl);
     }
     offersEl.classList.add('open');
-    window.history.pushState({ asSheet: 'offers' }, '');
+    Nav.open('offers', closeOffers);
     var body = offersEl.querySelector('.as-sheet-body');
     body.innerHTML = '<div class="as-skeleton"></div><div class="as-skeleton"></div><div class="as-skeleton"></div>';
     fetch(API + '/services/popular').then(function (r) {
@@ -158,7 +277,7 @@
         b.addEventListener('click', function () {
           var s = list[Number(b.getAttribute('data-i'))];
           var price = Number(s.offerPrice || s.basePrice || s.price || 0);
-          window.history.back();
+          closeOffers();
           var book = fn('openBookingModal');
           if (book) book(s.id, s.name, price ? '₹' + price : '');
         });
@@ -167,10 +286,6 @@
       body.innerHTML = '<p class="as-empty">Could not load offers. Please check your connection and try again.</p>';
     });
   }
-  window.addEventListener('popstate', function () {
-    if (offersEl && offersEl.classList.contains('open')) closeOffers();
-  });
-
   // ?open=<action> from a tab on another page or a manifest shortcut.
   function runRequestedAction() {
     var params = new URLSearchParams(window.location.search);
@@ -318,6 +433,8 @@
     nameControls();
     buildNav();
     buildCartPill();
+    guardExit();
+    watchOverlays();
     fitChatToKeyboard();
     watchConnection();
     setupInstall();
