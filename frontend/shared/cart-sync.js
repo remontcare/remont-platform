@@ -138,7 +138,10 @@
   window.addEventListener('pageshow', pull);
   window.addEventListener('pagehide', function () {
     if (!readMeta().dirty || !token()) return;
-    // keepalive lets the last change reach the server as the page closes.
-    fetch(API + '/cart', { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() }, body: JSON.stringify({ items: pushable(readCart()).slice(0, 30) }) }).catch(function () {});
+    // keepalive lets the last change reach the server as the page closes. Its body is capped at
+    // 64 KB, so a bigger cart is not cut short here: it stays dirty and is pushed on the next visit.
+    var body = JSON.stringify({ items: pushable(readCart()) });
+    if (body.length > 60000) return;
+    fetch(API + '/cart', { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() }, body: body }).catch(function () {});
   });
 })();
