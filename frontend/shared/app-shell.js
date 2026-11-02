@@ -80,6 +80,24 @@
     });
   }
 
+  // The full-screen chat follows the on-screen keyboard: Android Chrome only shrinks the visual
+  // viewport, so without this the message box would sit under the keyboard.
+  function fitChatToKeyboard() {
+    var chat = document.getElementById('remi-chat-modal');
+    if (!chat || !window.visualViewport) return;
+    var fit = function () {
+      // Only real changes are written: each write is itself a style mutation this observes.
+      var want = !isMobileWidth() || chat.style.display === 'none' ? '' : Math.round(window.visualViewport.height) + 'px';
+      if (chat.style.getPropertyValue('--as-vh') === want) return;
+      if (!want) { chat.style.removeProperty('--as-vh'); return; }
+      chat.style.setProperty('--as-vh', want);
+      var list = document.getElementById('remi-messages');
+      if (list) list.scrollTop = list.scrollHeight;
+    };
+    window.visualViewport.addEventListener('resize', fit);
+    new MutationObserver(fit).observe(chat, { attributes: true, attributeFilter: ['style'] });
+  }
+
   // ─── Cart pill ───
   function cartCount() {
     try {
@@ -300,6 +318,7 @@
     nameControls();
     buildNav();
     buildCartPill();
+    fitChatToKeyboard();
     watchConnection();
     setupInstall();
     if (document.readyState === 'complete') setupServiceWorker();

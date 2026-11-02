@@ -7709,7 +7709,7 @@ window.RemontMedia = (function () {
         });
       }
     }).catch(function() {
-      if (chatMsgEl) chatMsgEl.textContent = 'Unable to connect. Call +91-98765-43210 to book instantly.';
+      if (chatMsgEl) chatMsgEl.textContent = 'Could not reach the assistant right now. Please try again in a moment.';
     });
   }
 
@@ -7847,33 +7847,72 @@ window.RemontMedia = (function () {
     if (cartChanged) remiRenderCartCard();
   }
 
+  // The conversation survives closing the chat and moving between pages in this tab.
+  var REMI_STORE = 'remont_remi_chat';
+  function remiSave(role, text) {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(REMI_STORE) || '{"m":[]}');
+      if (role) s.m = s.m.concat([[role, text]]).slice(-40);
+      s.id = _remiSessionId;
+      sessionStorage.setItem(REMI_STORE, JSON.stringify(s));
+    } catch (e) { /* private mode: the chat still works, it just isn't kept */ }
+  }
+  (function remiRestore() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(REMI_STORE) || 'null');
+      if (!s || !s.m || !s.m.length) return;
+      _remiSessionId = s.id || null;
+      document.addEventListener('DOMContentLoaded', function () {
+        s.m.forEach(function (b) { remiAddBubble(b[0], b[1]); });
+      });
+    } catch (e) {}
+  })();
+
   function remiSendMessage(msg) {
     remiAddBubble('user', msg);
+    remiSave('user', msg);
     document.getElementById('remi-suggestions').innerHTML = '';
     var typingEl = remiAddBubble('assistant', '...');
-    fetch((API_BASE || '') + '/api/v1/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: msg,
-        sessionId: _remiSessionId,
-        city: typeof currentCity !== 'undefined' ? currentCity : undefined,
-        // Already-known customer identity — reused as-is from the same key
-        // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
-        // customer is never asked their phone number again in chat.
-        customerPhone: localStorage.getItem('remont_phone') || undefined
-      })
-    })
-    .then(function(r) { return r.json(); })
+    var body = JSON.stringify({
+      message: msg,
+      sessionId: _remiSessionId,
+      city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+      // Already-known customer identity — reused as-is from the same key
+      // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
+      // customer is never asked their phone number again in chat.
+      customerPhone: localStorage.getItem('remont_phone') || undefined
+    });
+    // Signed in, the assistant can look up this customer's own bookings. An expired token is
+    // rejected (401) rather than ignored, so the message is retried as a guest.
+    var token = localStorage.getItem('remont_access_token') || localStorage.getItem('remont_token');
+    var send = function (withToken) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (withToken) headers.Authorization = 'Bearer ' + token;
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = ctl && setTimeout(function () { ctl.abort(); }, 45000);
+      return fetch((API_BASE || '') + '/api/v1/ai/chat', { method: 'POST', headers: headers, body: body, signal: ctl ? ctl.signal : undefined })
+        .then(function (r) {
+          clearTimeout(timer);
+          if (r.status === 401 && withToken) return send(false);
+          return r.json().catch(function () { return {}; }).then(function (res) {
+            if (!r.ok) throw new Error((res && res.message) || ('HTTP ' + r.status));
+            return res;
+          });
+        });
+    };
+    send(!!token)
     .then(function(res) {
       var d = res.data || res;
+      if (!d || !d.reply) throw new Error('empty reply');
       _remiSessionId = d.sessionId || _remiSessionId;
-      typingEl.textContent = d.reply || 'Ek second...';
+      typingEl.textContent = d.reply;
+      remiSave('assistant', d.reply);
       remiRenderSuggestions(d.suggestions);
       remiHandleActions(d.actions);
     })
-    .catch(function() {
-      typingEl.textContent = 'Sorry, abhi connect nahi ho pa raha. Please call +91-98765-43210.';
+    .catch(function(err) {
+      var why = err && err.name === 'AbortError' ? 'The assistant took too long to answer.' : 'Could not reach the assistant right now.';
+      typingEl.textContent = why + ' Please try again in a moment.';
     });
   }
 
@@ -7884,7 +7923,8 @@ window.RemontMedia = (function () {
   document.addEventListener('click', function(e) {
     var modal = document.getElementById('remi-chat-modal');
     if (modal && modal.style.display === 'flex') {
-      var opener = e.target.closest('[onclick*="openRemiChat"]');
+      // The app bottom bar's Book button opens the chat from script, without an onclick attribute.
+      var opener = e.target.closest('[onclick*="openRemiChat"], [data-action="book"]');
       if (!modal.contains(e.target) && !opener) {
         closeRemiChat();
       }

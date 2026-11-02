@@ -127,6 +127,18 @@
     padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
   }
 
+  /* ── Remi AI chat: a full screen, sized to what the keyboard leaves visible ── */
+  #remi-chat-modal {
+    inset: 0 !important; top: 0 !important; left: 0 !important; right: auto !important; bottom: auto !important;
+    width: 100% !important; max-width: none !important; border-radius: 0 !important; box-shadow: none !important;
+    height: var(--as-vh, 100dvh) !important; max-height: none !important; z-index: 9550 !important;
+  }
+  #remi-chat-modal > div:first-child { background: #1D4ED8 !important; padding-top: max(14px, env(safe-area-inset-top)) !important; }
+  #remi-chat-modal > div:first-child .tap-target-fix { order: -1; width: 44px; height: 44px; font-size: 0 !important; }
+  #remi-chat-modal > div:first-child .tap-target-fix::before { content: '\2190'; font-size: 24px; }
+  #remi-chat-modal > div:last-child { padding-bottom: max(10px, env(safe-area-inset-bottom)) !important; }
+  #remi-input { font-size: 16px !important; min-height: 44px; box-sizing: border-box; } /* below 16px, iOS zooms the page on focus */
+
   /* ── Installed app: no browser-style site navigation ── */
   .as-standalone .mobile-nav, .as-standalone .hamburger, .as-standalone #hamburger, .as-standalone .mobile-menu-btn, .as-standalone footer { display: none !important; }
 }
