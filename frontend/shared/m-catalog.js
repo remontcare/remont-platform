@@ -97,8 +97,12 @@
     screen.setAttribute('aria-modal', 'true');
     screen.innerHTML = '<div class="mc-head"><button type="button" class="mc-back" aria-label="Back">' +
       '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>' +
-      '</button><h2 class="mc-title"></h2></div><div class="mc-body"></div><div class="mc-bar" hidden></div>';
+      '</button><h2 class="mc-title"></h2>' +
+      '<button type="button" class="mc-cart-btn" aria-label="Cart"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.1L21 8H6.2"/></svg><span class="mc-cart-count" hidden></span></button>' +
+      '</div><div class="mc-body"></div><div class="mc-bar" hidden></div>';
     screen.querySelector('.mc-back').addEventListener('click', function () { window.history.back(); });
+    // The cart drawer opens above these screens; Back closes it and returns here.
+    screen.querySelector('.mc-cart-btn').addEventListener('click', function () { if (typeof window.openCart === 'function') window.openCart(); });
     screen.addEventListener('click', onScreenClick);
     document.body.appendChild(screen);
     return screen;
@@ -134,6 +138,7 @@
     if (v.kind === 'all') renderAll(body);
     else if (v.kind === 'cat') renderCategory(body, v);
     else if (v.kind === 'svc') renderService(body, bar, v);
+    refreshCartControls();
     body.scrollTop = v.scroll || 0;
   }
   function title(t) { screen.querySelector('.mc-title').textContent = t; }
@@ -148,6 +153,53 @@
     }).join('') + '</div>';
   }
 
+  // ─── Cart: the page's own cart (remont_cart), same line shape as its "+ Cart" buttons ───
+  function readCart() {
+    try { var c = JSON.parse(localStorage.getItem('remont_cart') || '[]'); return Array.isArray(c) ? c : []; } catch (e) { return []; }
+  }
+  function cartQty(id) {
+    var line = readCart().filter(function (i) { return i && i.id === id; })[0];
+    return line ? (line.qty || 1) : 0;
+  }
+  function cartControl(id, big) {
+    var n = cartQty(id);
+    var inner = n
+      ? '<button type="button" data-dec="' + esc(id) + '" aria-label="Remove one">−</button><span aria-live="polite">' + n + '</span><button type="button" data-inc="' + esc(id) + '" aria-label="Add one more">+</button>'
+      : '<button type="button" class="mc-add-btn" data-inc="' + esc(id) + '">' + (big ? 'Add to cart' : 'Add') + '</button>';
+    return '<span class="mc-cart' + (n ? ' mc-step' : '') + (big ? ' mc-cart-lg' : '') + '" data-cart-for="' + esc(id) + '">' + inner + '</span>';
+  }
+  function addOne(id) {
+    var hit = findService(id);
+    if (!hit || typeof window.addToCart !== 'function') return;
+    window.addToCart({
+      id: hit.s.id, name: hit.s.name, price: price(hit.s), type: 'service', unit: hit.s.unit || 'per visit',
+      categoryKey: hit.entry.cat.key || '', inclusions: hit.s.inclusions || [],
+    });
+  }
+  function removeOne(id) {
+    var c = readCart();
+    var line = c.filter(function (i) { return i && i.id === id; })[0];
+    if (!line) return;
+    if ((line.qty || 1) > 1) line.qty = (line.qty || 1) - 1;
+    else c = c.filter(function (i) { return i !== line; });
+    localStorage.setItem('remont_cart', JSON.stringify(c)); // cart-sync.js saves it to the account
+    window.cart = c; // the page keeps its own copy for addToCart
+    if (typeof window.updateCartBadge === 'function') window.updateCartBadge();
+  }
+  // Every cart control on screen follows the cart, whichever page code changed it.
+  function refreshCartControls() {
+    if (!screen) return;
+    var count = readCart().reduce(function (n, i) { return n + ((i && i.qty) || 1); }, 0);
+    var badge = screen.querySelector('.mc-cart-count');
+    badge.hidden = !count;
+    badge.textContent = count > 99 ? '99+' : String(count);
+    Array.prototype.forEach.call(screen.querySelectorAll('[data-cart-for]'), function (el) {
+      var big = el.classList.contains('mc-cart-lg');
+      el.outerHTML = cartControl(el.getAttribute('data-cart-for'), big);
+    });
+  }
+  window.addEventListener('remont-cart-changed', refreshCartControls);
+
   function card(s, cat) {
     var d = duration(s.durationMinutes);
     return '<div class="mc-card" data-svc="' + esc(s.id) + '">' +
@@ -159,7 +211,8 @@
           (was(s) ? '<s>' + inr(was(s)) + '</s>' : '') +
           '<span>' + esc(s.unit || '') + (d ? ' · ' + d : '') + '</span></div>' +
         '<div class="mc-card-actions"><button type="button" class="mc-link" data-details="' + esc(s.id) + '">View details</button>' +
-          '<button type="button" class="mc-book" data-book="' + esc(s.id) + '">Book</button></div>' +
+          '<span class="mc-card-buttons">' + cartControl(s.id) +
+          '<button type="button" class="mc-book" data-book="' + esc(s.id) + '">Book</button></span></div>' +
       '</div></div>';
   }
   function strip(title, list, cat) {
@@ -253,7 +306,8 @@
       }).join('') + '</section>' : '');
     bar.hidden = false;
     bar.innerHTML = '<div><strong>' + inr(price(s)) + '</strong><span>' + esc(s.unit || '') + '</span></div>' +
-      '<button type="button" class="mc-book mc-book-lg" data-book="' + esc(s.id) + '">Book now</button>';
+      '<span class="mc-card-buttons">' + cartControl(s.id, true) +
+      '<button type="button" class="mc-book mc-book-lg" data-book="' + esc(s.id) + '">Book now</button></span>';
   }
 
   // ─── Actions ───
@@ -279,8 +333,10 @@
     return true;
   }
   function onScreenClick(e) {
-    var t = e.target.closest('[data-book],[data-details],[data-svc],[data-cat],[data-sub]');
+    var t = e.target.closest('[data-inc],[data-dec],[data-book],[data-details],[data-svc],[data-cat],[data-sub]');
     if (!t || !screen.contains(t)) return;
+    if (t.hasAttribute('data-inc')) return addOne(t.getAttribute('data-inc'));
+    if (t.hasAttribute('data-dec')) return removeOne(t.getAttribute('data-dec'));
     var v = views[views.length - 1];
     if (v) v.scroll = screen.querySelector('.mc-body').scrollTop;
     if (t.hasAttribute('data-book')) return book(t.getAttribute('data-book'));
