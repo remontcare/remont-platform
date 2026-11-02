@@ -8,6 +8,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
+import { CartModule } from './modules/cart/cart.module';
 import { CitiesModule } from './modules/cities/cities.module';
 import { ServicesModule } from './modules/services/services.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -62,6 +63,7 @@ import { LegalModule } from './modules/legal/legal.module';
     // Identity & Master Data
     AuthModule,
     UsersModule,
+    CartModule,
     CitiesModule,
 
     // Catalog
