@@ -3607,8 +3607,10 @@ window.RemontMedia = (function () {
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="stylesheet" href="/shared/app-shell.css" />
+<link rel="stylesheet" href="/shared/m-catalog.css" />
 <script src="/shared/cart-sync.js"></script>
 <script src="/shared/app-shell.js" defer></script>
+<script src="/shared/m-catalog.js" defer></script>
 </head>
 <body>
 
@@ -8553,7 +8555,8 @@ window.RemontMedia = (function () {
       }
     });
     Object.keys(seen).forEach(function(k){ deduped.push(seen[k]); });
-    deduped.sort(function(a,b){ return (a.sortOrder||99)-(b.sortOrder||99); });
+    // ?? not ||: a sortOrder of 0 is the admin's first position.
+    deduped.sort(function(a,b){ return (a.sortOrder ?? 99)-(b.sortOrder ?? 99); });
     categories = deduped;
 
     // Update serviceData from API categories
@@ -8606,6 +8609,13 @@ window.RemontMedia = (function () {
       };
     });
     _indexServicesFromData();
+
+    // The mobile catalog (shared/m-catalog.js) renders from the same list. It may load after
+    // this runs, so the list is also left where it picks it up.
+    window.__remontCatalogEntries = categories.map(function(cat) {
+      return { fkey: keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-'), cat: cat };
+    });
+    if (window.RemontCatalog) RemontCatalog.setCategories(window.__remontCatalogEntries);
 
     // Update the static svc-panel HTML items to match API categories
     var panel = document.querySelector('.svc-panel');
