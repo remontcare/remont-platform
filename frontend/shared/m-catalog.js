@@ -76,9 +76,11 @@
       var popular = [];
       cats.forEach(function (e) { allServices(e).forEach(function (s) { if (s.isPopular && price(s)) popular.push({ s: s, entry: e }); }); });
       if (popular.length) {
-        row.innerHTML = popular.slice(0, 12).map(function (p) {
+        row.innerHTML = popular.slice(0, 12).map(function (p, i) {
+          // The first cards are on screen at load (often the largest paint): fetch them at once.
+          var load = i < 2 ? 'fetchpriority="high"' : 'loading="lazy"';
           return '<button type="button" class="mc-pop" data-svc="' + esc(p.s.id) + '">' +
-            '<img src="' + esc(serviceImage(p.s, p.entry.cat, 400)) + '" alt="" width="150" height="110" loading="lazy" decoding="async">' +
+            '<img src="' + esc(serviceImage(p.s, p.entry.cat, 300)) + '" alt="" width="150" height="110" ' + load + ' decoding="async">' +
             '<span class="mc-pop-name">' + esc(p.s.name) + '</span>' +
             '<span class="mc-pop-price">' + inr(price(p.s)) + (was(p.s) ? ' <s>' + inr(was(p.s)) + '</s>' : '') + '</span></button>';
         }).join('');
