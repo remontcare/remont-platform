@@ -2631,7 +2631,7 @@
     color: rgba(255,255,255,0.6);
   }
   .social-btn:hover { background: var(--sienna); color: #fff; border-color: var(--sienna); }
-  .footer-col h4 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
+  .footer-col h3, .footer-col h4 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
   .footer-links { display: flex; flex-direction: column; gap: 9px; }
   .footer-links a { font-size: 13px; transition: color 0.2s; }
   .footer-links a:hover { color: var(--sienna); }
@@ -3447,8 +3447,35 @@
   }
   .loc-save-btn:disabled { background: #d1d5db; cursor: not-allowed; }
 </style>
-<!-- Razorpay SDK — preloaded so payment popup opens instantly -->
-<script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+<!-- Razorpay SDK — loaded on the visitor's first tap or key press, not with the page: it is
+     ~200 KB with an iframe and a third-party cookie. Every payment needs several taps first
+     (forms, Pay), so it is ready by then; loadRazorpay() also loads it on demand. -->
+<script>
+  window.loadRazorpay = (function () {
+    var pending = null;
+    return function () {
+      if (window.Razorpay) return Promise.resolve();
+      if (pending) return pending;
+      pending = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.async = true;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { pending = null; s.remove(); reject(new Error('Razorpay SDK load failed')); };
+        document.head.appendChild(s);
+      });
+      return pending;
+    };
+  })();
+  (function () {
+    var kinds = ['pointerdown', 'keydown', 'touchstart'];
+    function first() {
+      kinds.forEach(function (k) { window.removeEventListener(k, first, true); });
+      window.loadRazorpay().catch(function () { /* retried when a payment opens */ });
+    }
+    kinds.forEach(function (k) { window.addEventListener(k, first, { capture: true, passive: true }); });
+  })();
+</script>
 <script src="/shared/remont-auth.js"></script>
 <script src="/shared/remont-notifications.js"></script>
 <!-- ════════════════════════════════════════════════════════════════════════
@@ -3751,7 +3778,7 @@ window.RemontMedia = (function () {
 
     <!-- Service Categories -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Service Categories" data-hi="सर्विस कैटेगरी">Service Categories</span><a onclick="openMobileCatalogPicker()" data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Service Categories" data-hi="सर्विस कैटेगरी">Service Categories</span><a href="/?open=categories" onclick="openMobileCatalogPicker();return false" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-cat-grid" id="m-cat-grid">
         <div class="m-cat-item" onclick="if(!openMobileCatalog('ac'))openBookingModal('','AC Service & Repair','₹399');closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name" data-en="AC Repair" data-hi="AC रिपेयर">AC Repair</div></div>
         <div class="m-cat-item" onclick="if(!openMobileCatalog('plumbing'))openBookingModal('','Plumbing','₹299')"><div class="m-cat-icon">🔧</div><div class="m-cat-name" data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</div></div>
@@ -3804,7 +3831,7 @@ window.RemontMedia = (function () {
 
     <!-- Top Selling Products (mini scroll, inside services tab) -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a onclick="switchMTab('products',null)" data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a href="#mtp-products" onclick="switchMTab('products',null);return false" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-prod-scroll" id="m-prod-scroll-svc"></div>
     </div>
     <div style="height:16px"></div>
@@ -4385,7 +4412,9 @@ window.RemontMedia = (function () {
   function init() {
     startCountdown();
     bind();
-    load();
+    // Phones never show this section (CSS hides it), so its product list isn't fetched there.
+    var section = document.getElementById('deals');
+    if (!section || getComputedStyle(section).display !== 'none') load();
     window.refreshHotDeals = load;   // callable after a city / catalogue change
   }
 
@@ -5561,7 +5590,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Services" data-hi="सेवाएं">Services</h4>
+      <h3 data-en="Services" data-hi="सेवाएं">Services</h3>
       <div class="footer-links">
         <a href="/services" data-en="Handyman" data-hi="हैंडीमैन">Handyman</a>
         <a href="/services/ac-repair" data-en="AC Service" data-hi="AC सर्विस">AC Service</a>
@@ -5572,7 +5601,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="For Business" data-hi="बिज़नेस के लिए">For Business</h4>
+      <h3 data-en="For Business" data-hi="बिज़नेस के लिए">For Business</h3>
       <div class="footer-links">
         <a href="#corporate" data-en="Corporate Portal" data-hi="कॉर्पोरेट पोर्टल">Corporate Portal</a>
         <a href="#" data-en="Facility Management" data-hi="फैसिलिटी मैनेजमेंट">Facility Management</a>
@@ -5582,7 +5611,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Booking" data-hi="बुकिंग">Booking</h4>
+      <h3 data-en="Booking" data-hi="बुकिंग">Booking</h3>
       <div class="footer-links">
         <a href="#" data-en="AI Chat Booking" data-hi="AI चैट बुकिंग">AI Chat Booking</a>
         <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="whatsapp-link" data-en="WhatsApp Bot" data-hi="WhatsApp बॉट">WhatsApp Bot</a>
@@ -5592,7 +5621,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Company" data-hi="कंपनी">Company</h4>
+      <h3 data-en="Company" data-hi="कंपनी">Company</h3>
       <div class="footer-links">
         <a href="/about" data-en="About Us" data-hi="हमारे बारे में">About Us</a>
         <a href="/contact" data-en="Contact" data-hi="संपर्क करें">Contact</a>
@@ -5611,7 +5640,7 @@ window.RemontMedia = (function () {
       </div>
       <div id="newsletter-form" style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="nl-email" type="email" placeholder="Enter your email" data-en-ph="Enter your email" data-hi-ph="अपना ईमेल दर्ज करें" style="padding:10px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;width:240px;outline:none" />
-        <button onclick="subscribeNewsletter()" style="padding:10px 20px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap" data-en="Subscribe →" data-hi="सब्सक्राइब करें →">Subscribe →</button>
+        <button onclick="subscribeNewsletter()" style="padding:10px 20px;background:#C2410C;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap" data-en="Subscribe →" data-hi="सब्सक्राइब करें →">Subscribe →</button>
       </div>
       <div id="newsletter-success" style="display:none;color:#4ade80;font-weight:600;font-size:14px" data-en="✅ Subscribed! Thank you." data-hi="✅ सब्सक्राइब हो गया! धन्यवाद।">✅ Subscribed! Thank you.</div>
     </div>
@@ -8088,7 +8117,11 @@ window.RemontMedia = (function () {
     });
   }
 
+  // Fetched the first time someone uses search (focus, typing or voice), not with the page.
+  var _searchProductsRequested = false;
   function _fetchProductsForSearch() {
+    if (_searchProductsRequested) return;
+    _searchProductsRequested = true;
     apiGet('/api/v1/products?limit=300').then(function(res) {
       var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
       _mergeApiProducts(list);
@@ -8404,6 +8437,7 @@ window.RemontMedia = (function () {
   }
 
   function runSearch(query) {
+    _fetchProductsForSearch(); // voice search and links can search without focusing the input
     query = (query || '').trim();
     if (!query) { closeSearchDrop(); return; }
     var result = _runUnifiedSearch(query);
@@ -8454,7 +8488,12 @@ window.RemontMedia = (function () {
   _buildPagesIndex();
   _indexProductsFromServiceData();
   _indexServicesFromData();
-  _fetchProductsForSearch();
+  (function () {
+    var input = document.getElementById('headerSearchInput');
+    if (!input) { _fetchProductsForSearch(); return; }
+    input.addEventListener('focus', _fetchProductsForSearch);
+    input.addEventListener('input', _fetchProductsForSearch);
+  })();
 
   // ── Voice search (Web Speech API) ──────────────────────────────────
   (function() {
@@ -11698,15 +11737,12 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
       if (window.Razorpay) {
         tryOpen();
       } else {
-        var s = document.createElement('script');
-        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        s.onload = tryOpen;
-        s.onerror = function() {
+        // The shared loader: a second copy of checkout.js must not be added while one is loading.
+        window.loadRazorpay().then(tryOpen, function() {
           if (typeof showCoMsg === 'function') showCoMsg('Failed to load payment gateway. Check internet connection.');
           btn.textContent = 'Pay Online →'; btn.disabled = false;
           reject(new Error('Razorpay SDK load failed'));
-        };
-        document.head.appendChild(s);
+        });
       }
     }
 
@@ -13717,7 +13753,7 @@ window.closeCustPartner = function() {
 
       <div class="pp-sec-hd" style="margin-top:16px">
         <span>Recent Jobs</span>
-        <a onclick="switchPPScreen('jobs')">View All</a>
+        <a href="#" onclick="switchPPScreen('jobs');return false">View All</a>
       </div>
       <div class="pp-jobs-wrap" id="pp-recent-jobs">
         <div class="pp-empty"><div class="pp-empty-ic">📋</div><div class="pp-empty-ttl">No jobs yet</div><div>Complete your profile to start receiving jobs</div></div>
