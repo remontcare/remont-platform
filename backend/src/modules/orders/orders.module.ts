@@ -18,6 +18,7 @@ import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
+import { withoutCustomerOtps } from '../../common/customer-otp';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
@@ -2339,7 +2340,8 @@ export class OrdersController {
   @Post('quote') quote(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.quote(u.sub, dto); }
   @Post(':id/confirm-payment') pay(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
-  @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
+  // The assigned partner may read the order too, but never the customer's OTPs.
+  @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id).then((o) => (o.customerId === u.sub ? o : withoutCustomerOtps(o))); }
   @Patch(':id/cancel') cancel(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) {
     return this.orders.cancel(u.sub, id, b.reason);
   }
@@ -2350,7 +2352,7 @@ export class OrdersController {
     return this.orders.regenerateOtp(u.sub, id, b.type);
   }
   @Post(':id/verify-otp') verify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
-    return this.orders.verifyStartOtp(u.sub, id, b.otp);
+    return this.orders.verifyStartOtp(u.sub, id, b.otp).then(withoutCustomerOtps);
   }
   @Post(':id/extra-work') addExtra(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { description: string; amount: number }) {
     return this.extras.addExtraWork(u.sub, id, b.description, b.amount);
@@ -2367,7 +2369,7 @@ export class OrdersController {
   // collection (optional): { mode: CASH|UPI|CARD } — cash taken on this visit, confirmed by the
   // same customer completion OTP. Older clients that omit it are unaffected.
   @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string; collection?: { mode?: PaymentCollectionMode; collectedLocation?: string } }) {
-    return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl, b.collection);
+    return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl, b.collection).then(withoutCustomerOtps);
   }
   // The customer (or an admin) confirms cash a partner reported collecting.
   @Post(':id/cash-collections/:paymentId/confirm') confirmCash(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Param('paymentId') paymentId: string, @Body() b: { evidence?: string }) {
