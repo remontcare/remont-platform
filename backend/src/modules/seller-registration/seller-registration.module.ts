@@ -1,21 +1,77 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query,
-  UseGuards, BadRequestException, NotFoundException, Logger,
+  UseGuards, BadRequestException, NotFoundException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
-import { Public, JwtAuthGuard, RolesGuard, Roles } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
+import { samePhone } from '../../common/phone';
 import { recordPolicyAcceptances } from '../legal/legal.module';
 import { UserRole } from '@prisma/client';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
+import { assertSafeKycDocument, UPLOADED_PLACEHOLDER } from '../uploads/kyc-document';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// The registrationId is the only key the public draft endpoints take, so it must not be
+// guessable — the old 4-digit Math.random suffix gave only 9000 ids per day.
 function generateRegistrationId(): string {
   const d = new Date();
   const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  const rand = Math.floor(1000 + Math.random() * 9000);
+  const rand = randomBytes(5).toString('hex').toUpperCase();
   return `SR-${date}-${rand}`;
+}
+
+// Fields a draft save may write — exactly what seller-register.html and the app send.
+// Previously the whole client object was spread into the update (minus a few keys), so a
+// public, unauthenticated call could rewrite `phone` (which decides who becomes the seller
+// on approval), `adminNotes`, `currentStep`, or anything else on the row.
+const DRAFT_TEXT_FIELDS = [
+  'alternatePhone', 'whatsappNumber', 'email',
+  'businessName', 'ownerName', 'businessType', 'gstNumber', 'panNumber', 'aadhaarNumber', 'cin', 'msmeNumber',
+  'registeredAddress', 'officeAddress', 'warehouseAddress', 'city', 'state', 'pincode',
+  'bankAccountHolder', 'bankName', 'bankAccountNumber', 'bankIfsc', 'bankBranch', 'upiId',
+] as const;
+const DRAFT_DOCUMENT_FIELDS = [
+  'gstCertificateUrl', 'panCardUrl', 'cancelledChequeUrl', 'bankPassbookUrl',
+  'businessProofUrl', 'addressProofUrl', 'ownerPhotoUrl', 'ownerAadhaarUrl',
+] as const;
+const DRAFT_IMAGE_LIST_FIELDS = ['warehouseImages', 'storeImages'] as const;
+const MAX_DRAFT_TEXT_LENGTH = 1000;
+const MAX_DRAFT_IMAGES = 10;
+const MAX_PICKUP_LOCATIONS = 20;
+
+/** Applicant endpoints: generous for a person filling a form, tight for enumeration. */
+const REGISTRATION_THROTTLE = { default: { limit: 30, ttl: 60_000 } };
+
+async function sanitizeDraftData(data: Record<string, any>): Promise<Record<string, any>> {
+  const out: Record<string, any> = {};
+  for (const k of DRAFT_TEXT_FIELDS) {
+    const v = data[k];
+    if (v === undefined) continue;
+    if (v === null || v === '') { out[k] = null; continue; }
+    if (typeof v !== 'string' || v.length > MAX_DRAFT_TEXT_LENGTH) throw new BadRequestException(`${k}: invalid value`);
+    out[k] = v.trim();
+  }
+  for (const k of DRAFT_DOCUMENT_FIELDS) {
+    const v = data[k];
+    // '[uploaded]' is what getDraft() hands back for an already-stored file — echoing it
+    // back must keep that file, not overwrite it with the placeholder.
+    if (v === undefined || v === UPLOADED_PLACEHOLDER) continue;
+    if (v === null || v === '') { out[k] = null; continue; }
+    await assertSafeKycDocument(k, v);
+    out[k] = v;
+  }
+  for (const k of DRAFT_IMAGE_LIST_FIELDS) {
+    const v = data[k];
+    if (v === undefined) continue;
+    if (!Array.isArray(v) || v.length > MAX_DRAFT_IMAGES) throw new BadRequestException(`${k}: at most ${MAX_DRAFT_IMAGES} images`);
+    for (const img of v) await assertSafeKycDocument(k, img, { allowPdf: false });
+    out[k] = v;
+  }
+  return out;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -38,8 +94,14 @@ export class SellerRegistrationService {
     if (existing && existing.status === 'APPROVED') {
       return { registrationId: existing.registrationId, alreadyApproved: true, status: 'APPROVED' };
     }
-    if (existing && existing.agreedTerms && existing.status === 'PENDING') {
-      return { registrationId: existing.registrationId, alreadySubmitted: true, status: 'PENDING' };
+    // Admin asked for more information — the applicant amends THIS application (saveStep /
+    // submit allow MORE_INFO); creating a fresh draft here orphaned it.
+    if (existing && existing.status === 'MORE_INFO') {
+      return { registrationId: existing.registrationId, isNew: false, status: 'MORE_INFO', adminNotes: existing.adminNotes };
+    }
+    // HOLD is a submitted application paused in review — same as PENDING, not a new start.
+    if (existing && existing.agreedTerms && (existing.status === 'PENDING' || existing.status === 'HOLD')) {
+      return { registrationId: existing.registrationId, alreadySubmitted: true, status: existing.status };
     }
     if (existing && !existing.agreedTerms) {
       return { registrationId: existing.registrationId, isNew: false };
@@ -52,33 +114,55 @@ export class SellerRegistrationService {
   }
 
   /** Save step data (autosave) — accepts any partial step payload, same pattern as partner registration */
-  async saveStep(registrationId: string, step: number, data: Record<string, any>) {
-    const rec = await this.prisma.sellerRegistration.findUnique({ where: { registrationId } });
-    if (!rec) throw new NotFoundException('Registration not found');
-    if (rec.agreedTerms && rec.status !== 'MORE_INFO') {
-      throw new BadRequestException('Registration already submitted');
-    }
+  async saveStep(registrationId: string, step: number, data: Record<string, any>, actor?: JwtPayload | null) {
+    const rec = await this.findEditable(registrationId, actor);
 
-    // Sanitize: strip status/id/relation/trust fields the client must never set directly.
-    // agreedTerms/agreedAt are the legal-consent flags — only submit() may set them, so a
-    // draft save can never fast-forward a registration to "submitted" state. userId is set
-    // only by _activateSeller() once an application is actually approved.
-    const { id, status, createdAt, updatedAt, registrationId: _rid, pickupLocations, userId, agreedTerms, agreedAt, ...safe } = data;
+    // Allowlist only (see sanitizeDraftData): status/id/trust fields, phone, adminNotes,
+    // agreedTerms/agreedAt (only submit() sets consent) and userId (only _activateSeller())
+    // can never be written from here. Documents are content-validated and virus-scanned.
+    const safe = await sanitizeDraftData(data && typeof data === 'object' ? data : {});
+    const safeStep = Number.isInteger(step) && step >= 1 && step <= 8 ? step : 1;
 
     await this.prisma.sellerRegistration.update({
       where: { registrationId },
-      data: { ...safe, currentStep: Math.max(rec.currentStep, step) },
+      data: { ...safe, currentStep: Math.max(rec.currentStep, safeStep) },
     });
-    return { saved: true, step };
+    return { saved: true, step: safeStep };
+  }
+
+  /**
+   * Loads a registration the caller may modify: it must belong to the phone number in the
+   * caller's OTP-issued JWT (website and app both send it). Not-found and not-yours are
+   * deliberately indistinguishable, so an id reveals nothing about someone else's application.
+   */
+  private async findEditable(registrationId: string, actor?: JwtPayload | null) {
+    if (typeof registrationId !== 'string') throw new BadRequestException('registrationId is required');
+    const rec = await this.prisma.sellerRegistration.findUnique({ where: { registrationId } });
+    if (!rec || !samePhone(actor?.phone, rec.phone)) throw new NotFoundException('Registration not found');
+    if (rec.agreedTerms && rec.status !== 'MORE_INFO') {
+      throw new BadRequestException('Registration already submitted');
+    }
+    return rec;
   }
 
   /** Replace-semantics pickup-location save for a draft registration (same idea as
    * products.module.ts's syncCityCoverage — full replace, not accumulate, so re-saving a
    * step never duplicates locations). */
-  async savePickupLocations(registrationId: string, locations: any[]) {
-    const rec = await this.prisma.sellerRegistration.findUnique({ where: { registrationId } });
-    if (!rec) throw new NotFoundException('Registration not found');
-    if (!locations?.length) throw new BadRequestException('At least one pickup location is required');
+  async savePickupLocations(registrationId: string, locations: any[], actor?: JwtPayload | null) {
+    const rec = await this.findEditable(registrationId, actor);
+    if (!Array.isArray(locations) || !locations.length) throw new BadRequestException('At least one pickup location is required');
+    if (locations.length > MAX_PICKUP_LOCATIONS) throw new BadRequestException(`At most ${MAX_PICKUP_LOCATIONS} pickup locations are allowed`);
+    if (locations.some((l) => !l || typeof l !== 'object' || Array.isArray(l))) throw new BadRequestException('Invalid pickup location');
+    locations.forEach((l, i) => {
+      for (const k of ['name', 'address', 'city', 'state', 'pincode']) {
+        if (typeof l[k] !== 'string' || !l[k].trim()) throw new BadRequestException(`Pickup location ${i + 1}: ${k} is required`);
+      }
+      // The pin is what delivery partners navigate to — it must come from the seller, never a
+      // missing value (previously a Prisma error) or a non-coordinate.
+      if (!Number.isFinite(l.latitude) || !Number.isFinite(l.longitude) || Math.abs(l.latitude) > 90 || Math.abs(l.longitude) > 180) {
+        throw new BadRequestException(`Pickup location ${i + 1}: pin the location on the map`);
+      }
+    });
 
     const primaryCount = locations.filter((l) => l.isPrimary).length;
     if (primaryCount === 0) locations[0].isPrimary = true;
@@ -98,14 +182,18 @@ export class SellerRegistrationService {
     return { saved: true, count: locations.length };
   }
 
-  async getPickupLocations(registrationId: string) {
+  async getPickupLocations(registrationId: string, actor: JwtPayload) {
     const rec = await this.prisma.sellerRegistration.findUnique({ where: { registrationId } });
-    if (!rec) throw new NotFoundException('Registration not found');
+    // Addresses + contact numbers — owner only, same as getDraft().
+    if (!rec || !samePhone(actor?.phone, rec.phone)) throw new NotFoundException('Registration not found');
     return this.prisma.sellerRegistrationPickup.findMany({ where: { registrationId: rec.id }, orderBy: { isPrimary: 'desc' } });
   }
 
   /** Final submit — validate required fields and mark as submitted */
-  async submit(registrationId: string) {
+  async submit(registrationId: string, actor?: JwtPayload | null) {
+    // Same gate as draft saves — previously this had none, so anyone holding an id could
+    // flip an APPROVED/REJECTED application back to PENDING.
+    await this.findEditable(registrationId, actor);
     const rec = await this.prisma.sellerRegistration.findUnique({
       where: { registrationId },
       include: { pickupLocations: true },
@@ -117,6 +205,11 @@ export class SellerRegistrationService {
     if (!rec.phone) throw new BadRequestException('Phone number is required');
     if (!rec.pickupLocations.length) throw new BadRequestException('At least one pickup location is required');
     if (!rec.bankAccountNumber || !rec.bankIfsc) throw new BadRequestException('Bank account details are required');
+    // The documents seller-register.html and the Seller App both mark required — enforced
+    // here too, so an application can never reach admin review without them.
+    if (!rec.gstCertificateUrl) throw new BadRequestException('GST certificate is required');
+    if (!rec.panCardUrl) throw new BadRequestException('PAN card is required');
+    if (!rec.ownerPhotoUrl) throw new BadRequestException('Owner photo is required');
     // agreedTerms is never persisted via saveStep (stripped there — see its comment); calling
     // submit() is the only way to set it, so there's nothing left on rec to check here.
 
@@ -157,12 +250,14 @@ export class SellerRegistrationService {
     return rec;
   }
 
-  async getDraft(registrationId: string) {
+  async getDraft(registrationId: string, actor: JwtPayload) {
     const rec = await this.prisma.sellerRegistration.findUnique({
       where: { registrationId },
       include: { pickupLocations: true },
     });
-    if (!rec) throw new NotFoundException('Registration not found');
+    // The draft carries PAN, Aadhaar and bank account numbers — only its owner may read it.
+    // Not-found and not-yours are deliberately indistinguishable.
+    if (!rec || !samePhone(actor?.phone, rec.phone)) throw new NotFoundException('Registration not found');
     // Strip large binary fields — frontend re-shows previews from its own memory during a session
     return {
       ...rec,
@@ -354,51 +449,62 @@ export class SellerRegistrationService {
   }
 }
 
-// ─── Public Controller ────────────────────────────────────────────────────────
+// ─── Applicant Controller ────────────────────────────────────────────────────────
 
 @ApiTags('Seller Registration')
+// Every endpoint requires the OTP-issued JWT (the website's seller-register.html keeps the
+// token verify-otp returns; the app always sends its session token). The applicant's phone
+// comes from that token — a phone in the request is only accepted when it matches, so a
+// phone number alone can never reveal a registration id, status or KYC data.
+@UseGuards(JwtAuthGuard)
 @Controller('seller-registration')
 export class SellerRegistrationController {
   constructor(private svc: SellerRegistrationService) {}
 
-  @Public() @Post('init')
-  init(@Body() body: { phone: string }) {
-    if (!body.phone) throw new BadRequestException('Phone is required');
-    return this.svc.initRegistration(body.phone);
+  private ownPhone(u: JwtPayload, claimed?: unknown): string {
+    if (!u?.phone) throw new ForbiddenException('Verify your mobile number first');
+    if (claimed !== undefined && claimed !== null && claimed !== '' && (typeof claimed !== 'string' || !samePhone(claimed, u.phone))) {
+      throw new ForbiddenException('You can only access the application for your own verified mobile number');
+    }
+    return u.phone;
   }
 
-  @Public() @Post('save-step')
-  saveStep(@Body() body: { registrationId: string; step: number; data: Record<string, any> }) {
+  @Throttle(REGISTRATION_THROTTLE) @Post('init')
+  init(@CurrentUser() u: JwtPayload, @Body() body: { phone?: string }) {
+    return this.svc.initRegistration(this.ownPhone(u, body?.phone));
+  }
+
+  @Throttle(REGISTRATION_THROTTLE) @Post('save-step')
+  saveStep(@CurrentUser() u: JwtPayload, @Body() body: { registrationId: string; step: number; data: Record<string, any> }) {
     if (!body.registrationId) throw new BadRequestException('registrationId is required');
-    return this.svc.saveStep(body.registrationId, body.step || 1, body.data || {});
+    return this.svc.saveStep(body.registrationId, Number(body.step) || 1, body.data || {}, u);
   }
 
-  @Public() @Post('pickup-locations')
-  savePickups(@Body() body: { registrationId: string; locations: any[] }) {
+  @Throttle(REGISTRATION_THROTTLE) @Post('pickup-locations')
+  savePickups(@CurrentUser() u: JwtPayload, @Body() body: { registrationId: string; locations: any[] }) {
     if (!body.registrationId) throw new BadRequestException('registrationId is required');
-    return this.svc.savePickupLocations(body.registrationId, body.locations || []);
+    return this.svc.savePickupLocations(body.registrationId, body.locations || [], u);
   }
 
-  @Public() @Get('pickup-locations/:registrationId')
-  getPickups(@Param('registrationId') id: string) {
-    return this.svc.getPickupLocations(id);
+  @Get('pickup-locations/:registrationId')
+  getPickups(@CurrentUser() u: JwtPayload, @Param('registrationId') id: string) {
+    return this.svc.getPickupLocations(id, u);
   }
 
-  @Public() @Post('submit')
-  submit(@Body() body: { registrationId: string }) {
+  @Throttle(REGISTRATION_THROTTLE) @Post('submit')
+  submit(@CurrentUser() u: JwtPayload, @Body() body: { registrationId: string }) {
     if (!body.registrationId) throw new BadRequestException('registrationId is required');
-    return this.svc.submit(body.registrationId);
+    return this.svc.submit(body.registrationId, u);
   }
 
-  @Public() @Get('status')
-  status(@Query('phone') phone: string) {
-    if (!phone) throw new BadRequestException('phone is required');
-    return this.svc.checkStatus(phone);
+  @Throttle(REGISTRATION_THROTTLE) @Get('status')
+  status(@CurrentUser() u: JwtPayload, @Query('phone') phone?: string) {
+    return this.svc.checkStatus(this.ownPhone(u, phone));
   }
 
-  @Public() @Get('draft/:registrationId')
-  draft(@Param('registrationId') id: string) {
-    return this.svc.getDraft(id);
+  @Get('draft/:registrationId')
+  draft(@CurrentUser() u: JwtPayload, @Param('registrationId') id: string) {
+    return this.svc.getDraft(id, u);
   }
 }
 

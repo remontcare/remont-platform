@@ -91,36 +91,49 @@ export class WarrantyService {
   async decide(warrantyCaseId: string, decision: WarrantyDecision, adminId: string, notes?: string): Promise<void> {
     const wc = await this.prisma.warrantyCase.findUnique({ where: { id: warrantyCaseId }, include: { order: { include: { items: true } } } });
     if (!wc) throw new NotFoundException();
-    if (wc.status !== 'ADMIN_REVIEW') throw new BadRequestException('This warranty case is not awaiting an admin decision');
 
-    if (decision === 'APPROVED_REFUND') {
-      const item = wc.orderItemId ? wc.order.items.find((i) => i.id === wc.orderItemId) : undefined;
-      const amount = item ? Number(item.totalPrice) : Number(wc.order.totalAmount);
-      if (amount > 0) {
-        const rr = await this.refunds.raise(wc.customerId, wc.orderId, undefined, `Warranty claim ${wc.caseNumber} approved for refund`, []);
-        await this.refunds.decide(adminId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'Warranty claim approved' });
-      }
-    } else if (decision === 'APPROVED_REPLACEMENT') {
-      await this.returns.createReplacementOrder(wc.orderId, adminId);
-    }
-    // APPROVED_REPAIR / REJECTED — record-only, no existing repair-dispatch system to call into
-    // (same restraint SupportCasesService itself documents for FREE_REWORK/NO_REFUND).
-
-    await this.prisma.warrantyCase.update({
-      where: { id: warrantyCaseId },
-      data: {
-        status: decision === 'REJECTED' ? 'REJECTED' : 'RESOLVED',
-        finalDecision: decision, decidedBy: adminId, decidedAt: new Date(), resolutionNotes: notes, closedAt: new Date(),
-      },
+    // Idempotency/concurrency fix: only the caller whose updateMany actually flips status
+    // away from ADMIN_REVIEW may proceed — a double-click/concurrent/retried decision can
+    // never trigger a refund or replacement twice for the same warranty case, same idiom as
+    // ProductLedgerService.reverseSettlement()'s callers and ReturnsService.finalize() above.
+    const finalStatus = decision === 'REJECTED' ? 'REJECTED' : 'RESOLVED';
+    const claimed = await this.prisma.warrantyCase.updateMany({
+      where: { id: warrantyCaseId, status: 'ADMIN_REVIEW' },
+      data: { status: finalStatus, finalDecision: decision, decidedBy: adminId, decidedAt: new Date(), resolutionNotes: notes, closedAt: new Date() },
     });
-    await this.prisma.supportCase.update({
-      where: { id: wc.supportCaseId },
-      data: { status: decision === 'REJECTED' ? 'RESOLVED' : 'RESOLVED', resolutionReason: notes || `Warranty ${decision}`, decidedBy: adminId, decidedAt: new Date(), closedAt: new Date() },
-    }).catch(() => {});
-    await this.prisma.supportCaseLog.create({
-      data: { supportCaseId: wc.supportCaseId, actorId: adminId, actorRole: UserRole.ADMIN, action: `WARRANTY_${decision}`, notes },
-    }).catch(() => {});
-    await writeOrderTimeline(this.prisma, { orderId: wc.orderId, status: `WARRANTY_${decision}`, actorId: adminId, actorRole: UserRole.ADMIN, note: notes });
+    if (claimed.count !== 1) throw new BadRequestException('This warranty case is not awaiting an admin decision');
+
+    try {
+      if (decision === 'APPROVED_REFUND') {
+        const item = wc.orderItemId ? wc.order.items.find((i) => i.id === wc.orderItemId) : undefined;
+        const amount = item ? Number(item.totalPrice) : Number(wc.order.totalAmount);
+        if (amount > 0) {
+          const rr = await this.refunds.raise(wc.customerId, wc.orderId, undefined, `Warranty claim ${wc.caseNumber} approved for refund`, []);
+          await this.refunds.decide(adminId, rr.id, 'WALLET_CREDIT', { approvedAmount: amount, adminNotes: notes || 'Warranty claim approved' });
+        }
+      } else if (decision === 'APPROVED_REPLACEMENT') {
+        await this.returns.createReplacementOrder(wc.orderId, adminId);
+      }
+      // APPROVED_REPAIR / REJECTED — record-only, no existing repair-dispatch system to call
+      // into (same restraint SupportCasesService itself documents for FREE_REWORK/NO_REFUND).
+
+      await this.prisma.supportCase.update({
+        where: { id: wc.supportCaseId },
+        data: { status: 'RESOLVED', resolutionReason: notes || `Warranty ${decision}`, decidedBy: adminId, decidedAt: new Date(), closedAt: new Date() },
+      }).catch(() => {});
+      await this.prisma.supportCaseLog.create({
+        data: { supportCaseId: wc.supportCaseId, actorId: adminId, actorRole: UserRole.ADMIN, action: `WARRANTY_${decision}`, notes },
+      }).catch(() => {});
+      await writeOrderTimeline(this.prisma, { orderId: wc.orderId, status: `WARRANTY_${decision}`, actorId: adminId, actorRole: UserRole.ADMIN, note: notes });
+    } catch (e) {
+      // Roll back the claim so this warranty case can be retried after a transient failure
+      // instead of being stuck "resolved" with none of its side effects actually applied.
+      await this.prisma.warrantyCase.update({
+        where: { id: warrantyCaseId },
+        data: { status: 'ADMIN_REVIEW', finalDecision: null, decidedBy: null, decidedAt: null, resolutionNotes: null, closedAt: null },
+      }).catch(() => {});
+      throw e;
+    }
   }
 }
 

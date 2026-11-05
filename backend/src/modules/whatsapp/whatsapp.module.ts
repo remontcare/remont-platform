@@ -47,12 +47,14 @@ const TEMPLATES: Record<string, Record<string, (v: any) => string>> = {
     HI: (v) => `🔐 Order #${v.orderNumber} ka naya ${v.otpLabel} OTP ${v.otp} hai. Sirf apne assigned technician ke saath share karein. Purana code ab kaam nahi karega.`,
   },
   EXTRA_WORK: {
-    EN: (v) => `📝 Extra work for #${v.orderNumber}:\n${v.description}\nAmount: ₹${v.amount}\nApprove? YES/NO`,
-    HI: (v) => `📝 Order #${v.orderNumber} extra:\n${v.description}\nAmount: ₹${v.amount}\nYES/NO?`,
+    // No inbound handler reads replies — approval is in the customer's Remont app/website or
+    // by giving the technician the OTP, so the message must not ask for a YES/NO reply.
+    EN: (v) => `📝 Extra work for #${v.orderNumber}:\n${v.description}\nAmount: ₹${v.amount}\nNot billed until you approve it in the Remont app or share the OTP with your technician.`,
+    HI: (v) => `📝 Order #${v.orderNumber} extra:\n${v.description}\nAmount: ₹${v.amount}\nAapki approval (Remont app ya technician ko OTP) ke bina bill mein nahi judega.`,
   },
   EXTRA_WORK_OTP: {
-    EN: (v) => `🔐 OTP to confirm extra work on order #${v.orderNumber} is ${v.otp}. Share only with your assigned technician.`,
-    HI: (v) => `🔐 Order #${v.orderNumber} ke extra work ko confirm karne ka OTP ${v.otp} hai. Sirf apne assigned technician ke saath share karein.`,
+    EN: (v) => `🔐 OTP to approve extra work${v.amount != null ? ` of ₹${v.amount}` : ''} on order #${v.orderNumber} is ${v.otp}. Valid 10 min. Share only with your assigned technician.`,
+    HI: (v) => `🔐 Order #${v.orderNumber} ke extra work${v.amount != null ? ` (₹${v.amount})` : ''} ko approve karne ka OTP ${v.otp} hai. 10 min tak valid. Sirf apne assigned technician ke saath share karein.`,
   },
   EARNINGS_NUDGE: {
     EN: (v) => `💰 ${v.name}! ${v.openJobs} jobs near you ~₹${v.potential}. Open app to accept.`,
@@ -149,10 +151,20 @@ export class WhatsappService {
     return this.send(phone, body, WhatsappMessageType.SERVICE_OTP_RESENT);
   }
 
-  async sendExtraWorkOtp(phone: string, orderNumber: string, otp: string) {
+  /**
+   * MSG91_EXTRA_WORK_OTP_TEMPLATE_ID, when set, sends through a dedicated DLT-approved flow
+   * template with named variables (##otp##, ##order##, ##amount##) — the shared template
+   * below only ever receives the whole text as one `message` variable. The code is masked in
+   * WhatsappLog either way, and the result says whether the provider accepted the message.
+   */
+  async sendExtraWorkOtp(phone: string, orderNumber: string, otp: string, amount?: number) {
     const lang = await this.getLang(phone);
-    const body = this.render('EXTRA_WORK_OTP', lang, { orderNumber, otp });
-    return this.send(phone, body, WhatsappMessageType.EXTRA_WORK_OTP);
+    const body = this.render('EXTRA_WORK_OTP', lang, { orderNumber, otp, amount });
+    const templateId = process.env.MSG91_EXTRA_WORK_OTP_TEMPLATE_ID;
+    return this.send(phone, body, WhatsappMessageType.EXTRA_WORK_OTP, {}, {
+      redact: otp,
+      ...(templateId ? { template: { id: templateId, vars: { otp, order: orderNumber, amount: amount != null ? String(amount) : '' } } } : {}),
+    });
   }
 
   /** Plain-text message with no template — used by flows (like seller-registration review
@@ -163,13 +175,21 @@ export class WhatsappService {
   }
 
   // ─── Internal helpers ───
+  /**
+   * Returns the WhatsappLog row plus `delivered` — whether the provider accepted the message.
+   * `opts.redact` is a secret (an OTP) that must not be stored in WhatsappLog or logged;
+   * `opts.template` sends through a specific MSG91 flow template with named variables.
+   */
   private async send(
     toPhone: string, body: string, type: WhatsappMessageType,
     meta: { vendorId?: string; orderId?: string; leadId?: string } = {},
+    opts: { redact?: string; template?: { id: string; vars: Record<string, string> } } = {},
   ) {
+    const storedBody = opts.redact ? body.split(opts.redact).join('****') : body;
     const log = await this.prisma.whatsappLog.create({
-      data: { toPhone, messageType: type, messageBody: body, templateUsed: type, status: 'SENT', ...meta },
+      data: { toPhone, messageType: type, messageBody: storedBody, templateUsed: type, status: 'SENT', ...meta },
     });
+    let delivered = false;
 
     if (process.env.MSG91_AUTH_KEY) {
       const mobileNumber = toPhone.replace('+', '').replace(/\s/g, '');
@@ -181,27 +201,33 @@ export class WhatsappService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            template_id: process.env.MSG91_OTP_TEMPLATE_ID || process.env.MSG91_TEMPLATE_ID,
+            template_id: opts.template?.id || process.env.MSG91_OTP_TEMPLATE_ID || process.env.MSG91_TEMPLATE_ID,
             short_url: '0',
             realTimeResponse: '1',
-            recipients: [{ mobiles: mobileNumber, message: body }],
+            recipients: [opts.template ? { mobiles: mobileNumber, ...opts.template.vars } : { mobiles: mobileNumber, message: body }],
           }),
         });
         const result = await res.json() as any;
         if (!res.ok || result.type === 'error') {
-          this.logger.warn(`MSG91 send failed for ${toPhone}: ${JSON.stringify(result)}`);
+          this.logger.warn(`MSG91 send failed for ${toPhone} (${type}): ${JSON.stringify(result)}`);
           await this.prisma.whatsappLog.update({ where: { id: log.id }, data: { status: 'FAILED' } });
         } else {
+          delivered = true;
           this.logger.log(`📤 MSG91 sent to ${toPhone} (${type})`);
         }
       } catch (e) {
         this.logger.error(`MSG91 HTTP error for ${toPhone}: ${e.message}`);
         await this.prisma.whatsappLog.update({ where: { id: log.id }, data: { status: 'FAILED' } });
       }
+    } else if (process.env.NODE_ENV === 'production') {
+      // No provider in production means nothing was sent — never record that as SENT.
+      this.logger.error(`MSG91_AUTH_KEY is not set — ${type} to ${toPhone} was NOT sent`);
+      await this.prisma.whatsappLog.update({ where: { id: log.id }, data: { status: 'FAILED' } });
     } else {
-      this.logger.debug(`📱 [DEV] WhatsApp → ${toPhone}:\n${body}`);
+      delivered = true; // local/dev: printed instead of sent
+      this.logger.debug(`📱 [DEV] WhatsApp → ${toPhone}:\n${storedBody}`);
     }
-    return log;
+    return { ...log, delivered };
   }
 
   private render(key: string, lang: Language, vars: any): string {

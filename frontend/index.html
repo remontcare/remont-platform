@@ -772,6 +772,8 @@
     font-size: 16px;
     position: relative;
   }
+  /* Official Remi photo over the original icon (the icon shows if the image can't load). */
+  .remi-photo { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; object-position: center 35%; display: block; }
   .ai-avatar::after {
     content: '';
     position: absolute;
@@ -3963,6 +3965,7 @@ window.RemontMedia = (function () {
     <div class="ai-chat-widget">
       <div class="ai-chat-head">
         <div class="ai-avatar">
+          <picture><source srcset="/remi-avatar-96.webp 1x, /remi-avatar-256.webp 2x" type="image/webp"><img class="remi-photo" src="/remi-avatar-256.jpg" alt="Remi, Remont AI assistant" width="38" height="38" decoding="async" onerror="this.closest('picture').remove()"></picture>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
         </div>
         <div class="ai-chat-info">
@@ -5946,7 +5949,7 @@ window.RemontMedia = (function () {
 <!-- ═══ REMI AI CHAT MODAL ═══ -->
 <div id="remi-chat-modal" style="display:none;position:fixed;bottom:80px;right:20px;width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 100px);background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.25);z-index:9500;flex-direction:column;overflow:hidden">
   <div style="background:linear-gradient(135deg,#c4601a,#f59e0b);padding:14px 16px;display:flex;align-items:center;gap:12px;color:#fff;flex-shrink:0">
-    <div style="width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px">🤖</div>
+    <div style="position:relative;width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.6)">🤖<picture><source srcset="/remi-avatar-96.webp 1x, /remi-avatar-256.webp 2x" type="image/webp"><img class="remi-photo" src="/remi-avatar-256.jpg" alt="Remi, Remont AI assistant" width="40" height="40" decoding="async" onerror="this.closest('picture').remove()"></picture></div>
     <div style="flex:1">
       <div style="font-weight:700;font-size:15px">Remi AI</div>
       <div style="font-size:11px;opacity:.85">● Online · Hindi, English, Hinglish</div>
@@ -7651,6 +7654,25 @@ window.RemontMedia = (function () {
     });
   }
 
+  // ── Service contact / Authorized Person (optional, at booking) ──
+  // prefix 'bm' = booking modal, 'co' = cart checkout. {value:null} = "I will be available",
+  // {value:{…}} = a nominated person for this order, {error} = incomplete input.
+  function apToggle(prefix) {
+    var sel = document.querySelector('input[name="' + prefix + '-ap-mode"]:checked');
+    document.getElementById(prefix + '-ap-fields').style.display = sel && sel.value === 'other' ? '' : 'none';
+  }
+  function apCollect(prefix) {
+    var sel = document.querySelector('input[name="' + prefix + '-ap-mode"]:checked');
+    if (!sel || sel.value !== 'other') return { value: null };
+    var name = document.getElementById(prefix + '-ap-name').value.trim();
+    var phone = document.getElementById(prefix + '-ap-phone').value.replace(/D/g, '').slice(-10);
+    var rel = document.getElementById(prefix + '-ap-rel').value.trim();
+    if (!name) return { error: 'Enter the name of the person who will be available' };
+    if (!/^[6-9]d{9}$/.test(phone)) return { error: 'Enter a valid 10-digit mobile number for the person who will be available' };
+    if (!document.getElementById(prefix + '-ap-consent').checked) return { error: 'Please tick the box to authorize this person for this order' };
+    return { value: { name: name, phone: '+91' + phone, relationship: rel || undefined, consent: true } };
+  }
+
   function apiGet(path) {
     var token = localStorage.getItem('remont_token');
     var headers = {};
@@ -7672,10 +7694,18 @@ window.RemontMedia = (function () {
   function sendChat(message) {
     if (!message || !message.trim()) return;
     if (chatMsgEl) chatMsgEl.textContent = '...';
-    apiPost('/api/v1/ai/chat', {
+    var chatBody = {
       message: message,
       city: typeof currentCity !== 'undefined' ? currentCity : undefined,
       customerPhone: localStorage.getItem('remont_phone') || undefined
+    };
+    // The server rejects an expired/invalid token with 401 instead of ignoring it; chat is
+    // public, so retry once without the token rather than leaving the visitor stuck.
+    apiPost('/api/v1/ai/chat', chatBody).catch(function(err) {
+      if (String(err && err.message) !== '401') throw err;
+      return fetch(API_BASE + '/api/v1/ai/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(chatBody)
+      }).then(function(res) { if (!res.ok) throw new Error(res.status); return res.json(); });
     }).then(function(res) {
       var d = res.data || res; // unwrap NestJS envelope
       if (chatMsgEl) chatMsgEl.textContent = d.reply || message;
@@ -9287,6 +9317,9 @@ window.RemontMedia = (function () {
     var okToProceed = await _bmCheckGpsProximity(addrId, savedAddr);
     if (!okToProceed) return;
 
+    var bmAp = apCollect('bm');
+    if (bmAp.error) { showToast(bmAp.error, 'error'); return; }
+
     var btn = document.getElementById('bm-next-btn');
     btn.textContent = 'Booking…'; btn.disabled = true;
 
@@ -9307,10 +9340,14 @@ window.RemontMedia = (function () {
     if (email) payload.email = email;
     if (notes) payload.notes = notes;
     if (window._bmCoupon) payload.couponCode = window._bmCoupon.code;
+    if (bmAp.value) payload.authorizedPerson = bmAp.value;
 
     try {
       var res = await bmBookingRequest(payload);
       var r = res && res.data ? res.data : res;
+      if (r && r.authorizedPerson && r.authorizedPerson.saved === false) {
+        setTimeout(function(){ showToast('Booked — but the person you nominated could not be saved. Please contact support.', 'error'); }, 2500);
+      }
 
       if (r.requiresPayment) {
         window._bmPendingPayment = {
@@ -9649,6 +9686,17 @@ window.RemontMedia = (function () {
     <textarea id="bm-address" class="bm-inp" rows="2" placeholder="Flat/House No, Street, Area, Pincode…" style="resize:none"></textarea>
    </div>
    <div class="bm-field"><label class="bm-lbl">Notes (optional)</label><textarea id="bm-notes" class="bm-inp" rows="2" placeholder="Describe the problem or any special instructions…" style="resize:none"></textarea></div>
+   <div class="bm-field">
+    <label class="bm-lbl">Service contact</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:4px"><input type="radio" name="bm-ap-mode" value="self" checked onchange="apToggle('bm')"> I will be available</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="radio" name="bm-ap-mode" value="other" onchange="apToggle('bm')"> Someone else will be available</label>
+    <div id="bm-ap-fields" style="display:none;margin-top:8px">
+     <input id="bm-ap-name" class="bm-inp" placeholder="Their name" maxlength="80" style="margin-bottom:6px">
+     <input id="bm-ap-phone" class="bm-inp" type="tel" placeholder="Their 10-digit mobile number" maxlength="10" style="margin-bottom:6px">
+     <input id="bm-ap-rel" class="bm-inp" placeholder="Relationship (e.g. Wife, Father)" maxlength="40" style="margin-bottom:6px">
+     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#374151"><input type="checkbox" id="bm-ap-consent" style="margin-top:2px"> Authorize this person to manage service-related approvals for this order.</label>
+    </div>
+   </div>
   </div>
 
   <!-- STEP 2: Summary + Coupon -->
@@ -10175,6 +10223,19 @@ function cartCheckout() {
             style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:8px;outline:none;text-transform:uppercase" />
           <input id="co-gst-business-name" placeholder="Business / company name"
             style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none" />
+        </div>
+      </div>
+
+      <!-- Optional service contact / Authorized Person (applies to the service items) -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:13px;color:#6b7280;font-weight:600;margin-bottom:6px">👤 Service contact <span style="color:#9ca3af;font-weight:400">(for service bookings)</span></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:4px"><input type="radio" name="co-ap-mode" value="self" checked onchange="apToggle('co')"> I will be available</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="radio" name="co-ap-mode" value="other" onchange="apToggle('co')"> Someone else will be available</label>
+        <div id="co-ap-fields" style="display:none;margin-top:8px">
+          <input id="co-ap-name" placeholder="Their name" maxlength="80" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:8px;outline:none" />
+          <input id="co-ap-phone" type="tel" placeholder="Their 10-digit mobile number" maxlength="10" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:8px;outline:none" />
+          <input id="co-ap-rel" placeholder="Relationship (e.g. Wife, Father)" maxlength="40" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;margin-bottom:8px;outline:none" />
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#374151"><input type="checkbox" id="co-ap-consent" style="margin-top:2px"> Authorize this person to manage service-related approvals for this order.</label>
         </div>
       </div>
 
@@ -11249,6 +11310,8 @@ function submitCheckoutOrder() {
 
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showCoMsg('Cart is empty'); return; }
+  var coAp = cart.some(function(i){ return i.type === 'service'; }) ? apCollect('co') : { value: null };
+  if (coAp.error) { showCoMsg(coAp.error); return; }
 
   var paymentEl = document.querySelector('input[name="co-payment"]:checked');
   var paymentMethod = paymentEl ? paymentEl.value : 'ONLINE';
@@ -11299,6 +11362,7 @@ function submitCheckoutOrder() {
     gstin:           gstin || undefined,
     gstBusinessName: gstBusinessName || undefined,
     paymentMethod:   paymentMethod,
+    authorizedPerson: coAp.value || undefined,
     crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })()
   };
 
@@ -11738,6 +11802,78 @@ function _otpBanner(o) {
   return '';
 }
 
+// Extra work the technician added that the customer hasn't approved yet — not billed until
+// approved here (or by giving the technician the SMS OTP). Same states the backend accepts.
+function _extraWorkBanner(o) {
+  if (['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].indexOf(o.status) === -1) return '';
+  var pending = (o.extraWorkItems || []).filter(function(e){ return e.status ? e.status === 'PENDING' : !e.customerApproved; });
+  if (!pending.length) return '';
+  return '<div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:10px;padding:10px 12px;margin-bottom:10px">' +
+    '<div style="font-size:12px;color:#9a3412;font-weight:600;margin-bottom:6px">📋 Extra work needs your approval — not billed until you approve</div>' +
+    pending.map(function(e) {
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;flex-wrap:wrap">' +
+        '<span style="font-size:13px;color:#111">' + escHtml(e.description) + ' · <strong>₹' + Number(e.amount).toLocaleString('en-IN') + '</strong></span>' +
+        '<span style="display:flex;gap:6px">' +
+        '<button onclick="approveExtraWork(\'' + e.id + '\',this)" style="padding:6px 14px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Approve</button>' +
+        '<button onclick="rejectExtraWork(\'' + e.id + '\',this)" style="padding:6px 14px;background:#fff;color:#9a3412;border:1.5px solid #fdba74;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Reject</button>' +
+        '</span>' +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
+function approveExtraWork(extraId, btn) {
+  btn.disabled = true; btn.textContent = 'Approving…';
+  apiPatch('/api/v1/orders/extra-work/' + encodeURIComponent(extraId) + '/approve', {}).then(function() {
+    showToast('Extra work approved — it is now added to your bill.', 'success');
+    loadMyOrders();
+  }).catch(function(e) {
+    showToast(e && e.message === '409' ? 'This extra work was already decided.' : 'Could not approve the extra work. Please try again.', 'error');
+    if (e && e.message === '409') { loadMyOrders(); return; }
+    btn.disabled = false; btn.textContent = 'Approve';
+  });
+}
+function rejectExtraWork(extraId, btn) {
+  var reason = prompt('Reason for rejecting this extra work (optional):', '');
+  if (reason === null) return;
+  btn.disabled = true; btn.textContent = 'Rejecting…';
+  apiPatch('/api/v1/orders/extra-work/' + encodeURIComponent(extraId) + '/reject', { reason: reason.trim() || undefined }).then(function() {
+    showToast('Extra work rejected — it will not be billed.', 'success');
+    loadMyOrders();
+  }).catch(function(e) {
+    showToast(e && e.message === '409' ? 'This extra work was already decided.' : 'Could not reject the extra work. Please try again.', 'error');
+    if (e && e.message === '409') { loadMyOrders(); return; }
+    btn.disabled = false; btn.textContent = 'Reject';
+  });
+}
+// Orders where this signed-in phone is the customer's Authorized Person (GET /authorized-orders):
+// service details and extra-work decisions only — no link into the customer's own order page.
+function _renderAuthorizedOrders(list) {
+  if (!list || !list.length) return '';
+  return '<div style="border:1.5px solid #fdba74;border-radius:14px;padding:12px;margin-bottom:14px;background:#fffbf5">' +
+    '<div style="font-size:12px;font-weight:700;color:#9a3412;letter-spacing:.03em;text-transform:uppercase;padding:0 4px 10px">🔑 Orders you are authorized for</div>' +
+    list.map(function(x) {
+      var o = x.order || {};
+      var name = (o.serviceItems && o.serviceItems.length > 1)
+        ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+        : (o.service && o.service.name) || 'Service';
+      var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
+      var decided = (o.extraWorkItems || []).filter(function(e){ return e.status === 'APPROVED' || e.status === 'REJECTED'; });
+      return '<div style="border:1.5px solid #f3f4f6;border-radius:12px;padding:14px;margin-bottom:10px;background:#fff">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><div><div style="font-size:15px;font-weight:600;color:#111">' + escHtml(name) + '</div>' +
+        '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(o.orderNumber || '') + (x.authorization && x.authorization.relationship ? ' · as ' + escHtml(x.authorization.relationship) : '') + '</div></div>' +
+        '<span style="font-size:12px;font-weight:600;color:#6b7280">' + escHtml(statusLabel || '') + '</span></div>' +
+        (o.address ? '<div style="font-size:12px;color:#6b7280;margin-bottom:8px">📍 ' + escHtml(o.address.fullAddress || '') + '</div>' : '') +
+        _extraWorkBanner(o) +
+        decided.map(function(e) {
+          return '<div style="font-size:12px;color:' + (e.status === 'APPROVED' ? '#166534' : '#9a3412') + ';margin-bottom:4px">' +
+            (e.status === 'APPROVED' ? '✅ Approved: ' : '✗ Rejected: ') + escHtml(e.description) + ' · ₹' + Number(e.amount).toLocaleString('en-IN') + '</div>';
+        }).join('') +
+        '<div style="font-size:13px;font-weight:600;color:#111;margin-top:6px">Total ₹' + Number(o.totalAmount || 0).toLocaleString('en-IN') + '</div>' +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
+
 var COD_CONVERTIBLE_STATUSES = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE'];
 function _codBanner(o) {
   if (o.paymentMethod !== 'COD' || o.paymentStatus === 'PAID' || COD_CONVERTIBLE_STATUSES.indexOf(o.status) === -1) return '';
@@ -11845,6 +11981,7 @@ function _renderOrderCard(o) {
       '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';background:' + statusColor + '15;padding:4px 10px;border-radius:100px">' + statusLabel + '</span>' +
     '</div>' +
     _otpBanner(o) +
+    _extraWorkBanner(o) +
     _codBanner(o) +
     _shipmentBanner(o) +
     '<div style="display:flex;justify-content:space-between;align-items:center">' +
@@ -11906,10 +12043,13 @@ function loadMyOrders() {
   }
   Promise.all([
     apiGet('/api/v1/orders/mine'),
-    apiGet('/api/v1/reviews/mine').catch(function(){ return []; })
+    apiGet('/api/v1/reviews/mine').catch(function(){ return []; }),
+    apiGet('/api/v1/authorized-orders').catch(function(){ return []; })
   ]).then(function(results) {
     var res = results[0];
     var reviewsRes = results[1];
+    var authRes = results[2];
+    var authHtml = _renderAuthorizedOrders(Array.isArray(authRes) ? authRes : ((authRes && authRes.data) || []));
     var orders = Array.isArray(res) ? res : (res.data || []);
     var reviews = Array.isArray(reviewsRes) ? reviewsRes : (reviewsRes.data || []);
     _reviewedOrderIds = {};
@@ -11919,6 +12059,7 @@ function loadMyOrders() {
         '<div style="font-size:40px;margin-bottom:12px">📦</div>' +
         '<p style="color:#6b7280;font-size:14px">No orders yet.<br>Book a service or add products to cart!</p>' +
         '</div>';
+      emptyHtml = authHtml || emptyHtml;
       if (emptyHtml !== _lastOrdersHtml) { body.innerHTML = emptyHtml; _lastOrdersHtml = emptyHtml; }
       return;
     }
@@ -11951,6 +12092,7 @@ function loadMyOrders() {
         html += inner;
       }
     });
+    html = authHtml + html;
     if (html !== _lastOrdersHtml) { body.innerHTML = html; _lastOrdersHtml = html; }
     _refreshShipmentBadges(orders);
   }).catch(function(e) {

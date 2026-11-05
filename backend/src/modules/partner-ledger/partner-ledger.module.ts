@@ -291,6 +291,31 @@ export class PartnerLedgerService {
     return Math.max(0, totalAvailable - pending);
   }
 
+  /**
+   * The pieces availableBalance() is made of, computed the same way, for display: the ledger
+   * balance, the part locked by base hold, and the still-pending withdrawal requests.
+   * available here always equals availableBalance(vendorId) (pooled for an agency owner).
+   */
+  async balanceBreakdown(vendorId: string, client: any = this.prisma) {
+    const vendor = await client.serviceVendor.findUnique({ where: { id: vendorId }, select: { isAgencyOwner: true } });
+    if (!vendor) throw new NotFoundException('Partner not found');
+    const ids = vendor.isAgencyOwner
+      ? [vendorId, ...(await client.serviceVendor.findMany({ where: { agencyOwnerId: vendorId }, select: { id: true } })).map((m: any) => m.id)]
+      : [vendorId];
+    let ledgerBalance = 0, held = 0, unlocked = 0;
+    for (const id of ids) {
+      const v = await client.serviceVendor.findUnique({ where: { id }, select: { baseHoldAmount: true } });
+      const bal = await this.currentBalance(id, client);
+      const free = Math.max(0, bal - Number(v?.baseHoldAmount || 0)); // availableForSingleVendor()
+      ledgerBalance += bal;
+      unlocked += free;
+      held += Math.min(Math.max(bal, 0), Number(v?.baseHoldAmount || 0));
+    }
+    const pendingWithdrawals = await this.pendingWithdrawals(ids, client);
+    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    return { ledgerBalance: r2(ledgerBalance), heldAmount: r2(held), pendingWithdrawals: r2(pendingWithdrawals), available: Math.max(0, unlocked - pendingWithdrawals) };
+  }
+
   /** Per-member breakdown for the agency owner's "Team Ledger" view. */
   async agencyMemberBalances(agencyOwnerVendorId: string) {
     const members = await this.prisma.serviceVendor.findMany({
@@ -440,6 +465,29 @@ export class WithdrawalService {
     });
   }
 
+  /**
+   * The partner's withdrawable balance — exactly the figure request() validates against
+   * (PartnerLedgerService.availableBalance(): ledger balance − base hold − pending
+   * withdrawals, pooled across the team for an agency owner). Clients display this instead
+   * of re-deriving it. A team member can never withdraw, so their figure is 0.
+   */
+  async myAvailable(userId: string) {
+    const vendor = await this.resolveVendor(userId);
+    // Always this caller's own vendor (resolved from the JWT user) — never a client-supplied id.
+    if (vendor.agencyOwnerId) {
+      const own = await this.ledger.balanceBreakdown(vendor.id);
+      return { available: 0, canWithdraw: false, ledgerBalance: own.ledgerBalance, heldAmount: own.heldAmount, pendingWithdrawals: 0 };
+    }
+    const available = await this.ledger.availableBalance(vendor.id);
+    const parts = await this.ledger.balanceBreakdown(vendor.id);
+    // Floored to whole paise (never rounded up past what request() would accept).
+    return {
+      available: Math.floor(available * 100 + 1e-6) / 100, canWithdraw: true,
+      // Display-only breakdown: ledgerBalance − heldAmount − pendingWithdrawals = available.
+      ledgerBalance: parts.ledgerBalance, heldAmount: parts.heldAmount, pendingWithdrawals: parts.pendingWithdrawals,
+    };
+  }
+
   async myHistory(userId: string, limit = 50) {
     const vendor = await this.resolveVendor(userId);
     return this.prisma.withdrawalRequest.findMany({ where: { vendorId: vendor.id }, orderBy: { createdAt: 'desc' }, take: limit });
@@ -492,6 +540,12 @@ export class PartnerLedgerController {
   @Post('wallet/topup/confirm')
   confirmWalletTopup(@CurrentUser() u: JwtPayload, @Body() b: { gatewayOrderId: string; paymentId: string; signature: string }) {
     return this.withdrawals.confirmTopup(u.sub, b.paymentId, b.gatewayOrderId, b.signature);
+  }
+
+  @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)
+  @Get('wallet/available')
+  myAvailable(@CurrentUser() u: JwtPayload) {
+    return this.withdrawals.myAvailable(u.sub);
   }
 
   @UseGuards(RolesGuard) @Roles(UserRole.SERVICE_VENDOR)

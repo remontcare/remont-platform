@@ -1,6 +1,6 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, Logger, Optional,
+  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { MediaEntityType, UserRole } from '@prisma/client';
@@ -9,6 +9,33 @@ import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload, slugi
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { assertNoNewInlineImages } from '../media/media.policy';
+
+// Seller create/update bodies are passed to Prisma, so anything left in them is written.
+// System-managed counters/ids must never be seller-set (fake rating/reviewCount/views), and
+// relation keys must never get through at all: a nested write such as
+// `vendor: { connect: { id } }` reassigns the product despite the vendorId strip,
+// `category: { update: {...} }` edits a GLOBAL category, `reviews: { create: [...] }` fakes
+// reviews. Every legitimate client field (seller.html's full form, the app) is a scalar
+// column and is unaffected.
+const SELLER_PROTECTED_PRODUCT_FIELDS = [
+  'id', 'vendorId', 'slug', 'views', 'rating', 'reviewCount', 'aiGeneratedDesc', 'aiEnhancedImgs', 'createdAt', 'updatedAt',
+  'vendor', 'category', 'orderItems', 'cityProducts', 'reviews', 'inventory', 'zones', 'locationInventory',
+  'aiFeatureUsages', 'warrantyCases', 'productFeeRules',
+];
+function stripSellerProtectedProductFields(data: any): any {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new BadRequestException('Invalid product payload');
+  const out: Record<string, any> = { ...data };
+  for (const k of SELLER_PROTECTED_PRODUCT_FIELDS) delete out[k];
+  if (out.images !== undefined) {
+    // Uploaded images are hosted http(s) URLs (or a legacy /api/uploads path / legacy inline
+    // image, which assertNoNewInlineImages governs) — never javascript:/file:/other schemes.
+    if (!Array.isArray(out.images) || out.images.some((u: unknown) => typeof u !== 'string'
+      || !(/^https?:\/\//i.test(u) || u.startsWith('/api/uploads/') || /^data:image\//i.test(u)))) {
+      throw new BadRequestException('images must be a list of uploaded image URLs');
+    }
+  }
+  return out;
+}
 
 @Injectable()
 export class ProductsService {
@@ -138,7 +165,8 @@ export class ProductsService {
     return product;
   }
 
-  async create(userId: string, data: any) {
+  async create(userId: string, body: any) {
+    const data = stripSellerProtectedProductFields(body);
     const vendor = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!vendor) throw new ForbiddenException('Not a product vendor');
     if (vendor.status !== 'ACTIVE') {
@@ -171,7 +199,8 @@ export class ProductsService {
     return product;
   }
 
-  async update(userId: string, id: string, data: any) {
+  async update(userId: string, id: string, body: any) {
+    const data = stripSellerProtectedProductFields(body);
     const vendor = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!vendor) throw new ForbiddenException('Not a vendor');
     if (vendor.status !== 'ACTIVE') {

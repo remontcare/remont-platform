@@ -47,7 +47,7 @@ export class LogoutDto {
 
 // ─── JWT Strategy ───
 @Injectable()
-class JwtStrategy extends PassportStrategy(Strategy) {
+export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

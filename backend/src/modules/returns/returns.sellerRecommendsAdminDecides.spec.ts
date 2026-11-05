@@ -9,7 +9,11 @@ import { ReturnsService } from './returns.module';
  */
 function makeService() {
   const prisma: any = {
-    returnShipment: { findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
+    // updateMany models the atomic claim finalize()/finalizeRto() now take before any side
+    // effect runs (C-13) — defaults to always succeeding (count 1) so every existing test
+    // below, none of which is about the race itself, needs no other changes. Tests that
+    // exercise the race override this per-test (see "two simultaneous ... decisions" below).
+    returnShipment: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(async () => ({ count: 1 })), create: jest.fn() },
     supportCase: { update: jest.fn() },
     supportCaseLog: { create: jest.fn().mockResolvedValue({}) },
     order: { findFirst: jest.fn(), findUnique: jest.fn().mockResolvedValue({ totalAmount: 500 }), count: jest.fn().mockResolvedValue(0), create: jest.fn() },
@@ -82,9 +86,51 @@ describe('ReturnsService — RTO (return-to-origin)', () => {
     expect(refunds.decide).toHaveBeenCalledWith('admin-1', 'refund-1', 'WALLET_CREDIT', expect.objectContaining({ approvedAmount: 750 }));
   });
 
+  // C-13 — "two simultaneous RTO decisions": same atomic-claim guarantee as finalize() above.
+  it('two simultaneous finalizeRto() calls for the same RTO: only the first refunds, the second is rejected', async () => {
+    const { service, prisma, refunds } = makeService();
+    const rs = {
+      id: 'rto-1', kind: 'RTO', orderId: 'order-1', status: 'DELIVERED', inspectionStatus: 'PENDING',
+      order: { id: 'order-1', orderNumber: 'REM-1', customerId: 'cust-1', totalAmount: 750 },
+    };
+    prisma.returnShipment.findUnique.mockResolvedValue(rs);
+    prisma.returnShipment.updateMany.mockImplementation(async (args: any) => {
+      if (rs.inspectionStatus !== 'PENDING') return { count: 0 };
+      rs.inspectionStatus = args.data.inspectionStatus;
+      return { count: 1 };
+    });
+
+    await service.finalizeRto('rto-1', 'admin-1', 'ADMIN' as any, 'RTO settled');
+    await expect(service.finalizeRto('rto-1', 'admin-1', 'ADMIN' as any, 'RTO settled')).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(refunds.decide).toHaveBeenCalledTimes(1);
+  });
+
   it('finalize() refuses to run on an RTO shipment — must use finalizeRto() instead', async () => {
     const { service, prisma } = makeService();
     prisma.returnShipment.findUnique.mockResolvedValue({ id: 'rto-1', kind: 'RTO', status: 'DELIVERED', inspectionStatus: 'PENDING' });
     await expect(service.finalize('rto-1', 'ACCEPTED', 'admin-1', 'ADMIN' as any)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // C-13 — "two simultaneous return decisions": only the caller whose updateMany actually
+  // flips inspectionStatus away from PENDING may proceed. Models a real DB's row-level claim:
+  // the second call's updateMany finds inspectionStatus already ACCEPTED and matches nothing.
+  it('two simultaneous finalize() calls for the same return: only the first is accepted, the second is rejected', async () => {
+    const { service, prisma, refunds } = makeService();
+    const rs = {
+      id: 'rs-1', kind: 'RETURN', orderId: 'order-1', status: 'DELIVERED', inspectionStatus: 'PENDING',
+      supportCase: { id: 'case-1', customerId: 'cust-1', orderId: 'order-1', caseNumber: 'SUP-000001', evidenceUrls: [], recommendedAmount: 500, requestedRemedy: 'REFUND' },
+    };
+    prisma.returnShipment.findUnique.mockResolvedValue(rs);
+    prisma.returnShipment.updateMany.mockImplementation(async (args: any) => {
+      if (rs.inspectionStatus !== 'PENDING') return { count: 0 };
+      rs.inspectionStatus = args.data.inspectionStatus;
+      return { count: 1 };
+    });
+
+    await service.finalize('rs-1', 'ACCEPTED', 'admin-1', 'ADMIN' as any);
+    await expect(service.finalize('rs-1', 'ACCEPTED', 'admin-1', 'ADMIN' as any)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(refunds.decide).toHaveBeenCalledTimes(1);
   });
 });

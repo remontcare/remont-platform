@@ -121,6 +121,17 @@ export class TransformInterceptor implements NestInterceptor {
 
 // ─── UTILITIES ──────────────────────────────────────────────────────
 
+/**
+ * Every ExtraWorkItem field except `otp` — the code the customer gives the technician to
+ * approve a charge. Order/job responses go to the assigned technician too, so including the
+ * code there would let a partner approve their own extra work.
+ */
+export const EXTRA_WORK_ITEM_PUBLIC_SELECT = {
+  id: true, orderId: true, description: true, amount: true, addedBy: true,
+  customerApproved: true, approvedAt: true, createdAt: true, otpVerified: true, otpLastSentAt: true,
+  status: true, approvedByType: true, rejectedAt: true, rejectedByType: true, rejectionReason: true,
+} as const;
+
 export function generateOtp(length = 6): string {
   return Math.floor(Math.pow(10, length - 1) + Math.random() * 9 * Math.pow(10, length - 1)).toString();
 }
@@ -512,6 +523,83 @@ export function isValidIndiaCoords(lat: number | null | undefined, lng: number |
 // ServiceVendorsService.isEligibleForOrder's manual accept/available-jobs re-validation)
 // agrees on the same cutoff instead of one enforcing it and the other silently not.
 export const LOCATION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// ─── Partner-facing job-offer view (data minimization) ──────────────────────────
+// What a technician may see about an order they have NOT accepted yet — used by
+// available-jobs, the upcoming-scheduled preview and the job-offer ring payload (socket +
+// stored notification). An explicit allowlist, so new Order columns (payment, OTPs, notes,
+// customer data, internal routing/dispatch fields) can never leak by default. Full address
+// and customer contact unlock only via the assigned-job endpoints after accept.
+export function partnerOfferView(order: any, extra: { distanceKm?: number | null; releaseAt?: Date | null } = {}) {
+  const num = (v: any) => (v === null || v === undefined ? null : Number(v));
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber ?? null,
+    status: order.status,
+    vendorId: order.vendorId ?? null,
+    totalAmount: num(order.totalAmount),
+    serviceAmount: num(order.serviceAmount),
+    vendorPayout: num(order.vendorPayout),
+    createdAt: order.createdAt ?? null,
+    slotStart: order.slotStart ?? null,
+    slotEnd: order.slotEnd ?? null,
+    service: order.service ? { name: order.service.name ?? null, categoryId: order.service.categoryId ?? null } : null,
+    address: order.address ? { city: order.address.city ?? null, area: order.address.area || null } : null,
+    ...('distanceKm' in extra ? { distanceKm: extra.distanceKm ?? null } : {}),
+    ...('releaseAt' in extra ? { releaseAt: extra.releaseAt ?? null } : {}),
+  };
+}
+
+// ─── Scheduled-job release window ────────────────────────────────────────────
+// A service order with a future slotStart must not be offered/assigned to a technician days
+// in advance (availability changes, a better-placed technician may be online on the day).
+// It stays CONFIRMED + unassigned with RoutingService's routingDecision 'SCHEDULED' and is
+// released for dispatch at the EARLIER of: the service day's morning (IST) or slotStart −
+// lead minutes. Both are admin-tunable SiteSettings (group 'dispatch'); these are the
+// fallbacks used when the rows haven't been seeded.
+export const SCHEDULED_DISPATCH_DEFAULTS = { morningTime: '08:00', leadMinutes: 180 };
+export const ROUTING_DECISION_SCHEDULED = 'SCHEDULED';
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+export interface ScheduledDispatchConfig { morningTime: string; leadMinutes: number }
+
+/** When a scheduled order becomes dispatchable. Pure — the caller supplies the config. */
+export function scheduledReleaseAt(slotStart: Date, cfg: ScheduledDispatchConfig = SCHEDULED_DISPATCH_DEFAULTS): Date {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(cfg.morningTime ?? '');
+  const hours = match && Number(match[1]) < 24 ? Number(match[1]) : 8;
+  const minutes = match && Number(match[2]) < 60 ? Number(match[2]) : 0;
+  const lead = Number.isFinite(cfg.leadMinutes) && cfg.leadMinutes >= 0 ? cfg.leadMinutes : SCHEDULED_DISPATCH_DEFAULTS.leadMinutes;
+  // Shift into IST so the UTC getters below read the service day's IST calendar date.
+  const slotIst = new Date(slotStart.getTime() + IST_OFFSET_MS);
+  const morning = Date.UTC(slotIst.getUTCFullYear(), slotIst.getUTCMonth(), slotIst.getUTCDate(), hours, minutes) - IST_OFFSET_MS;
+  return new Date(Math.min(morning, slotStart.getTime() - lead * 60_000));
+}
+
+/** True when the order has a slot whose release time is still in the future. */
+export function isScheduledForLater(slotStart: Date | string | null | undefined, cfg?: ScheduledDispatchConfig, now = new Date()): boolean {
+  if (!slotStart) return false;
+  const slot = new Date(slotStart);
+  if (Number.isNaN(slot.getTime())) return false;
+  return scheduledReleaseAt(slot, cfg).getTime() > now.getTime();
+}
+
+/** Reads the release-window SiteSettings; any missing/invalid row (or a client without
+ * siteSetting, e.g. a unit-test mock) falls back to SCHEDULED_DISPATCH_DEFAULTS. */
+export async function loadScheduledDispatchConfig(prisma: any): Promise<ScheduledDispatchConfig> {
+  try {
+    const rows: { key: string; value: string }[] = await prisma.siteSetting.findMany({
+      where: { key: { in: ['dispatch_scheduled_morning_time', 'dispatch_scheduled_lead_minutes'] } },
+    });
+    const get = (k: string) => rows?.find((r) => r.key === k)?.value;
+    const lead = Number(get('dispatch_scheduled_lead_minutes'));
+    return {
+      morningTime: get('dispatch_scheduled_morning_time') || SCHEDULED_DISPATCH_DEFAULTS.morningTime,
+      leadMinutes: Number.isFinite(lead) && lead >= 0 ? lead : SCHEDULED_DISPATCH_DEFAULTS.leadMinutes,
+    };
+  } catch {
+    return { ...SCHEDULED_DISPATCH_DEFAULTS };
+  }
+}
 
 // The ONE authoritative location-eligibility rule, shared by every path that decides whether
 // a given vendor may be matched to a given order: DispatchService.dispatch's no-GPS fallback,

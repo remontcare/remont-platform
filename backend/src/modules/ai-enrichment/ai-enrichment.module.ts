@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Body, UseGuards, BadRequestException, ForbiddenException, Logger,
+  Module, Injectable, Controller, Get, Post, Body, UseGuards, BadRequestException, ForbiddenException, Logger, Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -7,11 +7,12 @@ import { UserRole, TransactionReason, AiFeatureType, AiFeatureStatus, MediaEntit
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload } from '../../common';
 import { WalletService, WalletModule } from '../wallet/wallet.module';
-import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
+import { parseAiJson } from '../ai-agent/openai-client';
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { generateImages } from '../ai-images/openai-images';
 import { tavilySearch } from '../ai-images/product-search';
+import { AiLimitsModule, AiLimitsService, AiRateLimitException, completeWithinBudget, isApprovedModel } from '../ai-agent/ai-limits';
 
 // Seller-facing, wallet-gated, optional paid AI features for the Add Product form
 // (frontend/seller.html) — see plan doc "Seller-Facing Paid AI Product Enrichment".
@@ -51,7 +52,11 @@ export class AiEnrichmentService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private wallet: WalletService, private media: MediaService) {
+  constructor(
+    private prisma: PrismaService, private config: ConfigService, private wallet: WalletService, private media: MediaService,
+    // Optional only so unit tests can construct the service without it; Nest always injects it.
+    @Optional() private limits?: AiLimitsService,
+  ) {
     this.tavilyKey = config.get('TAVILY_API_KEY', '');
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
@@ -116,6 +121,17 @@ export class AiEnrichmentService {
     const unavailable = features.filter((f) => !this.isFeatureAvailable(f));
     if (unavailable.length) throw new BadRequestException(`Feature not available yet: ${unavailable.join(', ')}`);
 
+    // Daily quotas BEFORE any wallet debit or provider call — they apply even when a feature is
+    // priced at ₹0, so a seller account can't drive unlimited OpenAI/Tavily spend.
+    if (this.limits) {
+      const quotas: Array<[string, any, 'identity' | 'global']> = [['enrichment', 'ai.enrichment.perSellerDaily', 'identity']];
+      if (features.includes('IMAGE_GENERATION' as AiFeatureType)) {
+        quotas.push(['images', 'ai.images.perSellerDaily', 'identity'], ['images', 'ai.images.globalDaily', 'global']);
+      }
+      const q = await this.limits.consumeDailyQuota(this.limits.identityKey({ userId }), quotas);
+      if (!q.ok) throw new AiRateLimitException(3600);
+    }
+
     const { items, total } = await this.costFor(features);
     // total<=0 (admin has priced every selected feature at ₹0 — e.g. a promotional period,
     // or a not-yet-configured SiteSetting row) means there's nothing to charge. WalletService
@@ -133,7 +149,7 @@ export class AiEnrichmentService {
       });
       try {
         let resultJson: any;
-        if (feature === 'WEB_SEARCH') resultJson = await this.runWebSearch(body.name, body.category, body.brand);
+        if (feature === 'WEB_SEARCH') resultJson = await this.runWebSearch(body.name, body.category, body.brand, userId);
         else if (feature === 'IMAGE_SEARCH') resultJson = await this.runImageSearch(body.name, body.category, body.brand);
         else resultJson = await this.runImageGeneration(userId, body.name, body.category, body.brand);
 
@@ -161,7 +177,7 @@ export class AiEnrichmentService {
     return tavilySearch({ apiKey: this.tavilyKey, query, includeImages });
   }
 
-  private async runWebSearch(name: string, category?: string, brand?: string) {
+  private async runWebSearch(name: string, category?: string, brand?: string, userId?: string) {
     const query = [name, category, brand, 'specifications brand manufacturer dimensions warranty country of origin'].filter(Boolean).join(' ');
     const search = await this.tavilySearch(query, false);
     const snippets = (search.results || []).slice(0, 5).map((r: any) => `${r.title}: ${r.content}`).join('\n\n');
@@ -175,10 +191,17 @@ ${snippets}
 
 Return JSON with: brand, manufacturer, modelNumber, weightKg (number or null), lengthCm (number or null), widthCm (number or null), heightCm (number or null), warranty, countryOfOrigin, material, description (2-3 sentences), specifications (a short object of key facts).`;
     if (!this.openaiKey) throw new Error('OPENAI_API_KEY not configured');
-    const raw = await openAiComplete(this.openaiKey, this.openaiModel, [
-      { role: 'system', content: 'You extract structured product data strictly from provided search text. Return only valid JSON. Never fabricate values not present in the source text.' },
-      { role: 'user', content: prompt },
-    ], { maxTokens: 600, jsonMode: true });
+    if (!isApprovedModel(this.openaiModel)) throw new Error('Configured AI model is not approved');
+    const messages = [
+      { role: 'system' as const, content: 'You extract structured product data strictly from provided search text. Return only valid JSON. Never fabricate values not present in the source text.' },
+      { role: 'user' as const, content: prompt },
+    ];
+    // Same shared token budget as Remi (reserved before the call, reconciled after). A refusal
+    // throws, so execute() auto-refunds the seller's wallet charge for this feature.
+    const raw = await completeWithinBudget(this.limits, {
+      identityKey: this.limits ? this.limits.identityKey({ userId: userId || 'seller-unknown' }) : 'seller', apiKey: this.openaiKey,
+      model: this.openaiModel, messages, maxTokens: 600, jsonMode: true,
+    });
     return parseAiJson(raw);
   }
 
@@ -248,7 +271,7 @@ export class AiEnrichmentController {
 }
 
 @Module({
-  imports: [WalletModule, MediaModule],
+  imports: [WalletModule, MediaModule, AiLimitsModule],
   controllers: [AiEnrichmentController],
   providers: [AiEnrichmentService],
   exports: [AiEnrichmentService],

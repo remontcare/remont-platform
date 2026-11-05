@@ -559,8 +559,8 @@ function openCatModal(cat) {
 
 function saveCategory() {
   var id = document.getElementById('cat-id').value;
+  var key = document.getElementById('cat-key').value.trim().toUpperCase();
   var data = {
-    key: document.getElementById('cat-key').value.trim().toUpperCase(),
     icon: document.getElementById('cat-icon').value.trim(),
     name: document.getElementById('cat-name').value.trim(),
     description: document.getElementById('cat-desc').value.trim() || undefined,
@@ -579,7 +579,12 @@ function saveCategory() {
   var warrantyPctVal = document.getElementById('cat-warranty-pct').value.trim();
   data.warrantyDays = warrantyDaysVal === '' ? null : parseInt(warrantyDaysVal);
   data.warrantyHoldPercent = warrantyPctVal === '' ? null : parseFloat(warrantyPctVal);
-  if (!data.key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
+  // The key is fixed once the category exists (the field is disabled when editing). Sending
+  // it back rewrote a lowercase key like "renovation" to "RENOVATION" — which already
+  // belongs to another category — so the unique constraint rejected the WHOLE update and
+  // the image URL silently never saved. Only a new category sends a key.
+  if (!id) data.key = key;
+  if (!key||!data.icon||!data.name) { toast('Key, icon and name required','error'); return; }
   var p = id ? api('PATCH','/admin/services/categories/'+id,data) : api('POST','/admin/services/categories',data);
   p.then(function(){ toast(id?'Category updated':'Category created','success'); closeModal('cat-overlay'); loadCategories(); }).catch(function(e){ toast(e.message,'error'); });
 }

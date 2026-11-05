@@ -800,26 +800,45 @@ function renderRegDetail(r) {
     dItem('Emergency Jobs', r.availableEmergency ? '✅ Yes' : 'No') +
     '</div></div>';
 
-  // Documents
-  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📄 Documents</strong><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">';
-  var docs = [
-    {key:'profilePhotoUrl', label:'Profile Photo'},
-    {key:'idProofFront', label:'ID Front (' + (r.idProofType||'') + ')'},
-    {key:'idProofBack', label:'ID Back'},
-    {key:'panCardUrl', label:'PAN Card'},
-    {key:'skillCertificateUrl', label:'Skill Cert'},
-    {key:'policeVerificationUrl', label:'Police Cert'},
-    {key:'cancelledChequeUrl', label:'Cheque'},
-  ];
-  docs.forEach(function(doc) {
+  // Verification checklist + documents with per-document review. The backend enforces the
+  // same rules on approval — this only shows them.
+  var a = r.assessment || { documents: [], approvalBlockers: [], readyForApproval: false };
+  var canReview = !!r.agreedTerms && r.status !== 'APPROVED';
+  currentRegDocs = {};
+  html += '<div style="margin-bottom:16px;border-radius:8px;padding:14px;border:1.5px solid ' + (a.readyForApproval ? '#bbf7d0;background:#f0fdf4' : '#fde68a;background:#fffbeb') + '">' +
+    '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🧾 Verification Checklist</strong>' +
+    (a.readyForApproval
+      ? '<div style="margin-top:6px;font-size:13px;color:#166534;font-weight:600">✅ Complete — all required documents verified. Ready to approve.</div>'
+      : '<div style="margin-top:6px;font-size:13px;color:#92400e;font-weight:600">Approval is blocked until:</div><ul style="margin:6px 0 0 18px;font-size:13px;color:#92400e">' +
+        (a.approvalBlockers || []).map(function(b){ return '<li>' + escape(b) + '</li>'; }).join('') + '</ul>') +
+    '</div>';
+  html += '<div style="margin-bottom:16px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">📄 Documents</strong>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px">';
+  (a.documents || []).forEach(function(doc) {
     var val = r[doc.key];
-    if (!val || val === '[uploaded]') {
-      if (val) html += '<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#166534">' + doc.label + ' ✅</div>';
-    } else if (val.startsWith('data:image')) {
-      html += '<div style="text-align:center"><img src="' + val + '" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"><div style="font-size:11px;color:#6b7280;margin-top:4px">' + doc.label + '</div></div>';
-    } else if (val.startsWith('data:application/pdf')) {
-      html += '<div style="background:#fee2e2;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#991b1b">📄 ' + doc.label + '</div>';
+    var rv = doc.review;
+    var badge = !doc.uploaded
+      ? (doc.required ? '<span style="color:#b91c1c;font-weight:700">Missing (required)</span>' : '<span style="color:#9ca3af">Not provided</span>')
+      : rv && rv.status === 'VERIFIED' ? '<span style="color:#166534;font-weight:700">✅ Verified</span>'
+      : rv && rv.status === 'REJECTED' ? '<span style="color:#b91c1c;font-weight:700">❌ Rejected</span>'
+      : '<span style="color:#92400e;font-weight:700">⏳ Not reviewed</span>';
+    var preview = '';
+    if (doc.uploaded) {
+      currentRegDocs[doc.key] = val;
+      var isPdf = /^data:application\/pdf/.test(val) || /\.pdf($|\?)/i.test(val);
+      preview = isPdf
+        ? '<div onclick="openRegDoc(\'' + doc.key + '\')" style="height:110px;display:flex;align-items:center;justify-content:center;background:#fee2e2;border-radius:6px;font-weight:700;color:#991b1b;cursor:pointer">📄 PDF — click to open</div>'
+        : '<img src="' + escape(val) + '" onclick="openRegDoc(\'' + doc.key + '\')" style="width:100%;height:110px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer">';
     }
+    html += '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fff">' +
+      '<div style="font-size:12px;font-weight:700;margin-bottom:6px">' + escape(doc.label) + (doc.required ? ' <span style="color:#b91c1c">*</span>' : '') + '</div>' + preview +
+      '<div style="font-size:12px;margin-top:6px">' + badge + '</div>' +
+      (rv ? '<div style="font-size:11px;color:#6b7280;margin-top:2px">by ' + escape(rv.byName || rv.byUserId) + ' · ' + fmtDate(rv.at) + (rv.reason ? '<br>Reason: ' + escape(rv.reason) : '') + '</div>' : '') +
+      (doc.uploaded ? '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-xs btn-outline" onclick="openRegDoc(\'' + doc.key + '\')">View</button>' +
+        (canReview ? '<button class="btn btn-xs btn-primary" onclick="reviewRegDoc(\'' + doc.key + '\',\'VERIFIED\')">Verify</button>' +
+          '<button class="btn btn-xs btn-outline" style="color:#b91c1c" onclick="reviewRegDoc(\'' + doc.key + '\',\'REJECTED\')">Reject</button>' : '') +
+        '</div>' : '') +
+    '</div>';
   });
   html += '</div></div>';
 
@@ -860,6 +879,11 @@ function renderRegDetail(r) {
     '<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="saveRegDetails()">Save Details</button>' +
     '</div>';
 
+  // Decision history — who did what and when (append-only audit trail from the server)
+  var hist = r.decisionHistory || [];
+  html += '<div style="margin-bottom:16px;background:#f9fafb;border-radius:8px;padding:14px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🕓 Decision History</strong>' +
+    (hist.length ? '<div style="margin-top:8px">' + hist.map(regHistoryRow).join('') + '</div>' : '<div style="margin-top:6px;font-size:12px;color:#9ca3af">No decisions recorded yet.</div>') + '</div>';
+
   // Admin notes
   html += '<div style="margin-bottom:8px"><label style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">Internal Notes</label>' +
     '<textarea id="reg-admin-notes" class="form-control" rows="2" style="margin-top:6px" placeholder="Add admin notes…">' + escape(r.adminNotes || '') + '</textarea></div>';
@@ -870,10 +894,10 @@ function renderRegDetail(r) {
   document.getElementById('reg-detail-footer').innerHTML =
     '<select id="reg-status-select" class="form-control" style="width:200px">' +
     '<option value="PENDING"' + (r.status==='PENDING'?' selected':'') + '>Pending</option>' +
-    '<option value="APPROVED"' + (r.status==='APPROVED'?' selected':'') + '>✅ Approve</option>' +
+    '<option value="APPROVED"' + (r.status==='APPROVED'?' selected':'') + (a.readyForApproval || r.status==='APPROVED' ? '' : ' disabled') + '>✅ Approve' + (a.readyForApproval || r.status==='APPROVED' ? '' : ' (blocked — see checklist)') + '</option>' +
     '<option value="REJECTED"' + (r.status==='REJECTED'?' selected':'') + '>❌ Reject</option>' +
     '<option value="HOLD"' + (r.status==='HOLD'?' selected':'') + '>⏸ Hold</option>' +
-    '<option value="MORE_DOCS"' + (r.status==='MORE_DOCS'?' selected':'') + '>📋 Request More Docs</option>' +
+    '<option value="MORE_DOCS"' + (r.status==='MORE_DOCS'?' selected':'') + '>📋 Return for Correction</option>' +
     '</select>' +
     '<button class="btn btn-primary" onclick="saveRegStatus()">Save Status</button>' +
     '<button class="btn btn-outline" onclick="closeModal(\'reg-detail-overlay\')">Close</button>';
@@ -901,12 +925,60 @@ function dItem(label, val, mono) {
 function saveRegStatus() {
   var status = document.getElementById('reg-status-select').value;
   var notes = document.getElementById('reg-admin-notes').value.trim();
+  if ((status === 'REJECTED' || status === 'MORE_DOCS') && !notes) {
+    toast(status === 'REJECTED' ? 'Add a reason in Internal Notes before rejecting' : 'Add what the applicant must correct in Internal Notes', 'error');
+    return;
+  }
   api('PATCH', '/admin/partner-registrations/' + currentRegId + '/status', {status: status, adminNotes: notes})
     .then(function() {
       toast('Status updated to ' + status, 'success');
       closeModal('reg-detail-overlay');
       loadRegistrations();
     }).catch(function(e){ toast(e.message, 'error'); });
+}
+
+var currentRegDocs = {};
+var REG_ACTION_LABEL = {
+  PARTNER_REGISTRATION_SUBMITTED: 'Submitted by applicant', PARTNER_REGISTRATION_RESUBMITTED: 'Resubmitted by applicant',
+  PARTNER_REGISTRATION_APPROVED: 'Approved', PARTNER_REGISTRATION_REJECTED: 'Rejected',
+  PARTNER_REGISTRATION_RETURNED_FOR_CORRECTION: 'Returned for correction', PARTNER_REGISTRATION_ON_HOLD: 'Put on hold',
+  PARTNER_REGISTRATION_SET_PENDING: 'Set back to pending', PARTNER_DOCUMENT_VERIFIED: 'Document verified', PARTNER_DOCUMENT_REJECTED: 'Document rejected',
+};
+function regHistoryRow(h) {
+  var d = h.details || {};
+  var who = h.actor ? (h.actor.name || h.actor.email || h.actor.phone || h.actor.id) : '—';
+  var whoExtra = h.actor && h.actor.email ? ' (' + h.actor.email + ')' : '';
+  var change = d.fromStatus || d.toStatus ? ' · ' + escape(d.fromStatus || '—') + ' → ' + escape(d.toStatus || '—') : '';
+  return '<div style="padding:6px 0;border-bottom:1px solid #e5e7eb;font-size:12.5px">' +
+    '<strong>' + escape(REG_ACTION_LABEL[h.action] || h.action) + (d.documentLabel ? ': ' + escape(d.documentLabel) : '') + '</strong>' + change +
+    '<div style="color:#6b7280">' + escape(who + whoExtra) + ' · ' + escape(h.actorRole || '') + ' · ' + fmtDate(h.at) + '</div>' +
+    (d.reason ? '<div style="color:#374151">Reason: ' + escape(d.reason) + '</div>' : '') +
+  '</div>';
+}
+// Opens a stored KYC document in a new tab (data: URLs can't be navigated to directly).
+function openRegDoc(key) {
+  var val = currentRegDocs[key];
+  if (!val) return;
+  if (/^https:/.test(val)) { window.open(val, '_blank', 'noopener'); return; }
+  var m = /^data:([^;]+);base64,(.*)$/.exec(val);
+  if (!m) return;
+  var bin = atob(m[2]), bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  var url = URL.createObjectURL(new Blob([bytes], { type: m[1] }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+}
+function reviewRegDoc(key, decision) {
+  var reason = '';
+  if (decision === 'REJECTED') {
+    reason = prompt('Why is this document rejected? The applicant will see this reason.');
+    if (reason === null) return;
+    reason = reason.trim();
+    if (!reason) { toast('A reason is required to reject a document', 'error'); return; }
+  }
+  api('PATCH', '/admin/partner-registrations/' + currentRegId + '/documents/' + encodeURIComponent(key), { decision: decision, reason: reason || undefined })
+    .then(function(){ toast(decision === 'VERIFIED' ? 'Document verified' : 'Document rejected', 'success'); viewReg(currentRegId); })
+    .catch(function(e){ toast(e.message, 'error'); });
 }
 
 // ── ACTIVE PARTNER DETAIL (photo, docs, address/city requests, wallet, withdrawals) ──
@@ -961,6 +1033,23 @@ function renderVendorDetail(v) {
         '<div style="display:flex;gap:6px">' +
         '<button class="btn btn-xs btn-success" onclick="approveCityUpdateReq(\'' + r.id + '\')">✓ Approve</button>' +
         '<button class="btn btn-xs btn-warning" onclick="rejectCityUpdateReq(\'' + r.id + '\')">✗ Reject</button>' +
+        '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Pending bank-detail change requests (filed from the partner app)
+  var pendingBank = (v.bankUpdateRequests || []).filter(function(r){ return r.status === 'PENDING'; });
+  if (pendingBank.length) {
+    html += '<div style="margin-bottom:16px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px">' +
+      '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#92400e">🏦 Pending Bank Details Change</strong>' +
+      '<div style="font-size:12px;color:#6b7280;margin-top:4px">Current: ' + escape(v.bankAccountHolder || '—') + ' · ' + escape(v.bankAccountNumber || '—') + ' · ' + escape(v.bankIfsc || '—') + '</div>';
+    pendingBank.forEach(function(r) {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;row-gap:8px;margin-top:10px">' +
+        '<div style="font-size:13px">Requested: <strong>' + escape(r.accountName) + '</strong> · ' + escape(r.accountNumber) + ' · ' + escape(r.ifsc) + '<br><small style="color:#6b7280">' + fmtDateShort(r.createdAt) + '</small></div>' +
+        '<div style="display:flex;gap:6px">' +
+        '<button class="btn btn-xs btn-success" onclick="approveBankUpdateReq(\'' + r.id + '\')">✓ Approve</button>' +
+        '<button class="btn btn-xs btn-warning" onclick="rejectBankUpdateReq(\'' + r.id + '\')">✗ Reject</button>' +
         '</div></div>';
     });
     html += '</div>';
@@ -1021,7 +1110,27 @@ function renderVendorDetail(v) {
   }
   html += '</div>';
 
+  // Who approved this partner and the full decision history (filled in asynchronously)
+  html += '<div id="vendor-approval-history" style="margin-top:16px;background:#f9fafb;border-radius:8px;padding:14px"><strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🛡️ Approval Record</strong><div style="margin-top:6px;font-size:12px;color:#9ca3af">Loading…</div></div>';
+
   document.getElementById('vendor-detail-body').innerHTML = html;
+  loadVendorApprovalHistory(v.id);
+}
+
+function loadVendorApprovalHistory(vendorId) {
+  api('GET', '/admin/partner-registrations/vendor/' + encodeURIComponent(vendorId) + '/history').then(function(h) {
+    var el = document.getElementById('vendor-approval-history');
+    if (!el || currentVendorDetailId !== vendorId) return;
+    var a = h.approvedBy;
+    var head = a
+      ? '<div style="margin-top:6px;font-size:13px"><strong>Approved by ' + escape(a.name || a.email || a.phone || a.id) + '</strong>' + (a.email ? ' (' + escape(a.email) + ')' : '') + ' on ' + fmtDate(a.at) + '</div>'
+      : '<div style="margin-top:6px;font-size:13px;color:#6b7280">No recorded approval — this partner was created before approval auditing (or added directly).</div>';
+    el.innerHTML = '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🛡️ Approval Record</strong>' + head +
+      ((h.history || []).length ? '<div style="margin-top:8px">' + h.history.map(regHistoryRow).join('') + '</div>' : '');
+  }).catch(function(e) {
+    var el = document.getElementById('vendor-approval-history');
+    if (el) el.innerHTML = '<strong style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">🛡️ Approval Record</strong><div style="margin-top:6px;font-size:12px;color:#b91c1c">Could not load: ' + escape(e.message) + '</div>';
+  });
 }
 
 // Full, business-usable financial ledger export — every entry enriched with the related
@@ -1073,6 +1182,17 @@ function approveCityUpdateReq(id) {
 function rejectCityUpdateReq(id) {
   api('PATCH', '/admin/vendors/city-update-requests/' + id + '/reject').then(function() {
     toast('City change rejected', 'warning'); openVendorDetail(currentVendorDetailId);
+  }).catch(function(e){ toast(e.message, 'error'); });
+}
+function approveBankUpdateReq(id) {
+  if (!confirm('Approve these bank details? Future payouts to this partner will use the new account.')) return;
+  api('PATCH', '/admin/vendors/bank-update-requests/' + id + '/approve').then(function() {
+    toast('Bank details updated', 'success'); openVendorDetail(currentVendorDetailId);
+  }).catch(function(e){ toast(e.message, 'error'); });
+}
+function rejectBankUpdateReq(id) {
+  api('PATCH', '/admin/vendors/bank-update-requests/' + id + '/reject').then(function() {
+    toast('Bank change rejected', 'warning'); openVendorDetail(currentVendorDetailId);
   }).catch(function(e){ toast(e.message, 'error'); });
 }
 </script>

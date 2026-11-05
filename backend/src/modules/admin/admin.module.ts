@@ -11,9 +11,10 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, EXTRA_WORK_ITEM_PUBLIC_SELECT } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
-import { openAiComplete, parseAiJson } from '../ai-agent/openai-client';
+import { parseAiJson } from '../ai-agent/openai-client';
+import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
 import {
   ServiceDetailsAiInput, ServiceDetailsAiResult, InvalidServiceDetailsAiOutput,
   normalizeServiceDetailsInput, buildServiceDetailsMessages, validateServiceDetailsAiOutput,
@@ -69,7 +70,7 @@ export class AdminService {
   private readonly openaiKey: string;
   private readonly openaiModel: string;
 
-  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService, @Optional() private media?: MediaService) {
+  constructor(private prisma: PrismaService, private config: ConfigService, private payments: PaymentsService, private settlements: SettlementsService, private cities: CitiesService, private events: EventEmitter2, private ledger: PartnerLedgerService, private invoices: InvoicesService, private crm: CrmService, private shipments: ShipmentService, private returns: ReturnsService, private warranty: WarrantyService, private productLedger: ProductLedgerService, @Optional() private media?: MediaService, @Optional() private aiLimits?: AiLimitsService) {
     this.openaiKey = config.get('OPENAI_API_KEY', '');
     this.openaiModel = config.get('OPENAI_MODEL', 'gpt-4o-mini');
   }
@@ -484,6 +485,34 @@ export class AdminService {
     return updated;
   }
 
+  // ─── Vendor bank-detail change requests ─────────────────────────────────────────────
+  // The partner app files these (POST vendors/service/me/bank-update-request) but nothing
+  // could review them — same approve/reject shape as the city requests above. Only an
+  // approval writes the details onto ServiceVendor; pending/rejected never touch it.
+  async approveBankUpdate(id: string, adminId: string) {
+    const req = await this.prisma.vendorBankUpdateRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    await this.prisma.$transaction([
+      this.prisma.serviceVendor.update({
+        where: { id: req.vendorId },
+        data: { bankAccountHolder: req.accountName, bankAccountNumber: req.accountNumber, bankIfsc: req.ifsc },
+      }),
+      this.prisma.vendorBankUpdateRequest.update({ where: { id }, data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() } }),
+    ]);
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'VENDOR_BANK_UPDATE_APPROVED', targetType: 'VendorBankUpdateRequest', targetId: id, metadata: { ifsc: req.ifsc } });
+    return this.prisma.vendorBankUpdateRequest.findUnique({ where: { id } });
+  }
+
+  async rejectBankUpdate(id: string, adminId: string) {
+    const req = await this.prisma.vendorBankUpdateRequest.findUnique({ where: { id } });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('This request was already reviewed');
+    const updated = await this.prisma.vendorBankUpdateRequest.update({ where: { id }, data: { status: 'REJECTED', reviewedBy: adminId, reviewedAt: new Date() } });
+    await logAudit(this.prisma, { actorId: adminId, actorRole: UserRole.ADMIN, action: 'VENDOR_BANK_UPDATE_REJECTED', targetType: 'VendorBankUpdateRequest', targetId: id });
+    return updated;
+  }
+
   // ─── Vendor Wallet: Base Hold + admin hold/release ─────────────────────
   // Base Hold is a pure withdrawal-floor threshold (see PartnerLedgerService.availableBalance)
   // — no ledger entry, just the stored field an admin can adjust per vendor.
@@ -814,7 +843,7 @@ export class AdminService {
         serviceItems: { include: { service: { include: { category: { select: { name: true } } } } } },
         address: true,
         items: { include: { product: { select: { name: true, sku: true, images: true } } } },
-        extraWorkItems: true,
+        extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT },
         invoice: true,
       },
     });
@@ -1768,10 +1797,14 @@ Return JSON with:
 - exclusions: array of 2-4 short bullet points of what's NOT included (e.g. spare parts, materials, exclusions)
 - faq: array of 4 objects with {q, a} — common customer questions and answers`;
 
-        const raw = await openAiComplete(this.openaiKey, this.openaiModel, [
-          { role: 'system', content: 'You are a marketing copywriter for Remont India home services. Return only valid JSON.' },
-          { role: 'user', content: prompt },
-        ], { maxTokens: 500, jsonMode: true });
+        // Shared AI budget (reserved before the call); a refusal falls back to the template below.
+        const raw = await completeWithinBudget(this.aiLimits, {
+          identityKey: 'admin-content', apiKey: this.openaiKey, model: this.openaiModel, maxTokens: 500, jsonMode: true,
+          messages: [
+            { role: 'system', content: 'You are a marketing copywriter for Remont India home services. Return only valid JSON.' },
+            { role: 'user', content: prompt },
+          ],
+        });
         return parseAiJson(raw);
       } catch (e) {
         this.logger.warn(`AI content generation failed, using template: ${e.message}`);
@@ -1817,10 +1850,14 @@ Return JSON with:
 
     let raw: string;
     try {
-      raw = await openAiComplete(this.openaiKey, this.openaiModel, buildServiceDetailsMessages(ctx), {
-        maxTokens: 700, temperature: 0.3, jsonMode: true,
+      raw = await completeWithinBudget(this.aiLimits, {
+        identityKey: 'admin-content', apiKey: this.openaiKey, model: this.openaiModel,
+        messages: buildServiceDetailsMessages(ctx), maxTokens: 700, temperature: 0.3, jsonMode: true,
       });
     } catch (e) {
+      if (e instanceof AiBudgetRefusedError) {
+        throw new ServiceUnavailableException("AI generation is unavailable right now (today's AI budget reached, usage tracking offline, or the configured model isn't approved).");
+      }
       this.logger.warn(`Service details AI request failed: ${String(e?.message || e).slice(0, 300)}`);
       throw new BadGatewayException('The AI service could not be reached. Please try again.');
     }
@@ -3413,6 +3450,14 @@ export class AdminController {
     return this.admin.rejectCityUpdate(id, u.sub);
   }
 
+  // ─── Vendor bank-detail change requests ───────────────────────────────────────────
+  @Patch('vendors/bank-update-requests/:id/approve') approveBankUpdate(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.admin.approveBankUpdate(id, u.sub);
+  }
+  @Patch('vendors/bank-update-requests/:id/reject') rejectBankUpdate(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
+    return this.admin.rejectBankUpdate(id, u.sub);
+  }
+
   // ─── Phase 2: Agency Partner Management ────────────────────────────
   @Patch('agencies/:id/approve') approveAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.approveAgency(id, u.sub); }
   @Patch('agencies/:id/suspend') suspendAgency(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.suspendAgency(id, u.sub); }
@@ -3856,7 +3901,7 @@ export class AdminController {
 }
 
 @Module({
-  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule, MediaModule, AiImagesModule],
+  imports: [PaymentsModule, MasterOrdersModule, SettlementsModule, CitiesModule, PartnerLedgerModule, InvoicesModule, CrmModule, LogisticsModule, ReturnsModule, WarrantyModule, ProductLedgerModule, MediaModule, AiImagesModule, AiLimitsModule],
   controllers: [AdminController],
   providers: [AdminService],
   exports: [AdminService],

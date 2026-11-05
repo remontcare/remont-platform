@@ -16,6 +16,7 @@ import { RetrySweepService } from './retry-sweep.service';
 import { JobRingPolicyService } from './job-ring-policy.service';
 import { ScheduledNotificationCron } from './scheduled-notification.cron';
 import { AgencyNotificationsService } from './agency-notifications.service';
+import { ExtraWorkNotificationsService } from './extra-work-notifications.service';
 
 class RegisterDeviceDto {
   @IsString() token: string;
@@ -71,7 +72,7 @@ export class NotificationEngineController {
 @Module({
   imports: [PrismaModule, NotificationsModule, WhatsappModule, AuthModule],
   controllers: [NotificationEngineController],
-  providers: [FcmService, NotificationGateway, ChannelAdapters, NotificationEngineService, RetrySweepService, JobRingPolicyService, ScheduledNotificationCron, AgencyNotificationsService],
+  providers: [FcmService, NotificationGateway, ChannelAdapters, NotificationEngineService, RetrySweepService, JobRingPolicyService, ScheduledNotificationCron, AgencyNotificationsService, ExtraWorkNotificationsService],
   exports: [NotificationEngineService],
 })
 export class NotificationEngineModule {}

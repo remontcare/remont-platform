@@ -311,11 +311,12 @@ a{color:inherit;text-decoration:none}
       </div>
       <div class="field">
         <label data-en="City" data-hi="शहर">City</label>
-        <input type="text" id="reg-city" placeholder="e.g. Bhopal">
+        <!-- Controlled list: dispatch matches baseCity/skills exactly, so a typo would mean no jobs. -->
+        <select id="reg-city"><option value="">Choose your city</option></select>
       </div>
       <div class="field">
         <label data-en="Primary Skill / Service" data-hi="मुख्य कौशल / सेवा">Primary Skill / Service</label>
-        <input type="text" id="reg-skill" placeholder="e.g. Electrician">
+        <select id="reg-skill"><option value="">Choose your main service</option></select>
       </div>
       <div class="auth-error" id="regtype-err"></div>
       <button class="btn-primary" id="regtype-btn" onclick="finishRegister()" data-en="Continue to Dashboard →" data-hi="डैशबोर्ड पर जाएं →">Continue to Dashboard →</button>
@@ -342,7 +343,7 @@ a{color:inherit;text-decoration:none}
       <div class="view active" id="view-home">
         <div class="wallet-banner">
           <div class="wb-label" data-en="Wallet Balance" data-hi="वॉलेट बैलेंस">Wallet Balance</div>
-          <div class="wb-val" id="home-wallet-val">₹0</div>
+          <div class="wb-val" id="home-wallet-val">—</div>
           <div class="wb-row">
             <div style="font-size:11px;opacity:.85"><span data-en="Today's Earnings: " data-hi="आज की कमाई: ">Today's Earnings: </span><span id="home-today-earn">₹0</span></div>
             <button class="wb-btn" onclick="goView('earnings')" data-en="View →" data-hi="देखें →">View →</button>
@@ -381,7 +382,7 @@ a{color:inherit;text-decoration:none}
       <div class="view" id="view-earnings">
         <div class="wallet-banner">
           <div class="wb-label" data-en="Total Wallet Balance" data-hi="कुल वॉलेट बैलेंस">Total Wallet Balance</div>
-          <div class="wb-val" id="earn-wallet-val">₹0</div>
+          <div class="wb-val" id="earn-wallet-val">—</div>
           <div class="wb-row"><div style="font-size:11px;opacity:.85" id="earn-pending-label" data-en="Pending payout" data-hi="लंबित भुगतान">Pending payout</div><button class="wb-btn" onclick="togglePayoutHistory()" data-en="Payout History" data-hi="भुगतान इतिहास">Payout History</button></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <input type="number" id="topup-amount" placeholder="Amount" style="flex:1;padding:10px 12px;border:1.5px solid rgba(255,255,255,.4);border-radius:8px;font-size:13px;background:rgba(255,255,255,.15);color:#fff">
@@ -412,7 +413,8 @@ a{color:inherit;text-decoration:none}
 
         <div class="section-title" style="margin-top:20px" data-en="Available to Withdraw" data-hi="निकासी के लिए उपलब्ध">Available to Withdraw</div>
         <div class="wallet-banner" style="margin-bottom:12px">
-          <div class="wb-val" id="available-balance-val">₹0</div>
+          <div class="wb-val" id="available-balance-val">—</div>
+          <div style="font-size:11px;opacity:.85;margin-top:2px" id="available-balance-note"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <input type="number" id="withdrawal-amount" placeholder="Amount" style="flex:1;padding:10px 12px;border:1.5px solid rgba(255,255,255,.4);border-radius:8px;font-size:13px;background:rgba(255,255,255,.15);color:#fff">
             <button class="wb-btn" onclick="requestWithdrawal()">Request Withdrawal</button>
@@ -677,7 +679,7 @@ function verifyLoginOtp(){
 function loadVendorProfile(){
   return apiFetch('/vendors/service/me')
     .then(function(v){ vendorProfile=v; enterDashboard(); })
-    .catch(function(){ showScreen('screen-regtype'); });
+    .catch(function(){ showScreen('screen-regtype'); loadRegisterOptions(); });
 }
 function afterAuth(){
   return apiFetch('/auth/me')
@@ -693,6 +695,37 @@ function selectType(t){
   document.getElementById('type-agency').classList.toggle('selected',t==='agency');
   document.getElementById('reg-business-field').style.display = t==='agency' ? 'block':'none';
   window.vendorType=t;
+}
+// Fills the registration city/skill pickers from the same data the backend validates
+// against (active cities, active service categories). If a list is empty or can't load,
+// that picker falls back to free text so onboarding is never blocked (the backend also
+// accepts free text only when nothing is configured).
+function loadRegisterOptions(){
+  function fill(id, items, toOption){
+    var sel = document.getElementById(id);
+    if (!sel || sel.tagName !== 'SELECT') return;
+    if (!items || !items.length) { fallbackToText(id); return; }
+    items.forEach(function(it){
+      var o = toOption(it); var opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label; sel.appendChild(opt);
+    });
+  }
+  function fallbackToText(id){
+    var sel = document.getElementById(id);
+    if (!sel || sel.tagName !== 'SELECT') return;
+    var input = document.createElement('input');
+    input.type = 'text'; input.id = id;
+    input.placeholder = id === 'reg-city' ? 'e.g. Bhopal' : 'e.g. Electrician';
+    sel.parentNode.replaceChild(input, sel);
+  }
+  apiFetch('/cities').then(function(list){
+    fill('reg-city', (list || []).filter(function(c){ return c && c.name; }).sort(function(a, b){ return a.name.localeCompare(b.name); }),
+      function(c){ return { value: c.name, label: c.name }; });
+  }).catch(function(){ fallbackToText('reg-city'); });
+  apiFetch('/services/categories').then(function(list){
+    fill('reg-skill', (list || []).filter(function(c){ return c && c.key && c.isActive !== false; }),
+      function(c){ return { value: c.key, label: c.name || c.key }; });
+  }).catch(function(){ fallbackToText('reg-skill'); });
 }
 function finishRegister(){
   var err=document.getElementById('regtype-err'); err.textContent='';
@@ -943,12 +976,11 @@ function toggleOnline(){
 function loadEarnings(){
   apiFetch('/vendors/service/me/earnings').then(function(e){
     earningsData=e;
-    document.getElementById('home-wallet-val').textContent = fmtMoney(e.lifetime.pending);
     document.getElementById('home-today-earn').textContent = fmtMoney(e.today.earnings);
-    document.getElementById('earn-wallet-val').textContent = fmtMoney(e.lifetime.pending);
     earnTabRender('today');
     updateAvailableBalanceDisplay();
   }).catch(function(e){ console.warn('earnings load failed', e.message); });
+  loadWalletBalance();
   loadRefundRequests();
 }
 
@@ -1399,7 +1431,12 @@ function addExtraItem(){
 }
 function renderExtraList(){
   var wrap=document.getElementById('extra-list'); if(!wrap)return;
-  wrap.innerHTML=jfState.extras.map(function(e){ return `<div class="extra-item"><span>${escapeHtml(e.description)}</span><span style="font-weight:700">${fmtMoney(e.amount)}</span></div>`; }).join('');
+  // Customer/authorized-person decision on each sent item; unsent (local) items have no status yet.
+  var EXTRA_STATUS={PENDING:['Pending customer approval','#92400e'], APPROVED:['Approved — added to bill','#166534'], REJECTED:['Rejected — not billed','#991b1b']};
+  wrap.innerHTML=jfState.extras.map(function(e){
+    var st=e._pending?null:EXTRA_STATUS[e.status||(e.customerApproved?'APPROVED':'PENDING')];
+    return `<div class="extra-item"><span>${escapeHtml(e.description)}${st?`<br><small style="color:${st[1]};font-weight:600">${st[0]}</small>`:''}</span><span style="font-weight:700">${fmtMoney(e.amount)}</span></div>`;
+  }).join('');
 }
 function sendExtraForApproval(){
   var pending=jfState.extras.filter(function(e){return e._pending;});
@@ -1609,14 +1646,39 @@ function renderWithdrawalHistory(){
     return '<div class="txn-row"><div class="txn-info"><div class="tr-title">Withdrawal Request</div><div class="tr-date">'+escapeHtml(date)+'</div></div><div style="text-align:right"><div class="txn-amt">'+fmtMoney(w.amount)+'</div><span class="badge '+(badgeClass[w.status]||'pending')+'">'+escapeHtml(w.status)+'</span></div></div>';
   }).join('');
 }
-function updateAvailableBalanceDisplay(){
-  var el = document.getElementById('available-balance-val');
-  if (!el || !earningsData) return;
-  var ownBalance = Number(earningsData.lifetime.pending || 0);
-  var pending = withdrawalsMine.filter(function(w){ return w.status === 'PENDING'; }).reduce(function(s,w){ return s + Number(w.amount); }, 0);
-  var available = ownBalance + teamLedgerTotal - pending;
-  el.textContent = fmtMoney(available > 0 ? available : 0);
+// Wallet figures come only from GET /vendors/wallet/available — the same backend figure the
+// withdrawal API enforces (ledger balance − base hold − pending withdrawals, team-pooled for
+// an agency owner). Never re-derived here, and a failed load is shown as an error, never ₹0.
+var walletBalanceSeq = 0;
+function setWalletFigures(text, note, isError){
+  ['home-wallet-val','earn-wallet-val','available-balance-val'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.textContent = text;
+  });
+  var n = document.getElementById('available-balance-note'); if (n) n.innerHTML = note || '';
+  var lbl = document.getElementById('earn-pending-label'); if (lbl) lbl.innerHTML = isError ? note : (lbl.dataset.breakdown || lbl.innerHTML);
 }
+function loadWalletBalance(){
+  var seq = ++walletBalanceSeq;
+  return apiFetch('/vendors/wallet/available').then(function(b){
+    if (seq !== walletBalanceSeq) return;
+    var ledger = Number(b.ledgerBalance != null ? b.ledgerBalance : b.available);
+    document.getElementById('home-wallet-val').textContent = fmtMoney(ledger);
+    document.getElementById('earn-wallet-val').textContent = fmtMoney(ledger);
+    document.getElementById('available-balance-val').textContent = b.canWithdraw === false ? fmtMoney(0) : fmtMoney(b.available);
+    var parts = [];
+    if (Number(b.heldAmount) > 0) parts.push('Held (base hold) ' + fmtMoney(b.heldAmount));
+    if (Number(b.pendingWithdrawals) > 0) parts.push('Pending withdrawals ' + fmtMoney(b.pendingWithdrawals));
+    var lbl = document.getElementById('earn-pending-label');
+    if (lbl) { lbl.dataset.breakdown = escapeHtml('Available ' + fmtMoney(b.available) + (parts.length ? ' · ' + parts.join(' · ') : '')); lbl.innerHTML = lbl.dataset.breakdown; }
+    document.getElementById('available-balance-note').innerHTML = b.canWithdraw === false
+      ? 'Team members cannot withdraw — your agency owner withdraws for the team.'
+      : escapeHtml(parts.join(' · '));
+  }).catch(function(e){
+    if (seq !== walletBalanceSeq) return;
+    setWalletFigures('Unavailable', 'Could not load your wallet balance. <a href="#" onclick="loadWalletBalance();return false" style="color:#fff;text-decoration:underline;font-weight:700">Retry</a>', true);
+  });
+}
+function updateAvailableBalanceDisplay(){ loadWalletBalance(); }
 function requestWithdrawal(){
   var input = document.getElementById('withdrawal-amount');
   var amount = Number(input.value);

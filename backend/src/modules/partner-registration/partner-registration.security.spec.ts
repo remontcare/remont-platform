@@ -1,13 +1,30 @@
+import sharp from 'sharp';
+
+// Documents now go through the shared KYC check, which includes a ClamAV scan — mocked as
+// clean here (same hoisting-safe pattern as upload-security.interceptor.spec.ts).
+jest.mock('clamscan', () => {
+  const scanStream = jest.fn().mockResolvedValue({ isInfected: false, viruses: [] });
+  const init = jest.fn().mockImplementation(async () => ({ scanStream }));
+  return jest.fn().mockImplementation(() => ({ init }));
+});
+
 import { PartnerRegistrationService } from './partner-registration.module';
 
+let realJpeg: Buffer;
+beforeAll(async () => {
+  realJpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } }).jpeg().toBuffer();
+});
+
 /**
- * saveStep() persists an arbitrary partial payload from an unauthenticated applicant (it's a
- * public multi-step draft-save endpoint). It must strip trust fields the applicant could
+ * saveStep() persists an arbitrary partial payload from the applicant (it's a
+ * self-service multi-step draft-save endpoint). It must strip trust fields the applicant could
  * otherwise mass-assign onto their own draft: invitedByAgencyId (grants agency membership on
  * approval — must only be set by an agency owner's own inviteAgencyMember() call),
  * agreedTerms/agreedAt (the legal-consent gate — only submit() may set these), and userId
  * (linked only once an application is actually approved).
  */
+const OWNER: any = { sub: 'owner', phone: '+919666321542' };
+
 function makeService() {
   const prisma: any = {
     partnerRegistration: { findUnique: jest.fn(), update: jest.fn() },
@@ -17,20 +34,20 @@ function makeService() {
   return { service, prisma };
 }
 
-// A JPEG data URL with correct magic bytes (FF D8 FF), well under the 5MB cap.
+// A real, decodable JPEG data URL, well under the 5MB cap (magic bytes alone no longer pass —
+// the image must actually decode).
 function fakeJpegDataUrl(): string {
-  return `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 1, 2, 3]).toString('base64')}`;
+  return `data:image/jpeg;base64,${realJpeg.toString('base64')}`;
 }
 
 describe('PartnerRegistrationService saveStep mass-assignment protection', () => {
   it('never writes invitedByAgencyId from client-supplied step data', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({
-      registrationId: 'PR-1', agreedTerms: false, currentStep: 1,
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1,
     });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
-    await service.saveStep('PR-1', 2, { fullName: 'Attacker', invitedByAgencyId: 'someone-elses-agency-id' });
+    await service.saveStep('PR-1', 2, { fullName: 'Attacker', invitedByAgencyId: 'someone-elses-agency-id' }, OWNER);
 
     const writeData = prisma.partnerRegistration.update.mock.calls[0][0].data;
     expect(writeData.invitedByAgencyId).toBeUndefined();
@@ -39,14 +56,13 @@ describe('PartnerRegistrationService saveStep mass-assignment protection', () =>
 
   it('never writes agreedTerms/agreedAt/userId from client-supplied step data', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({
-      registrationId: 'PR-1', agreedTerms: false, currentStep: 1,
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1,
     });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
     await service.saveStep('PR-1', 2, {
       agreedTerms: true, agreedAt: new Date().toISOString(), userId: 'some-other-user-id',
-    });
+    }, OWNER);
 
     const writeData = prisma.partnerRegistration.update.mock.calls[0][0].data;
     expect(writeData.agreedTerms).toBeUndefined();
@@ -63,46 +79,46 @@ describe('PartnerRegistrationService saveStep mass-assignment protection', () =>
 describe('PartnerRegistrationService document upload validation', () => {
   it('rejects a document field whose content does not match a real JPG/PNG/PDF magic byte', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
 
     const fakeExecutableDisguisedAsJpeg = `data:image/jpeg;base64,${Buffer.from('MZ\x90\x00 not actually a jpeg').toString('base64')}`;
 
-    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: fakeExecutableDisguisedAsJpeg }))
+    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: fakeExecutableDisguisedAsJpeg }, OWNER))
       .rejects.toThrow(/does not match its declared type/);
     expect(prisma.partnerRegistration.update).not.toHaveBeenCalled();
   });
 
   it('rejects a document field with a disallowed declared mime type', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
 
-    await expect(service.saveStep('PR-1', 5, { panCardUrl: 'data:application/x-msdownload;base64,TVo=' }))
-      .rejects.toThrow(/only JPG, PNG, or PDF/);
+    await expect(service.saveStep('PR-1', 5, { panCardUrl: 'data:application/x-msdownload;base64,TVo=' }, OWNER))
+      .rejects.toThrow(/only JPG, PNG, WebP or PDF/);
   });
 
   it('rejects an oversized document', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
 
     const oversized = `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(6 * 1024 * 1024)]).toString('base64')}`;
 
-    await expect(service.saveStep('PR-1', 5, { idProofFront: oversized })).rejects.toThrow(/under 5MB/);
+    await expect(service.saveStep('PR-1', 5, { idProofFront: oversized }, OWNER)).rejects.toThrow(/under 5MB/);
   });
 
   it('accepts a document field with real magic bytes and a valid mime', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
-    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: fakeJpegDataUrl() })).resolves.toEqual({ saved: true, step: 5 });
+    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: fakeJpegDataUrl() }, OWNER)).resolves.toEqual({ saved: true, step: 5 });
   });
 
   it('leaves an already-uploaded placeholder ("[uploaded]") alone — getDraft()\'s own redaction round-tripping back', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: false, currentStep: 1, status: 'PENDING' });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
-    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: '[uploaded]' })).resolves.toEqual({ saved: true, step: 5 });
+    await expect(service.saveStep('PR-1', 5, { profilePhotoUrl: '[uploaded]' }, OWNER)).resolves.toEqual({ saved: true, step: 5 });
   });
 });
 
@@ -113,25 +129,25 @@ describe('PartnerRegistrationService document upload validation', () => {
 describe('PartnerRegistrationService — resubmission after MORE_DOCS/HOLD', () => {
   it('blocks further edits once fully submitted and still PENDING', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'PENDING' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'PENDING' });
 
-    await expect(service.saveStep('PR-1', 5, { fullName: 'Edited' })).rejects.toThrow(/already submitted/);
+    await expect(service.saveStep('PR-1', 5, { fullName: 'Edited' }, OWNER)).rejects.toThrow(/already submitted/);
   });
 
   it('allows edits when status is MORE_DOCS even though fully submitted before', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'MORE_DOCS' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'MORE_DOCS' });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
-    await expect(service.saveStep('PR-1', 5, { panCardUrl: fakeJpegDataUrl() })).resolves.toEqual({ saved: true, step: 5 });
+    await expect(service.saveStep('PR-1', 5, { panCardUrl: fakeJpegDataUrl() }, OWNER)).resolves.toEqual({ saved: true, step: 5 });
   });
 
   it('allows edits when status is HOLD', async () => {
     const { service, prisma } = makeService();
-    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'HOLD' });
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ phone: '+919666321542', registrationId: 'PR-1', agreedTerms: true, currentStep: 8, status: 'HOLD' });
     prisma.partnerRegistration.update.mockResolvedValue({});
 
-    await expect(service.saveStep('PR-1', 3, { city: 'Indore' })).resolves.toEqual({ saved: true, step: 3 });
+    await expect(service.saveStep('PR-1', 3, { city: 'Indore' }, OWNER)).resolves.toEqual({ saved: true, step: 3 });
   });
 });
 
@@ -141,10 +157,16 @@ describe('PartnerRegistrationService — resubmission after MORE_DOCS/HOLD', () 
  */
 describe('PartnerRegistrationService.submit — OTP verification + mandatory in-India GPS', () => {
   function baseRec(overrides: Record<string, unknown> = {}) {
+    // A complete, not-yet-submitted draft (agreedTerms is only ever set by submit()).
+    const IMG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     return {
-      registrationId: 'PR-1', fullName: 'Rahul', phone: '+919666321542',
-      categories: ['ELECTRICAL'],
-      agreedTerms: true, agreedBackground: true, agreedCommission: true, agreedStandards: true,
+      id: 'row-1', registrationId: 'PR-1', fullName: 'Rahul', phone: '+919666321542',
+      gender: 'MALE', dateOfBirth: '1990-04-12', city: 'Bhopal',
+      categories: ['ELECTRICAL'], experienceYears: '3-5',
+      idProofType: 'AADHAAR', idProofFront: IMG, profilePhotoUrl: IMG,
+      bankAccountName: 'Rahul', bankAccountNumber: '50100123456789', bankIfsc: 'HDFC0001234',
+      emergencyName: 'Sita', emergencyRelation: 'SPOUSE', emergencyPhone: '9876543210',
+      agreedTerms: false, agreedBackground: true, agreedCommission: true, agreedStandards: true,
       latitude: 23.25, longitude: 77.41, status: 'PENDING',
       ...overrides,
     };
@@ -163,7 +185,7 @@ describe('PartnerRegistrationService.submit — OTP verification + mandatory in-
     const { service, prisma } = makeServiceWithUser(null);
     prisma.partnerRegistration.findUnique.mockResolvedValue(baseRec());
 
-    await expect(service.submit('PR-1')).rejects.toThrow(/not verified/);
+    await expect(service.submit('PR-1', OWNER)).rejects.toThrow(/not verified/);
     expect(prisma.partnerRegistration.update).not.toHaveBeenCalled();
   });
 
@@ -171,7 +193,7 @@ describe('PartnerRegistrationService.submit — OTP verification + mandatory in-
     const { service, prisma } = makeServiceWithUser({ isVerified: false });
     prisma.partnerRegistration.findUnique.mockResolvedValue(baseRec());
 
-    await expect(service.submit('PR-1')).rejects.toThrow(/not verified/);
+    await expect(service.submit('PR-1', OWNER)).rejects.toThrow(/not verified/);
     expect(prisma.partnerRegistration.update).not.toHaveBeenCalled();
   });
 
@@ -179,7 +201,7 @@ describe('PartnerRegistrationService.submit — OTP verification + mandatory in-
     const { service, prisma } = makeServiceWithUser({ isVerified: true });
     prisma.partnerRegistration.findUnique.mockResolvedValue(baseRec({ latitude: null, longitude: null }));
 
-    await expect(service.submit('PR-1')).rejects.toThrow(/Location is required/);
+    await expect(service.submit('PR-1', OWNER)).rejects.toThrow(/Location is required/);
   });
 
   it('rejects submit for a GPS location outside India', async () => {
@@ -187,14 +209,14 @@ describe('PartnerRegistrationService.submit — OTP verification + mandatory in-
     // London
     prisma.partnerRegistration.findUnique.mockResolvedValue(baseRec({ latitude: 51.5074, longitude: -0.1278 }));
 
-    await expect(service.submit('PR-1')).rejects.toThrow(/within India/);
+    await expect(service.submit('PR-1', OWNER)).rejects.toThrow(/within India/);
   });
 
   it('accepts submit for an OTP-verified user with a valid in-India GPS location', async () => {
     const { service, prisma } = makeServiceWithUser({ isVerified: true });
     prisma.partnerRegistration.findUnique.mockResolvedValue(baseRec());
 
-    const result = await service.submit('PR-1');
+    const result = await service.submit('PR-1', OWNER);
 
     expect(result.status).toBe('PENDING');
     expect(prisma.partnerRegistration.update).toHaveBeenCalledWith(expect.objectContaining({
@@ -254,5 +276,16 @@ describe('PartnerRegistrationService.adminUpdateDetails', () => {
 
     await expect(service.adminUpdateDetails('reg-1', { panCardUrl: 'data:image/jpeg;base64,bm90IGEgcmVhbCBqcGVn' }))
       .rejects.toThrow(/does not match its declared type/);
+  });
+});
+
+/** draft exposes PAN + bank account number — it must answer only for the token's own phone. */
+describe('PartnerRegistrationService.getDraft — owner only', () => {
+  it("returns the draft to its owner and 'not found' to anyone else", async () => {
+    const { service, prisma } = makeService();
+    prisma.partnerRegistration.findUnique.mockResolvedValue({ registrationId: 'PR-1', phone: '+919666321542', bankAccountNumber: '123' });
+
+    await expect(service.getDraft('PR-1', { sub: 'x', phone: '+911111111111' } as any)).rejects.toThrow(/not found/);
+    await expect(service.getDraft('PR-1', { sub: 'o', phone: '9666321542' } as any)).resolves.toMatchObject({ registrationId: 'PR-1' });
   });
 });

@@ -28,6 +28,15 @@ export interface OpenAiToolCall {
   function: { name: string; arguments: string };
 }
 
+/** Token counts as reported by the provider (null when it didn't send them). */
+export interface OpenAiUsage { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+
+/** Shared call options: a hard timeout (no hung requests) and a usage callback for cost tracking. */
+export interface OpenAiCallControls {
+  timeoutMs?: number;
+  onUsage?: (usage: OpenAiUsage | null) => void;
+}
+
 export interface OpenAiResponseMessage {
   role: 'assistant';
   content: string | null;
@@ -44,9 +53,11 @@ async function callChatCompletions(
     jsonMode?: boolean;
     tools?: OpenAiTool[];
     toolChoice?: 'auto' | 'none';
-  } = {},
+  } & OpenAiCallControls = {},
 ): Promise<OpenAiResponseMessage> {
-  const { maxTokens = 400, temperature = 0.7, jsonMode = false, tools, toolChoice } = options;
+  // 60s default only stops a truly hung call for the other features sharing this client
+  // (seller enrichment, admin service details); Remi chat passes its own shorter limit.
+  const { maxTokens = 400, temperature = 0.7, jsonMode = false, tools, toolChoice, timeoutMs = 60000, onUsage } = options;
 
   const body: Record<string, unknown> = {
     model,
@@ -67,14 +78,19 @@ async function callChatCompletions(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    // One attempt only, never retried here: a failed or slow call must not turn into
+    // repeated paid calls. The caller falls back to the rule-based reply instead.
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText);
-    throw new Error(`OpenAI ${res.status}: ${errText}`);
+    // Status only — the provider's error body is not echoed into logs or responses.
+    onUsage?.(null);
+    throw new Error(`OpenAI request failed with status ${res.status}`);
   }
 
   const data: any = await res.json();
+  onUsage?.(data?.usage ?? null);
   const message = data.choices?.[0]?.message || { role: 'assistant', content: '' };
   return { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls };
 }
@@ -85,7 +101,7 @@ export async function openAiComplete(
   apiKey: string,
   model: string,
   messages: OpenAiMessage[],
-  options: { maxTokens?: number; temperature?: number; jsonMode?: boolean } = {},
+  options: { maxTokens?: number; temperature?: number; jsonMode?: boolean } & OpenAiCallControls = {},
 ): Promise<string> {
   const result = await callChatCompletions(apiKey, model, messages, options);
   return (result.content || '').trim();
@@ -98,7 +114,7 @@ export async function openAiChatWithTools(
   model: string,
   messages: OpenAiMessage[],
   tools: OpenAiTool[],
-  options: { maxTokens?: number; temperature?: number } = {},
+  options: { maxTokens?: number; temperature?: number } & OpenAiCallControls = {},
 ): Promise<OpenAiResponseMessage> {
   return callChatCompletions(apiKey, model, messages, { ...options, tools, toolChoice: 'auto' });
 }

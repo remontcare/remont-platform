@@ -19,8 +19,9 @@ import { normalizeSkillKey } from '../../common';
  * bank details, addresses or ids ever leave this endpoint.
  *
  * Status definitions reuse the website's own fields (nothing new is stored):
- *   onboarding  PartnerRegistration PENDING | HOLD | MORE_DOCS (not yet approved, and
- *               the phone is not already a vendor) + ServiceVendor PENDING_VERIFICATION
+ *   onboarding  PartnerRegistration PENDING | HOLD | MORE_DOCS and submitted (agreedTerms;
+ *               not yet approved, and the phone is not already a vendor)
+ *               + ServiceVendor PENDING_VERIFICATION
  *   onboarded   ServiceVendor ACTIVE                      (= live + offline)
  *   live        ServiceVendor ACTIVE and isOnline
  *   offline     ServiceVendor ACTIVE and not isOnline
@@ -148,7 +149,8 @@ export class PartnerOpsService {
         take: MAX_ROWS,
       }),
       p.partnerRegistration.findMany({
-        where: { status: { in: PENDING_PARTNER_APPLICATION } },
+        // agreedTerms: submitted only — an unsubmitted draft is also status PENDING.
+        where: { status: { in: PENDING_PARTNER_APPLICATION }, agreedTerms: true },
         select: { phone: true, city: true, categories: true },
         take: MAX_ROWS,
       }),

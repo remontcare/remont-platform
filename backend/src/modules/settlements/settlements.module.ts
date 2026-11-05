@@ -26,13 +26,6 @@ export class SettlementsService {
     withdrawalRequestId?: string,
   ) {
     if (!amount || amount <= 0) throw new BadRequestException('Enter a valid settlement amount');
-    const vendor = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId } });
-    if (!vendor) throw new NotFoundException('Partner not found');
-    if (amount > Number(vendor.pendingPayout)) {
-      throw new BadRequestException(
-        `Amount exceeds pending payout (₹${vendor.pendingPayout} available)`,
-      );
-    }
 
     // Accounting fix: this is the ONE place a vendor payout actually gets recorded — both
     // the formal withdrawal-approval flow (AdminService.approveWithdrawal) and the direct
@@ -45,7 +38,30 @@ export class SettlementsService {
     // pendingPayout decrement also closes a smaller atomicity gap that existed in
     // approveWithdrawal() before (it called this method, then posted its ledger entry as a
     // separate, later transaction).
+    //
+    // Race/idempotency fix: the balance check used to read ServiceVendor.pendingPayout via a
+    // plain findUnique BEFORE this transaction — two concurrent payouts for the same vendor
+    // could both pass that stale check and both debit, overdrawing the balance. The lookup +
+    // check now happen inside this same row-locked transaction (mirrors WithdrawalService.
+    // request()'s own FOR UPDATE lock), so a second concurrent call always sees the first's
+    // already-committed decrement. `referenceNumber` doubles as an idempotent financial
+    // reference when supplied: a retried call with the same (vendorId, referenceNumber)
+    // returns the original settlement instead of creating a second payout for it.
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ServiceVendor" WHERE id = ${vendorId} FOR UPDATE`;
+      const vendor = await tx.serviceVendor.findUnique({ where: { id: vendorId } });
+      if (!vendor) throw new NotFoundException('Partner not found');
+
+      if (referenceNumber) {
+        const existing = await tx.partnerSettlement.findFirst({ where: { vendorId, referenceNumber } });
+        if (existing) return existing;
+      }
+      if (amount > Number(vendor.pendingPayout)) {
+        throw new BadRequestException(
+          `Amount exceeds pending payout (₹${vendor.pendingPayout} available)`,
+        );
+      }
+
       const settlement = await tx.partnerSettlement.create({
         data: { vendorId, amount, mode, referenceNumber, notes, paidBy },
       });

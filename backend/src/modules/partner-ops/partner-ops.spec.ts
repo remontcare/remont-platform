@@ -86,6 +86,14 @@ describe('PartnerOpsService.summary', () => {
     expect(prisma.partnerRegistration.findMany.mock.calls[0][0].where.status.in).toEqual(['PENDING', 'HOLD', 'MORE_DOCS']);
   });
 
+  it('counts only submitted applications as onboarding — an unsubmitted draft (agreedTerms=false) is also PENDING', async () => {
+    const { service, prisma } = makeService({});
+    await service.summary();
+    expect(prisma.partnerRegistration.findMany.mock.calls[0][0].where).toEqual({
+      status: { in: ['PENDING', 'HOLD', 'MORE_DOCS'] }, agreedTerms: true,
+    });
+  });
+
   it('counts sellers with the same status rules (isOpen is the seller online toggle)', async () => {
     const { service } = makeService({
       sellers: [

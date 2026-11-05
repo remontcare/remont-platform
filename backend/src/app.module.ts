@@ -49,6 +49,7 @@ import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module
 import { LogisticsModule } from './modules/logistics/logistics.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { LegalModule } from './modules/legal/legal.module';
+import { AuthorizedPersonModule } from './modules/authorized-person/authorized-person.module';
 
 @Module({
   imports: [
@@ -110,6 +111,7 @@ import { LegalModule } from './modules/legal/legal.module';
     LegalModule, // Legal & Policies CMS (admin/legal, public /legal)
     AiCatalogModule,
     PartnerOpsModule, // read-only partner network summary for the CRM (API key)
+    AuthorizedPersonModule, // order-scoped Authorized Person (extra-work approvals)
     ReviewsModule,
     HealthModule,
     LocationModule,
