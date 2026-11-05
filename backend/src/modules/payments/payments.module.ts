@@ -1,5 +1,5 @@
 import {
-  Module, Injectable, Controller, Get, Post, Query, Body, UseGuards,
+  Module, Injectable, Controller, Get, Post, Query, Body, UseGuards, ForbiddenException,
   BadRequestException, Logger, Headers, Req, OnModuleInit,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
@@ -7,7 +7,20 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER } from '../../common';
+import { JwtAuthGuard, Public, CurrentUser, JwtPayload, VENDOR_WALLET_TOPUP_MARKER, Roles, RolesGuard } from '../../common';
+import { UserRole } from '@prisma/client';
+
+/**
+ * Razorpay reports its charge on a captured payment as `fee` (paise, INCLUDING GST) and `tax`
+ * (the GST part). Stored in rupees as the net fee and its GST separately — the GST is input tax.
+ * Empty when the payment carries no fee information (never guessed).
+ */
+export function gatewayFeeFromPayment(payment: any): { gatewayFee?: number; gatewayFeeTax?: number } {
+  if (!payment || payment.fee == null || Number.isNaN(Number(payment.fee))) return {};
+  const fee = Number(payment.fee) / 100;
+  const tax = payment.tax != null && !Number.isNaN(Number(payment.tax)) ? Number(payment.tax) / 100 : 0;
+  return { gatewayFee: Math.round((fee - tax) * 100) / 100, gatewayFeeTax: Math.round(tax * 100) / 100 };
+}
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
 interface PhonePeConfig {
@@ -131,13 +144,36 @@ export class PaymentsService implements OnModuleInit {
       notes: { orderId, amcSubscriptionId, userId },
     });
     const tx = await this.prisma.paymentTransaction.create({
-      data: { orderId, amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
+      data: { orderId, masterOrderId: await this.masterOrderIdFor(orderId), amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
     });
     return { gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id, amount, currency: 'INR', keyId: this.razorpayKeyId, txId: tx.id };
   }
 
   /** Legacy alias used by AMC and retry-payment flows */
+  /** A cart (MasterOrder) payment also records masterOrderId, so every reader can find it. */
+  private async masterOrderIdFor(orderId?: string | null): Promise<string | undefined> {
+    if (!orderId) return undefined;
+    const mo = await this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { id: true } });
+    return mo?.id;
+  }
+
   async createOrder(userId: string, amount: number, orderId?: string, amcSubscriptionId?: string) {
+    // Ownership: a client-created payment may only be attached to the caller's own order/cart/AMC
+    // (top-up markers are the caller's own wallet by definition).
+    if (orderId && orderId !== 'WALLET_TOPUP' && orderId !== VENDOR_WALLET_TOPUP_MARKER) {
+      const [o, mo] = await Promise.all([
+        this.prisma.order.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+        this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+      ]);
+      const owner = o?.customerId ?? mo?.customerId;
+      if (!owner) throw new BadRequestException('Unknown order');
+      if (owner !== userId) throw new ForbiddenException();
+    }
+    if (amcSubscriptionId) {
+      const sub = await this.prisma.amcSubscription.findUnique({ where: { id: amcSubscriptionId }, select: { userId: true } });
+      if (!sub) throw new BadRequestException('Unknown subscription');
+      if (sub.userId !== userId) throw new ForbiddenException();
+    }
     return this.createRazorpayOrder(userId, amount, orderId, amcSubscriptionId);
   }
 
@@ -202,6 +238,34 @@ export class PaymentsService implements OnModuleInit {
    * historically the thing that made the underpayment bypass possible) — this always goes
    * back to the gateway itself.
    */
+  /**
+   * Admin backfill of gateway fees for captured Razorpay payments that have none recorded —
+   * read-only fetches from Razorpay (no money moves), a bounded batch per call.
+   */
+  async backfillGatewayFees(limit = 50) {
+    if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
+    const rows = await this.prisma.paymentTransaction.findMany({
+      where: { gateway: 'RAZORPAY', status: 'PAID', gatewayPaymentId: { not: null }, gatewayFee: null, refundRequestId: null },
+      orderBy: { createdAt: 'asc' }, take: Math.min(Math.max(1, Number(limit) || 50), 200),
+    });
+    let updated = 0; const failed: { id: string; error: string }[] = []; let noFee = 0;
+    for (const row of rows) {
+      try {
+        const payment: any = await this.razorpay.payments.fetch(row.gatewayPaymentId as string);
+        const fee = gatewayFeeFromPayment(payment);
+        if (fee.gatewayFee == null) { noFee++; continue; }
+        await this.prisma.paymentTransaction.update({ where: { id: row.id }, data: fee });
+        updated++;
+      } catch (e: any) {
+        failed.push({ id: row.id, error: String(e?.error?.description || e?.message || e).slice(0, 200) });
+      }
+    }
+    const remaining = await this.prisma.paymentTransaction.count({
+      where: { gateway: 'RAZORPAY', status: 'PAID', gatewayPaymentId: { not: null }, gatewayFee: null, refundRequestId: null },
+    });
+    return { checked: rows.length, updated, withoutFeeData: noFee, failed, remaining };
+  }
+
   async getVerifiedCapturedAmount(gatewayOrderId: string, paymentId: string): Promise<number> {
     if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
     let payment: any;
@@ -243,10 +307,78 @@ export class PaymentsService implements OnModuleInit {
     throw new BadRequestException(`Cannot issue a gateway refund for a ${tx.gateway} payment — use Wallet Credit instead`);
   }
 
-  private async refundPhonePe(merchantTransactionId: string, amount: number): Promise<{ refundId: string; gateway: string }> {
+  // ─── Duplicate-safe gateway refunds (used by RefundsService's provider-refund workflow) ───
+  //
+  // Razorpay idempotent refunds: POST /v1/payments/{id}/refund with the X-Refund-Idempotency
+  // header (≥10 chars, [A-Za-z0-9_-]). A retry MUST reuse the same key and the same body; the
+  // same key with a different body is rejected (409), a concurrent same-key request returns 409
+  // "still in progress". The razorpay SDK (2.9.x) cannot send per-request headers, so this call
+  // uses the REST endpoint directly with the same credentials. Every non-success outcome is
+  // classified so the caller never assumes a refund did — or did not — happen when it is unsure.
+  async createRazorpayRefund(
+    gatewayPaymentId: string, amountPaise: number, idempotencyKey: string, receipt: string, notes: Record<string, string>,
+  ): Promise<
+    | { ok: true; refund: { id: string; status: string; amount: number; receipt?: string } }
+    | { ok: false; kind: 'DEFINITE_REJECTION' | 'UNCERTAIN' | 'IN_PROGRESS' | 'KEY_CONFLICT'; httpStatus?: number; message: string }
+  > {
+    if (!this.razorpayKeyId || !this.razorpayKeySecret) return { ok: false, kind: 'DEFINITE_REJECTION', message: 'Razorpay is not configured' };
+    if (!/^[A-Za-z0-9_-]{10,}$/.test(idempotencyKey)) return { ok: false, kind: 'DEFINITE_REJECTION', message: 'Invalid idempotency key' };
+    let resp: any;
+    try {
+      resp = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(gatewayPaymentId)}/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Basic ' + Buffer.from(`${this.razorpayKeyId}:${this.razorpayKeySecret}`).toString('base64'),
+          'X-Refund-Idempotency': idempotencyKey,
+        },
+        body: JSON.stringify({ amount: amountPaise, receipt, notes }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e: any) {
+      // Timeout / network failure: the request may or may not have reached Razorpay.
+      return { ok: false, kind: 'UNCERTAIN', message: `No response from Razorpay: ${e?.message || e}` };
+    }
+    let body: any = null;
+    try { body = await resp.json(); } catch { body = null; }
+    if (resp.ok && body?.id) return { ok: true, refund: { id: body.id, status: body.status, amount: body.amount, receipt: body.receipt } };
+    const message = String(body?.error?.description || body?.error?.reason || `HTTP ${resp.status}`);
+    if (resp.status === 409) {
+      return /in progress/i.test(message)
+        ? { ok: false, kind: 'IN_PROGRESS', httpStatus: 409, message }
+        : { ok: false, kind: 'KEY_CONFLICT', httpStatus: 409, message };
+    }
+    // "fully refunded already" can mean an earlier attempt DID go through — never treat as a clean rejection.
+    if (resp.status >= 400 && resp.status < 500 && !/fully refunded/i.test(message)) {
+      return { ok: false, kind: 'DEFINITE_REJECTION', httpStatus: resp.status, message };
+    }
+    return { ok: false, kind: 'UNCERTAIN', httpStatus: resp.status, message };
+  }
+
+  /** Current state of one Razorpay refund (null when Razorpay is not configured). */
+  async fetchRazorpayRefund(gatewayPaymentId: string, refundId: string): Promise<{ id: string; status: string; amount: number; receipt?: string } | null> {
+    if (!this.razorpay) return null;
+    const r = await this.razorpay.payments.fetchRefund(gatewayPaymentId, refundId);
+    return { id: r.id, status: r.status, amount: r.amount, receipt: r.receipt };
+  }
+
+  /** Finds the refund for our stable receipt / internal id among a payment's refunds (null = none found). */
+  async findRazorpayRefundByReceipt(gatewayPaymentId: string, receipt: string): Promise<{ id: string; status: string; amount: number; receipt?: string } | null> {
+    if (!this.razorpay) throw new BadRequestException('Razorpay is not configured');
+    const list = await this.razorpay.payments.fetchMultipleRefund(gatewayPaymentId, { count: 100 });
+    const match = (list?.items || []).find((r: any) => r.receipt === receipt || r?.notes?.internal_refund_id === receipt);
+    return match ? { id: match.id, status: match.status, amount: match.amount, receipt: match.receipt } : null;
+  }
+
+  /** PhonePe refund with a caller-supplied, stable merchant refund id (no status API is wired here). */
+  async submitPhonePeRefund(merchantTransactionId: string, amount: number, merchantRefundId: string) {
+    return this.refundPhonePe(merchantTransactionId, amount, merchantRefundId);
+  }
+
+  private async refundPhonePe(merchantTransactionId: string, amount: number, stableRefundId?: string): Promise<{ refundId: string; gateway: string }> {
     const cfg = this.phonePe;
     if (!cfg.merchantId || !cfg.saltKey) throw new BadRequestException('PhonePe is not configured');
-    const merchantRefundId = `REFUND_${merchantTransactionId.slice(-8)}_${Date.now()}`;
+    const merchantRefundId = stableRefundId || `REFUND_${merchantTransactionId.slice(-8)}_${Date.now()}`;
     const payload = {
       merchantId: cfg.merchantId,
       merchantTransactionId: merchantRefundId,
@@ -358,7 +490,7 @@ export class PaymentsService implements OnModuleInit {
 
   // ─── Webhook ───────────────────────────────────────────────────────────────
 
-  async handleWebhook(rawBody: string, signature: string) {
+  async handleWebhook(rawBody: string, signature: string, eventId?: string) {
     const secret = this.razorpayWebhookSecret;
     if (!secret) throw new BadRequestException('Webhook secret not configured');
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
@@ -367,49 +499,53 @@ export class PaymentsService implements OnModuleInit {
     const event = JSON.parse(rawBody);
     this.logger.log(`Webhook: ${event.event}`);
 
+    // De-duplicate by Razorpay's event id (x-razorpay-event-id), AFTER the signature check. An
+    // event is marked processed only once its handling succeeded, so a delivery that failed
+    // half-way is processed again on Razorpay's retry; a successfully handled one is skipped.
+    if (eventId) {
+      const seen = await this.prisma.paymentWebhookEvent.findUnique({ where: { eventId } });
+      if (seen?.processedAt) return { received: true, duplicate: true };
+      if (!seen) {
+        try {
+          await this.prisma.paymentWebhookEvent.create({ data: { provider: 'RAZORPAY', eventId, event: String(event.event || '') } });
+        } catch {
+          // a concurrent delivery of the same event inserted it first
+          const again = await this.prisma.paymentWebhookEvent.findUnique({ where: { eventId } });
+          if (again?.processedAt) return { received: true, duplicate: true };
+        }
+      }
+    }
+    await this.handleWebhookEvent(event, signature);
+    if (eventId) await this.prisma.paymentWebhookEvent.update({ where: { eventId }, data: { processedAt: new Date() } }).catch(() => {});
+    return { received: true };
+  }
+
+  private async handleWebhookEvent(event: any, signature: string) {
+    // Refund lifecycle → the refund workflow (RefundsService) — never marked complete on acceptance.
+    if (typeof event.event === 'string' && event.event.startsWith('refund.')) {
+      const refund = event.payload?.refund?.entity;
+      if (refund?.id) {
+        await this.events.emitAsync('provider.refund.update', {
+          gateway: 'RAZORPAY', event: event.event, refundId: refund.id, paymentId: refund.payment_id,
+          status: refund.status, amount: refund.amount, receipt: refund.receipt, internalRefundId: refund.notes?.internal_refund_id,
+        });
+      }
+      return;
+    }
+
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity;
       const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId: payment.order_id } });
       if (tx) {
         await this.prisma.paymentTransaction.update({
           where: { id: tx.id },
-          data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature },
+          data: { status: 'PAID', gatewayPaymentId: payment.id, gatewaySignature: signature, ...gatewayFeeFromPayment(payment) },
         });
-        // tx.orderId is a loose, non-FK string — for a wallet top-up it's the literal
-        // 'WALLET_TOPUP' marker (no Order row exists), and for a master-order checkout
-        // it's actually a MasterOrder.id, not an Order.id. Neither has a corresponding
-        // Order row, so swallow the not-found instead of failing the whole webhook;
-        // wallet credit and master-order confirmation both already happen via the
-        // client-driven confirm-payment HMAC re-verify path, not this webhook.
-        if (tx.orderId) {
-          try {
-            // Never downgrade an order that has already progressed past PENDING_PAYMENT
-            // (e.g. a COD order converting to Online after a vendor is already assigned) —
-            // only flip status to CONFIRMED when it's still awaiting its first confirmation.
-            const existing = await this.prisma.order.findUnique({ where: { id: tx.orderId } });
-            if (existing && existing.paymentStatus !== 'PAID') {
-              // PAYMENT SECURITY — the webhook is Razorpay's own guaranteed-delivery,
-              // HMAC-verified channel, so `payment.amount` here is authoritative (never the
-              // client, never our own PaymentTransaction.amount). A captured payment that
-              // doesn't cover the order's real total must never mark it PAID/CONFIRMED just
-              // because *some* linked transaction captured — this is the same reconciliation
-              // OrdersService.confirmPayment() now performs, applied to the webhook trigger too.
-              const capturedAmount = Number(payment.amount) / 100;
-              if (capturedAmount + 0.01 >= Number(existing.totalAmount)) {
-                await this.prisma.order.update({
-                  where: { id: tx.orderId },
-                  data: {
-                    paymentId: payment.id, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
-                    status: existing.status === 'PENDING_PAYMENT' ? 'CONFIRMED' : existing.status,
-                  },
-                });
-              } else {
-                this.logger.warn(`Webhook: captured amount ₹${capturedAmount} is less than order ${tx.orderId}'s total ₹${existing.totalAmount} — not marking paid`);
-              }
-            }
-          } catch (e) {
-            this.logger.warn(`Webhook: no single Order row for orderId=${tx.orderId} (${e.message})`);
-          }
+        // Order / cart follow-up (confirm + dispatch for a first payment, balance + earnings for a
+        // later one) is done by OrdersService / MasterOrdersService, which listen for this event and
+        // apply the same verified, once-only logic as the browser callback.
+        if (tx.orderId && !tx.isWalletTopup && tx.orderId !== VENDOR_WALLET_TOPUP_MARKER) {
+          this.events.emit('payment.order.captured', { paymentTransactionId: tx.id, orderId: tx.orderId, gatewayPaymentId: payment.id });
         }
         if (tx.amcSubscriptionId) {
           const sub = await this.prisma.amcSubscription.findUnique({ where: { id: tx.amcSubscriptionId }, include: { plan: true } });
@@ -455,7 +591,6 @@ export class PaymentsService implements OnModuleInit {
         }
       }
     }
-    return { received: true };
   }
 
   private async notifyPaymentFailed(userId: string, orderId: string, reason?: string) {
@@ -514,15 +649,24 @@ export class PaymentsController {
   }
 
   @Public() @Post('webhook')
-  webhook(@Headers('x-razorpay-signature') signature: string, @Req() req: RawBodyRequest<any>) {
+  webhook(@Headers('x-razorpay-signature') signature: string, @Headers('x-razorpay-event-id') eventId: string, @Req() req: RawBodyRequest<any>) {
     const rawBody = req.rawBody?.toString('utf8') ?? '';
-    return this.p.handleWebhook(rawBody, signature);
+    return this.p.handleWebhook(rawBody, signature, eventId || undefined);
   }
+}
+
+@ApiTags('Admin')
+@ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+@Controller('admin/payments')
+export class PaymentsAdminController {
+  constructor(private p: PaymentsService) {}
+  @Post('gateway-fees/backfill') backfill(@Query('limit') limit?: string) { return this.p.backfillGatewayFees(limit ? Number(limit) : 50); }
 }
 
 @Module({
   imports: [PaymentNotificationsModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PaymentsAdminController],
   providers: [PaymentsService],
   exports: [PaymentsService],
 })

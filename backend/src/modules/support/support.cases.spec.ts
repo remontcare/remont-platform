@@ -5,6 +5,7 @@ function makeOrder(overrides: any = {}) {
   return {
     id: 'order-1', customerId: 'cust-1', vendorId: 'vendor-1', status: 'CONFIRMED',
     dispatchAttempts: 0, createdAt: new Date(), completedAt: null, totalAmount: 1500,
+    paymentStatus: 'PAID', walletUsed: 0, // a paid booking — refunds are capped by what was actually received
     items: [], service: { category: { warrantyDays: 7, warrantyHoldPercent: 15 } },
     ...overrides,
   };
@@ -36,7 +37,16 @@ function makeService(orderOverrides: any = {}) {
     },
     supportCaseLog: { create: jest.fn().mockResolvedValue({}) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
+    // Post-arrival review additions read these (no open case yet, no city/charge rule configured).
+    city: { findFirst: jest.fn().mockResolvedValue(null) },
+    commissionRule: { findMany: jest.fn().mockResolvedValue([]) },
+    refundRequest: { findMany: jest.fn().mockResolvedValue([]) }, // no earlier refunds
+    $queryRaw: jest.fn().mockResolvedValue([]), // advisory lock for one-open-case
   };
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
+  prisma.supportCase.findFirst = jest.fn().mockResolvedValue(null);
+  prisma.supportCase.findMany = jest.fn(async () => [...caseRows.values()]); // refund claims on the booking
+  prisma.supportCase.updateMany = jest.fn().mockResolvedValue({ count: 1 });
 
   const policyEngine: any = {
     getPolicyConfig: jest.fn().mockResolvedValue({ visitCharge: 200, diagnosisCharge: 150, slaMin: 60, returnWindowDays: 7 }),
@@ -47,6 +57,9 @@ function makeService(orderOverrides: any = {}) {
   const refunds: any = {
     raise: jest.fn().mockResolvedValue({ id: 'refund-1' }),
     decide: jest.fn().mockResolvedValue({ id: 'refund-1', status: 'PROCESSED' }),
+    // the shared booking refund boundary (real one tested in refunds + support.concurrency.int specs)
+    bookingRefundState: jest.fn().mockResolvedValue({ received: 1500, committed: 0, inFlight: 0, refundable: 1500 }),
+    withdrawUndecided: jest.fn(),
   };
   const admin: any = { forceAssignVendor: jest.fn().mockResolvedValue({}) };
   const ledger: any = { getWarrantyDefaults: jest.fn().mockResolvedValue({ days: 7, percent: 15 }) };
@@ -95,7 +108,7 @@ describe('SupportCasesService.openCase', () => {
 
     const result = await svc.openCase('cust-1', { orderId: 'order-1', issueType: 'PARTNER_ON_THE_WAY' });
 
-    expect(refunds.raise).toHaveBeenCalledWith('cust-1', 'order-1', undefined, expect.stringContaining('PARTNER_ON_THE_WAY'), []);
+    expect(refunds.raise).toHaveBeenCalledWith('cust-1', 'order-1', undefined, expect.stringContaining('PARTNER_ON_THE_WAY'), [], expect.objectContaining({ supportCaseId: expect.any(String) }));
     expect(refunds.decide).toHaveBeenCalledWith('SYSTEM', 'refund-1', 'WALLET_CREDIT', { approvedAmount: 1300, adminNotes: 'visit charge applied' });
     expect(result.status).toBe('RESOLVED');
     expect(result.decidedBy).toBeUndefined();
@@ -162,7 +175,7 @@ describe('SupportCasesService.adminDecide', () => {
 
     await svc.adminDecide('admin-1', kase.id, 'PARTIAL_REFUND', 400, 'goodwill gesture');
 
-    expect(refunds.raise).toHaveBeenCalledWith('cust-1', 'order-1', undefined, expect.any(String), []);
+    expect(refunds.raise).toHaveBeenCalledWith('cust-1', 'order-1', undefined, expect.any(String), [], expect.objectContaining({ supportCaseId: expect.any(String) }));
     expect(refunds.decide).toHaveBeenCalledWith('admin-1', 'refund-1', 'WALLET_CREDIT', { approvedAmount: 400, adminNotes: 'goodwill gesture' });
   });
 });

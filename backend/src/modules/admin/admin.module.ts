@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, EXTRA_WORK_ITEM_PUBLIC_SELECT } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, vendorAllowedForOrder, priceServiceBookingSnapshot, orderFieldsFromSnapshot, resolveServicePricingParams, computeServicePricing, resolveBookingMinimumCharge, applyBookingMinimum, pricingEngineEnabled, PRICING_ENGINE_SETTING, EXTRA_WORK_ITEM_PUBLIC_SELECT } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -62,6 +62,18 @@ export class UpdateProductVendorDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() address?: string;
   @IsOptional() @IsString() pickupAddress?: string;
+}
+
+const COMMISSION_RULE_TYPES = ['COMMISSION', 'MINIMUM_CHARGE', 'CANCELLATION_CHARGE', 'ADDITIONAL_FEE'] as const;
+
+/** ServiceCategory.serviceModel: who supplies the category's services (fixes checkout pricing). */
+function assertServiceModel(data: any) {
+  if (data?.serviceModel !== undefined && !['IN_HOUSE', 'PARTNER_MARKETPLACE'].includes(data.serviceModel)) {
+    throw new BadRequestException('serviceModel must be IN_HOUSE or PARTNER_MARKETPLACE');
+  }
+  if (data?.partnerGstProfile !== undefined && !['UNREGISTERED_ONLY', 'REGISTERED_ONLY'].includes(data.partnerGstProfile)) {
+    throw new BadRequestException('partnerGstProfile must be UNREGISTERED_ONLY or REGISTERED_ONLY');
+  }
 }
 
 @Injectable()
@@ -870,7 +882,13 @@ export class AdminService {
           ? 'Product sale value belongs to the seller — only Remont\'s marketplace commission (if any) is Remont revenue.'
           : 'Remont fulfils this order directly — the full value is Remont revenue.',
     };
-    return { ...order, billing };
+    // Every in-person collection on this job, so admins can see and confirm partner-reported cash.
+    const cashCollections = await this.prisma.paymentTransaction.findMany({
+      where: { orderId, gateway: 'CASH_COLLECTION' },
+      select: { id: true, amount: true, status: true, collectionMode: true, collectedBy: true, collectedLocation: true, createdAt: true, verifiedAt: true, verifiedBy: true, verificationMethod: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { ...order, billing, cashCollections };
   }
 
   async adminCreateOrder(data: {
@@ -878,7 +896,7 @@ export class AdminService {
     guestName: string; guestPhone: string; guestEmail?: string;
     fullAddress: string; notes?: string; channel?: string; leadId?: string;
   }) {
-    const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId } });
+    const svc = await this.prisma.service.findUnique({ where: { id: data.serviceId }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } } } });
     if (!svc) throw new NotFoundException('Service not found');
     const city = await this.prisma.city.findUnique({ where: { id: data.cityId } });
     if (!city) throw new NotFoundException('City not found');
@@ -891,11 +909,11 @@ export class AdminService {
     }
 
     const cityPrice = await this.cities.getServicePrice(city.name, data.serviceId);
-    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
-    const commissionResult = await resolveCommission(this.prisma, {
-      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
-    });
-    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
+    const priced = await priceServiceBooking(this.prisma, svc, city.id, cityPrice !== null ? cityPrice : Number(svc.basePrice));
+    const serviceAmount = priced.serviceAmount;
+    const commissionResult = priced.commissionResult;
+    const pricing = await priceServiceBookingSnapshot(this.prisma, { lines: [{ service: svc as any, amount: serviceAmount }], category: (svc as any).category, cityId: city.id });
+    const gstAmount = pricing ? pricing.result.gstAmount : Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
 
     const [h, m] = data.slotTime.split(':').map(Number);
     const slotStart = new Date(data.slotDate); slotStart.setHours(h, m || 0, 0, 0);
@@ -919,6 +937,8 @@ export class AdminService {
         couponDiscount: 0, membershipDiscount: 0, walletUsed: 0,
         gstAmount, totalAmount: serviceAmount + gstAmount,
         remontCommission: commissionResult.commissionAmount,
+        ...(pricing ? orderFieldsFromSnapshot(pricing) : {}),
+        minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
         vendorPayout: serviceAmount - commissionResult.commissionAmount,
         commissionRuleId: commissionResult.ruleId,
         commissionRuleLabel: commissionResult.ruleLabel,
@@ -941,17 +961,35 @@ export class AdminService {
     // job.offer.created notification a real service job would. A Service Partner is
     // never the right recipient for a product order — that belongs to the Product's
     // own ProductVendor/Seller (see ProductVendorsService.myOrders()).
-    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true } });
+    const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true, vendorId: true, arrivedAt: true, serviceModel: true, pricingSnapshot: true } });
     if (!existing) throw new NotFoundException();
     if (!existing.serviceId) {
       throw new BadRequestException('This order has no service — a Service Partner cannot be assigned to a product-only order.');
     }
+    // A different partner must record their own arrival — the previous partner's is cleared
+    // (it stays in the order timeline). Re-assigning the same partner keeps it.
+    const clearedArrival = !!existing.arrivedAt && existing.vendorId !== vendorId;
+    // The booking was priced for one service model at checkout — only matching staff can take it.
+    if (existing.serviceModel) {
+      const target = await this.prisma.serviceVendor.findUnique({ where: { id: vendorId }, select: { staffType: true, gstin: true } });
+      if (!target) throw new NotFoundException('Partner not found');
+      if (!vendorAllowedForOrder(existing, target)) {
+        const profile = (existing.pricingSnapshot as any)?.params?.partnerGstProfile;
+        throw new BadRequestException(existing.serviceModel === 'IN_HOUSE'
+          ? 'This is an in-house service — assign one of Remont\'s own technicians.'
+          : target.staffType === 'IN_HOUSE'
+            ? 'This is a partner marketplace service — assign an external partner, not an in-house technician.'
+            : profile === 'REGISTERED_ONLY'
+              ? 'This booking was priced for a GST-registered partner — assign a partner with a valid GSTIN.'
+              : 'This booking was priced without partner GST — assign a partner who is not GST-registered.');
+      }
+    }
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED },
+      data: { vendorId, status: OrderStatus.VENDOR_ASSIGNED, ...(clearedArrival ? ARRIVAL_RESET_DATA : {}) },
       include: { vendor: { include: { user: { select: { name: true, phone: true } } } }, service: true, address: true },
     });
-    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: 'Force-assigned by admin' });
+    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.VENDOR_ASSIGNED, actorId, actorRole, note: clearedArrival ? "Force-assigned by admin — previous partner's arrival record cleared" : 'Force-assigned by admin' });
     // Previously this silently set vendorId with no notification of any kind — the
     // vendor only ever found out by happening to check their job list. Now goes
     // through the same ring/push/WhatsApp-fallback path as auto-routed jobs.
@@ -961,18 +999,43 @@ export class AdminService {
     return updated;
   }
 
+  /**
+   * Admin status changes are limited to legitimate operational moves. Completion, payment, refund
+   * and start states can only be reached through their real workflows (partner OTP flow, verified
+   * payments, Refunds) — an override must never create a completion, an invoice, earnings or a
+   * "refunded" state without the money and records behind it. CANCELLED goes through the full
+   * cancellation workflow.
+   */
   async adminUpdateStatus(orderId: string, status: string, note?: string, actorId?: string, actorRole?: UserRole) {
     const validStatuses = ['PENDING_PAYMENT', 'CONFIRMED', 'VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED', 'COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'];
     if (!validStatuses.includes(status)) throw new BadRequestException(`Invalid status: ${status}`);
-    const data: any = { status };
-    if (note) data.adminNotes = note;
-    if (status === 'COMPLETED') data.completedAt = new Date();
-    if (status === 'CANCELLED') { data.cancelledAt = new Date(); if (note) data.cancelReason = note; }
-    if (status === 'REFUNDED') data.paymentStatus = 'REFUNDED';
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (status === 'CANCELLED') return this.adminCancelOrder(orderId, note || 'Cancelled by admin', actorId, actorRole);
+    const ALLOWED: Record<string, string[]> = {
+      VENDOR_EN_ROUTE: ['VENDOR_ASSIGNED'], // partner on the way, app could not update
+      CLOSED: ['COMPLETED', 'INVOICED'],     // final closure of a completed job
+    };
+    const WHY: Record<string, string> = {
+      PENDING_PAYMENT: 'payment state is set only by checkout',
+      CONFIRMED: 'an order is confirmed only by a verified payment or a cash-on-service booking',
+      VENDOR_ASSIGNED: 'use "Assign partner"',
+      STARTED: 'a job starts only with the customer\'s start OTP',
+      IN_PROGRESS: 'set by the partner flow',
+      EXTRA_WORK_ADDED: 'set by the partner flow',
+      COMPLETED: 'a job completes only with the customer\'s completion OTP in the partner flow',
+      INVOICED: 'invoices are issued automatically on completion',
+      REFUNDED: 'refunds are processed in Admin › Refunds',
+    };
+    const allowedFrom = ALLOWED[status];
+    if (!allowedFrom) throw new BadRequestException(`Can't set ${status} here — ${WHY[status] || 'not an admin action'}`);
+    if (!allowedFrom.includes(order.status)) throw new BadRequestException(`Can't move from ${order.status} to ${status}`);
+    if (status === 'VENDOR_EN_ROUTE' && !order.vendorId) throw new BadRequestException('No partner is assigned to this order');
+    const moved = await this.prisma.order.updateMany({ where: { id: orderId, status: order.status }, data: { status: status as any, ...(note ? { adminNotes: note } : {}) } });
+    if (moved.count !== 1) throw new BadRequestException('The order changed meanwhile — reload and try again');
     await writeOrderTimeline(this.prisma, { orderId, status, note, actorId, actorRole });
-    if (status === 'COMPLETED') this.autoGenerateInvoice(orderId).catch(() => {});
-    return updated;
+    if (actorId && actorRole) await logAudit(this.prisma, { actorId, actorRole, action: 'ORDER_STATUS_OVERRIDE', targetType: 'Order', targetId: orderId, metadata: { from: order.status, to: status, note: note || null } });
+    return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
   }
 
   private async autoGenerateInvoice(orderId: string) {
@@ -1172,8 +1235,23 @@ export class AdminService {
     // compare-and-swap on leadCostRefunded (rather than a plain read-then-write) is what
     // actually prevents a double-refund if this races the customer cancel path for the same
     // order — see the race-condition fix comment on OrdersService.cancel().
+    if (!order) throw new NotFoundException('Order not found');
+    if (!isProduct && ['COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED'].includes(order.status)) {
+      throw new BadRequestException('A completed, invoiced or closed job cannot be cancelled — use Admin › Refunds for money back');
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const cancelled = await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: `Admin: ${reason}`, adminNotes: reason } });
+      // Wallet taken for a never-paid order goes straight back; money actually received becomes a
+      // refund request for review (this cancellation itself moves no money).
+      const walletReturned = await releaseUnpaidOrderWallet(tx, order, `Order ${order.orderNumber} cancelled by Remont before payment`);
+      const received = order.paymentStatus === 'PAID' || order.paymentStatus === 'PARTIAL' || Number(order.cartPaidAmount || 0) > 0
+        || (!walletReturned && Number(order.walletUsed || 0) > 0);
+      if (received) {
+        const open = await tx.refundRequest.findFirst({ where: { orderId, status: { in: ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED'] } }, select: { id: true } });
+        if (!open) {
+          await tx.refundRequest.create({ data: { orderId, customerId: order.customerId, reason: `Order cancelled by Remont: ${reason}`, evidenceUrls: [], partnerId: order.vendorId || undefined, status: 'REQUESTED' } });
+        }
+      }
       if (order?.vendorId && Number(order.leadCostAmount) > 0) {
         const claimed = await tx.order.updateMany({
           where: { id: orderId, leadCostRefunded: false },
@@ -1191,9 +1269,10 @@ export class AdminService {
   }
 
   async refundOrder(orderId: string, reason: string, actorId?: string, actorRole?: UserRole) {
-    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED, paymentStatus: 'REFUNDED', cancelReason: `REFUND: ${reason}`, adminNotes: reason } });
-    await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.REFUNDED, note: reason, actorId, actorRole });
-    return updated;
+    // Marking an order "refunded" without moving money or issuing a credit note made the books
+    // wrong. Refunds go through Admin › Refunds (money, credit note, partner recovery, audit).
+    void orderId; void reason; void actorId; void actorRole;
+    throw new BadRequestException('Refunds are processed in Admin › Refunds, which returns the money and issues the credit note');
   }
 
   // ─── Cities ─────────────────────────────────────────────────────────
@@ -1279,6 +1358,7 @@ export class AdminService {
   }
 
   async createCategory(data: any) {
+    assertServiceModel(data);
     assertNoNewInlineImages([data.logoUrl, data.imageUrl]);
     const slug = data.slug || slugify(data.name);
     const created = await this.prisma.serviceCategory.create({ data: { ...data, slug, seoKeywords: data.seoKeywords || [] } });
@@ -1289,6 +1369,7 @@ export class AdminService {
   async updateCategory(id: string, data: any) {
     const existing = await this.prisma.serviceCategory.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Category not found');
+    assertServiceModel(data);
     assertNoNewInlineImages([data.logoUrl, data.imageUrl], [existing.logoUrl, existing.imageUrl]);
     if (data.name && !data.slug) data.slug = slugify(data.name);
     const updated = await this.prisma.serviceCategory.update({ where: { id }, data });
@@ -1946,9 +2027,10 @@ Return JSON with:
   // take effect on the NEXT booking without touching past orders (which keep their
   // snapshotted commissionRuleId/commissionRuleLabel — see Order in schema.prisma).
 
-  async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string) {
+  async listCommissionRules(scope?: string, categoryId?: string, serviceId?: string, cityId?: string, ruleType?: string) {
     return this.prisma.commissionRule.findMany({
       where: {
+        ...(ruleType && COMMISSION_RULE_TYPES.includes(ruleType as any) ? { ruleType: ruleType as any } : {}),
         ...(scope ? { scope: scope as any } : {}),
         ...(categoryId ? { categoryId } : {}),
         ...(serviceId ? { serviceId } : {}),
@@ -1963,25 +2045,133 @@ Return JSON with:
     });
   }
 
-  async createCommissionRule(data: any) {
-    if (data.scope === 'CATEGORY' && !data.categoryId) throw new BadRequestException('categoryId is required for a CATEGORY-scoped rule');
-    if (data.scope === 'SERVICE' && !data.serviceId) throw new BadRequestException('serviceId is required for a SERVICE-scoped rule');
-    return this.prisma.commissionRule.create({ data });
+  /**
+   * Whitelisted, validated CommissionRule data — the request body is never passed to Prisma as
+   * is (it used to be: any column, any value). The same table holds the commission, minimum
+   * charge and cancellation charge rules (ruleType); the two new types are flat ₹ amounts.
+   */
+  private async validateCommissionRuleInput(input: any, existing?: any) {
+    const pick = (k: string) => (input?.[k] !== undefined ? input[k] : existing?.[k]);
+    const data: any = {};
+    for (const k of ['ruleType', 'scope', 'categoryId', 'serviceId', 'cityId', 'commissionType', 'value', 'minimumAmount', 'slabJson', 'priority', 'stackable', 'isActive', 'validFrom', 'validTo',
+      'feeName', 'feeDisplayName', 'feeCondition', 'feeAppliesTo', 'feeBeneficiary', 'feeSac', 'nightStartHour', 'nightEndHour']) {
+      if (input?.[k] !== undefined) data[k] = input[k];
+    }
+    const ruleType = pick('ruleType') ?? 'COMMISSION';
+    const scope = pick('scope');
+    const commissionType = pick('commissionType');
+    if (!COMMISSION_RULE_TYPES.includes(ruleType)) throw new BadRequestException(`ruleType must be one of ${COMMISSION_RULE_TYPES.join(', ')}`);
+    if (!['CATEGORY', 'SERVICE'].includes(scope)) throw new BadRequestException('scope must be CATEGORY or SERVICE');
+    if (scope === 'CATEGORY' && !pick('categoryId')) throw new BadRequestException('categoryId is required for a CATEGORY-scoped rule');
+    if (scope === 'SERVICE' && !pick('serviceId')) throw new BadRequestException('serviceId is required for a SERVICE-scoped rule');
+    if (!['PERCENTAGE', 'FLAT', 'SLAB'].includes(commissionType)) throw new BadRequestException('commissionType must be PERCENTAGE, FLAT or SLAB');
+    const value = Number(pick('value') ?? 0);
+    if (!Number.isFinite(value) || value < 0) throw new BadRequestException('value must be a non-negative number');
+    if (commissionType === 'PERCENTAGE' && value > 100) throw new BadRequestException('A percentage rule cannot exceed 100');
+    if (data.priority !== undefined && !Number.isInteger(Number(data.priority))) throw new BadRequestException('priority must be a whole number');
+    const validFrom = pick('validFrom') ? new Date(pick('validFrom')) : null;
+    const validTo = pick('validTo') ? new Date(pick('validTo')) : null;
+    if ((validFrom && isNaN(+validFrom)) || (validTo && isNaN(+validTo))) throw new BadRequestException('validFrom/validTo must be valid dates');
+    if (validFrom && validTo && validTo <= validFrom) throw new BadRequestException('validTo must be after validFrom');
+    // minimumAmount: only for a PERCENTAGE cancellation penalty ("X%, minimum ₹Y").
+    const minimumAmount = pick('minimumAmount');
+    const hasMinimum = minimumAmount !== undefined && minimumAmount !== null && minimumAmount !== '';
+    if (hasMinimum) {
+      if (ruleType !== 'CANCELLATION_CHARGE' || commissionType !== 'PERCENTAGE') {
+        throw new BadRequestException('minimumAmount applies only to a percentage CANCELLATION_CHARGE rule');
+      }
+      if (!Number.isFinite(Number(minimumAmount)) || Number(minimumAmount) < 0) throw new BadRequestException('minimumAmount must be a non-negative number');
+    }
+    let feeName: string | null = null;
+    if (ruleType === 'ADDITIONAL_FEE') {
+      // A named customer fee: added only when its condition holds, taxed by its own rule.
+      feeName = String(pick('feeName') || '').trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_');
+      if (!feeName) throw new BadRequestException('A fee needs an internal name (feeName), e.g. EMERGENCY');
+      if (!String(pick('feeDisplayName') || '').trim()) throw new BadRequestException('A fee needs the name customers see (feeDisplayName)');
+      const cond = pick('feeCondition') || 'ALWAYS';
+      if (!['ALWAYS', 'NIGHT', 'EMERGENCY'].includes(cond)) throw new BadRequestException('feeCondition must be ALWAYS, NIGHT or EMERGENCY');
+      if (!['ALL', 'IN_HOUSE', 'MARKETPLACE'].includes(pick('feeAppliesTo') || 'ALL')) throw new BadRequestException('feeAppliesTo must be ALL, IN_HOUSE or MARKETPLACE');
+      if (!['REMONT', 'PARTNER'].includes(pick('feeBeneficiary') || 'REMONT')) throw new BadRequestException('feeBeneficiary must be REMONT or PARTNER');
+      if (cond === 'NIGHT') {
+        const okHour = (h: any) => h !== null && h !== undefined && h !== '' && Number.isInteger(Number(h)) && Number(h) >= 0 && Number(h) <= 23;
+        if (!okHour(pick('nightStartHour')) || !okHour(pick('nightEndHour')) || Number(pick('nightStartHour')) === Number(pick('nightEndHour'))) {
+          throw new BadRequestException('A night fee needs nightStartHour and nightEndHour (0–23, IST), e.g. 21 and 6');
+        }
+      }
+      if (pick('feeSac') && !/^\d{4,8}$/.test(String(pick('feeSac')))) throw new BadRequestException('feeSac must be a 4–8 digit SAC');
+      data.feeName = feeName;
+      data.feeCondition = cond;
+      for (const k of ['nightStartHour', 'nightEndHour']) if (data[k] !== undefined) data[k] = data[k] === '' || data[k] === null ? null : Number(data[k]);
+      if (data.feeSac === '') data.feeSac = null;
+    }
+    if (ruleType !== 'COMMISSION') {
+      // Minimum charge: an admin-approved flat ₹ amount. Cancellation penalty: flat ₹, or a
+      // percentage of the service amount with an optional minimum. ₹0 allowed (= no penalty).
+      // Never stacked — and no two active rules may cover the same target, city and dates.
+      const allowed = ruleType === 'CANCELLATION_CHARGE' || ruleType === 'ADDITIONAL_FEE' ? ['FLAT', 'PERCENTAGE'] : ['FLAT'];
+      if (!allowed.includes(commissionType)) {
+        throw new BadRequestException(ruleType === 'CANCELLATION_CHARGE' || ruleType === 'ADDITIONAL_FEE'
+          ? `${ruleType === 'ADDITIONAL_FEE' ? 'A fee' : 'A cancellation penalty'} must be a flat ₹ amount or a percentage of the service amount`
+          : `${ruleType} rules must be a flat ₹ amount (commissionType FLAT)`);
+      }
+      if (pick('stackable')) throw new BadRequestException(`${ruleType} rules cannot be stackable`);
+      if (pick('isActive') !== false) {
+        const others = await this.prisma.commissionRule.findMany({
+          where: {
+            ruleType, isActive: true, scope,
+            categoryId: scope === 'CATEGORY' ? pick('categoryId') : undefined,
+            serviceId: scope === 'SERVICE' ? pick('serviceId') : undefined,
+            cityId: pick('cityId') || null,
+            ...(ruleType === 'ADDITIONAL_FEE' ? { feeName } : {}), // several differently named fees may coexist
+            ...(existing ? { id: { not: existing.id } } : {}),
+          },
+        });
+        const overlaps = others.some((o: any) => {
+          const aFrom = validFrom ? +validFrom : -Infinity, aTo = validTo ? +validTo : Infinity;
+          const bFrom = o.validFrom ? +new Date(o.validFrom) : -Infinity, bTo = o.validTo ? +new Date(o.validTo) : Infinity;
+          return aFrom < bTo && bFrom < aTo;
+        });
+        if (overlaps) throw new BadRequestException(`Another active ${ruleType === 'ADDITIONAL_FEE' ? `"${feeName}" fee` : ruleType} rule already covers this ${scope === 'CATEGORY' ? 'category' : 'service'}, city and dates — end or deactivate it first`);
+      }
+    }
+    if (data.priority !== undefined) data.priority = Number(data.priority);
+    if (data.value !== undefined) data.value = value;
+    if (data.validFrom !== undefined) data.validFrom = validFrom;
+    if (data.validTo !== undefined) data.validTo = validTo;
+    if (data.cityId === '') data.cityId = null;
+    if (data.minimumAmount !== undefined) data.minimumAmount = hasMinimum ? Number(minimumAmount) : null;
+    // switching a cancellation rule to FLAT clears any stale minimum
+    if (existing && commissionType !== 'PERCENTAGE' && existing.minimumAmount != null && data.minimumAmount === undefined) data.minimumAmount = null;
+    return data;
   }
 
-  async updateCommissionRule(id: string, data: any) {
+  async createCommissionRule(input: any, actorId?: string) {
+    const data = await this.validateCommissionRuleInput(input);
+    const created = await this.prisma.commissionRule.create({ data });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_CREATED', targetType: 'CommissionRule', targetId: created.id, metadata: { after: created } });
+    return created;
+  }
+
+  async updateCommissionRule(id: string, input: any, actorId?: string) {
     const existing = await this.prisma.commissionRule.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Commission rule not found');
-    return this.prisma.commissionRule.update({ where: { id }, data });
+    const data = await this.validateCommissionRuleInput(input, existing);
+    const updated = await this.prisma.commissionRule.update({ where: { id }, data });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_UPDATED', targetType: 'CommissionRule', targetId: id, metadata: { before: existing, after: updated } });
+    return updated;
   }
 
-  async deleteCommissionRule(id: string) {
-    return this.prisma.commissionRule.delete({ where: { id } });
+  async deleteCommissionRule(id: string, actorId?: string) {
+    const existing = await this.prisma.commissionRule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Commission rule not found');
+    const deleted = await this.prisma.commissionRule.delete({ where: { id } });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'COMMISSION_RULE_DELETED', targetType: 'CommissionRule', targetId: id, metadata: { before: existing } });
+    return deleted;
   }
 
   // Admin preview: "This service, this city -> commission = ₹X (rule: ...)" — reuses
   // the exact same resolveCommission() every real order goes through.
-  async previewCommission(serviceId: string, cityName?: string, amount?: number) {
+  async previewCommission(serviceId: string, cityName?: string, amount?: number, ruleType: string = 'COMMISSION') {
     const svc = await this.prisma.service.findUnique({ where: { id: serviceId } });
     if (!svc) throw new NotFoundException('Service not found');
     let cityId: string | null = null;
@@ -1990,8 +2180,9 @@ Return JSON with:
       cityId = city?.id || null;
     }
     const testAmount = amount ?? Number(svc.basePrice);
-    const result = await resolveCommission(this.prisma, { serviceId, categoryId: svc.categoryId, cityId, amount: testAmount });
-    return { serviceName: svc.name, amount: testAmount, ...result };
+    const type = COMMISSION_RULE_TYPES.includes(ruleType as any) ? (ruleType as ServiceRuleTypeValue) : 'COMMISSION';
+    const result = await resolveServiceRule(this.prisma, type, { serviceId, categoryId: svc.categoryId, cityId, amount: testAmount });
+    return { serviceName: svc.name, amount: testAmount, ruleType: type, ...result };
   }
 
   // ─── Product Fee Rules (Phase 7) ──────────────────────────────────────
@@ -2463,6 +2654,9 @@ Return JSON with:
       { key: 'total_vendors', value: '5000', label: 'Total Vendors (shown on homepage)', group: 'stats' },
       { key: 'otp_regen_max_attempts', value: '0', label: 'Max "Request OTP Again" attempts per service (0 = unlimited)', group: 'operations' },
       { key: 'bundle_discount_percent', value: '10', label: 'Bundle Offer — discount % applied to the service when a product is in the same order', group: 'operations' },
+      { key: 'arrival_verification_radius_m', value: '300', label: 'Partner arrival — max distance from the service address to count as verified (metres)', group: 'operations' },
+      { key: 'arrival_max_gps_accuracy_m', value: '100', label: 'Partner arrival — worst acceptable GPS accuracy for verification (metres)', group: 'operations' },
+      { key: 'arrival_max_fix_age_s', value: '120', label: 'Partner arrival — oldest acceptable location fix, as reported by the device (seconds)', group: 'operations' },
       { key: 'ai_web_search_cost', value: '15', label: 'Live Web Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_search_cost', value: '10', label: 'Actual Image Search — cost per product (₹)', group: 'ai' },
       { key: 'ai_image_generation_cost', value: '20', label: 'AI Image Generation — cost per product (₹)', group: 'ai' },
@@ -2641,29 +2835,123 @@ Return JSON with:
     if (overlap) throw new BadRequestException('This HSN/category already has an active GST rule whose effective dates overlap — adjust the dates or deactivate the existing rule first');
   }
 
-  async createTax(data: {
-    name: string; type?: string; rate: number; hsnCode?: string; appliesTo?: string[];
-    gstApplicable?: boolean; priceType?: 'GST_INCLUSIVE' | 'GST_EXCLUSIVE'; productCategoryId?: string;
-    validFrom?: string; validTo?: string;
-  }) {
-    const payload = { ...data, appliesTo: data.appliesTo || ['SERVICE'] };
-    await this.assertNoTaxConfigOverlap(payload);
-    return this.prisma.taxConfig.create({ data: payload }).catch((e) => { throw e; });
+  // Fields an admin may set on a tax rule. Approval fields are never taken from the request.
+  private static readonly TAX_FIELDS = ['name', 'type', 'rate', 'hsnCode', 'appliesTo', 'isActive', 'gstApplicable', 'priceType', 'productCategoryId', 'validFrom', 'validTo'] as const;
+  // Changing any of these changes what customers are charged → back to PENDING_CA until re-approved.
+  private static readonly TAX_RATE_FIELDS = ['rate', 'hsnCode', 'appliesTo', 'gstApplicable', 'priceType', 'productCategoryId', 'validFrom', 'validTo', 'type'] as const;
+
+  private pickTaxFields(data: any) {
+    const out: any = {};
+    for (const k of AdminService.TAX_FIELDS) if (data?.[k] !== undefined) out[k] = data[k];
+    if (out.rate !== undefined) {
+      const r = Number(out.rate);
+      if (!Number.isFinite(r) || r < 0 || r > 100) throw new BadRequestException('rate must be between 0 and 100');
+      out.rate = r;
+    }
+    if (out.appliesTo !== undefined && (!Array.isArray(out.appliesTo) || !out.appliesTo.every((a: any) => ['SERVICE', 'PRODUCT', 'AMC', 'PLATFORM_FEE'].includes(a)))) {
+      throw new BadRequestException('appliesTo must list SERVICE, PRODUCT, AMC or PLATFORM_FEE');
+    }
+    for (const k of ['validFrom', 'validTo']) if (out[k] === '') out[k] = null;
+    if (out.hsnCode === '') out.hsnCode = null;
+    if (out.productCategoryId === '') out.productCategoryId = null;
+    return out;
   }
 
-  async updateTax(id: string, data: {
-    name?: string; rate?: number; isActive?: boolean; appliesTo?: string[];
-    gstApplicable?: boolean; priceType?: 'GST_INCLUSIVE' | 'GST_EXCLUSIVE'; productCategoryId?: string;
-    validFrom?: string; validTo?: string;
-  }) {
+  async createTax(data: any, actorId?: string) {
+    const payload = { ...this.pickTaxFields(data), approvalStatus: 'PENDING_CA' };
+    payload.appliesTo = payload.appliesTo || ['SERVICE'];
+    if (!payload.name || payload.rate === undefined) throw new BadRequestException('name and rate are required');
+    await this.assertNoTaxConfigOverlap(payload);
+    const created = await this.prisma.taxConfig.create({ data: payload });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'TAX_RULE_CREATED', targetType: 'TaxConfig', targetId: created.id, metadata: { after: created, note: 'Pending CA approval — not used for pricing until approved' } });
+    return created;
+  }
+
+  async updateTax(id: string, data: any, actorId?: string) {
     const existing = await this.prisma.taxConfig.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Tax rate not found');
-    await this.assertNoTaxConfigOverlap({ ...existing, ...data }, id);
-    return this.prisma.taxConfig.update({ where: { id }, data }).catch((e) => { throw e; });
+    const patch = this.pickTaxFields(data);
+    await this.assertNoTaxConfigOverlap({ ...existing, ...patch }, id);
+    // normalise both sides (Decimal → number, Date/date string → ISO) before comparing
+    const norm = (k: string, v: any) => (v == null || v === '' ? null : k === 'rate' ? Number(v) : k === 'validFrom' || k === 'validTo' ? new Date(v).toISOString() : Array.isArray(v) ? [...v].sort().join(',') : v);
+    const rateChanged = AdminService.TAX_RATE_FIELDS.some((k) => patch[k] !== undefined && norm(k, patch[k]) !== norm(k, (existing as any)[k]));
+    const reactivated = patch.isActive === true && !existing.isActive;
+    if (rateChanged || reactivated) Object.assign(patch, { approvalStatus: 'PENDING_CA', approvedBy: null, approvedAt: null, approvalNote: null });
+    const updated = await this.prisma.taxConfig.update({ where: { id }, data: patch });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'TAX_RULE_UPDATED', targetType: 'TaxConfig', targetId: id, metadata: { before: existing, after: updated, needsReapproval: rateChanged || reactivated } });
+    return updated;
   }
 
-  async deleteTax(id: string) {
-    return this.prisma.taxConfig.delete({ where: { id } }).catch((e) => { throw e; });
+  /** A super admin records the CA/legal verification; only then is the rule used for pricing. */
+  async approveTax(id: string, actor: { sub: string; role: UserRole }, note: string) {
+    const existing = await this.prisma.taxConfig.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Tax rate not found');
+    if (!note || String(note).trim().length < 10) throw new BadRequestException('Record how the CA verified this rule (at least 10 characters)');
+    const updated = await this.prisma.taxConfig.update({
+      where: { id }, data: { approvalStatus: 'APPROVED', approvedBy: actor.sub, approvedAt: new Date(), approvalNote: String(note).trim() },
+    });
+    await logAudit(this.prisma, { actorId: actor.sub, actorRole: actor.role, action: 'TAX_RULE_APPROVED', targetType: 'TaxConfig', targetId: id, metadata: { before: existing.approvalStatus, rate: Number(existing.rate), hsnCode: existing.hsnCode, appliesTo: existing.appliesTo, note: String(note).trim() } });
+    return updated;
+  }
+
+  /** Can every active service be priced by the engine? (missing/unapproved GST rules, conflicts) */
+  async pricingReadiness() {
+    const services = await this.prisma.service.findMany({ where: { isActive: true }, include: { category: true }, orderBy: { name: 'asc' } });
+    const blocked: { serviceId: string; service: string; category: string; problems: string[] }[] = [];
+    for (const svc of services) {
+      const { problems } = await resolveServicePricingParams(this.prisma, { lines: [{ service: svc as any, amount: Number(svc.basePrice) }], category: (svc as any).category });
+      if (problems.length) blocked.push({ serviceId: svc.id, service: svc.name, category: (svc as any).category?.name || '', problems });
+    }
+    const categories = await this.prisma.serviceCategory.findMany({ where: { isActive: true }, select: { id: true, name: true, serviceModel: true, partnerGstProfile: true, gstSection95Status: true }, orderBy: { name: 'asc' } });
+    return { enabled: await pricingEngineEnabled(this.prisma), ready: blocked.length === 0, activeServices: services.length, blocked, categories };
+  }
+
+  /** Super admin turns the engine on (only when ready) or off (always allowed). Audited. */
+  async setPricingEngine(actor: { sub: string; role: UserRole }, enabled: boolean, reason: string) {
+    if (!reason || String(reason).trim().length < 10) throw new BadRequestException('Give a reason (at least 10 characters)');
+    if (enabled) {
+      const r = await this.pricingReadiness();
+      if (!r.ready) throw new BadRequestException(`Not ready: ${r.blocked.length} active service(s) can't be priced yet — e.g. ${r.blocked[0].service}: ${r.blocked[0].problems[0]}`);
+    }
+    const before = await pricingEngineEnabled(this.prisma);
+    await this.prisma.siteSetting.upsert({ where: { key: PRICING_ENGINE_SETTING }, update: { value: String(enabled) }, create: { key: PRICING_ENGINE_SETTING, value: String(enabled), group: 'pricing' } as any });
+    await logAudit(this.prisma, { actorId: actor.sub, actorRole: actor.role, action: enabled ? 'PRICING_ENGINE_ENABLED' : 'PRICING_ENGINE_DISABLED', targetType: 'SiteSetting', targetId: PRICING_ENGINE_SETTING, metadata: { before, after: enabled, reason: String(reason).trim() } });
+    return { enabled };
+  }
+
+  /**
+   * Admin calculation preview — the real pricing engine, nothing written (no booking, payment, invoice
+   * or ledger entry). What-if overrides for the supplier model and partner GST profile are allowed.
+   */
+  async previewPricing(b: { serviceId: string; cityId?: string; amount?: number; discount?: number; extraWork?: number; slotStart?: string; emergency?: boolean; serviceModel?: string; partnerGstProfile?: string }) {
+    const svc = await this.prisma.service.findUnique({ where: { id: b?.serviceId }, include: { category: true } });
+    if (!svc) throw new NotFoundException('Service not found');
+    let amount = Number(b.amount);
+    let minimumCharge = 0;
+    if (!(amount > 0)) {
+      const city = b.cityId ? await this.prisma.city.findUnique({ where: { id: b.cityId } }) : null;
+      const cityPrice = city ? await this.cities.getServicePrice(city.name, svc.id) : null;
+      amount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
+      const priced = await priceServiceBooking(this.prisma, svc, b.cityId || null, amount);
+      minimumCharge = priced.minimumChargeAdjustment;
+      amount = priced.serviceAmount;
+    }
+    const category = { ...(svc as any).category, ...(b.serviceModel ? { serviceModel: b.serviceModel } : {}), ...(b.partnerGstProfile ? { partnerGstProfile: b.partnerGstProfile } : {}) };
+    const discount = Math.max(0, Number(b.discount) || 0);
+    const { params, problems } = await resolveServicePricingParams(this.prisma, {
+      lines: [{ service: svc as any, amount }], category, cityId: b.cityId || null, discount, slotStart: b.slotStart || null, emergency: !!b.emergency,
+    });
+    if (!params) return { valid: false, problems: ['This category has no service model (legacy pricing)'], amount };
+    const result = computeServicePricing(params, { lineAmounts: [amount], discount, extraWork: Number(b.extraWork) || 0 });
+    return { valid: problems.length === 0, problems, amount, minimumChargeAdjustment: minimumCharge, params, result, note: 'Preview only — nothing was booked, charged, invoiced or posted.' };
+  }
+
+  async deleteTax(id: string, actorId?: string) {
+    const existing = await this.prisma.taxConfig.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Tax rate not found');
+    const deleted = await this.prisma.taxConfig.delete({ where: { id } });
+    if (actorId) await logAudit(this.prisma, { actorId, actorRole: UserRole.ADMIN, action: 'TAX_RULE_DELETED', targetType: 'TaxConfig', targetId: id, metadata: { before: existing } });
+    return deleted;
   }
 
   // ─── Seasonal Ads ─────────────────────────────────────────────────────
@@ -3696,14 +3984,14 @@ export class AdminController {
   // Settings
   @Get('commission-rules') listCommissionRules(
     @Query('scope') scope?: string, @Query('categoryId') categoryId?: string,
-    @Query('serviceId') serviceId?: string, @Query('cityId') cityId?: string,
-  ) { return this.admin.listCommissionRules(scope, categoryId, serviceId, cityId); }
-  @Post('commission-rules') createCommissionRule(@Body() b: any) { return this.admin.createCommissionRule(b); }
-  @Patch('commission-rules/:id') updateCommissionRule(@Param('id') id: string, @Body() b: any) { return this.admin.updateCommissionRule(id, b); }
-  @Delete('commission-rules/:id') deleteCommissionRule(@Param('id') id: string) { return this.admin.deleteCommissionRule(id); }
+    @Query('serviceId') serviceId?: string, @Query('cityId') cityId?: string, @Query('ruleType') ruleType?: string,
+  ) { return this.admin.listCommissionRules(scope, categoryId, serviceId, cityId, ruleType); }
+  @Post('commission-rules') createCommissionRule(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.admin.createCommissionRule(b, u.sub); }
+  @Patch('commission-rules/:id') updateCommissionRule(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: any) { return this.admin.updateCommissionRule(id, b, u.sub); }
+  @Delete('commission-rules/:id') deleteCommissionRule(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.deleteCommissionRule(id, u.sub); }
   @Get('commission-rules/preview') previewCommission(
-    @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string,
-  ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined); }
+    @Query('serviceId') serviceId: string, @Query('city') city?: string, @Query('amount') amount?: string, @Query('ruleType') ruleType?: string,
+  ) { return this.admin.previewCommission(serviceId, city, amount ? Number(amount) : undefined, ruleType); }
 
   // Phase 7 — Product Fee Rules (commission/marketing/gateway/other for PRODUCT sellers)
   @Get('product-fee-rules') listProductFeeRules(
@@ -3760,9 +4048,15 @@ export class AdminController {
 
   // Taxes
   @Get('taxes') taxes() { return this.admin.listTaxes(); }
-  @Post('taxes') createTax(@Body() b: any) { return this.admin.createTax(b); }
-  @Patch('taxes/:id') updateTax(@Param('id') id: string, @Body() b: any) { return this.admin.updateTax(id, b); }
-  @Delete('taxes/:id') deleteTax(@Param('id') id: string) { return this.admin.deleteTax(id); }
+  @Post('taxes') createTax(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.admin.createTax(b, u.sub); }
+  @Patch('taxes/:id') updateTax(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: any) { return this.admin.updateTax(id, b, u.sub); }
+  @Delete('taxes/:id') deleteTax(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.admin.deleteTax(id, u.sub); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('taxes/:id/approve') approveTax(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { note: string }) { return this.admin.approveTax(id, { sub: u.sub, role: u.role }, b?.note); }
+  @Post('pricing/preview') previewPricing(@Body() b: any) { return this.admin.previewPricing(b); }
+  @Get('pricing/readiness') pricingReadiness() { return this.admin.pricingReadiness(); }
+  @Roles(UserRole.SUPER_ADMIN)
+  @Post('pricing/engine') setPricingEngine(@CurrentUser() u: JwtPayload, @Body() b: { enabled: boolean; reason: string }) { return this.admin.setPricingEngine({ sub: u.sub, role: u.role }, b?.enabled === true, b?.reason); }
 
   // Seasonal Ads
   @Get('ads') ads(@Query('type') type?: string) { return this.admin.listAds(type); }
@@ -3817,7 +4111,9 @@ export class AdminController {
   @Get('invoices/:id') invoice(@Param('id') id: string) { return this.admin.getInvoice(id); }
   @Post('invoices/:orderId/generate') genInvoice(@Param('orderId') id: string) { return this.admin.generateInvoice(id); }
   @Get('invoices/orders/:orderId/pdf')
-  async invoicePdf(@Param('orderId') id: string, @Query('doc') doc: 'CUSTOMER' | 'VENDOR' | 'REMONT' = 'CUSTOMER', @Res() res: Response) {
+  async invoicePdf(@Param('orderId') id: string, @Query('doc') docParam: string = 'CUSTOMER', @Res() res: Response) {
+    // ALL = every issued document plus its credit notes, in one PDF.
+    const doc = (['CUSTOMER', 'VENDOR', 'REMONT', 'ALL'].includes(docParam) ? docParam : 'CUSTOMER') as 'CUSTOMER' | 'VENDOR' | 'REMONT' | 'ALL';
     const buf = await this.invoices.getPdfBufferAdmin(id, doc);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="invoice-${id}-${doc.toLowerCase()}.pdf"`);

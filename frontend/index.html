@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Remont India — AI-Powered Home Services, Construction & Corporate Marketplace</title>
 <meta name="description" content="Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation. Corporate portal & AMC plans available." />
 <link rel="canonical" href="https://www.remontindia.com/" />
@@ -146,7 +146,10 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+<link rel="preconnect" href="https://res.cloudinary.com" />
+<!-- Loaded without blocking first paint; display=swap already shows fallback text until it arrives. -->
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+<noscript><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..500;9..700&family=Bebas+Neue&display=swap" rel="stylesheet" /></noscript>
 <style>
   :root {
     --cream:    #F5F0E8;
@@ -2628,7 +2631,7 @@
     color: rgba(255,255,255,0.6);
   }
   .social-btn:hover { background: var(--sienna); color: #fff; border-color: var(--sienna); }
-  .footer-col h4 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
+  .footer-col h3, .footer-col h4 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #fff; margin-bottom: 16px; }
   .footer-links { display: flex; flex-direction: column; gap: 9px; }
   .footer-links a { font-size: 13px; transition: color 0.2s; }
   .footer-links a:hover { color: var(--sienna); }
@@ -3444,9 +3447,35 @@
   }
   .loc-save-btn:disabled { background: #d1d5db; cursor: not-allowed; }
 </style>
-<!-- Razorpay SDK — preloaded so payment popup opens instantly -->
-<script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
-<link rel="manifest" href="/manifest.json">
+<!-- Razorpay SDK — loaded on the visitor's first tap or key press, not with the page: it is
+     ~200 KB with an iframe and a third-party cookie. Every payment needs several taps first
+     (forms, Pay), so it is ready by then; loadRazorpay() also loads it on demand. -->
+<script>
+  window.loadRazorpay = (function () {
+    var pending = null;
+    return function () {
+      if (window.Razorpay) return Promise.resolve();
+      if (pending) return pending;
+      pending = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.async = true;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { pending = null; s.remove(); reject(new Error('Razorpay SDK load failed')); };
+        document.head.appendChild(s);
+      });
+      return pending;
+    };
+  })();
+  (function () {
+    var kinds = ['pointerdown', 'keydown', 'touchstart'];
+    function first() {
+      kinds.forEach(function (k) { window.removeEventListener(k, first, true); });
+      window.loadRazorpay().catch(function () { /* retried when a payment opens */ });
+    }
+    kinds.forEach(function (k) { window.addEventListener(k, first, { capture: true, passive: true }); });
+  })();
+</script>
 <script src="/shared/remont-auth.js"></script>
 <script src="/shared/remont-notifications.js"></script>
 <!-- ════════════════════════════════════════════════════════════════════════
@@ -3597,6 +3626,19 @@ window.RemontMedia = (function () {
   return { productSlot: productSlot, pickSrc: pickSrc, cardSrc: cardSrc, slugify: slugify, assets: assets };
 })();
 </script>
+<meta name="theme-color" content="#1D4ED8" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Remont" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<link rel="icon" href="/icon-192.png" type="image/png" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="stylesheet" href="/shared/app-shell.css" />
+<link rel="stylesheet" href="/shared/m-catalog.css" />
+<script src="/shared/cart-sync.js"></script>
+<script src="/shared/app-shell.js" defer></script>
+<script src="/shared/m-catalog.js" defer></script>
 </head>
 <body>
 
@@ -3736,7 +3778,7 @@ window.RemontMedia = (function () {
 
     <!-- Service Categories -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Service Categories" data-hi="सर्विस कैटेगरी">Service Categories</span><a onclick="openMobileCatalogPicker()" data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Service Categories" data-hi="सर्विस कैटेगरी">Service Categories</span><a href="/?open=categories" onclick="openMobileCatalogPicker();return false" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-cat-grid" id="m-cat-grid">
         <div class="m-cat-item" onclick="if(!openMobileCatalog('ac'))openBookingModal('','AC Service & Repair','₹399');closeSearchDrop()"><div class="m-cat-icon">❄️</div><div class="m-cat-name" data-en="AC Repair" data-hi="AC रिपेयर">AC Repair</div></div>
         <div class="m-cat-item" onclick="if(!openMobileCatalog('plumbing'))openBookingModal('','Plumbing','₹299')"><div class="m-cat-icon">🔧</div><div class="m-cat-name" data-en="Plumbing" data-hi="प्लंबिंग">Plumbing</div></div>
@@ -3789,7 +3831,7 @@ window.RemontMedia = (function () {
 
     <!-- Top Selling Products (mini scroll, inside services tab) -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a onclick="switchMTab('products',null)" data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a href="#mtp-products" onclick="switchMTab('products',null);return false" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-prod-scroll" id="m-prod-scroll-svc"></div>
     </div>
     <div style="height:16px"></div>
@@ -4370,7 +4412,9 @@ window.RemontMedia = (function () {
   function init() {
     startCountdown();
     bind();
-    load();
+    // Phones never show this section (CSS hides it), so its product list isn't fetched there.
+    var section = document.getElementById('deals');
+    if (!section || getComputedStyle(section).display !== 'none') load();
     window.refreshHotDeals = load;   // callable after a city / catalogue change
   }
 
@@ -5546,7 +5590,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Services" data-hi="सेवाएं">Services</h4>
+      <h3 data-en="Services" data-hi="सेवाएं">Services</h3>
       <div class="footer-links">
         <a href="/services" data-en="Handyman" data-hi="हैंडीमैन">Handyman</a>
         <a href="/services/ac-repair" data-en="AC Service" data-hi="AC सर्विस">AC Service</a>
@@ -5557,7 +5601,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="For Business" data-hi="बिज़नेस के लिए">For Business</h4>
+      <h3 data-en="For Business" data-hi="बिज़नेस के लिए">For Business</h3>
       <div class="footer-links">
         <a href="#corporate" data-en="Corporate Portal" data-hi="कॉर्पोरेट पोर्टल">Corporate Portal</a>
         <a href="#" data-en="Facility Management" data-hi="फैसिलिटी मैनेजमेंट">Facility Management</a>
@@ -5567,7 +5611,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Booking" data-hi="बुकिंग">Booking</h4>
+      <h3 data-en="Booking" data-hi="बुकिंग">Booking</h3>
       <div class="footer-links">
         <a href="#" data-en="AI Chat Booking" data-hi="AI चैट बुकिंग">AI Chat Booking</a>
         <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="whatsapp-link" data-en="WhatsApp Bot" data-hi="WhatsApp बॉट">WhatsApp Bot</a>
@@ -5577,7 +5621,7 @@ window.RemontMedia = (function () {
       </div>
     </div>
     <div class="footer-col">
-      <h4 data-en="Company" data-hi="कंपनी">Company</h4>
+      <h3 data-en="Company" data-hi="कंपनी">Company</h3>
       <div class="footer-links">
         <a href="/about" data-en="About Us" data-hi="हमारे बारे में">About Us</a>
         <a href="/contact" data-en="Contact" data-hi="संपर्क करें">Contact</a>
@@ -5596,7 +5640,7 @@ window.RemontMedia = (function () {
       </div>
       <div id="newsletter-form" style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="nl-email" type="email" placeholder="Enter your email" data-en-ph="Enter your email" data-hi-ph="अपना ईमेल दर्ज करें" style="padding:10px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;width:240px;outline:none" />
-        <button onclick="subscribeNewsletter()" style="padding:10px 20px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap" data-en="Subscribe →" data-hi="सब्सक्राइब करें →">Subscribe →</button>
+        <button onclick="subscribeNewsletter()" style="padding:10px 20px;background:#C2410C;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap" data-en="Subscribe →" data-hi="सब्सक्राइब करें →">Subscribe →</button>
       </div>
       <div id="newsletter-success" style="display:none;color:#4ade80;font-weight:600;font-size:14px" data-en="✅ Subscribed! Thank you." data-hi="✅ सब्सक्राइब हो गया! धन्यवाद।">✅ Subscribed! Thank you.</div>
     </div>
@@ -7716,7 +7760,7 @@ window.RemontMedia = (function () {
         });
       }
     }).catch(function() {
-      if (chatMsgEl) chatMsgEl.textContent = 'Unable to connect. Call +91-98765-43210 to book instantly.';
+      if (chatMsgEl) chatMsgEl.textContent = 'Could not reach the assistant right now. Please try again in a moment.';
     });
   }
 
@@ -7804,8 +7848,6 @@ window.RemontMedia = (function () {
         '<span>' + escHtml(item.name) + (qty > 1 ? ' × ' + qty : '') + '</span>' +
         '<span>₹' + lineTotal.toLocaleString('en-IN') + '</span></div>';
     }).join('');
-    var gst = Math.round(subtotal * 0.18 * 100) / 100; // same formula as renderCartDrawer()
-    var total = subtotal + gst;
 
     var card = document.createElement('div');
     card.id = 'remi-cart-card';
@@ -7815,8 +7857,7 @@ window.RemontMedia = (function () {
       rows +
       '<div style="border-top:1px dashed #e5e7eb;margin:8px 0 6px"></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#6b7280"><span>Subtotal</span><span>₹' + subtotal.toLocaleString('en-IN') + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#6b7280;margin-bottom:6px"><span>GST (18%)</span><span>₹' + gst.toLocaleString('en-IN') + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;font-weight:700;margin-bottom:10px"><span>Total</span><span style="color:#c4601a">₹' + total.toLocaleString('en-IN') + '</span></div>' +
+      '<div style="font-size:12px;color:#6b7280;margin-bottom:10px">GST and fees are calculated at checkout.</div>' +
       '<div style="display:flex;gap:8px">' +
         '<button onclick="remiSendMessage(\'Mujhe ek aur service add karni hai\')" style="flex:1;padding:8px 10px;border:1.5px solid #c4601a;border-radius:20px;background:#fff;color:#c4601a;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Add Service</button>' +
         '<button onclick="remiBookNow()" style="flex:1;padding:8px 10px;border:none;border-radius:20px;background:#c4601a;color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Book Now</button>' +
@@ -7857,33 +7898,72 @@ window.RemontMedia = (function () {
     if (cartChanged) remiRenderCartCard();
   }
 
+  // The conversation survives closing the chat and moving between pages in this tab.
+  var REMI_STORE = 'remont_remi_chat';
+  function remiSave(role, text) {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(REMI_STORE) || '{"m":[]}');
+      if (role) s.m = s.m.concat([[role, text]]).slice(-40);
+      s.id = _remiSessionId;
+      sessionStorage.setItem(REMI_STORE, JSON.stringify(s));
+    } catch (e) { /* private mode: the chat still works, it just isn't kept */ }
+  }
+  (function remiRestore() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(REMI_STORE) || 'null');
+      if (!s || !s.m || !s.m.length) return;
+      _remiSessionId = s.id || null;
+      document.addEventListener('DOMContentLoaded', function () {
+        s.m.forEach(function (b) { remiAddBubble(b[0], b[1]); });
+      });
+    } catch (e) {}
+  })();
+
   function remiSendMessage(msg) {
     remiAddBubble('user', msg);
+    remiSave('user', msg);
     document.getElementById('remi-suggestions').innerHTML = '';
     var typingEl = remiAddBubble('assistant', '...');
-    fetch((API_BASE || '') + '/api/v1/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: msg,
-        sessionId: _remiSessionId,
-        city: typeof currentCity !== 'undefined' ? currentCity : undefined,
-        // Already-known customer identity — reused as-is from the same key
-        // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
-        // customer is never asked their phone number again in chat.
-        customerPhone: localStorage.getItem('remont_phone') || undefined
-      })
-    })
-    .then(function(r) { return r.json(); })
+    var body = JSON.stringify({
+      message: msg,
+      sessionId: _remiSessionId,
+      city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+      // Already-known customer identity — reused as-is from the same key
+      // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
+      // customer is never asked their phone number again in chat.
+      customerPhone: localStorage.getItem('remont_phone') || undefined
+    });
+    // Signed in, the assistant can look up this customer's own bookings. An expired token is
+    // rejected (401) rather than ignored, so the message is retried as a guest.
+    var token = localStorage.getItem('remont_access_token') || localStorage.getItem('remont_token');
+    var send = function (withToken) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (withToken) headers.Authorization = 'Bearer ' + token;
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = ctl && setTimeout(function () { ctl.abort(); }, 45000);
+      return fetch((API_BASE || '') + '/api/v1/ai/chat', { method: 'POST', headers: headers, body: body, signal: ctl ? ctl.signal : undefined })
+        .then(function (r) {
+          clearTimeout(timer);
+          if (r.status === 401 && withToken) return send(false);
+          return r.json().catch(function () { return {}; }).then(function (res) {
+            if (!r.ok) throw new Error((res && res.message) || ('HTTP ' + r.status));
+            return res;
+          });
+        });
+    };
+    send(!!token)
     .then(function(res) {
       var d = res.data || res;
+      if (!d || !d.reply) throw new Error('empty reply');
       _remiSessionId = d.sessionId || _remiSessionId;
-      typingEl.textContent = d.reply || 'Ek second...';
+      typingEl.textContent = d.reply;
+      remiSave('assistant', d.reply);
       remiRenderSuggestions(d.suggestions);
       remiHandleActions(d.actions);
     })
-    .catch(function() {
-      typingEl.textContent = 'Sorry, abhi connect nahi ho pa raha. Please call +91-98765-43210.';
+    .catch(function(err) {
+      var why = err && err.name === 'AbortError' ? 'The assistant took too long to answer.' : 'Could not reach the assistant right now.';
+      typingEl.textContent = why + ' Please try again in a moment.';
     });
   }
 
@@ -7894,7 +7974,8 @@ window.RemontMedia = (function () {
   document.addEventListener('click', function(e) {
     var modal = document.getElementById('remi-chat-modal');
     if (modal && modal.style.display === 'flex') {
-      var opener = e.target.closest('[onclick*="openRemiChat"]');
+      // The app bottom bar's Book button opens the chat from script, without an onclick attribute.
+      var opener = e.target.closest('[onclick*="openRemiChat"], [data-action="book"]');
       if (!modal.contains(e.target) && !opener) {
         closeRemiChat();
       }
@@ -8055,7 +8136,11 @@ window.RemontMedia = (function () {
     });
   }
 
+  // Fetched the first time someone uses search (focus, typing or voice), not with the page.
+  var _searchProductsRequested = false;
   function _fetchProductsForSearch() {
+    if (_searchProductsRequested) return;
+    _searchProductsRequested = true;
     apiGet('/api/v1/products?limit=300').then(function(res) {
       var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
       _mergeApiProducts(list);
@@ -8371,6 +8456,7 @@ window.RemontMedia = (function () {
   }
 
   function runSearch(query) {
+    _fetchProductsForSearch(); // voice search and links can search without focusing the input
     query = (query || '').trim();
     if (!query) { closeSearchDrop(); return; }
     var result = _runUnifiedSearch(query);
@@ -8421,7 +8507,12 @@ window.RemontMedia = (function () {
   _buildPagesIndex();
   _indexProductsFromServiceData();
   _indexServicesFromData();
-  _fetchProductsForSearch();
+  (function () {
+    var input = document.getElementById('headerSearchInput');
+    if (!input) { _fetchProductsForSearch(); return; }
+    input.addEventListener('focus', _fetchProductsForSearch);
+    input.addEventListener('input', _fetchProductsForSearch);
+  })();
 
   // ── Voice search (Web Speech API) ──────────────────────────────────
   (function() {
@@ -8523,7 +8614,8 @@ window.RemontMedia = (function () {
       }
     });
     Object.keys(seen).forEach(function(k){ deduped.push(seen[k]); });
-    deduped.sort(function(a,b){ return (a.sortOrder||99)-(b.sortOrder||99); });
+    // ?? not ||: a sortOrder of 0 is the admin's first position.
+    deduped.sort(function(a,b){ return (a.sortOrder ?? 99)-(b.sortOrder ?? 99); });
     categories = deduped;
 
     // Update serviceData from API categories
@@ -8576,6 +8668,13 @@ window.RemontMedia = (function () {
       };
     });
     _indexServicesFromData();
+
+    // The mobile catalog (shared/m-catalog.js) renders from the same list. It may load after
+    // this runs, so the list is also left where it picks it up.
+    window.__remontCatalogEntries = categories.map(function(cat) {
+      return { fkey: keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-'), cat: cat };
+    });
+    if (window.RemontCatalog) RemontCatalog.setCategories(window.__remontCatalogEntries);
 
     // Update the static svc-panel HTML items to match API categories
     var panel = document.querySelector('.svc-panel');
@@ -9150,8 +9249,6 @@ window.RemontMedia = (function () {
     var price = window._bmPriceNum;
     var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
     var subtotal = Math.max(0, price - couponDiscount);
-    var gst = Math.round(subtotal * 0.18);
-    var total = subtotal + gst;
 
     // Items list
     var svcId = document.getElementById('bm-svc-id').value;
@@ -9171,28 +9268,52 @@ window.RemontMedia = (function () {
     } else {
       discRow.style.display = 'none';
     }
-    document.getElementById('bs-gst').textContent = '₹' + gst.toLocaleString('en-IN');
-    document.getElementById('bs-total').textContent = '₹' + total.toLocaleString('en-IN');
-    window._bmTotal = total;
-    window._bmGst = gst;
-    window._bmSubtotal = subtotal;
+    // GST and the total come only from the server quote (the amount the booking is charged).
+    document.getElementById('bs-gst').textContent = 'Calculating…';
+    document.getElementById('bs-total').textContent = 'Calculating…';
+    window._bmTotal = null; window._bmGst = null; window._bmSubtotal = subtotal;
+    bmRefreshServerQuote();
+  }
+
+  // The direct-booking path prices one service exactly like a cart service booking (city
+  // price, minimum charge, configured GST) — so the server quote for that one service is the
+  // amount this booking charges. This path does not apply coupons (see bmApplyCoupon).
+  function bmRefreshServerQuote() {
+    var svcId = document.getElementById('bm-svc-id').value;
+    if (!svcId) return;
+    var body = JSON.stringify({ items: [{ type: 'SERVICE', serviceId: svcId, quantity: 1 }], city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined });
+    fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+      .then(function(r) { return r.json().catch(function() { return null; }).then(function(j) { return { ok: r.ok, j: j }; }); })
+      .then(function(rr) {
+        var res = rr && rr.j;
+        var q = rr && rr.ok ? (res && (res.data || res)) : null;
+        if (!q || typeof q.totalAmount !== 'number') {
+          var why = (res && (res.message || (res.error && res.error.message))) || 'Price unavailable right now — please try again.';
+          ['bs-gst', 'bs-total', 'bp-gst', 'bp-total'].forEach(function(id) { var el = document.getElementById(id); if (el) el.textContent = '—'; });
+          showToast(Array.isArray(why) ? why.join('; ') : String(why), 'error');
+          return;
+        }
+        var fmt = function(n) { return '₹' + Number(n).toLocaleString('en-IN'); };
+        [['bs-service', q.subtotal], ['bs-gst', q.gstAmount], ['bs-total', q.totalAmount], ['bp-subtotal', q.subtotal], ['bp-gst', q.gstAmount], ['bp-total', q.totalAmount]]
+          .forEach(function(pair) { var el = document.getElementById(pair[0]); if (el) el.textContent = fmt(pair[1]); });
+        ['bs-discount-row', 'bp-disc-row'].forEach(function(id) { var el = document.getElementById(id); if (el) el.style.display = 'none'; });
+        window._bmTotal = q.totalAmount; window._bmGst = q.gstAmount; window._bmSubtotal = q.subtotal;
+        if (window._bmCoupon) showToast('Coupons apply at cart checkout — add this service to the cart to use one', 'info');
+      }).catch(function() {});
   }
 
   function bmBuildPayRecap() {
     var price = window._bmPriceNum;
     var couponDiscount = window._bmCoupon ? window._bmCoupon.discount : 0;
-    var subtotal = Math.max(0, price - couponDiscount);
-    var gst = Math.round(subtotal * 0.18);
-    var total = subtotal + gst;
     document.getElementById('bp-subtotal').textContent = '₹' + price.toLocaleString('en-IN');
     var discRow = document.getElementById('bp-disc-row');
     if (couponDiscount > 0) {
       discRow.style.display = '';
       document.getElementById('bp-disc').textContent = '-₹' + couponDiscount.toLocaleString('en-IN');
     } else { discRow.style.display = 'none'; }
-    document.getElementById('bp-gst').textContent = '₹' + gst.toLocaleString('en-IN');
-    document.getElementById('bp-total').textContent = '₹' + total.toLocaleString('en-IN');
-    window._bmTotal = total;
+    document.getElementById('bp-gst').textContent = window._bmGst != null ? '₹' + Number(window._bmGst).toLocaleString('en-IN') : 'Calculating…';
+    document.getElementById('bp-total').textContent = window._bmTotal != null ? '₹' + Number(window._bmTotal).toLocaleString('en-IN') : 'Calculating…';
+    bmRefreshServerQuote();
   }
 
   function bmApplyCoupon() {
@@ -9343,7 +9464,9 @@ window.RemontMedia = (function () {
     if (bmAp.value) payload.authorizedPerson = bmAp.value;
 
     try {
+      payload.idempotencyKey = (window._bmIdemKey = window._bmIdemKey || _newRequestKey());
       var res = await bmBookingRequest(payload);
+      window._bmIdemKey = null; // booked — the next booking is a new request
       var r = res && res.data ? res.data : res;
       if (r && r.authorizedPerson && r.authorizedPerson.saved === false) {
         setTimeout(function(){ showToast('Booked — but the person you nominated could not be saved. Please contact support.', 'error'); }, 2500);
@@ -9715,7 +9838,7 @@ window.RemontMedia = (function () {
    <div style="background:#f9fafb;border-radius:12px;padding:14px 16px">
     <div class="bm-summary-item"><span>Service Amount</span><span id="bs-service">₹0</span></div>
     <div class="bm-summary-item" id="bs-discount-row" style="color:#16a34a"><span>🎉 Coupon Discount</span><span id="bs-discount">-₹0</span></div>
-    <div class="bm-summary-item"><span>GST (18%)</span><span id="bs-gst">₹0</span></div>
+    <div class="bm-summary-item"><span>GST</span><span id="bs-gst">₹0</span></div>
     <div class="bm-summary-total"><span>Total Payable</span><span id="bs-total" style="color:#c4601a">₹0</span></div>
    </div>
   </div>
@@ -9752,7 +9875,7 @@ window.RemontMedia = (function () {
     <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Order Total</div>
     <div style="display:flex;justify-content:space-between;font-size:14px;color:#374151;margin-bottom:4px"><span>Subtotal</span><span id="bp-subtotal">₹0</span></div>
     <div id="bp-disc-row" style="display:flex;justify-content:space-between;font-size:14px;color:#16a34a;margin-bottom:4px"><span>Discount</span><span id="bp-disc">-₹0</span></div>
-    <div style="display:flex;justify-content:space-between;font-size:14px;color:#374151;margin-bottom:8px"><span>GST (18%)</span><span id="bp-gst">₹0</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px;color:#374151;margin-bottom:8px"><span>GST</span><span id="bp-gst">₹0</span></div>
     <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:800;color:#c4601a;border-top:1.5px solid #fed7aa;padding-top:10px"><span>Total</span><span id="bp-total">₹0</span></div>
    </div>
   </div>
@@ -9984,12 +10107,9 @@ function renderCartDrawer() {
 
   itemsEl.innerHTML = html;
 
-  var gst = Math.round(subtotal * 0.18 * 100) / 100;
-  var total = subtotal + gst;
   footerEl.innerHTML =
-    '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#6b7280"><span>Subtotal</span><span>₹' + subtotal.toLocaleString('en-IN') + '</span></div>' +
-    '<div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:13px;color:#6b7280"><span>GST (18%)</span><span>₹' + gst.toLocaleString('en-IN') + '</span></div>' +
-    '<div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:16px;font-weight:700;color:#111;padding-top:10px;border-top:1px solid #f3f4f6"><span>Total</span><span style="color:#c4601a">₹' + total.toLocaleString('en-IN') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:16px;font-weight:700;color:#111"><span>Subtotal</span><span style="color:#c4601a">₹' + subtotal.toLocaleString('en-IN') + '</span></div>' +
+    '<div style="margin-bottom:16px;font-size:12px;color:#6b7280">GST and fees are calculated at checkout — in-house services include GST on the service; partner services include Remont\'s platform fee and its GST (plus the partner\'s GST if they are GST-registered).</div>' +
     '<button onclick="cartCheckout()" style="width:100%;padding:14px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px">Proceed to Book →</button>' +
     '<button onclick="cartClear()" style="width:100%;padding:10px;background:none;border:1.5px solid #e5e7eb;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer;color:#6b7280">Clear Cart</button>';
 }
@@ -10193,14 +10313,18 @@ function cartCheckout() {
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>Subtotal</span><span id="co-subtotal">₹0</span>
         </div>
+        <div id="co-min-line" style="display:none;justify-content:space-between;font-size:12px;color:#6b7280;margin-bottom:6px">
+          <span>Includes minimum service charge</span><span id="co-min-line-amt">₹0</span>
+        </div>
         <div id="co-coupon-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>Coupon discount</span><span id="co-coupon-line-amt">−₹0</span>
         </div>
         <div id="co-bundle-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
           <span>🎁 Bundle offer (<span id="co-bundle-line-pct">10</span>% off service)</span><span id="co-bundle-line-amt">−₹0</span>
         </div>
+        <div id="co-charges"></div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
-          <span>GST (18%)</span><span id="co-gst">₹0</span>
+          <span>GST</span><span id="co-gst">₹0</span>
         </div>
         <div id="co-delivery-line" style="display:none;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
           <span>Delivery Charge</span><span id="co-delivery-line-amt">₹0</span>
@@ -10256,8 +10380,8 @@ function cartCheckout() {
           style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
       </div>
       <div id="co-slot-row" style="display:none;gap:10px;margin-bottom:16px">
-        <input id="co-date" type="date" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
-        <select id="co-time" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
+        <input id="co-date" type="date" onchange="recalcTotals()" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none" />
+        <select id="co-time" onchange="recalcTotals()" style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;background:#fff">
           <option value="07:00">7:00 AM</option><option value="08:00">8:00 AM</option>
           <option value="09:00">9:00 AM</option><option value="10:00" selected>10:00 AM (Most Popular)</option>
           <option value="11:00">11:00 AM</option><option value="12:00">12:00 PM</option>
@@ -10266,6 +10390,9 @@ function cartCheckout() {
           <option value="17:00">5:00 PM</option><option value="18:00">6:00 PM</option>
           <option value="19:00">7:00 PM</option>
         </select>
+      </div>
+      <div id="co-emergency-row" style="display:none;margin:-8px 0 16px;font-size:13px;color:#374151">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="co-emergency" onchange="recalcTotals()"> Emergency visit <span style="color:#6b7280">(an emergency fee applies where configured — shown below before you pay)</span></label>
       </div>
       <p id="co-slot-hint" style="display:none;font-size:11px;color:#9ca3af;margin:-10px 0 16px">Date &amp; time apply to any services in this order — products ship separately.</p>
       <div id="co-delivery-estimate" style="display:none;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600">
@@ -10753,6 +10880,10 @@ var _coCoupon = null;      // { code, discountAmount } once applied
 var _coWalletBalance = 0;  // logged-in customer's wallet balance, fetched on open
 var _coBundleDiscountPercent = 10; // admin-configurable (SiteSetting 'bundle_discount_percent'), refetched on every modal open — server-side checkout() is always the source of truth for the actual charged amount, this is a preview only
 
+function _newRequestKey() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}
 function openCheckoutModal() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   if (!cart.length) { showToast('Cart is empty', 'error'); return; }
@@ -11019,6 +11150,78 @@ function handleCheckoutSubmit() {
 // charged via Razorpay is always the backend's own independently-computed totalAmount from
 // MasterOrdersService.checkout() — this display does not need to match it to the paisa.
 var _coDeliveryCharge = 0;
+// ── Server quote (POST /master-orders/public/quote) — writes nothing; same pricing as checkout.
+var _coQuote = null, _coQuoteFor = null, _coQuoteTimer = null, _coQuoteInflight = null;
+function _coQuoteBody() {
+  var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
+  var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
+  return {
+    items: cart.map(function(i) {
+      return i.type === 'service' ? { type: 'SERVICE', serviceId: i.id, quantity: i.qty || 1 } : { type: 'PRODUCT', productId: i.id, quantity: i.qty || 1 };
+    }),
+    city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined,
+    couponCode: _coCoupon ? _coCoupon.code : undefined,
+    latitude: savedLoc && savedLoc.latitude ? savedLoc.latitude : undefined,
+    longitude: savedLoc && savedLoc.longitude ? savedLoc.longitude : undefined,
+    state: savedLoc ? (savedLoc.state || undefined) : undefined,
+    pincode: savedLoc ? (savedLoc.pincode || undefined) : undefined,
+    slotStart: _coSlotStart(),
+    emergency: (document.getElementById('co-emergency') || {}).checked || undefined,
+  };
+}
+function _coSlotStart() {
+  var d = (document.getElementById('co-date') || {}).value, t = (document.getElementById('co-time') || {}).value;
+  return d && t ? d + 'T' + t + ':00+05:30' : undefined;
+}
+function _coRenderCharges(q) {
+  // every extra charge the server priced, each on its own line (GST shown in the GST line)
+  var el = document.getElementById('co-charges'); if (!el) return;
+  var html = '';
+  (q && q.bookings || []).forEach(function(b) {
+    (b.charges || []).forEach(function(c) {
+      if (c.code === 'FEE') html += '<div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px"><span>' + escHtml(c.label) + '</span><span>₹' + Number(c.amount).toLocaleString('en-IN') + '</span></div>';
+      if (c.code === 'PLATFORM_FEE') html += '<div style="display:flex;justify-content:space-between;font-size:12px;color:#9ca3af;margin-bottom:6px"><span>incl. Remont platform fee (' + c.gstRatePercent + '% GST)</span><span>₹' + Number(c.amount).toLocaleString('en-IN') + '</span></div>';
+    });
+  });
+  el.innerHTML = html;
+}
+function _coQuoteKey() { try { return JSON.stringify(_coQuoteBody()); } catch (e) { return ''; } }
+function _coScheduleQuote(key) {
+  if (!key || _coQuoteInflight === key) return;
+  clearTimeout(_coQuoteTimer);
+  _coQuoteTimer = setTimeout(function() {
+    _coQuoteInflight = key;
+    // Signed in → the authenticated quote prices YOUR account (membership included). Guests get
+    // the public quote, which never looks anyone up by phone (privacy) — a member checking out
+    // as a guest sees their member discount once the order is placed.
+    var token = localStorage.getItem('remont_token');
+    var publicQuote = function() {
+      return fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key,
+      });
+    };
+    var req = publicQuote;
+    if (token) {
+      var b = JSON.parse(key);
+      var authBody = JSON.stringify({
+        items: b.items, city: b.city, couponCode: b.couponCode,
+        inlineAddress: (b.latitude != null || b.fullAddress) ? { fullAddress: b.fullAddress || '', city: b.city, state: b.state, pincode: b.pincode, latitude: b.latitude, longitude: b.longitude } : undefined,
+      });
+      req = function() {
+        return fetch((API_BASE || '') + '/api/v1/master-orders/quote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: authBody,
+        }).then(function(r) { return r.status === 401 ? publicQuote() : r; }); // expired session → guest quote
+      };
+    }
+    req().then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || r.status); return d; }); })
+      .then(function(res) {
+        _coQuote = res.data || res; _coQuoteFor = key; _coQuoteInflight = null;
+        recalcTotals();
+      })
+      .catch(function() { _coQuoteInflight = null; /* keep the estimate; checkout re-prices on the server */ });
+  }, 300);
+}
+
 function recalcTotals() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   var subtotal = 0;
@@ -11039,8 +11242,36 @@ function recalcTotals() {
 
   var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal - bundleDiscount) : 0;
   var discounted = Math.max(0, subtotal - couponDiscount - bundleDiscount);
-  var gst = Math.round(discounted * 0.18 * 100) / 100;
-  var preWalletTotal = discounted + gst + _coDeliveryCharge;
+  // GST and the payable total come only from the server quote; until it arrives they show as
+  // 'Calculating…' (no client-side tax estimate).
+  var gst = 0;
+  var preWalletTotal = discounted + _coDeliveryCharge;
+  var hasQuote = false;
+  var minimumCharge = 0;
+  // The server quote is produced by the SAME pricing checkout charges with (minimum charge,
+  // configured GST, coupon, bundle, delivery) — once it arrives it replaces the estimate above.
+  var quoteKey = _coQuoteKey();
+  if (_coQuote && _coQuoteFor === quoteKey) {
+    subtotal = _coQuote.subtotal;
+    bundleDiscount = _coQuote.bundleDiscount || 0;
+    couponDiscount = (_coQuote.couponDiscount || 0) + (_coQuote.membershipDiscount || 0);
+    gst = _coQuote.gstAmount;
+    _coDeliveryCharge = _coQuote.deliveryCharge || 0;
+    preWalletTotal = _coQuote.totalAmount;
+    minimumCharge = _coQuote.minimumChargeAdjustment || 0;
+    hasQuote = true;
+    _coRenderCharges(_coQuote);
+  } else {
+    _coRenderCharges(null);
+    _coScheduleQuote(quoteKey);
+  }
+  var emRow = document.getElementById('co-emergency-row');
+  if (emRow) emRow.style.display = (document.getElementById('co-slot-row') || {}).style && document.getElementById('co-slot-row').style.display !== 'none' ? 'block' : 'none';
+  var minLine = document.getElementById('co-min-line');
+  if (minLine) {
+    minLine.style.display = minimumCharge > 0 ? 'flex' : 'none';
+    if (minimumCharge > 0) document.getElementById('co-min-line-amt').textContent = '₹' + minimumCharge.toLocaleString('en-IN');
+  }
 
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletApplied = (useWalletEl && useWalletEl.checked) ? Math.min(_coWalletBalance, preWalletTotal) : 0;
@@ -11062,7 +11293,7 @@ function recalcTotals() {
   } else {
     couponLine.style.display = 'none';
   }
-  document.getElementById('co-gst').textContent = '₹' + gst.toLocaleString('en-IN');
+  document.getElementById('co-gst').textContent = hasQuote ? '₹' + gst.toLocaleString('en-IN') : 'Calculating…';
   var deliveryLine = document.getElementById('co-delivery-line');
   if (_coDeliveryCharge > 0) {
     deliveryLine.style.display = 'flex';
@@ -11077,8 +11308,8 @@ function recalcTotals() {
   } else {
     walletLine.style.display = 'none';
   }
-  document.getElementById('co-total').textContent = '₹' + total.toLocaleString('en-IN');
-  return { subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
+  document.getElementById('co-total').textContent = hasQuote ? '₹' + total.toLocaleString('en-IN') : 'Calculating…';
+  return { quoted: hasQuote, subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
 }
 
 // Fetches a PREVIEW delivery charge for the current cart + whatever address info is
@@ -11338,6 +11569,12 @@ function submitCheckoutOrder() {
   var coHasServiceItem = cart.some(function(i){ return i.type === 'service'; });
   var slotStart = (coHasServiceItem && slotDate && slotTime) ? (slotDate + 'T' + slotTime + ':00+05:30') : undefined;
   var totals = recalcTotals();
+  // never place an order on a price the customer hasn't seen from the server
+  if (!totals.quoted) {
+    btn.disabled = false; btn.textContent = paymentMethod === 'COD' ? 'Place Order (Cash) →' : 'Pay Online →';
+    showCoMsg('Calculating the final price — please try again in a moment');
+    return;
+  }
   var useWalletEl = document.getElementById('co-use-wallet');
   var walletAmount = (useWalletEl && useWalletEl.checked && paymentMethod === 'ONLINE') ? totals.walletApplied : undefined;
   var gstin = document.getElementById('co-gstin').value.trim();
@@ -11356,6 +11593,7 @@ function submitCheckoutOrder() {
     latitude:        savedLoc ? (savedLoc.latitude  || 0) : 0,
     longitude:       savedLoc ? (savedLoc.longitude || 0) : 0,
     slotStart:       slotStart,
+    emergency:       (document.getElementById('co-emergency') || {}).checked || undefined,
     slotEnd:         slotStart,
     couponCode:      _coCoupon ? _coCoupon.code : undefined,
     walletAmount:    walletAmount,
@@ -11363,16 +11601,25 @@ function submitCheckoutOrder() {
     gstBusinessName: gstBusinessName || undefined,
     paymentMethod:   paymentMethod,
     authorizedPerson: coAp.value || undefined,
-    crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })()
+    crmRef:          (function(){ try { return localStorage.getItem('remont_crm_ref') || undefined; } catch (e) { return undefined; } })(),
+    // Same key for every retry of THIS checkout attempt — the server then returns the order it
+    // already created instead of booking twice (double click, flaky network).
+    idempotencyKey:  (window._coIdemKey = window._coIdemKey || _newRequestKey())
   };
 
+  // The wallet can only be spent by its logged-in owner: the server takes the account from this
+  // token, never from the name/phone typed above. Without wallet use the checkout stays a guest one.
+  var coHeaders = { 'Content-Type': 'application/json' };
+  var coToken = localStorage.getItem('remont_token');
+  if (walletAmount && coToken) coHeaders['Authorization'] = 'Bearer ' + coToken;
   fetch((API_BASE || '') + '/api/v1/master-orders/public/checkout', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: coHeaders,
     body: JSON.stringify(payload)
   })
   .then(function(r) {
     return r.json().then(function(d) {
+      if (r.status === 401 && walletAmount) throw new Error('Please log in again to pay with your Remont wallet');
       if (!r.ok) throw new Error(d.message || 'Order placement failed');
       return d;
     });
@@ -11382,6 +11629,7 @@ function submitCheckoutOrder() {
     var orderNumber = d.masterOrderNumber;
     var totalAmount = Number(d.totalAmount || 0);
     _checkoutOrderId = d.masterOrderId;
+    window._coIdemKey = null; // next checkout is a new request
     try { localStorage.removeItem('remont_crm_ref'); } catch (e) {}
     _checkoutOrderNumber = orderNumber;
     _checkoutTotalAmount = totalAmount;
@@ -11456,13 +11704,15 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
       if (nameEl) prefillName = nameEl.value.trim();
       if (phoneEl) prefillPhone = '+91' + phoneEl.value.replace(/\D/g, '');
 
+      // The admin-set site logo when there is one, else the app icon (/admin/logo.png never existed).
+      var logoEl = document.getElementById('header-logo-img');
       var options = {
         key: keyId,
         amount: Math.round(totalAmount * 100),
         currency: 'INR',
         name: 'Remont India',
         description: 'Home Services Payment',
-        image: '/admin/logo.png',
+        image: (logoEl && logoEl.getAttribute('src')) || window.location.origin + '/icon-512.png',
         order_id: payment.gatewayOrderId,
         handler: function(response) {
           btn.textContent = 'Confirming payment…'; btn.disabled = true;
@@ -11540,15 +11790,12 @@ function launchRazorpay(payment, order, totalAmount, btn, isMaster) {
       if (window.Razorpay) {
         tryOpen();
       } else {
-        var s = document.createElement('script');
-        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        s.onload = tryOpen;
-        s.onerror = function() {
+        // The shared loader: a second copy of checkout.js must not be added while one is loading.
+        window.loadRazorpay().then(tryOpen, function() {
           if (typeof showCoMsg === 'function') showCoMsg('Failed to load payment gateway. Check internet connection.');
           btn.textContent = 'Pay Online →'; btn.disabled = false;
           reject(new Error('Razorpay SDK load failed'));
-        };
-        document.head.appendChild(s);
+        });
       }
     }
 
@@ -12150,6 +12397,12 @@ function openPaymentDetailModal(orderId) {
   document.getElementById('pd-body').innerHTML = '<p style="color:#6b7280;text-align:center;padding:40px 0">Loading…</p>';
   loadPaymentDetail();
 }
+function pdConfirmCash(paymentId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+  apiPost('/api/v1/orders/' + _pdOrderId + '/cash-collections/' + paymentId + '/confirm', {})
+    .then(function() { showToast('Thank you — payment confirmed', 'success'); loadPaymentDetail(); })
+    .catch(function() { showToast('Could not confirm the payment. Please try again.', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Yes, I paid'; } });
+}
 function closePaymentDetailModal() {
   document.getElementById('payment-detail-modal').style.display = 'none';
   document.body.style.overflow = '';
@@ -12183,6 +12436,12 @@ function renderPaymentDetail(bal, txns) {
   }
 
   html += '<div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Transaction History</div>';
+  var pendingCash = (txns || []).filter(function(t) { return t.status === 'PENDING' && t.gateway === 'CASH_COLLECTION'; });
+  pendingCash.forEach(function(t) {
+    html += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px;margin-bottom:12px;font-size:13px">' +
+      'Your service partner reported collecting <b>₹' + Number(t.amount).toLocaleString('en-IN') + '</b> in person. Please confirm only if you paid it.' +
+      '<button onclick="pdConfirmCash(\'' + t.id + '\', this)" style="display:block;width:100%;margin-top:8px;padding:10px;background:#16a34a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Yes, I paid ₹' + Number(t.amount).toLocaleString('en-IN') + '</button></div>';
+  });
   if (!txns.length) {
     html += '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px 0">No transactions yet</div>';
   } else {
@@ -12301,19 +12560,25 @@ function _pdPrintWindow(title, bodyHtml) {
 
 function pdDownloadInvoice() {
   var orderId = _pdOrderId;
-  apiPost('/api/v1/invoices/orders/' + orderId + '/generate', {}).then(function(res) {
-    var inv = res && res.data ? res.data : res;
-    var rows =
-      '<tr><td>Subtotal</td><td class="right">₹' + Number(inv.customerSubtotal).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr><td>CGST</td><td class="right">₹' + Number(inv.customerCgst).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr><td>SGST</td><td class="right">₹' + Number(inv.customerSgst).toLocaleString('en-IN') + '</td></tr>' +
-      '<tr class="total"><td>Total</td><td class="right">₹' + Number(inv.customerTotal).toLocaleString('en-IN') + '</td></tr>';
-    _pdPrintWindow('Invoice ' + inv.invoiceNumber,
-      '<h1>Remont India</h1><h2>GST Invoice · ' + escHtml(inv.invoiceNumber) + '</h2>' +
-      '<div style="font-size:13px;color:#6b7280">' + new Date(inv.generatedAt).toLocaleDateString('en-IN') + '</div>' +
-      '<table>' + rows + '</table>');
+  var base = (typeof API_BASE !== 'undefined' && API_BASE) || (typeof window.API_BASE === 'string' ? window.API_BASE : '');
+  var token = localStorage.getItem('remont_token');
+  var headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  // Issue the invoice if it isn't yet (idempotent; refused while the order isn't invoiceable),
+  // then download the issued PDF itself — never a page rebuilt in the browser.
+  apiPost('/api/v1/invoices/orders/' + orderId + '/generate', {}).catch(function() { return null; }).then(function() {
+    return fetch(base + '/api/v1/invoices/orders/' + orderId + '/pdf?docKind=ALL', { headers: headers });
+  }).then(function(res) {
+    if (res.status === 404) throw new Error('The invoice for this booking is not issued yet — it is issued once the job is completed or the order is shipped.');
+    if (!res.ok) throw new Error('Could not download the invoice (' + res.status + ')');
+    return res.blob();
+  }).then(function(blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'Remont-invoice-' + orderId + '.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
   }).catch(function(e) {
-    showToast((e && e.message) || 'Could not generate invoice', 'error');
+    showToast((e && e.message) || 'Could not download the invoice', 'error');
   });
 }
 
@@ -12379,9 +12644,15 @@ function cancelOrderFromList(orderId) {
     method: 'PATCH', headers: headers,
     body: JSON.stringify({ reason: 'Customer requested cancellation' })
   }).then(function(r) {
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }).then(function() {
+    return r.json().catch(function() { return {}; }).then(function(d) {
+      if (r.status === 409 && d && d.errorCode === 'CANCELLATION_REVIEW_REQUIRED') return { reviewRequired: true, message: d.message };
+      if (r.status === 409 && d && d.errorCode === 'SERVICE_STARTED') return { serviceStarted: true, message: d.message };
+      if (!r.ok) throw new Error(r.status);
+      return d;
+    });
+  }).then(function(res) {
+    if (res && res.reviewRequired) { requestCancellationReview(orderId, res.message); return; }
+    if (res && res.serviceStarted) { offerServiceComplaint(orderId, res.message); return; }
     showToast('Order cancelled', 'success');
     loadMyOrders();
   }).catch(function() {
@@ -12548,6 +12819,7 @@ var SUPPORT_ISSUE_LABELS = {
   PARTNER_ON_THE_WAY: 'Partner On The Way — I want to cancel', PARTNER_ARRIVED: 'Partner Arrived — I want to cancel',
   PARTNER_DID_NOT_ARRIVE: 'Partner Did Not Arrive', SERVICE_STARTED_ISSUE: 'Issue During Service',
   SERVICE_COMPLETED_ISSUE_NOT_FIXED: 'Issue Not Fixed', OTHER_ISSUE: 'Other Issue',
+  CUSTOMER_REFUSED_SERVICE: 'Partner reported the service could not go ahead',
 };
 var _supCtx = { orderId: null, orderItemId: null, itemLabel: null };
 
@@ -12710,7 +12982,84 @@ function _renderSupportResult(kase) {
     (kase.policyApplied ? '<div style="font-size:11px;color:#9ca3af;margin-bottom:10px">Policy: ' + escHtml(kase.policyApplied) + '</div>' : '') +
     '<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Case ID: <b>' + escHtml(kase.caseNumber) + '</b></div>' +
     '<div style="font-size:12px;color:#374151;padding:10px;background:#eff6ff;border-radius:8px">Next step: ' + escHtml(nextStep) + '</div>' +
+    (SUPPORT_CANCELLATION_ISSUES.indexOf(kase.issueType) !== -1 && !resolved && kase.status !== 'CLOSED'
+      ? '<button onclick="supportCustomerRespond(\'' + kase.id + '\')" style="width:100%;margin-top:10px;padding:10px;background:#fff;color:#0d1535;border:1.5px solid #0d1535;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">' + (kase.customerStatement ? 'Update your response' : 'Add your side') + '</button>'
+      : '') +
+    (SUPPORT_CANCELLATION_ISSUES.indexOf(kase.issueType) !== -1 && resolved && !kase.appealedAt
+      ? '<button onclick="supportCustomerAppeal(\'' + kase.id + '\')" style="width:100%;margin-top:10px;padding:10px;background:#fff;color:#c4601a;border:1.5px solid #c4601a;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Appeal this decision</button>'
+      : '') +
     '<button onclick="closeSupportModal()" style="width:100%;margin-top:14px;padding:11px;background:#0d1535;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Done</button>';
+}
+
+function _supPost(path, body) {
+  var token = localStorage.getItem('remont_token');
+  var headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return fetch(API_BASE + path, { method: 'POST', headers: headers, body: JSON.stringify(body) })
+    .then(function(r) { return r.json().catch(function() { return {}; }).then(function(d) { if (!r.ok) throw new Error(d.message || 'Request failed'); return d.data || d; }); });
+}
+
+// Partner already arrived: the cancellation goes to our team for review (no instant cancel,
+// no automatic charge). The partner's arrival record and the customer's reason are kept.
+// The service has started (start OTP shared): no self-service cancellation — a genuine problem
+// still goes to our team as a complaint through the existing support flow.
+function offerServiceComplaint(orderId, message) {
+  if (confirm((message || 'The service has already started, so it can no longer be cancelled here.') + '\n\nRaise a complaint about this service now?')) {
+    openSupportModal(orderId);
+  }
+}
+
+function _fmtRs(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+
+// Shows the customer what cancelling now would mean BEFORE they confirm (penalty rule, what was
+// paid, estimated refund) — an estimate; our team reviews and confirms the final amount.
+function requestCancellationReview(orderId, serverMessage) {
+  var token = localStorage.getItem('remont_token');
+  var headers = {}; if (token) headers['Authorization'] = 'Bearer ' + token;
+  fetch(API_BASE + '/api/v1/support/orders/' + orderId + '/cancellation-preview', { headers: headers })
+    .then(function(r) { return r.json().catch(function() { return {}; }).then(function(d) { if (!r.ok) throw new Error(d.message || 'Could not load the cancellation details'); return d.data || d; }); })
+    .then(function(pv) {
+      if (pv.complaintOnly) { offerServiceComplaint(orderId, pv.message); return; }
+      if (!pv.canRequestCancellation) { showToast(pv.message || 'This booking can no longer be cancelled', 'error'); return; }
+      var lines = [serverMessage || 'Your partner has already arrived, so this cancellation needs a review.', ''];
+      lines.push('Amount paid so far: ' + _fmtRs(pv.paid));
+      if (pv.penalty && pv.penalty.amount > 0) {
+        lines.push('Cancellation charge: ' + _fmtRs(pv.penalty.amount) + ' (' + pv.penalty.rule + ')');
+      } else {
+        lines.push('Cancellation charge: none for this service');
+      }
+      lines.push('Estimated refund: ' + _fmtRs(pv.estimatedRefund));
+      if (pv.note) lines.push('', pv.note);
+      if (!confirm(lines.join('\n') + '\n\nSend the cancellation request?')) return;
+      _submitCancellationRequest(orderId);
+    })
+    .catch(function(e) { showToast(e.message || 'Could not load the cancellation details', 'error'); });
+}
+
+function _submitCancellationRequest(orderId) {
+  var reason = prompt('Please tell us why you want to cancel:');
+  if (reason === null) return;
+  if (!reason.trim()) { showToast('Please enter a reason', 'error'); return; }
+  _supPost('/api/v1/support/orders/' + orderId + '/cancellation-request', { reason: reason.trim() }).then(function(kase) {
+    showToast('Cancellation request submitted' + (kase && kase.caseNumber ? ' (' + kase.caseNumber + ')' : '') + ' — our team will review it', 'success');
+    loadMyOrders();
+  }).catch(function(e) { showToast(e.message || 'Could not submit the request', 'error'); });
+}
+
+var SUPPORT_CANCELLATION_ISSUES = ['PARTNER_ON_THE_WAY', 'PARTNER_ARRIVED', 'CUSTOMER_REFUSED_SERVICE'];
+function supportCustomerRespond(caseId) {
+  var statement = prompt('Add your side of what happened (our team will see it before deciding):');
+  if (statement === null || !statement.trim()) return;
+  _supPost('/api/v1/support/cases/' + caseId + '/customer-respond', { statement: statement.trim() })
+    .then(function() { showToast('Your response was added', 'success'); viewSupportCase(caseId); })
+    .catch(function(e) { showToast(e.message, 'error'); });
+}
+function supportCustomerAppeal(caseId) {
+  var statement = prompt('Explain why you want this decision reviewed again (you can appeal once):');
+  if (statement === null || !statement.trim()) return;
+  _supPost('/api/v1/support/cases/' + caseId + '/appeal', { statement: statement.trim() })
+    .then(function() { showToast('Appeal submitted — our team will review it again', 'success'); viewSupportCase(caseId); })
+    .catch(function(e) { showToast(e.message, 'error'); });
 }
 
 function viewSupportCase(caseId) {
@@ -12868,7 +13217,8 @@ document.getElementById('support-case-modal').addEventListener('click', function
   // Cart badge on header already works. No extra action needed.
 
   // ── Try to load real products from API ────────────────────────
-  fetch(API_BASE + '/api/v1/products?take=6').then(function(r){return r.json();}).then(function(res){
+  // `limit` is the list endpoint's size parameter; `take` was ignored, so this fetched the default 50.
+  fetch(API_BASE + '/api/v1/products?limit=6').then(function(r){return r.json();}).then(function(res){
     var list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
     if (!list || list.length < 2) return; // fallback data is fine
     [svcProdScroll, prodGrid].forEach(function(container, isGrid) {
@@ -13534,7 +13884,7 @@ window.closeCustPartner = function() {
 
       <div class="pp-sec-hd" style="margin-top:16px">
         <span>Recent Jobs</span>
-        <a onclick="switchPPScreen('jobs')">View All</a>
+        <a href="#" onclick="switchPPScreen('jobs');return false">View All</a>
       </div>
       <div class="pp-jobs-wrap" id="pp-recent-jobs">
         <div class="pp-empty"><div class="pp-empty-ic">📋</div><div class="pp-empty-ttl">No jobs yet</div><div>Complete your profile to start receiving jobs</div></div>

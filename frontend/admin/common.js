@@ -238,7 +238,12 @@ var SIDEBAR_NAV = [
     { key:'wallet', label:'Wallet', icon:'👛', href:'/admin/wallet.html' },
     { key:'invoices', label:'Invoices', icon:'🧾', href:'/admin/invoices.html' },
     { key:'coupons', label:'Coupons', icon:'🏷', href:'/admin/coupons.html' },
-    { key:'taxes', label:'Taxes', icon:'📊', href:'/admin/taxes.html' },
+  ]},
+  { section: '🧮 FINANCE & CONFIGURATION', items: [
+    { key:'taxes', label:'Tax Configuration', icon:'📊', href:'/admin/taxes.html' },
+    { key:'pricing-rules', label:'Commission, Fees & Charges', icon:'💲', href:'/admin/services.html?tab=commission' },
+    { key:'pricing-preview', label:'Price Calculation Preview', icon:'🧮', href:'/admin/pricing-preview.html' },
+    { key:'rule-history', label:'Rule History', icon:'📜', href:'/admin/audit-logs.html?action=TAX_RULE_UPDATED', superAdminOnly:true },
   ]},
   { section: '📢 MARKETING', items: [
     { key:'banners', label:'Front Slider', icon:'🖼', href:'/admin/banners.html' },

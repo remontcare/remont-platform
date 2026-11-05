@@ -79,7 +79,7 @@ export class PartnerLedgerService {
     vendorId: string,
     type: LedgerEntryType,
     amount: number,
-    meta?: { orderId?: string; withdrawalRequestId?: string; notes?: string; createdBy?: string },
+    meta?: { orderId?: string; withdrawalRequestId?: string; notes?: string; createdBy?: string; reference?: string },
   ) {
     await tx.$queryRaw`SELECT id FROM "ServiceVendor" WHERE id = ${vendorId} FOR UPDATE`;
     const last = await tx.partnerLedgerEntry.findFirst({
@@ -93,6 +93,7 @@ export class PartnerLedgerService {
         vendorId, type, amount, balanceAfter,
         orderId: meta?.orderId, withdrawalRequestId: meta?.withdrawalRequestId,
         notes: meta?.notes, createdBy: meta?.createdBy,
+        ...(meta?.reference ? { reference: meta.reference } : {}),
       },
     });
   }

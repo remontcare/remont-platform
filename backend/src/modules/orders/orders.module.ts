@@ -1,25 +1,26 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, InternalServerErrorException,
-  ServiceUnavailableException, ConflictException, Inject, forwardRef,
+  NotFoundException, BadRequestException, ForbiddenException, ConflictException, Logger, Optional, InternalServerErrorException,
+  ServiceUnavailableException, Inject, forwardRef,
 } from '@nestjs/common';
 import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto, AUTHORIZED_PERSON_PERMISSIONS } from '../authorized-person/authorized-person.module';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, OrderType, BookingChannel, UserRole, PaymentCollectionMode, MediaEntityType } from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsDateString, IsEmail, IsIn, Min, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsNumber, IsBoolean, IsDateString, IsEmail, IsIn, Min, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, EXTRA_WORK_ITEM_PUBLIC_SELECT, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, releaseUnpaidOrderWallet, logAudit, recalculateServiceOrder, isValidGstinFormat, priceServiceBookingSnapshot, orderFieldsFromSnapshot, vendorAllowedForOrder, EXTRA_WORK_ITEM_PUBLIC_SELECT, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
 import { PaymentsService, PaymentsModule } from '../payments/payments.module';
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
+import { withoutCustomerOtps } from '../../common/customer-otp';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
 import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
@@ -106,6 +107,7 @@ class InlineAddressDto {
 
 class CreateOrderDto {
   @IsEnum(OrderType) type: OrderType;
+  @IsOptional() @IsBoolean() emergency?: boolean;
   @IsOptional() @IsEnum(BookingChannel) channel?: BookingChannel;
   @IsOptional() @IsString() serviceId?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemDto) items?: OrderItemDto[];
@@ -153,6 +155,9 @@ export class DispatchService {
     // candidates even when a perfectly eligible vendor is online right next door.
     const skill = normalizeSkillKey(order.service.category.key);
     const hasOrderCoords = isValidIndiaCoords(lat, lng);
+    // Service model: a MARKETPLACE job is offered only to external partners, an IN_HOUSE job only to
+    // Remont's own technicians (legacy orders: anyone, as before).
+    const staffFilter = order.serviceModel === 'MARKETPLACE' ? { staffType: 'PARTNER' as const } : order.serviceModel === 'IN_HOUSE' ? { staffType: 'IN_HOUSE' as const } : {};
 
     // Production incident: a verified, ACTIVE, online, correct-skill, same-city vendor
     // (Mayank, Bhopal, WATERPROOFING) never received an order with valid GPS coordinates,
@@ -181,6 +186,7 @@ export class DispatchService {
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
+          ...staffFilter,
           currentLatitude: { gte: box.minLat, lte: box.maxLat },
           currentLongitude: { gte: box.minLng, lte: box.maxLng },
           lastLocationUpdate: { gte: new Date(Date.now() - LOCATION_STALE_AFTER_MS) },
@@ -190,6 +196,7 @@ export class DispatchService {
         take: 200,
       });
       for (const v of vendors) {
+        if (!vendorAllowedForOrder(order, v)) continue;
         const d = haversineKm(lat, lng, v.currentLatitude!, v.currentLongitude!);
         if (d > v.serviceRadius) continue;
         const score = (v.rating / 5) * 50 + Math.max(0, 50 - d * 5) + (v.isVipPro ? 10 : 0);
@@ -207,6 +214,7 @@ export class DispatchService {
         where: {
           isOnline: true, status: 'ACTIVE',
           skills: { has: skill },
+          ...staffFilter,
           baseCity: { equals: order.address.city, mode: 'insensitive' },
           ...NOT_FROZEN_MEMBER_FILTER,
           OR: [
@@ -218,7 +226,7 @@ export class DispatchService {
         take: 50,
       });
       for (const v of vendors) {
-        if (candidatesByVendorId.has(v.id)) continue;
+        if (candidatesByVendorId.has(v.id) || !vendorAllowedForOrder(order, v)) continue;
         candidatesByVendorId.set(v.id, {
           vendorId: v.id, userId: v.userId, distance: null, rating: v.rating,
           score: (v.rating / 5) * 50 + (v.isVipPro ? 10 : 0),
@@ -388,7 +396,15 @@ export class RoutingService {
       orderBy: { rating: 'desc' },
     }) : [];
 
-    const chosen = candidates.find((v) => v.staffType === 'IN_HOUSE');
+    // Service model (frozen on the order from its category): a MARKETPLACE job goes only to external
+    // partners, an IN_HOUSE job only to Remont's own technicians. Legacy orders: in-house first.
+    const chosen = order.serviceModel === 'MARKETPLACE' ? undefined : candidates.find((v) => v.staffType === 'IN_HOUSE');
+    if (!chosen && order.serviceModel === 'IN_HOUSE') {
+      await this.prisma.order.update({ where: { id: orderId }, data: { needsAdminReview: true, routingDecision: 'IN_HOUSE_UNAVAILABLE' } });
+      await writeOrderTimeline(this.prisma, { orderId, status: order.status, note: 'No in-house technician available — sent to the admin queue (in-house service)' });
+      this.logger.log('📋 ' + order.orderNumber + ' in-house service, no in-house technician online — admin queue');
+      return;
+    }
 
     if (chosen) {
       await this.prisma.order.update({
@@ -528,6 +544,9 @@ export class ExtraWorkService {
     const now = new Date();
     await this.prisma.extraWorkItem.updateMany({ where: { id: { in: ids }, status: 'PENDING' }, data: { otp, otpLastSentAt: now } });
 
+    // A fresh code gets a fresh set of attempts (same rule as the start/completion OTPs).
+    await this.prisma.order.update({ where: { id: orderId }, data: { extraOtpFailedAttempts: 0 } });
+
     // Wait for the provider: a code the customer never receives must not be reported as sent.
     const sent = await this.wa.sendExtraWorkOtp(phone, order.orderNumber, otp, total).catch(() => null);
     if (!sent?.delivered) {
@@ -552,6 +571,9 @@ export class ExtraWorkService {
     if (!EXTRA_WORK_APPROVABLE_STATUSES.includes(order.status)) {
       throw new BadRequestException('Extra work can no longer be approved for this job');
     }
+    // Wrong codes are counted per order and locked after OTP_MAX_FAILED_ATTEMPTS until a new code is sent.
+    const slot = await this.prisma.order.updateMany({ where: { id: orderId, extraOtpFailedAttempts: { lt: OTP_MAX_FAILED_ATTEMPTS } }, data: { extraOtpFailedAttempts: { increment: 1 } } });
+    if (slot.count !== 1) throw new BadRequestException('Too many wrong OTP attempts — send the customer a new extra-work OTP');
 
     const matched = await this.prisma.extraWorkItem.findMany({
       where: { orderId, status: 'PENDING', otp },
@@ -573,6 +595,7 @@ export class ExtraWorkService {
       },
     });
     if (!count) throw new BadRequestException('Invalid OTP');
+    await this.prisma.order.update({ where: { id: orderId }, data: { extraOtpFailedAttempts: 0 } });
     await this.recalc(orderId);
     const approved = await this.prisma.extraWorkItem.findMany({ where: { id: { in: ids } }, select: EXTRA_WORK_ITEM_PUBLIC_SELECT });
     approved.forEach((item) => this.emitDecided(order, item, vendorUserId));
@@ -621,15 +644,25 @@ export class ExtraWorkService {
   }
 
   private async recalc(orderId: string) {
+    // Partner marketplace: GST on the fee + partner share (+ the partner's GST if registered).
+    if (await recalculateServiceOrder(this.prisma, orderId)) return;
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { extraWorkItems: { where: { customerApproved: true } } },
+      include: { extraWorkItems: { where: { customerApproved: true } }, service: true },
     });
     if (!order) return;
     const extraTotal = order.extraWorkItems.reduce((s, e) => s + Number(e.amount), 0);
     const subtotal = Number(order.serviceAmount) + Number(order.productsAmount) + extraTotal;
-    const gst = Math.round(subtotal * 0.18 * 100) / 100;
-    const discount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.walletUsed);
+    const svcRate = order.service
+      ? (await buildServiceTaxResolver(this.prisma)).rateFor(order.service.hsnSac, order.service.gstOverridePercent)
+      : SERVICE_GST_FALLBACK_RATE;
+    // In-house: Remont's own supply, GST on the discounted value (as at checkout). Legacy orders keep
+    // their original formula unchanged.
+    const priceDiscount = Number(order.couponDiscount) + Number(order.membershipDiscount) + Number(order.bundleDiscountAmount || 0);
+    const gst = order.serviceModel === 'IN_HOUSE'
+      ? Math.round(Math.max(0, subtotal - priceDiscount) * (svcRate / 100) * 100) / 100
+      : Math.round(subtotal * (svcRate / 100) * 100) / 100;
+    const discount = (order.serviceModel === 'IN_HOUSE' ? priceDiscount : Number(order.couponDiscount) + Number(order.membershipDiscount)) + Number(order.walletUsed);
     const total = Math.max(0, subtotal + gst - discount);
     // Commission was already resolved once and snapshotted at confirmation time (Task 9) —
     // extra work changes the payout (more serviceAmount-equivalent to pay the vendor for)
@@ -644,7 +677,27 @@ export class ExtraWorkService {
   }
 }
 
+/** Partner "I have arrived". All optional: a GPS failure is reported via locationError, never
+ * with made-up coordinates; the server decides verification (recordPartnerArrival). */
+export class PartnerArrivalDto {
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsNumber() @Min(0) accuracyM?: number;
+  @IsOptional() @IsString() @MaxLength(200) locationError?: string;
+  // Device metadata (optional; untrusted — can only downgrade verification, never upgrade it)
+  @IsOptional() @IsBoolean() isMocked?: boolean;
+  @IsOptional() @IsNumber() @Min(0) fixAgeMs?: number;
+}
 // ─── Main Orders service ───
+/** Wrong start/completion/extra-work OTP guesses allowed before a new code must be sent. */
+export const OTP_MAX_FAILED_ATTEMPTS = 5;
+/** A re-sent start/completion OTP is valid for this long (the booking-time code has no expiry). */
+export const OTP_RESENT_VALIDITY_MS = 15 * 60 * 1000;
+const r2m = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/** A cash collection is "verified" only by one of these — never by the partner's own report. */
+type CashVerification = 'COMPLETION_OTP' | 'CUSTOMER' | 'ADMIN';
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -663,34 +716,28 @@ export class OrdersService {
     @Optional() private media?: MediaService,
   ) {}
 
-  async create(customerId: string, dto: CreateOrderDto) {
-    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
-    if (dto.idempotencyKey) {
-      const existing = await this.prisma.order.findUnique({
-        where: { idempotencyKey: dto.idempotencyKey },
-        include: { items: true, service: true, address: true },
-      });
-      if (existing) return existing;
-    }
-
-    // City activation gate: if the order names a city that resolves to a managed City row
-    // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
-    // allowed through unchanged — this only tightens the case we can actually verify.
-    if (dto.city) {
-      const city = await this.cities.getByName(dto.city);
-      if (city && !city.isActive) {
-        throw new BadRequestException(`${city.name} is not currently accepting orders`);
-      }
-    }
-
+  /**
+   * The single pricing path for create() and quote(): service price (city override, minimum
+   * charge, shared GST rate, commission), product GST/fees, membership/coupon discounts, GST and
+   * wallet. Writes nothing — so the app's quote is exactly what create() then charges.
+   */
+  private async priceOrder(customerId: string, dto: CreateOrderDto) {
     let serviceAmount = 0;
     let productsAmount = 0;
     let commissionResult = { commissionAmount: 0, ruleId: null as string | null, ruleLabel: 'No service on this order' };
+    let serviceGstRatePercent = SERVICE_GST_FALLBACK_RATE;
+    let minimumChargeAdjustment = 0;
+    let minimumChargeRuleId: string | null = null;
+    let serviceCategory: { serviceModel?: string | null; gstSection95Status?: string | null; partnerGstProfile?: string | null } | null = null;
+    let serviceRecord: any = null;
+    let serviceCityId: string | null = null;
     const itemInputs: any[] = [];
 
     if (dto.serviceId) {
-      const svc = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
+      const svc = await this.prisma.service.findUnique({ where: { id: dto.serviceId }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } } } });
       if (!svc) throw new NotFoundException('Service not found');
+      serviceCategory = (svc as any).category;
+      serviceRecord = svc;
       let cityRowId: string | null = null;
       // City-wise price override
       if (dto.city) {
@@ -701,9 +748,18 @@ export class OrdersService {
       } else {
         serviceAmount = Number(svc.basePrice);
       }
-      commissionResult = await resolveCommission(this.prisma, {
-        serviceId: svc.id, categoryId: svc.categoryId, cityId: cityRowId, amount: serviceAmount,
-      });
+      // Rules need the booking's city even when the client sends no city name (the app never
+      // does): take it from the customer's own address. Unrecognised → all-city rules only.
+      if (!cityRowId) {
+        cityRowId = await resolveCityIdForRules(this.prisma, { addressId: dto.addressId, customerId, inlineCity: dto.inlineAddress?.city });
+      }
+      const priced = await priceServiceBooking(this.prisma, svc, cityRowId, serviceAmount);
+      serviceAmount = priced.serviceAmount;
+      commissionResult = priced.commissionResult;
+      serviceGstRatePercent = priced.gstRatePercent;
+      minimumChargeAdjustment = priced.minimumChargeAdjustment;
+      minimumChargeRuleId = priced.minimumChargeRuleId;
+      serviceCityId = cityRowId;
     }
 
     // Phase 8 — resolves each product line's real GST (was previously ignored entirely
@@ -762,6 +818,139 @@ export class OrdersService {
       }
     }
 
+
+    let subtotal = serviceAmount + productsAmount;
+    const membershipPct = await this.memberships.getActiveDiscount(customerId);
+    const membershipDiscount = Math.round((subtotal * membershipPct) / 100 * 100) / 100;
+
+    let couponDiscount = 0;
+    let couponId: string | undefined;
+    let couponFundedBy: 'PLATFORM' | 'SELLER' = 'PLATFORM';
+    if (dto.couponCode) {
+      const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount);
+      if (!v.valid) throw new BadRequestException(v.reason);
+      couponDiscount = v.discountAmount || 0;
+      couponId = v.coupon?.id;
+      couponFundedBy = (v.coupon as any)?.fundedBy === 'SELLER' ? 'SELLER' : 'PLATFORM';
+    }
+
+    const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
+    // Phase 8 — SERVICE-side GST stays flat 18%, applied to the service's own discounted
+    // share only (this Order can hold one service AND products together — predates the
+    // Child-Order-split engine). PRODUCT-side GST is the real per-item figure resolved
+    // above; an INCLUSIVE line's tax is embedded in its price and never added again here.
+    const serviceDiscountShare = subtotal > 0
+      ? Math.round(((serviceAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
+      : 0;
+    const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
+    // Service model from the category (a booking mixing products keeps the legacy pricing).
+    // Pricing engine (a booking mixing products keeps the legacy pricing). Missing, unapproved or
+    // conflicting configuration blocks the booking instead of guessing.
+    const pricing = dto.serviceId && !dto.items?.length && serviceRecord
+      ? await priceServiceBookingSnapshot(this.prisma, {
+          lines: [{ service: serviceRecord, amount: serviceAmount }], category: serviceCategory, cityId: serviceCityId,
+          discount: serviceDiscountShare, slotStart: dto.slotStart || null, emergency: !!dto.emergency,
+        })
+      : null;
+    const serviceFees = pricing?.result.feesTotal || 0;
+    const serviceGstAmount = pricing ? pricing.result.gstAmount : Math.round(discountedServiceAmount * (serviceGstRatePercent / 100) * 100) / 100;
+
+    // Phase 3 (C-02/C-03) — a SELLER-funded coupon reduces the PRODUCT taxable base/GST by
+    // its share of the combined discount, exactly like the SERVICE share above already
+    // does — but ONLY when every product line belongs to the same single seller (see the
+    // productVendorIds comment above); a mixed-vendor cart stays platform-funded/unchanged,
+    // since there's no single seller to attribute the reduction to. See
+    // applySellerFundedDiscountToProductGst() in common/index.ts for why scaling both
+    // taxableValue and gstAmount by the same ratio is exact, not an approximation.
+    const singleProductVendorId = productVendorIds.size === 1 ? [...productVendorIds][0] : null;
+    let productTaxableAdjustment = 0;
+    const productSellerFunded = couponFundedBy === 'SELLER' && productsAmount > 0 && !!singleProductVendorId;
+    if (productSellerFunded) {
+      const productDiscountShare = subtotal > 0
+        ? Math.round(((productsAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
+        : 0;
+      const before = productsTaxableAmount;
+      const scaled = applySellerFundedDiscountToProductGst(itemInputs, before, productGstOnTop, productsAmount, productDiscountShare);
+      itemInputs.length = 0;
+      itemInputs.push(...scaled.items);
+      productsTaxableAmount = scaled.productsTaxableAmount;
+      productGstOnTop = scaled.productGstOnTop;
+      productTaxableAdjustment = Math.round((before - scaled.productsTaxableAmount) * 100) / 100;
+    }
+    const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
+    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + serviceFees + gstAmount);
+    const totalAmount = Math.max(0, discountedSubtotal + serviceFees + gstAmount - walletUsed);
+    // remontCommission/vendorPayout now account for BOTH the service leg (unchanged
+    // resolveCommission() figure) and the product leg (Phase-7 resolveProductFee(), newly
+    // wired in here) — kept additive so the existing service-only display/read paths that
+    // expect remontCommission to include the service commission are unaffected when there
+    // are no products on the order (productCommissionTotal is 0 in that case).
+    const remontCommission = commissionResult.commissionAmount + productCommissionTotal;
+    const vendorPayout = (serviceAmount - commissionResult.commissionAmount)
+      + (productsTaxableAmount - productCommissionTotal - productMarketingTotal - productGatewayTotal);
+    const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+    const productFeeGstRate = feeTax.rateFor(null, null);
+    const productFeeTotal = productCommissionTotal + productMarketingTotal + productGatewayTotal;
+    const productGstOnFeesAmount = Math.round(((productFeeTotal * productFeeGstRate) / 100) * 100) / 100;
+    const productFeeBreakdown = dto.items?.length
+      ? {
+          commission: { amount: productCommissionTotal, ruleId: productCommissionRuleId, ruleLabel: productCommissionRuleLabel },
+          marketing: { amount: productMarketingTotal, ruleId: productMarketingRuleId, ruleLabel: productMarketingRuleLabel },
+          gateway: { amount: productGatewayTotal, ruleId: productGatewayRuleId, ruleLabel: productGatewayRuleLabel },
+          gstOnFees: { amount: productGstOnFeesAmount, ratePercent: productFeeGstRate },
+        }
+      : undefined;
+
+
+    return { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown, pricing };
+  }
+
+  /** What POST /orders would charge for this cart, without creating anything. */
+  async quote(customerId: string, dto: CreateOrderDto) {
+    const p = await this.priceOrder(customerId, dto);
+    return {
+      currency: 'INR',
+      serviceAmount: p.serviceAmount,
+      minimumChargeAdjustment: p.minimumChargeAdjustment,
+      productsAmount: p.productsAmount,
+      subtotal: p.subtotal,
+      membershipDiscount: p.membershipDiscount,
+      couponDiscount: p.couponDiscount,
+      gstAmount: p.gstAmount,
+      walletUsed: p.walletUsed,
+      totalAmount: p.totalAmount,
+      // MARKETPLACE: Remont's platform fee (inside serviceAmount) and the GST split; a registered
+      // partner's GST on their share is added once they accept the job.
+      // pricing-engine bookings: every charge with its GST
+      ...(p.pricing ? {
+        serviceModel: p.pricing.params.model, serviceFeesTotal: p.pricing.result.feesTotal,
+        charges: p.pricing.result.components.map((c) => ({ label: c.label, code: c.code, amount: c.taxable, gstRatePercent: c.ratePercent, gst: c.gst })),
+      } : {}),
+    };
+  }
+
+  async create(customerId: string, dto: CreateOrderDto) {
+    // Idempotency (M-06) — opt-in: see MasterOrdersService.checkout()'s matching comment.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+        include: { items: true, service: true, address: true },
+      });
+      if (existing) return existing;
+    }
+
+    // City activation gate: if the order names a city that resolves to a managed City row
+    // and that row is deactivated, block the order. Unresolvable/unmanaged city text is
+    // allowed through unchanged — this only tightens the case we can actually verify.
+    if (dto.city) {
+      const city = await this.cities.getByName(dto.city);
+      if (city && !city.isActive) {
+        throw new BadRequestException(`${city.name} is not currently accepting orders`);
+      }
+    }
+
+    const { serviceAmount, productsAmount, commissionResult, minimumChargeAdjustment, minimumChargeRuleId, itemInputs, productsTaxableAmount, subtotal, membershipDiscount, couponDiscount, couponId, couponFundedBy, singleProductVendorId, productTaxableAdjustment, gstAmount, walletUsed, totalAmount, remontCommission, vendorPayout, productFeeBreakdown, pricing } = await this.priceOrder(customerId, dto);
+
     // Resolve addressId: if an inline address is provided and no addressId, create one
     let resolvedAddressId = dto.addressId;
     let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
@@ -792,79 +981,6 @@ export class OrdersService {
       // Later edits to this Address row must not retroactively change this order.
       resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
     }
-
-    let subtotal = serviceAmount + productsAmount;
-    const membershipPct = await this.memberships.getActiveDiscount(customerId);
-    const membershipDiscount = Math.round((subtotal * membershipPct) / 100 * 100) / 100;
-
-    let couponDiscount = 0;
-    let couponId: string | undefined;
-    let couponFundedBy: 'PLATFORM' | 'SELLER' = 'PLATFORM';
-    if (dto.couponCode) {
-      const v = await this.coupons.validate(dto.couponCode, customerId, subtotal - membershipDiscount);
-      if (!v.valid) throw new BadRequestException(v.reason);
-      couponDiscount = v.discountAmount || 0;
-      couponId = v.coupon?.id;
-      couponFundedBy = (v.coupon as any)?.fundedBy === 'SELLER' ? 'SELLER' : 'PLATFORM';
-    }
-
-    const discountedSubtotal = subtotal - membershipDiscount - couponDiscount;
-    // Phase 8 — SERVICE-side GST stays flat 18%, applied to the service's own discounted
-    // share only (this Order can hold one service AND products together — predates the
-    // Child-Order-split engine). PRODUCT-side GST is the real per-item figure resolved
-    // above; an INCLUSIVE line's tax is embedded in its price and never added again here.
-    const serviceDiscountShare = subtotal > 0
-      ? Math.round(((serviceAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
-      : 0;
-    const discountedServiceAmount = Math.max(0, serviceAmount - serviceDiscountShare);
-    const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
-
-    // Phase 3 (C-02/C-03) — a SELLER-funded coupon reduces the PRODUCT taxable base/GST by
-    // its share of the combined discount, exactly like the SERVICE share above already
-    // does — but ONLY when every product line belongs to the same single seller (see the
-    // productVendorIds comment above); a mixed-vendor cart stays platform-funded/unchanged,
-    // since there's no single seller to attribute the reduction to. See
-    // applySellerFundedDiscountToProductGst() in common/index.ts for why scaling both
-    // taxableValue and gstAmount by the same ratio is exact, not an approximation.
-    const singleProductVendorId = productVendorIds.size === 1 ? [...productVendorIds][0] : null;
-    let productTaxableAdjustment = 0;
-    const productSellerFunded = couponFundedBy === 'SELLER' && productsAmount > 0 && !!singleProductVendorId;
-    if (productSellerFunded) {
-      const productDiscountShare = subtotal > 0
-        ? Math.round(((productsAmount / subtotal) * (membershipDiscount + couponDiscount)) * 100) / 100
-        : 0;
-      const before = productsTaxableAmount;
-      const scaled = applySellerFundedDiscountToProductGst(itemInputs, before, productGstOnTop, productsAmount, productDiscountShare);
-      itemInputs.length = 0;
-      itemInputs.push(...scaled.items);
-      productsTaxableAmount = scaled.productsTaxableAmount;
-      productGstOnTop = scaled.productGstOnTop;
-      productTaxableAdjustment = Math.round((before - scaled.productsTaxableAmount) * 100) / 100;
-    }
-    const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
-    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount);
-    const totalAmount = Math.max(0, discountedSubtotal + gstAmount - walletUsed);
-    // remontCommission/vendorPayout now account for BOTH the service leg (unchanged
-    // resolveCommission() figure) and the product leg (Phase-7 resolveProductFee(), newly
-    // wired in here) — kept additive so the existing service-only display/read paths that
-    // expect remontCommission to include the service commission are unaffected when there
-    // are no products on the order (productCommissionTotal is 0 in that case).
-    const remontCommission = commissionResult.commissionAmount + productCommissionTotal;
-    const vendorPayout = (serviceAmount - commissionResult.commissionAmount)
-      + (productsTaxableAmount - productCommissionTotal - productMarketingTotal - productGatewayTotal);
-    const feeTax = await buildTaxRateResolver(this.prisma, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
-    const productFeeGstRate = feeTax.rateFor(null, null);
-    const productFeeTotal = productCommissionTotal + productMarketingTotal + productGatewayTotal;
-    const productGstOnFeesAmount = Math.round(((productFeeTotal * productFeeGstRate) / 100) * 100) / 100;
-    const productFeeBreakdown = dto.items?.length
-      ? {
-          commission: { amount: productCommissionTotal, ruleId: productCommissionRuleId, ruleLabel: productCommissionRuleLabel },
-          marketing: { amount: productMarketingTotal, ruleId: productMarketingRuleId, ruleLabel: productMarketingRuleLabel },
-          gateway: { amount: productGatewayTotal, ruleId: productGatewayRuleId, ruleLabel: productGatewayRuleLabel },
-          gstOnFees: { amount: productGstOnFeesAmount, ratePercent: productFeeGstRate },
-        }
-      : undefined;
-
     const orderNumber = `REM-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const startOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const endOtp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -878,7 +994,13 @@ export class OrdersService {
       // back the whole create() — no partially-created order, no oversold item.
       order = await this.prisma.$transaction(async (tx) => {
         if (dto.items?.length) await reserveProductStock(tx, dto.items.map((i) => ({ productId: i.productId, quantity: i.quantity })));
-        return tx.order.create({
+        // Wallet portion debited atomically with the order row: one conditional decrement (never
+        // below zero, even under concurrent checkouts); insufficient balance rolls everything back.
+        if (walletUsed > 0) {
+          const debited = await tx.user.updateMany({ where: { id: customerId, walletBalance: { gte: walletUsed } }, data: { walletBalance: { decrement: walletUsed } } });
+          if (debited.count !== 1) throw new BadRequestException('Insufficient wallet balance');
+        }
+        const created = await tx.order.create({
           data: {
             orderNumber, customerId,
             type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
@@ -892,7 +1014,9 @@ export class OrdersService {
             productFeeBreakdown: productFeeBreakdown as any,
             couponCode: dto.couponCode, couponDiscount, membershipDiscount,
             walletUsed, gstAmount, totalAmount, remontCommission, vendorPayout,
+            ...(pricing ? { ...orderFieldsFromSnapshot(pricing), gstAmount, isEmergency: !!dto.emergency, commissionRuleId: pricing.params.lines[0].commission.ruleId, commissionRuleLabel: pricing.params.lines[0].commission.label } : {}),
             commissionRuleId: commissionResult.ruleId, commissionRuleLabel: commissionResult.ruleLabel,
+            minimumChargeAdjustment, minimumChargeRuleId: minimumChargeRuleId || undefined,
             aiSessionId: dto.aiSessionId, leadId: dto.leadId,
             guestName: dto.guestName,
             guestPhone: dto.guestPhone,
@@ -901,6 +1025,16 @@ export class OrdersService {
           },
           include: { items: true, service: true, address: true },
         });
+        if (walletUsed > 0) {
+          const after = await tx.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+          await tx.walletTransaction.create({
+            data: {
+              userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount: walletUsed, balanceAfter: after!.walletBalance,
+              orderId: created.id, notes: `Payment for order ${created.orderNumber}`,
+            },
+          });
+        }
+        return created;
       });
     } catch (e: any) {
       // Idempotency race: two concurrent requests with the same key can both pass the
@@ -939,26 +1073,7 @@ export class OrdersService {
 
     if (couponId) await this.coupons.recordUsage(couponId, customerId, order.id, couponDiscount);
 
-    if (walletUsed > 0) {
-      const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
-      if (!user || Number(user.walletBalance) < walletUsed) {
-        throw new BadRequestException('Insufficient wallet balance');
-      }
-      const newBalance = Number(user.walletBalance) - walletUsed;
-      await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: walletUsed } } });
-      await this.prisma.walletTransaction.create({
-        data: {
-          userId: customerId,
-          type: 'DEBIT',
-          reason: 'ORDER_PAYMENT',
-          amount: walletUsed,
-          balanceAfter: newBalance,
-          orderId: order.id,
-          notes: `Payment for order ${order.orderNumber}`,
-        },
-      });
-    }
-
+    // (wallet portion was debited inside the creation transaction above)
     return order;
   }
 
@@ -1022,14 +1137,24 @@ export class OrdersService {
       throw new BadRequestException('Payment amount does not cover the order total. Please contact support.');
     }
 
+    // The gateway row for this verified payment is PAID (the browser callback used to leave it
+    // PENDING unless the webhook arrived — so the job still looked unpaid).
+    await this.prisma.paymentTransaction.updateMany({
+      where: { orderId, gatewayOrderId: verifiedGatewayOrderId, status: { not: 'PAID' } },
+      data: { status: 'PAID', gatewayPaymentId: paymentId },
+    });
     const wasPendingPayment = existing.status === OrderStatus.PENDING_PAYMENT;
-    const order = await this.prisma.order.update({
-      where: { id: orderId },
+    // Exactly one confirmation wins (browser callback, webhook, retries racing): a conditional
+    // update — the loser returns the already-confirmed order and never re-dispatches.
+    const won = await this.prisma.order.updateMany({
+      where: { id: orderId, paymentStatus: { not: 'PAID' }, status: existing.status },
       data: {
         paymentId, paymentStatus: 'PAID', paymentMethod: 'ONLINE',
         status: wasPendingPayment ? OrderStatus.CONFIRMED : existing.status,
       },
     });
+    if (won.count !== 1) return this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     await writeOrderTimeline(this.prisma, { orderId: order.id, status: wasPendingPayment ? OrderStatus.CONFIRMED : existing.status, note: wasPendingPayment ? undefined : 'Converted from COD to Online payment' });
     // Only dispatch on the order's first confirmation — a mid-flow COD->Online conversion
     // must not re-trigger vendor matching for an order that may already have a vendor.
@@ -1130,10 +1255,103 @@ export class OrdersService {
   }
 
   /**
-   * Records that a COD order's payment was actually collected in person (cash/UPI/card) —
-   * previously COD orders had no way to ever leave paymentStatus PENDING; it just stayed
-   * PENDING forever with no reconciliation step. Callable by the assigned vendor or an admin.
+   * The single authoritative "what has been paid for this job" — used by the partner apps, the
+   * customer, collections and earnings. Counts only VERIFIED money: this job's own PAID payments,
+   * its share of a verified cart (master-order) payment (cartPaidAmount) and the wallet already
+   * taken at checkout is excluded from totalAmount by construction. Partner-reported cash that is
+   * not yet confirmed is shown separately and is never counted as received.
    */
+  async paymentPosition(orderId: string, client: any = this.prisma) {
+    const order = await client.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const rows: { amount: any; status: string; gateway: string }[] = await client.paymentTransaction.findMany({
+      where: { orderId, isWalletTopup: false, refundRequestId: null, status: { in: ['PAID', 'PENDING'] } },
+      select: { amount: true, status: true, gateway: true },
+    });
+    const verifiedOwn = r2m(rows.filter((r) => r.status === 'PAID').reduce((a, r) => a + Number(r.amount), 0));
+    const pendingCash = r2m(rows.filter((r) => r.status === 'PENDING' && r.gateway === 'CASH_COLLECTION').reduce((a, r) => a + Number(r.amount), 0));
+    let cartPaid = Number(order.cartPaidAmount || 0);
+    // Cart jobs paid online before cartPaidAmount existed: the verified cart payment (on the master
+    // order) covered the job's checkout total, i.e. today's total minus extra work approved later.
+    if (order.cartPaidAmount == null && order.masterOrderId && order.paymentStatus === 'PAID') {
+      const masterPaid = await client.paymentTransaction.findFirst({ where: { orderId: order.masterOrderId, status: 'PAID', isWalletTopup: false, refundRequestId: null }, select: { id: true } });
+      if (masterPaid) {
+        const extras = await client.extraWorkItem.findMany({ where: { orderId, customerApproved: true }, select: { amount: true } });
+        cartPaid = Math.max(0, r2m(Number(order.totalAmount) - extras.reduce((a: number, e: any) => a + Number(e.amount), 0)));
+      }
+    }
+    const wallet = Number(order.walletUsed || 0);
+    const payable = Number(order.totalAmount); // already net of the wallet portion
+    const paidAmount = r2m(verifiedOwn + cartPaid);
+    const outstanding = Math.max(0, r2m(payable - paidAmount)); // not yet VERIFIED as received
+    return {
+      order, payable, walletUsed: wallet, paidAmount, cartPaidAmount: cartPaid,
+      pendingVerificationAmount: pendingCash,
+      outstanding,
+      // what may still be collected: outstanding minus cash already reported (awaiting confirmation)
+      balanceDue: Math.max(0, r2m(outstanding - pendingCash)),
+    };
+  }
+
+  /**
+   * Partner/admin records cash/UPI/card taken in person. The amount is always the server's own
+   * balance due (never a client figure), computed under a row lock so two taps can't record it
+   * twice. Partner-reported cash is PENDING until confirmed (completion OTP, the customer, or an
+   * admin); an admin's own record is verified. Nothing is collectible on a fully paid job.
+   */
+  private async recordCashCollectionTx(
+    tx: any,
+    p: { actorUserId: string; orderId: string; mode: PaymentCollectionMode; collectedLocation?: string; verification: CashVerification | null },
+  ) {
+    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${p.orderId} FOR UPDATE`;
+    const pos = await this.paymentPosition(p.orderId, tx);
+    if (['CANCELLED', 'REFUNDED'].includes(pos.order.status)) throw new BadRequestException('Cannot collect payment for a cancelled/refunded order');
+    if (pos.balanceDue <= 0) return null;
+    const verified = !!p.verification;
+    const payment = await tx.paymentTransaction.create({
+      data: {
+        orderId: p.orderId, userId: pos.order.customerId, amount: pos.balanceDue, status: verified ? 'PAID' : 'PENDING',
+        gateway: 'CASH_COLLECTION', collectionMode: p.mode, collectedBy: p.actorUserId, collectedLocation: p.collectedLocation,
+        ...(verified ? { verifiedAt: new Date(), verifiedBy: p.actorUserId, verificationMethod: p.verification } : {}),
+      },
+    });
+    if (verified) await this.applyVerifiedCashTx(tx, pos.order, Number(payment.amount), p.actorUserId, p.mode);
+    else if (!pos.order.paymentMethod) await tx.order.update({ where: { id: p.orderId }, data: { paymentMethod: 'COD' } });
+    return payment;
+  }
+
+  /** Effects of cash once verified: the collecting partner holds it (ledger debit), order status. */
+  private async applyVerifiedCashTx(tx: any, order: any, amount: number, actorUserId: string, mode: string) {
+    if (order.vendorId) {
+      await this.ledger.postEntry(tx, order.vendorId, 'COD_COLLECTION', -amount, {
+        orderId: order.id, notes: `Cash/UPI/card collected from customer (${mode})`, createdBy: actorUserId,
+      });
+      await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { decrement: amount } } });
+    }
+    const after = await this.paymentPosition(order.id, tx);
+    await tx.order.update({
+      where: { id: order.id },
+      data: { paymentStatus: after.outstanding <= 0 ? 'PAID' : 'PARTIAL', paymentMethod: order.paymentMethod || 'COD' },
+    });
+  }
+
+  /** Confirms partner-reported cash still PENDING on this order (used at OTP-verified completion). */
+  private async confirmPendingCashTx(tx: any, orderId: string, method: CashVerification, actorUserId: string, onlyCollectedBy?: string) {
+    const rows = await tx.paymentTransaction.findMany({
+      where: { orderId, status: 'PENDING', gateway: 'CASH_COLLECTION', ...(onlyCollectedBy ? { collectedBy: onlyCollectedBy } : {}) },
+    });
+    for (const r of rows) {
+      const claim = await tx.paymentTransaction.updateMany({
+        where: { id: r.id, status: 'PENDING' },
+        data: { status: 'PAID', verifiedAt: new Date(), verifiedBy: actorUserId, verificationMethod: method },
+      });
+      if (claim.count !== 1) continue;
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      await this.applyVerifiedCashTx(tx, order, Number(r.amount), r.collectedBy || actorUserId, r.collectionMode || 'CASH');
+    }
+    return rows.length;
+  }
+
   async collectCod(
     actorUserId: string, actorRole: UserRole, orderId: string,
     mode: PaymentCollectionMode, collectedLocation?: string,
@@ -1142,92 +1360,38 @@ export class OrdersService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.paymentMethod === 'ONLINE') throw new BadRequestException('This order was paid online, not COD');
     if (order.paymentStatus === 'PAID') return order; // idempotent
-    if (['CANCELLED', 'REFUNDED'].includes(order.status)) {
-      throw new BadRequestException('Cannot collect payment for a cancelled/refunded order');
-    }
-
-    const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
-    if (actorRole === UserRole.SERVICE_VENDOR) {
-      const v = await this.prisma.serviceVendor.findUnique({ where: { userId: actorUserId } });
-      if (!v || order.vendorId !== v.id) throw new ForbiddenException();
-    } else if (!adminRoles.includes(actorRole)) {
-      throw new ForbiddenException();
-    }
-
-    const collectedAmount = Number(order.totalAmount);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.paymentTransaction.create({
-        data: {
-          orderId, userId: order.customerId, amount: collectedAmount, status: 'PAID',
-          gateway: 'CASH_COLLECTION', collectionMode: mode,
-          collectedBy: actorUserId, collectedLocation,
-        },
-      });
-      // Accounting fix: this cash/UPI/card amount is now physically with the vendor, on
-      // Remont's behalf — it is NOT new money Remont is releasing to them, so it must not
-      // also inflate pendingPayout the way a completed job's own JOB_EARNING credit does.
-      // See the COD_COLLECTION enum comment in schema.prisma for the full accounting model.
-      if (order.vendorId) {
-        await this.ledger.postEntry(tx, order.vendorId, 'COD_COLLECTION', -collectedAmount, {
-          orderId, notes: `Cash/UPI/card collected from customer (${mode})`, createdBy: actorUserId,
-        });
-        await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { decrement: collectedAmount } } });
-      }
-      return tx.order.update({
-        where: { id: orderId },
-        data: { paymentStatus: 'PAID', paymentMethod: 'COD' },
-      });
-    });
-    await writeOrderTimeline(this.prisma, {
-      orderId, status: 'COD_PAYMENT_COLLECTED', actorId: actorUserId, actorRole,
-      note: `Collected via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
-    });
-    this.notifyPaymentSuccess(updated).catch(() => {});
-    return updated;
+    return this.collectInPerson(actorUserId, actorRole, orderId, mode, collectedLocation);
   }
 
-  /**
-   * The single source of truth for "how much is still owed" — Order.totalAmount already
-   * absorbs extra-work amounts automatically (ExtraWorkService.recalc()), so balanceDue
-   * recalculates correctly the moment extra work is approved, with no separate tracking
-   * needed. Sums every successful PaymentTransaction for this order (original payment,
-   * COD/balance collections, prior partial payments) plus any wallet amount applied at
-   * booking time.
-   */
   async getBalance(orderId: string, actorUserId?: string, actorRole?: UserRole) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
     if (!order) throw new NotFoundException('Order not found');
-    // Ownership check only applies when called directly from a controller (actorUserId
-    // passed in); collectBalance() already authorized the caller before delegating here.
     const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
     const isAdmin = !!actorRole && adminRoles.includes(actorRole);
     if (actorUserId && !isAdmin && order.customerId !== actorUserId && order.vendor?.userId !== actorUserId) {
       throw new ForbiddenException();
     }
-    const paidAgg = await this.prisma.paymentTransaction.aggregate({
-      where: { orderId, status: 'PAID' },
-      _sum: { amount: true },
-    });
-    const paidAmount = Number(paidAgg._sum.amount || 0);
-    const walletUsed = Number(order.walletUsed || 0);
-    const balanceDue = Math.max(0, Number(order.totalAmount) - paidAmount - walletUsed);
+    const pos = await this.paymentPosition(orderId);
     return {
       orderId: order.id,
       orderNumber: order.orderNumber,
-      totalAmount: order.totalAmount,
-      walletUsed: order.walletUsed,
-      paidAmount,
-      balanceDue,
+      // Order value including the wallet portion, so totalAmount − (paidAmount + walletUsed)
+      // − pendingVerificationAmount = balanceDue reads correctly on every screen.
+      totalAmount: r2m(pos.payable + pos.walletUsed),
+      payableAfterWallet: pos.payable,
+      walletUsed: pos.walletUsed,
+      paidAmount: pos.paidAmount,
+      cartPaidAmount: pos.cartPaidAmount,
+      pendingVerificationAmount: pos.pendingVerificationAmount,
+      balanceDue: pos.balanceDue,
       paymentStatus: order.paymentStatus,
     };
   }
 
   /**
-   * Collect any outstanding balance — the original amount for a still-unpaid order, or
-   * whatever extra work added on top of an already-paid one. CASH/UPI/CARD is an in-person
-   * collection (vendor or admin only); ONLINE generates a fresh gateway order that the
-   * customer themselves, the vendor (handing over their device), or admin can trigger —
-   * confirmBalancePayment() below finalizes it once the gateway signature verifies.
+   * Collect any outstanding balance. CASH/UPI/CARD in person → recorded (partner-reported cash
+   * stays PENDING until confirmed; see recordCashCollectionTx); ONLINE → a payment link/order
+   * for the exact balance due, confirmed server-side. A fully paid job has nothing to collect.
    */
   async collectBalance(actorUserId: string, actorRole: UserRole, orderId: string, mode: PaymentCollectionMode, collectedLocation?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
@@ -1235,21 +1399,14 @@ export class OrdersService {
     if (['CANCELLED', 'REFUNDED'].includes(order.status)) {
       throw new BadRequestException('Cannot collect payment for a cancelled/refunded order');
     }
-
     const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
     const isAdmin = adminRoles.includes(actorRole);
     const isOwner = order.customerId === actorUserId;
     const isAssignedVendor = order.vendor?.userId === actorUserId;
     if (mode === 'ONLINE') {
       if (!isAdmin && !isAssignedVendor && !isOwner) throw new ForbiddenException();
-    } else if (!isAdmin && !isAssignedVendor) {
-      throw new ForbiddenException();
-    }
-
-    const balance = await this.getBalance(orderId);
-    if (balance.balanceDue <= 0) return { ...balance, message: 'Nothing due — already fully paid' };
-
-    if (mode === 'ONLINE') {
+      const balance = await this.getBalance(orderId);
+      if (balance.balanceDue <= 0) return { ...balance, message: 'Nothing due — already fully paid' };
       const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
       const payOrder: any = await this.payments.initiatePayment(order.customerId, balance.balanceDue, order.id, frontendUrl);
       return {
@@ -1258,39 +1415,70 @@ export class OrdersService {
         razorpayKeyId: payOrder.keyId, txId: payOrder.txId,
       };
     }
+    return this.collectInPerson(actorUserId, actorRole, orderId, mode, collectedLocation);
+  }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.paymentTransaction.create({
-        data: {
-          orderId, userId: order.customerId, amount: balance.balanceDue, status: 'PAID',
-          gateway: 'CASH_COLLECTION', collectionMode: mode, collectedBy: actorUserId, collectedLocation,
-        },
-      });
-      // Accounting fix: same as collectCod() — this cash/UPI/card amount is now physically
-      // with the vendor on Remont's behalf, not new money Remont is releasing, so it must
-      // not also inflate pendingPayout the way the job's own JOB_EARNING credit does.
-      if (order.vendorId) {
-        await this.ledger.postEntry(tx, order.vendorId, 'COD_COLLECTION', -balance.balanceDue, {
-          orderId, notes: `Cash/UPI/card collected from customer (${mode})`, createdBy: actorUserId,
-        });
-        await tx.serviceVendor.update({ where: { id: order.vendorId }, data: { pendingPayout: { decrement: balance.balanceDue } } });
-      }
-      return tx.order.update({ where: { id: orderId }, data: { paymentStatus: 'PAID' } });
-    });
+  private async collectInPerson(actorUserId: string, actorRole: UserRole, orderId: string, mode: PaymentCollectionMode, collectedLocation?: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { vendor: true } });
+    if (!order) throw new NotFoundException('Order not found');
+    const adminRoles: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+    const isAdmin = adminRoles.includes(actorRole);
+    if (!isAdmin && order.vendor?.userId !== actorUserId) throw new ForbiddenException();
+    const payment = await this.prisma.$transaction((tx) => this.recordCashCollectionTx(tx, {
+      actorUserId, orderId, mode, collectedLocation, verification: isAdmin ? 'ADMIN' : null,
+    }));
+    if (!payment) return { ...(await this.getBalance(orderId)), message: 'Nothing due — already fully paid or awaiting confirmation' };
     await writeOrderTimeline(this.prisma, {
-      orderId, status: 'BALANCE_COLLECTED', actorId: actorUserId, actorRole,
-      note: `Collected ₹${balance.balanceDue} via ${mode}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
+      orderId, status: payment.status === 'PAID' ? 'BALANCE_COLLECTED' : 'CASH_REPORTED', actorId: actorUserId, actorRole,
+      note: `₹${Number(payment.amount)} via ${mode}${payment.status === 'PAID' ? '' : ' — reported by partner, awaiting customer/admin confirmation'}${collectedLocation ? ` at ${collectedLocation}` : ''}`,
     });
-    this.notifyPaymentSuccess(updated).catch(() => {});
-    const paymentLinkUrl = await this.payments.createPaymentLink(balance.balanceDue, orderId);
-    return { ...updated, paymentLinkUrl };
+    const updated = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    if (payment.status === 'PAID') {
+      if (updated.paymentStatus === 'PAID') this.notifyPaymentSuccess(updated).catch(() => {});
+      await this.releaseJobEarnings(orderId).catch((e) => this.logger.warn(`Earnings release ${orderId}: ${e.message}`));
+    }
+    return { ...updated, cashCollection: { id: payment.id, amount: Number(payment.amount), status: payment.status } };
   }
 
   /**
-   * Confirms an ONLINE balance/extra-work payment. Deliberately separate from
-   * confirmPayment(): that method also drives the order's lifecycle status (PENDING_PAYMENT
-   * -> CONFIRMED) which does not apply here — a balance payment can happen at ANY point after
-   * the job is already COMPLETED/INVOICED, and must never move status backwards or sideways.
+   * The customer (or an admin) confirms cash a partner reported collecting. Only the order's own
+   * customer or an admin; only PENDING cash rows; once.
+   */
+  async verifyCashCollection(actor: { sub: string; role: UserRole }, orderId: string, paymentId: string, evidence?: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const isAdmin = actor.role === UserRole.ADMIN || actor.role === UserRole.SUPER_ADMIN;
+    if (!isAdmin && order.customerId !== actor.sub) throw new ForbiddenException();
+    // The customer's own confirmation is the evidence; an admin must record what they checked
+    // (call with the customer, receipt, deposit reference…) — kept in the audit log.
+    const note = String(evidence || '').trim();
+    if (isAdmin && note.length < 10) throw new BadRequestException('Record how the cash was confirmed (at least 10 characters)');
+    const done = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.paymentTransaction.findFirst({ where: { id: paymentId, orderId, gateway: 'CASH_COLLECTION' } });
+      if (!row) throw new NotFoundException('Cash collection not found');
+      const claim = await tx.paymentTransaction.updateMany({
+        where: { id: paymentId, status: 'PENDING' },
+        data: { status: 'PAID', verifiedAt: new Date(), verifiedBy: actor.sub, verificationMethod: isAdmin ? 'ADMIN' : 'CUSTOMER' },
+      });
+      if (claim.count !== 1) return false;
+      await this.applyVerifiedCashTx(tx, order, Number(row.amount), row.collectedBy || actor.sub, row.collectionMode || 'CASH');
+      return true;
+    });
+    if (done) {
+      await writeOrderTimeline(this.prisma, { orderId, status: 'CASH_CONFIRMED', actorId: actor.sub, actorRole: actor.role, note: isAdmin ? `Confirmed by admin: ${note}` : 'Confirmed by customer' });
+      await logAudit(this.prisma, {
+        actorId: actor.sub, actorRole: actor.role, action: 'CASH_COLLECTION_CONFIRMED', targetType: 'PaymentTransaction', targetId: paymentId,
+        metadata: { orderId, orderNumber: order.orderNumber, method: isAdmin ? 'ADMIN' : 'CUSTOMER', evidence: isAdmin ? note : null },
+      });
+      await this.releaseJobEarnings(orderId).catch((e) => this.logger.warn(`Earnings release ${orderId}: ${e.message}`));
+    }
+    return this.getBalance(orderId);
+  }
+
+  /**
+   * Confirms an ONLINE balance/extra-work payment. Deliberately separate from confirmPayment():
+   * a balance payment can happen after completion and must never move status. Verified with the
+   * gateway signature AND the amount Razorpay actually captured.
    */
   async confirmBalancePayment(orderId: string, paymentId: string, gatewayOrderId: string, signature: string) {
     if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
@@ -1302,18 +1490,161 @@ export class OrdersService {
 
     const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId } });
     if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
-    if (linkedTx.status !== 'PAID') {
-      await this.prisma.paymentTransaction.update({
-        where: { id: linkedTx.id },
-        data: { status: 'PAID', gatewayPaymentId: paymentId, gatewaySignature: signature },
-      });
-    }
+    const captured = await this.payments.getVerifiedCapturedAmount(gatewayOrderId, paymentId);
+    if (captured + 0.01 < Number(linkedTx.amount)) throw new BadRequestException('Payment amount does not cover the balance. Please contact support.');
+    await this.prisma.paymentTransaction.updateMany({
+      where: { id: linkedTx.id, status: { not: 'PAID' } },
+      data: { status: 'PAID', gatewayPaymentId: paymentId, gatewaySignature: signature },
+    });
+    return this.settleAfterOnlinePayment(orderId);
+  }
 
-    const balance = await this.getBalance(orderId);
-    const newPaymentStatus = balance.balanceDue <= 0 ? 'PAID' : 'PARTIAL';
+  /** After any verified online money on an order: payment status, then earnings if now fully paid. */
+  private async settleAfterOnlinePayment(orderId: string) {
+    const pos = await this.paymentPosition(orderId);
+    const newPaymentStatus = pos.outstanding <= 0 ? 'PAID' : pos.paidAmount > 0 ? 'PARTIAL' : pos.order.paymentStatus;
     const updated = await this.prisma.order.update({ where: { id: orderId }, data: { paymentStatus: newPaymentStatus } });
-    if (newPaymentStatus === 'PAID') this.notifyPaymentSuccess(updated).catch(() => {});
+    if (newPaymentStatus === 'PAID' && pos.order.paymentStatus !== 'PAID') this.notifyPaymentSuccess(updated).catch(() => {});
+    await this.releaseJobEarnings(orderId).catch((e) => this.logger.warn(`Earnings release ${orderId}: ${e.message}`));
     return updated;
+  }
+
+  /**
+   * Server-side follow-up for a payment Razorpay captured (webhook): a first payment confirms and
+   * dispatches the order exactly like the browser callback would (idempotent); a later balance
+   * payment updates the payment status and releases earnings. Master (cart) orders are handled
+   * by MasterOrdersService; top-ups/AMC elsewhere.
+   */
+  @OnEvent('payment.order.captured', { async: true })
+  async onOrderPaymentCaptured(p: { orderId?: string | null; gatewayPaymentId: string }) {
+    if (!p?.orderId) return;
+    const order = await this.prisma.order.findUnique({ where: { id: p.orderId } });
+    if (!order) return;
+    try {
+      const firstPaymentStatuses: string[] = [OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED, OrderStatus.VENDOR_ASSIGNED, OrderStatus.VENDOR_EN_ROUTE];
+      if (order.paymentStatus !== 'PAID' && firstPaymentStatuses.includes(order.status) && Number(order.totalAmount) > 0) {
+        await this.confirmPayment(order.id, p.gatewayPaymentId);
+      } else {
+        await this.settleAfterOnlinePayment(order.id);
+      }
+    } catch (e: any) {
+      this.logger.warn(`Webhook follow-up for order ${order.orderNumber}: ${e.message}`);
+    }
+  }
+
+  /**
+   * Partner earnings for a completed job are posted ONCE, and only when the customer's payment is
+   * fully verified (online, verified cash, cart share, wallet). Until then the job is DEFERRED and
+   * nothing is withdrawable. Same amounts as before (JOB_EARNING gross, commission true-up net of
+   * lead cost, warranty hold). Legacy jobs (earningsStatus null) are never touched.
+   */
+  async releaseJobEarnings(orderId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId }, include: { vendor: true, service: { include: { category: true } } } });
+      if (!order || order.earningsStatus !== 'DEFERRED' || !order.vendor || order.vendor.staffType === 'IN_HOUSE') return false;
+      if (!['COMPLETED', 'INVOICED', 'CLOSED'].includes(order.status)) return false;
+      const pos = await this.paymentPosition(orderId, tx);
+      if (pos.outstanding > 0.009) return false;
+      const claim = await tx.order.updateMany({ where: { id: orderId, earningsStatus: 'DEFERRED' }, data: { earningsStatus: 'POSTED', earningsPostedAt: new Date() } });
+      if (claim.count !== 1) return false;
+      if ((await tx.partnerLedgerEntry.count({ where: { orderId, type: 'JOB_EARNING' } })) > 0) return true; // never twice
+      const fullCommission = Number(order.remontCommission);
+      const leadCostPaid = Number(order.leadCostAmount);
+      const remainingCommission = Math.max(0, fullCommission - leadCostPaid);
+      const grossAmount = Number(order.vendorPayout) + fullCommission;
+      const completionCredit = grossAmount - remainingCommission; // == vendorPayout + leadCostPaid
+      const { days, percent } = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
+      const holdAmount = percent > 0 ? Math.round(completionCredit * percent) / 100 : 0;
+      if (order.serviceModel === 'MARKETPLACE') {
+        // Partner marketplace: the customer paid Remont's platform fee (+ its GST) directly, so the
+        // partner is credited their share, never charged commission. A registered partner also gets
+        // the GST on their share that the customer paid (theirs to remit); under 9(5) Remont is the
+        // liable person and keeps it. Lead cost (an advance against commission) is returned.
+        const payout = Number(order.vendorPayout);
+        const registered = !!order.vendor.gstin && isValidGstinFormat(String(order.vendor.gstin));
+        const partnerGst = registered ? Number(order.partnerServiceGst) : 0;
+        let leadReturned = 0;
+        if (leadCostPaid > 0) {
+          const claimLead = await tx.order.updateMany({ where: { id: orderId, leadCostRefunded: false }, data: { leadCostRefunded: true } });
+          if (claimLead.count === 1) leadReturned = leadCostPaid;
+        }
+        await tx.serviceVendor.update({
+          where: { id: order.vendor.id },
+          data: { totalEarnings: { increment: payout }, pendingPayout: { increment: payout + leadReturned + partnerGst - holdAmount } },
+        });
+        await this.ledger.postEntry(tx, order.vendor.id, 'JOB_EARNING', payout, { orderId, notes: 'Partner share of the service (platform fee paid by the customer)' });
+        if (leadReturned > 0) await this.ledger.postEntry(tx, order.vendor.id, 'LEAD_COST', leadReturned, { orderId, notes: 'Lead cost returned — the platform fee was paid by the customer' });
+        if (partnerGst > 0) await this.ledger.postEntry(tx, order.vendor.id, 'GST', partnerGst, { orderId, notes: "Your GST on this service, collected from the customer — yours to remit" });
+        if (holdAmount > 0) {
+          const releaseDueAt = new Date();
+          releaseDueAt.setDate(releaseDueAt.getDate() + days);
+          await this.ledger.postHold(tx, order.vendor.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
+        }
+        return true;
+      }
+      // GST on Remont's commission is invoiced to the partner (commission invoice). Whether the
+      // partner ledger also recovers it is a CA/accounting decision — configurable, OFF by default
+      // (the approved behaviour: the ledger recovers the commission only).
+      const gstRecovery = (await tx.siteSetting.findUnique({ where: { key: 'partner_commission_gst_recovery' } }))?.value === 'true';
+      let commissionGst = 0;
+      if (gstRecovery && fullCommission > 0) {
+        const feeTax = await buildTaxRateResolver(tx, 'PLATFORM_FEE', PLATFORM_FEE_DEFAULT_RATE);
+        commissionGst = r2m((fullCommission * feeTax.rateFor(null, null)) / 100);
+      }
+      const releasedNow = completionCredit - holdAmount - commissionGst;
+      await tx.serviceVendor.update({
+        where: { id: order.vendor.id },
+        data: { totalEarnings: { increment: Number(order.vendorPayout) }, pendingPayout: { increment: releasedNow } },
+      });
+      await this.ledger.postEntry(tx, order.vendor.id, 'JOB_EARNING', grossAmount, { orderId });
+      await this.ledger.trueUpCommission(tx, order.vendor.id, orderId, remainingCommission);
+      if (commissionGst > 0) {
+        await this.ledger.postEntry(tx, order.vendor.id, 'GST', -commissionGst, { orderId, notes: 'GST on Remont commission (as invoiced to the partner)' });
+      }
+      if (holdAmount > 0) {
+        const releaseDueAt = new Date();
+        releaseDueAt.setDate(releaseDueAt.getDate() + days);
+        await this.ledger.postHold(tx, order.vendor.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
+      }
+      return true;
+    });
+  }
+
+  /** Safety net: completed jobs whose earnings are still DEFERRED but are now fully paid. */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async sweepDeferredEarnings() {
+    const due = await this.prisma.order.findMany({
+      where: { earningsStatus: 'DEFERRED', status: { in: ['COMPLETED', 'INVOICED', 'CLOSED'] } },
+      select: { id: true }, take: 200, orderBy: { completedAt: 'asc' },
+    });
+    for (const o of due) await this.releaseJobEarnings(o.id).catch(() => undefined);
+  }
+
+  /**
+   * One code check with a hard attempt limit that also holds under concurrency: an attempt slot
+   * is taken atomically BEFORE comparing, so a burst of parallel guesses can never exceed the
+   * limit. A wrong code keeps the slot; the right one resets the counter. A missing code is never
+   * skipped (a new code must be sent), and a re-sent code expires.
+   */
+  private async assertOrderOtp(order: any, type: 'START' | 'END', otp: string) {
+    const isStart = type === 'START';
+    const code: string | null = isStart ? order.startOtp : order.endOtp;
+    const label = isStart ? 'start' : 'completion';
+    if (!code) throw new BadRequestException(`No ${label} OTP is active for this job — request a new OTP for the customer`);
+    const expires: Date | null = isStart ? order.startOtpExpiresAt : order.endOtpExpiresAt;
+    if (expires && new Date(expires).getTime() < Date.now()) throw new BadRequestException(`This ${label} OTP has expired — request a new one`);
+    const counter = isStart ? 'startOtpFailedAttempts' : 'endOtpFailedAttempts';
+    const slot = await this.prisma.order.updateMany({
+      where: { id: order.id, [counter]: { lt: OTP_MAX_FAILED_ATTEMPTS } },
+      data: { [counter]: { increment: 1 } },
+    });
+    if (slot.count !== 1) throw new BadRequestException(`Too many wrong ${label} OTP attempts — request a new OTP for the customer`);
+    if (String(otp ?? '') !== code) {
+      const after = await this.prisma.order.findUnique({ where: { id: order.id }, select: { [counter]: true } as any });
+      const left = OTP_MAX_FAILED_ATTEMPTS - Number((after as any)?.[counter] ?? OTP_MAX_FAILED_ATTEMPTS);
+      throw new BadRequestException(left > 0 ? `Invalid OTP (${left} attempt${left === 1 ? '' : 's'} left)` : `Invalid OTP — too many attempts; request a new OTP for the customer`);
+    }
+    await this.prisma.order.update({ where: { id: order.id }, data: { [counter]: 0 } });
   }
 
   async markEnRoute(vendorUserId: string, orderId: string) {
@@ -1333,23 +1664,44 @@ export class OrdersService {
     return result;
   }
 
+  /**
+   * Partner "I have arrived": records a fresh location and the server's verification decision
+   * (recordPartnerArrival in common). The order status is NOT changed — arrival is evidence,
+   * kept separate from the partner's self-reported progress. Idempotent.
+   */
+  async markArrived(vendorUserId: string, orderId: string, body: { latitude?: number; longitude?: number; accuracyM?: number; locationError?: string }) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!v) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (!order.arrivedAt && !['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE'].includes(order.status)) {
+      throw new BadRequestException('Arrival can only be recorded before the job starts');
+    }
+    return recordPartnerArrival(this.prisma, order, body || {}, { vendorId: v.id });
+  }
+
   async verifyStartOtp(vendorUserId: string, orderId: string, otp: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order || order.vendorId !== v.id) throw new ForbiddenException();
     if (order.status !== OrderStatus.VENDOR_EN_ROUTE) throw new BadRequestException('Order is not en-route');
-    if (order.startOtp !== otp) throw new BadRequestException('Invalid OTP');
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
+    await this.assertOrderOtp(order, 'START', otp);
+    const moved = await this.prisma.order.updateMany({
+      where: { id: orderId, status: OrderStatus.VENDOR_EN_ROUTE },
       data: { startOtpVerified: true, startedAt: new Date(), status: OrderStatus.STARTED },
     });
+    if (moved.count !== 1) throw new BadRequestException('Order is not en-route');
+    const updated = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.STARTED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     await writeOtpLog(this.prisma, { orderId, otpType: 'START', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
     return updated;
   }
 
-  async complete(vendorUserId: string, orderId: string, otp: string, photosAfter: string[], videoUrl?: string) {
+  async complete(
+    vendorUserId: string, orderId: string, otp: string, photosAfter: string[], videoUrl?: string,
+    collection?: { mode?: PaymentCollectionMode; collectedLocation?: string },
+  ) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new ForbiddenException();
     const order = await this.prisma.order.findUnique({
@@ -1364,31 +1716,16 @@ export class OrdersService {
     // OTP, so a job can't be marked done without the customer actually present/satisfied.
     // Orders created before this field existed have endOtp === null — skip the check for
     // those rather than permanently locking them out of completion.
-    if (order.endOtp && order.endOtp !== otp) throw new BadRequestException('Invalid completion OTP');
+    if (collection?.mode && !['CASH', 'UPI', 'CARD'].includes(collection.mode)) throw new BadRequestException('Invalid collection mode');
+    // The customer's completion OTP is required (a missing code is never skipped — a new one must
+    // be sent). It confirms the job AND any cash the partner takes for it on this visit.
+    await this.assertOrderOtp(order, 'END', otp);
 
     // Completion proof photos arrive as data: URIs (partner portal + app contract). They go
     // through the central media pipeline only now that the request is known to be valid, and
     // only their Cloudinary URLs are stored on the order — never the base64 itself.
     const vendorActor = { id: vendorUserId, role: UserRole.SERVICE_VENDOR };
     const photos = await this.storeCompletionPhotos(photosAfter, vendorActor);
-
-    // Vendor Wallet true-up: Lead Cost was already deducted in full at accept time as an
-    // advance against this job's commission (see ServiceVendorsService.acceptJob) — only the
-    // remainder of the commission is collected here. Reconstructing the gross amount from
-    // vendorPayout+remontCommission (both already fully resolved, including any approved
-    // extra work via ExtraWorkService.recalc()) avoids re-deriving totals from scratch.
-    // When leadCostAmount is 0 (every order that predates this feature, or if it's ever
-    // disabled) this reduces exactly to remainingCommission=fullCommission and
-    // completionCredit=vendorPayout — byte-identical to the pre-existing behavior.
-    const fullCommission = Number(order.remontCommission);
-    const leadCostPaid = Number(order.leadCostAmount);
-    const remainingCommission = Math.max(0, fullCommission - leadCostPaid);
-    const grossAmount = Number(order.vendorPayout) + fullCommission;
-    const completionCredit = grossAmount - remainingCommission; // == vendorPayout + leadCostPaid
-
-    const { days, percent } = await this.ledger.getWarrantyDefaults(order.service?.category ?? null);
-    const holdAmount = percent > 0 ? Math.round(completionCredit * percent) / 100 : 0;
-    const releasedNow = completionCredit - holdAmount;
 
     // Job-completion → ledger update is Phase 2's "Settlement Engine" backbone: previously
     // the order update and the ServiceVendor earnings update were two separate, non-atomic
@@ -1405,27 +1742,22 @@ export class OrdersService {
     const completed = await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
         where: { id: orderId, status: { in: ['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } },
-        data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter: photos.urls, videoUrl, endOtpVerified: !!order.endOtp },
+        data: { status: OrderStatus.COMPLETED, completedAt: new Date(), photosAfter: photos.urls, videoUrl, endOtpVerified: true, earningsStatus: v.staffType === 'IN_HOUSE' ? 'NOT_APPLICABLE' : 'DEFERRED' },
       });
       if (claimed.count !== 1) {
         throw new BadRequestException('Order cannot be completed at this stage');
       }
-      const updated = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-      await tx.serviceVendor.update({
-        where: { id: v.id },
-        data: {
-          completedJobs: { increment: 1 },
-          totalEarnings: { increment: Number(order.vendorPayout) }, // unchanged formula/timing — lifetime-gross metric
-          pendingPayout: { increment: releasedNow },
-        },
-      });
-      await this.ledger.postEntry(tx, v.id, 'JOB_EARNING', grossAmount, { orderId });
-      await this.ledger.trueUpCommission(tx, v.id, orderId, remainingCommission);
-      if (holdAmount > 0) {
-        const releaseDueAt = new Date();
-        releaseDueAt.setDate(releaseDueAt.getDate() + days);
-        await this.ledger.postHold(tx, v.id, 'WARRANTY_HOLD', holdAmount, { orderId, releaseDueAt });
+      // Job count moves now; partner EARNINGS are posted only once the customer's payment is
+      // verified (releaseJobEarnings, below and on every later payment event) — a completed but
+      // unpaid job is never withdrawable. In-house staff never earn partner money.
+      await tx.serviceVendor.update({ where: { id: v.id }, data: { completedJobs: { increment: 1 } } });
+      // The customer's completion OTP confirms cash this partner reported on this visit, and any
+      // collection submitted together with the completion.
+      await this.confirmPendingCashTx(tx, orderId, 'COMPLETION_OTP', vendorUserId, vendorUserId);
+      if (collection?.mode) {
+        await this.recordCashCollectionTx(tx, { actorUserId: vendorUserId, orderId, mode: collection.mode, collectedLocation: collection.collectedLocation, verification: 'COMPLETION_OTP' });
       }
+      const updated = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       return updated;
     }).catch(async (e) => {
       // Completion lost (e.g. a concurrent double-submit won) — don't leave its photos behind.
@@ -1436,9 +1768,8 @@ export class OrdersService {
       await this.media?.linkByUrls({ entityType: MediaEntityType.PROJECT, entityId: orderId, urls: photos.urls, actor: vendorActor });
     }
     await writeOrderTimeline(this.prisma, { orderId, status: OrderStatus.COMPLETED, actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
-    if (order.endOtp) {
-      await writeOtpLog(this.prisma, { orderId, otpType: 'END', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
-    }
+    await writeOtpLog(this.prisma, { orderId, otpType: 'END', otp, action: 'VERIFIED', requestedByRole: 'VENDOR', requestedById: v.id });
+    await this.releaseJobEarnings(orderId).catch((e) => this.logger.warn(`Earnings release ${orderId}: ${e.message}`));
     this.autoGenerateInvoice(orderId).catch((e) => this.logger.warn(`Auto-invoice failed: ${e.message}`));
     this.notifyWorkCompleted(completed).catch(() => {});
     return completed;
@@ -1526,7 +1857,9 @@ export class OrdersService {
     const now = new Date();
     await this.prisma.order.update({
       where: { id: orderId },
-      data: isStart ? { startOtp: newOtp, startOtpLastSentAt: now } : { endOtp: newOtp, endOtpLastSentAt: now },
+      data: isStart
+        ? { startOtp: newOtp, startOtpLastSentAt: now, startOtpFailedAttempts: 0, startOtpExpiresAt: new Date(now.getTime() + OTP_RESENT_VALIDITY_MS) }
+        : { endOtp: newOtp, endOtpLastSentAt: now, endOtpFailedAttempts: 0, endOtpExpiresAt: new Date(now.getTime() + OTP_RESENT_VALIDITY_MS) },
     });
     await writeOtpLog(this.prisma, { orderId, otpType: type, otp: newOtp, action: 'REGENERATED', requestedByRole: 'VENDOR', requestedById: v.id });
 
@@ -1642,8 +1975,22 @@ export class OrdersService {
         throw new BadRequestException('This order has already been delivered — please raise a return request instead');
       }
       // else: not yet shipped — falls through to the plain-cancel transaction below, unchanged
-    } else if (['COMPLETED', 'CANCELLED', 'IN_PROGRESS'].includes(order.status)) {
+    } else if (['COMPLETED', 'INVOICED', 'CLOSED', 'CANCELLED', 'REFUNDED', 'IN_PROGRESS'].includes(order.status)) {
       throw new BadRequestException('Cannot cancel at this stage');
+    } else if (order.startOtpVerified || ['STARTED', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+      // The customer shared the START OTP: the work has begun, so self-service cancellation is
+      // closed. Genuine problems still go to Support/Admin as a complaint.
+      throw new ConflictException({
+        error: 'SERVICE_STARTED',
+        message: 'The service has already started (you shared the start OTP), so it can no longer be cancelled here. If something is wrong, please raise a complaint — our team will review it.',
+      });
+    } else if (order.arrivedAt) {
+      // The partner has already arrived: cancellation goes to admin review (with the arrival
+      // evidence and the configured penalty) instead of an instant cancel — never decided here.
+      throw new ConflictException({
+        error: 'CANCELLATION_REVIEW_REQUIRED',
+        message: 'Your partner has already arrived, so this cancellation needs a quick review by our team. Please submit a cancellation request.',
+      });
     }
     // Customer-initiated cancellation refunds any Lead Cost already charged to the assigned
     // vendor — per spec, only a vendor-side drop (rejectJob) forfeits it.
@@ -1659,6 +2006,22 @@ export class OrdersService {
         where: { id: orderId },
         data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
       });
+      // Money already received (online payment and/or wallet) is never lost track of: the
+      // cancellation records a refund REQUEST for admin review — it moves no money. Skipped
+      // when one is already open for this order.
+      // Wallet taken at checkout for an order that was never paid goes straight back (once).
+      const walletReturned = await releaseUnpaidOrderWallet(tx, order, `Order ${order.orderNumber} cancelled before payment`);
+      const received = order.paymentStatus === 'PAID' || order.paymentStatus === 'PARTIAL' || Number(order.cartPaidAmount || 0) > 0
+        || (!walletReturned && Number(order.walletUsed || 0) > 0);
+      if (received) {
+        const open = await tx.refundRequest.findFirst({ where: { orderId, status: { in: ['REQUESTED', 'PARTNER_RESPONDED', 'UNDER_REVIEW', 'ESCALATED'] } }, select: { id: true } });
+        if (!open) {
+          const rr = await tx.refundRequest.create({
+            data: { orderId, customerId: order.customerId, reason: `Order cancelled by the customer: ${reason || 'no reason given'}`, evidenceUrls: [], partnerId: order.vendorId || undefined, status: 'REQUESTED' },
+          });
+          await tx.refundRequestLog.create({ data: { refundRequestId: rr.id, actorId: userId, actorRole: UserRole.CUSTOMER, action: 'REQUESTED', notes: 'Raised automatically on cancellation — awaiting admin review' } });
+        }
+      }
       if (order.vendorId && Number(order.leadCostAmount) > 0) {
         const claimed = await tx.order.updateMany({
           where: { id: orderId, leadCostRefunded: false },
@@ -1712,7 +2075,8 @@ export class GuestBookingService {
           name: dto.name,
           email: dto.email || undefined,
           role: UserRole.CUSTOMER,
-          isVerified: true,
+          // Not verified by a typed phone number — only by the customer's own OTP login.
+          isVerified: false,
         },
       });
     }
@@ -1742,13 +2106,13 @@ export class GuestBookingService {
     // basePrice → else basePrice as-is (CitiesService.getServicePrice — shared with
     // the authenticated create() and Master Order checkout price resolution).
     const cityPrice = await this.cities.getServicePrice(city.name, dto.serviceId);
-    const serviceAmount = cityPrice !== null ? cityPrice : Number(svc.basePrice);
-    const commissionResult = await resolveCommission(this.prisma, {
-      serviceId: svc.id, categoryId: svc.categoryId, cityId: city.id, amount: serviceAmount,
-    });
+    const priced = await priceServiceBooking(this.prisma, svc, city.id, cityPrice !== null ? cityPrice : Number(svc.basePrice));
+    const serviceAmount = priced.serviceAmount;
+    const commissionResult = priced.commissionResult;
 
-    const gstAmount = Math.round(serviceAmount * 0.18 * 100) / 100;
-    const totalAmount = serviceAmount + gstAmount;
+    const pricing = await priceServiceBookingSnapshot(this.prisma, { lines: [{ service: svc as any, amount: serviceAmount }], category: (svc as any).category, cityId: city.id, slotStart: `${dto.slotDate}T${dto.slotTime.length === 5 ? dto.slotTime : dto.slotTime + ':00'}:00+05:30` });
+    const gstAmount = pricing ? pricing.result.gstAmount : Math.round(serviceAmount * (priced.gstRatePercent / 100) * 100) / 100;
+    const totalAmount = pricing ? pricing.result.customerTotal : Math.round((serviceAmount + gstAmount) * 100) / 100;
 
     // Parse slot datetime as IST (UTC+5:30) to avoid local-timezone drift
     const paddedTime = dto.slotTime.length === 5 ? dto.slotTime : `${dto.slotTime}:00`;
@@ -1817,6 +2181,8 @@ export class GuestBookingService {
           gstAmount,
           totalAmount,
           remontCommission: commissionResult.commissionAmount,
+          ...(pricing ? orderFieldsFromSnapshot(pricing) : {}),
+          minimumChargeAdjustment: priced.minimumChargeAdjustment, minimumChargeRuleId: priced.minimumChargeRuleId || undefined,
           vendorPayout: serviceAmount - commissionResult.commissionAmount,
           commissionRuleId: commissionResult.ruleId,
           commissionRuleLabel: commissionResult.ruleLabel,
@@ -2137,19 +2503,24 @@ export class OrdersController {
     const res: any = await this.orders.create(u.sub, orderDto as CreateOrderDto);
     return this.authz.attachSafely(res, { orderId: res?.id }, authorizedPerson);
   }
+  // Same pricing as POST /orders (priceOrder), nothing created.
+  @Post('quote') quote(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.quote(u.sub, dto); }
   @Post(':id/confirm-payment') pay(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
-  @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
+  // The assigned partner may read the order too, but never the customer's OTPs.
+  @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id).then((o) => (o.customerId === u.sub ? o : withoutCustomerOtps(o))); }
   @Patch(':id/cancel') cancel(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { reason: string }) {
     return this.orders.cancel(u.sub, id, b.reason);
   }
   @Patch(':id/en-route') enRoute(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.markEnRoute(u.sub, id); }
+  // Partner "I have arrived" — fresh location evidence; order status unchanged.
+  @Patch(':id/arrived') arrived(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: PartnerArrivalDto) { return this.orders.markArrived(u.sub, id, b); }
   @Post(':id/regenerate-otp') regenerateOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { type: 'START' | 'END' }) {
     return this.orders.regenerateOtp(u.sub, id, b.type);
   }
   @Throttle(OTP_VERIFY_THROTTLE)
   @Post(':id/verify-otp') verify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
-    return this.orders.verifyStartOtp(u.sub, id, b.otp);
+    return this.orders.verifyStartOtp(u.sub, id, b.otp).then(withoutCustomerOtps);
   }
   @Post(':id/extra-work') addExtra(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { description: string; amount: number }) {
     return this.extras.addExtraWork(u.sub, id, b.description, b.amount);
@@ -2169,8 +2540,14 @@ export class OrdersController {
     return this.extras.verifyOtp(u.sub, id, b.otp);
   }
   @Throttle(OTP_VERIFY_THROTTLE)
-  @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string }) {
-    return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl);
+  // collection (optional): { mode: CASH|UPI|CARD } — cash taken on this visit, confirmed by the
+  // same customer completion OTP. Older clients that omit it are unaffected.
+  @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string; collection?: { mode?: PaymentCollectionMode; collectedLocation?: string } }) {
+    return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl, b.collection).then(withoutCustomerOtps);
+  }
+  // The customer (or an admin) confirms cash a partner reported collecting.
+  @Post(':id/cash-collections/:paymentId/confirm') confirmCash(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Param('paymentId') paymentId: string, @Body() b: { evidence?: string }) {
+    return this.orders.verifyCashCollection({ sub: u.sub, role: u.role }, id, paymentId, b?.evidence);
   }
   @Post(':id/collect-cod')
   collectCod(

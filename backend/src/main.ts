@@ -1,10 +1,8 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { resolveTrustProxyHops } from './common/trust-proxy';
+import { configureHttpApp } from './app.setup';
 
 function assertRequiredEnv() {
   const logger = new Logger('Bootstrap');
@@ -27,57 +25,7 @@ async function bootstrap() {
 
   // Rate limits key on req.ip — make it the real client address behind Railway's edge proxy
   // (see common/trust-proxy.ts for why this is exactly the hop count, never `true`).
-  const proxyHops = resolveTrustProxyHops();
-  if (proxyHops > 0) app.getHttpAdapter().getInstance().set('trust proxy', proxyHops);
-  new Logger('Bootstrap').log(`trust proxy hops: ${proxyHops}`);
-
-  // Increase body limit to 15MB for base64 document uploads in partner registration
-  const express = require('express');
-  app.use(express.json({ limit: '15mb' }));
-  app.use(express.urlencoded({ limit: '15mb', extended: true }));
-
-  // Task 3 uploads (backend/src/modules/uploads) now go to Cloudinary, not this local
-  // folder. Kept mounted only so any pre-Cloudinary /api/uploads/* URLs still saved in the
-  // DB keep resolving until they're naturally replaced; nothing new is written here.
-  app.use('/api/uploads', express.static(require('path').join(process.cwd(), 'uploads')));
-
-  const allowedOrigins = [
-    'https://remontindia.com',
-    'https://www.remontindia.com',
-    'https://remontone.in',
-  ];
-  if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL);
-  if (process.env.NODE_ENV !== 'production') allowedOrigins.push('http://localhost:3000', 'http://localhost:3001');
-
-  app.enableCors({
-    origin: allowedOrigins,
-    credentials: true,
-  });
-
-  app.setGlobalPrefix('api/v1');
-
-  // Every /api/v1/* response is dynamic, admin-editable data (prices, categories,
-  // services, site settings/logo, etc). Express auto-generates an ETag for JSON
-  // responses but sends no Cache-Control, so without this, HTTP caches fall back to
-  // heuristic freshness — mobile/standalone-PWA HTTP caches are far more aggressive
-  // about reusing a stale GET response this way than a desktop browser tab, which is
-  // why admin edits used to lag on the installed mobile PWA while desktop looked fine.
-  app.use('/api/v1', (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
-    res.setHeader('Cache-Control', 'no-store');
-    next();
-  });
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: false,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
-
-  app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new TransformInterceptor());
+  configureHttpApp(app);
 
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()

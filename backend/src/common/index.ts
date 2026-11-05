@@ -52,6 +52,25 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 }
 
+/**
+ * Optional login on a public route: no Authorization header → anonymous (guard passes, no user);
+ * a header that is present but invalid/expired/revoked → 401, never silently treated as anonymous.
+ * When it passes with a header, request.user comes from JwtStrategy (user re-read: verified, not
+ * blocked) — the only trustworthy identity. Same behaviour as the AI chat's OptionalJwtAuthGuard.
+ */
+@Injectable()
+export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
+  canActivate(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    if (!req.headers?.authorization) return true;
+    return super.canActivate(context) as any;
+  }
+  handleRequest(err: any, user: any) {
+    if (err || !user) throw new UnauthorizedException();
+    return user;
+  }
+}
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
@@ -161,6 +180,35 @@ export async function writeOrderTimeline(prisma: any, entry: {
 // Append-only audit trail for job start/completion OTPs — same direct-insert pattern
 // as writeOrderTimeline above, no event bus. Called at initial generation (booking
 // time), on regeneration ("Request OTP Again"), and on successful verification.
+/**
+ * Gives back the wallet amount taken at checkout for an order that was never paid (cancelled
+ * before payment, abandoned online payment) — exactly once (Order.walletReleasedAt claim), and
+ * only if a wallet DEBIT for this order (or its cart) really exists, so an older order whose wallet
+ * portion was merely reserved is never credited money that was not taken. Paid orders go through
+ * the refund workflow instead. Returns true when the wallet was credited.
+ */
+export async function releaseUnpaidOrderWallet(
+  tx: any,
+  order: { id: string; customerId: string; masterOrderId?: string | null; walletUsed: any; paymentStatus: string; cartPaidAmount?: any },
+  note: string,
+): Promise<boolean> {
+  const amount = Number(order.walletUsed || 0);
+  if (amount <= 0) return false;
+  if (['PAID', 'PARTIAL', 'REFUNDED'].includes(order.paymentStatus) || Number(order.cartPaidAmount || 0) > 0) return false;
+  const debit = await tx.walletTransaction.findFirst({
+    where: { userId: order.customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', orderId: { in: [order.id, order.masterOrderId].filter(Boolean) } },
+    select: { id: true },
+  });
+  if (!debit) return false;
+  const claim = await tx.order.updateMany({ where: { id: order.id, walletReleasedAt: null }, data: { walletReleasedAt: new Date() } });
+  if (claim.count !== 1) return false;
+  const u = await tx.user.update({ where: { id: order.customerId }, data: { walletBalance: { increment: amount } }, select: { walletBalance: true } });
+  await tx.walletTransaction.create({
+    data: { userId: order.customerId, type: 'CREDIT', reason: 'REFUND', amount, balanceAfter: u.walletBalance, orderId: order.id, notes: note },
+  });
+  return true;
+}
+
 export async function writeOtpLog(prisma: any, entry: {
   orderId: string;
   otpType: 'START' | 'END';
@@ -231,7 +279,7 @@ type CommissionRuleRow = {
   stackable: boolean;
 };
 
-function computeRuleAmount(rule: CommissionRuleRow, amount: number): number {
+export function computeRuleAmount(rule: CommissionRuleRow, amount: number): number {
   if (rule.commissionType === 'FLAT') return Number(rule.value);
   if (rule.commissionType === 'PERCENTAGE') return (amount * Number(rule.value)) / 100;
   if (rule.commissionType === 'SLAB') {
@@ -255,21 +303,44 @@ export async function resolveCommission(
   prisma: any,
   params: { serviceId: string; categoryId: string; cityId?: string | null; amount: number },
 ): Promise<{ commissionAmount: number; ruleId: string | null; ruleLabel: string }> {
+  return resolveServiceRule(prisma, 'COMMISSION', params);
+}
+
+/** What a CommissionRule row prices — see ServiceRuleType in schema.prisma. */
+export type ServiceRuleTypeValue = 'COMMISSION' | 'MINIMUM_CHARGE' | 'CANCELLATION_CHARGE' | 'ADDITIONAL_FEE';
+
+/**
+ * The existing commission resolution (service beats category, city-specific beats all-city,
+ * priority, opt-in stacking, effective dates), generalised over CommissionRule.ruleType so the
+ * minimum-charge and cancellation-charge rules reuse it instead of a second rule engine.
+ * Only COMMISSION falls back to the `default_commission_pct` setting — the new types have no
+ * fallback: no matching rule means ₹0 (nothing is ever invented).
+ */
+export async function resolveServiceRule(
+  prisma: any,
+  ruleType: ServiceRuleTypeValue,
+  params: { serviceId: string; categoryId: string; cityId?: string | null; amount: number },
+): Promise<{ commissionAmount: number; ruleId: string | null; ruleLabel: string; rule?: CommissionRuleRow | null }> {
   const { serviceId, categoryId, cityId, amount } = params;
   const now = new Date();
 
-  const rules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
+  const candidateRules: CommissionRuleRow[] = await prisma.commissionRule.findMany({
     where: {
       isActive: true,
+      ruleType,
       OR: [{ serviceId }, { categoryId, serviceId: null }],
       AND: [
-        { OR: [{ cityId: null }, { cityId: cityId || undefined }] },
+        // This city's rules or all-city rules only. With no known city, ONLY all-city rules —
+        // `{ cityId: undefined }` would be "no filter" to Prisma and match every city's rule.
+        cityId ? { OR: [{ cityId: null }, { cityId }] } : { cityId: null },
         { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
         { OR: [{ validTo: null }, { validTo: { gte: now } }] },
       ],
     },
     orderBy: { priority: 'desc' },
   });
+  // Defence in depth: a rule scoped to another city is never applied, whatever the query returned.
+  const rules = candidateRules.filter((r) => !r.cityId || (!!cityId && r.cityId === cityId));
 
   // City-specific beats "all cities" at the same scope level.
   const bySpecificity = (a: CommissionRuleRow, b: CommissionRuleRow) => {
@@ -284,6 +355,9 @@ export async function resolveCommission(
   // alone still applies when no category rule exists.
   const primary = serviceRules[0] || categoryRules[0] || null;
 
+  if (!primary && ruleType !== 'COMMISSION') {
+    return { commissionAmount: 0, ruleId: null, ruleLabel: 'No rule — ₹0', rule: null };
+  }
   if (!primary) {
     const setting = await prisma.siteSetting.findUnique({ where: { key: 'default_commission_pct' } });
     const pct = setting ? parseFloat(setting.value) || 0 : 0;
@@ -296,7 +370,312 @@ export async function resolveCommission(
   for (const r of stacked) commissionAmount += computeRuleAmount(r, amount);
 
   const label = describeRule(primary) + (stacked.length ? ` + ${stacked.length} stacked rule(s)` : '');
-  return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label };
+  return { commissionAmount: Math.round(commissionAmount * 100) / 100, ruleId: primary.id, ruleLabel: label, rule: primary };
+}
+
+/**
+ * Customer cancellation penalty after the partner has arrived — the CANCELLATION_CHARGE rule for
+ * the booking's service/category and city (same resolver as commission). Admin-configured:
+ *   FLAT ₹X                       → ₹X
+ *   PERCENTAGE X%                 → X% of the booking's service amount
+ *   PERCENTAGE X% + minimumAmount → the higher of the two
+ *   no rule / ₹0 rule             → no penalty
+ * Never more than `cap` (the booking's total payable). Nothing is invented: no rule → ₹0.
+ */
+export async function resolveCancellationPenalty(
+  prisma: any,
+  p: { serviceId: string; categoryId: string; cityId?: string | null; serviceAmount: number; cap: number },
+): Promise<{ penalty: number; ruleId: string | null; label: string; breakdown: { percent: number | null; percentAmount: number | null; minimum: number | null; cap: number; capped: boolean } }> {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const cap = round2(Math.max(0, Number(p.cap) || 0));
+  const r = await resolveServiceRule(prisma, 'CANCELLATION_CHARGE', { serviceId: p.serviceId, categoryId: p.categoryId, cityId: p.cityId, amount: p.serviceAmount });
+  const rule: any = r.rule;
+  if (!rule) return { penalty: 0, ruleId: null, label: 'No cancellation penalty configured', breakdown: { percent: null, percentAmount: null, minimum: null, cap, capped: false } };
+  const percent = rule.commissionType === 'PERCENTAGE' ? Number(rule.value) : null;
+  const percentAmount = percent != null ? round2((Math.max(0, Number(p.serviceAmount) || 0) * percent) / 100) : null;
+  const minimum = rule.commissionType === 'FLAT' ? Number(rule.value) : rule.minimumAmount != null ? Number(rule.minimumAmount) : null;
+  const raw = round2(Math.max(percentAmount ?? 0, minimum ?? 0));
+  const penalty = round2(Math.min(raw, cap));
+  const label = percent != null
+    ? `${percent}% of the service amount${minimum != null ? `, minimum ₹${minimum}` : ''}`
+    : `₹${minimum} flat`;
+  return { penalty, ruleId: rule.id, label: raw > 0 ? label : 'No cancellation penalty (₹0 rule)', breakdown: { percent, percentAmount, minimum, cap, capped: raw > cap } };
+}
+
+/**
+ * The City row id a booking's service rules (commission, minimum charge, cancellation charge)
+ * are matched against: the city name the client sent, else the city of the customer's OWN saved
+ * address, else the inline address's city. null when none is recognised — then only all-city
+ * rules apply (see resolveServiceRule). Used only for rule matching; prices are unaffected.
+ */
+export async function resolveCityIdForRules(
+  prisma: any,
+  input: { cityName?: string | null; addressId?: string | null; customerId?: string | null; inlineCity?: string | null },
+): Promise<string | null> {
+  const names: string[] = [];
+  if (input.cityName?.trim()) names.push(input.cityName.trim());
+  if (input.addressId && input.customerId) {
+    const addr = await prisma.address.findUnique({ where: { id: input.addressId }, select: { userId: true, city: true } });
+    if (addr && addr.userId === input.customerId && addr.city?.trim()) names.push(addr.city.trim());
+  }
+  if (input.inlineCity?.trim()) names.push(input.inlineCity.trim());
+  for (const name of names) {
+    const row = await prisma.city.findFirst({ where: { name: { equals: name, mode: 'insensitive' } }, select: { id: true } });
+    if (row?.id) return row.id;
+  }
+  return null;
+}
+
+// ─── Service GST — one source for checkout, extra work and invoices ─────────
+// Checkout used to hardcode 18% in five places while invoices read TaxConfig (empty in
+// production → 0%), so the two never agreed. Both now read the SAME resolver: an admin/CA-
+// configured TaxConfig row (appliesTo SERVICE, by SAC) or Service.gstOverridePercent wins;
+// with nothing configured it falls back to 18%, which is exactly what every checkout path
+// already charged — so live customer prices are unchanged until a CA-approved rate is set.
+export const SERVICE_GST_FALLBACK_RATE = 18;
+export function buildServiceTaxResolver(prisma: any): Promise<TaxRateResolver> {
+  return buildTaxRateResolver(prisma, 'SERVICE', SERVICE_GST_FALLBACK_RATE);
+}
+
+// ─── Minimum service charge (CommissionRule ruleType=MINIMUM_CHARGE) ─────────
+// Business rules (confirmed): applied per SERVICE BOOKING (one child Order = one partner
+// visit); the configured minimum is GST-INCLUSIVE — the customer pays at least that much in
+// total for the booking; commission rules then apply to the raised amount as usual. Separate
+// from the cancellation charge and from partner payout.
+
+/** Highest MINIMUM_CHARGE that applies to any service in this booking (service rule beats
+ * category, city-specific beats all-city — the shared resolveServiceRule()). 0 = none. */
+export async function resolveBookingMinimumCharge(
+  prisma: any,
+  lines: { serviceId: string; categoryId: string }[],
+  cityId?: string | null,
+): Promise<{ minimum: number; ruleId: string | null }> {
+  let best = { minimum: 0, ruleId: null as string | null };
+  for (const l of lines) {
+    const r = await resolveServiceRule(prisma, 'MINIMUM_CHARGE', { serviceId: l.serviceId, categoryId: l.categoryId, cityId, amount: 0 });
+    if (r.ruleId && r.commissionAmount > best.minimum) best = { minimum: r.commissionAmount, ruleId: r.ruleId };
+  }
+  return best;
+}
+
+/**
+ * Pure. Raises a booking's pre-GST line amounts so the booking's GST-inclusive total reaches
+ * `minimumInclusive`. Returns the pre-GST adjustment (0 when the booking already meets it) and
+ * the per-line amounts with the adjustment spread proportionally (all on the first line when
+ * every line is ₹0). `gstRatePercent` is the booking's effective service GST rate.
+ */
+export function applyBookingMinimum(
+  lineAmounts: number[],
+  gstRatePercent: number,
+  minimumInclusive: number,
+): { adjustment: number; lineAmounts: number[] } {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const base = round2(lineAmounts.reduce((s, a) => s + a, 0));
+  if (!(minimumInclusive > 0) || !lineAmounts.length) return { adjustment: 0, lineAmounts };
+  const factor = 1 + (gstRatePercent > 0 ? gstRatePercent : 0) / 100;
+  const currentInclusive = round2(base + round2(base * (factor - 1)));
+  if (currentInclusive >= minimumInclusive) return { adjustment: 0, lineAmounts };
+  const targetBase = round2(minimumInclusive / factor);
+  const adjustment = round2(Math.max(0, targetBase - base));
+  if (adjustment <= 0) return { adjustment: 0, lineAmounts };
+  const out = [...lineAmounts];
+  if (base <= 0) { out[0] = round2(out[0] + adjustment); return { adjustment, lineAmounts: out }; }
+  let allocated = 0;
+  for (let i = 0; i < out.length; i++) {
+    const share = i === out.length - 1 ? round2(adjustment - allocated) : round2((lineAmounts[i] / base) * adjustment);
+    allocated = round2(allocated + share);
+    out[i] = round2(out[i] + share);
+  }
+  return { adjustment, lineAmounts: out };
+}
+
+/**
+ * One single-service booking priced the same way MasterOrdersService.priceCart() prices a
+ * service booking: the shared service GST rate, the minimum charge (GST-inclusive, per
+ * booking), then the EXISTING commission rules on the amount actually charged. Used by the
+ * legacy create(), guest book() and admin-created orders so none of them keeps its own 18%.
+ */
+export async function priceServiceBooking(
+  prisma: any,
+  svc: { id: string; categoryId: string; hsnSac?: string | null; gstOverridePercent?: any },
+  cityId: string | null | undefined,
+  catalogueAmount: number,
+): Promise<{
+  serviceAmount: number; gstRatePercent: number; minimumChargeAdjustment: number; minimumChargeRuleId: string | null;
+  commissionResult: { commissionAmount: number; ruleId: string | null; ruleLabel: string };
+}> {
+  const svcTax = await buildServiceTaxResolver(prisma);
+  const gstRatePercent = svcTax.rateFor(svc.hsnSac, svc.gstOverridePercent);
+  const minimum = await resolveBookingMinimumCharge(prisma, [{ serviceId: svc.id, categoryId: svc.categoryId }], cityId);
+  const topUp = applyBookingMinimum([catalogueAmount], gstRatePercent, minimum.minimum);
+  const serviceAmount = topUp.adjustment > 0 ? topUp.lineAmounts[0] : catalogueAmount;
+  const commissionResult = await resolveCommission(prisma, { serviceId: svc.id, categoryId: svc.categoryId, cityId, amount: serviceAmount });
+  return {
+    serviceAmount, gstRatePercent, commissionResult,
+    minimumChargeAdjustment: topUp.adjustment,
+    minimumChargeRuleId: topUp.adjustment > 0 ? minimum.ruleId : null,
+  };
+}
+
+// ─── Service models: in-house vs partner marketplace ──────────────────────────
+// The customer pays before anyone is assigned, so the pricing model comes from the service's
+// category (ServiceCategory.serviceModel) and is frozen on the order (Order.serviceModel).
+export type OrderServiceModel = 'IN_HOUSE' | 'MARKETPLACE';
+
+/** Category setting → order model. Anything else (no category row) = legacy pricing (null). */
+export function orderServiceModelFor(categoryServiceModel?: string | null): OrderServiceModel | null {
+  if (categoryServiceModel === 'IN_HOUSE') return 'IN_HOUSE';
+  if (categoryServiceModel === 'PARTNER_MARKETPLACE') return 'MARKETPLACE';
+  return null;
+}
+
+/** Which staff a category's jobs may go to (dispatch, acceptance, admin assignment). Legacy = any. */
+export function staffAllowedForModel(model: string | null | undefined, staffType: string | null | undefined): boolean {
+  if (model === 'IN_HOUSE') return staffType === 'IN_HOUSE';
+  if (model === 'MARKETPLACE') return staffType !== 'IN_HOUSE';
+  return true;
+}
+
+/**
+ * Recomputes a service booking priced by the pricing engine (Order.pricingSnapshot) after approved
+ * extra work changes — with the rates, commission and fees FROZEN at checkout (a rule changed since
+ * never alters a confirmed booking). A no-op (false) for bookings without a snapshot. A total that
+ * rises past what was paid becomes a balance due through the existing balance flow.
+ */
+export async function recalculateServiceOrder(client: any, orderId: string): Promise<boolean> {
+  const order = await client.order.findUnique({ where: { id: orderId }, include: { extraWorkItems: { where: { customerApproved: true } } } });
+  const snap: any = order?.pricingSnapshot;
+  if (!order || order.type !== 'SERVICE' || !snap?.params) return false;
+  const extraWork = order.extraWorkItems.reduce((s: number, e: any) => s + Number(e.amount), 0);
+  const next = pricingSnapshot(snap.params, { lineAmounts: snap.amounts.lineAmounts, discount: snap.amounts.discount, extraWork });
+  const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const res = next.result;
+  const totalAmount = Math.max(0, r2(res.customerTotal - Number(order.walletUsed || 0)));
+  const rose = totalAmount > Number(order.totalAmount) + 0.009;
+  await client.order.update({
+    where: { id: orderId },
+    data: {
+      extraWorkAmount: extraWork, subtotal: r2(Number(order.serviceAmount) + extraWork),
+      gstAmount: res.gstAmount, platformFeeGst: res.platformFeeGst, partnerServiceGst: res.partnerServiceGst, totalAmount,
+      vendorPayout: res.partnerShare, pricingSnapshot: { ...next, previous: snap.computedAt } as any,
+      ...(rose && order.paymentStatus === 'PAID' ? { paymentStatus: 'PARTIAL' } : {}),
+    },
+  });
+  return true;
+}
+
+// ─── Partner arrival evidence ──────────────────────────────────────────────────
+// "I have arrived" captures a fresh location; verification is decided here, server-side, and
+// stored separately from the (unchanged) order status. Thresholds are admin-editable settings
+// (group 'operations'); these code defaults only apply until an admin sets them.
+export const ARRIVAL_SETTING_DEFAULTS = {
+  arrival_verification_radius_m: 300,
+  arrival_max_gps_accuracy_m: 100,
+  arrival_max_fix_age_s: 120,
+} as const;
+
+export type ArrivalVerificationValue =
+  | 'VERIFIED' | 'NOT_VERIFIED_TOO_FAR' | 'NOT_VERIFIED_LOW_ACCURACY'
+  | 'NOT_VERIFIED_NO_LOCATION' | 'NOT_VERIFIED_NO_ADDRESS_COORDINATES'
+  | 'NOT_VERIFIED_MOCK_LOCATION' | 'NOT_VERIFIED_STALE_LOCATION';
+
+/** Order fields cleared when the assigned partner changes — the new partner records their own arrival. */
+export const ARRIVAL_RESET_DATA = {
+  arrivedAt: null, arrivalLatitude: null, arrivalLongitude: null, arrivalAccuracyM: null,
+  arrivalDistanceM: null, arrivalVerification: null, arrivalNote: null,
+} as const;
+
+/**
+ * Pure. Never returns VERIFIED without valid partner AND address coordinates. Device metadata
+ * (isMocked, fixAgeMs) is untrusted client input, so it can only DOWNGRADE the result: a device
+ * reporting a mock or stale fix is not verified, but a device NOT reporting one proves nothing
+ * (older apps and browsers send neither) — this reduces, never eliminates, location spoofing.
+ */
+export function decideArrivalVerification(input: {
+  latitude?: number | null; longitude?: number | null; accuracyM?: number | null;
+  addressLatitude?: number | null; addressLongitude?: number | null;
+  radiusM: number; maxAccuracyM: number;
+  isMocked?: boolean | null; fixAgeMs?: number | null; maxFixAgeS?: number;
+}): { verification: ArrivalVerificationValue; distanceM: number | null } {
+  if (!isValidIndiaCoords(input.latitude ?? null, input.longitude ?? null)) {
+    return { verification: 'NOT_VERIFIED_NO_LOCATION', distanceM: null };
+  }
+  if (!isValidIndiaCoords(input.addressLatitude ?? null, input.addressLongitude ?? null)) {
+    return { verification: 'NOT_VERIFIED_NO_ADDRESS_COORDINATES', distanceM: null };
+  }
+  const distanceM = Math.round(haversineKm(input.latitude!, input.longitude!, input.addressLatitude!, input.addressLongitude!) * 1000);
+  if (input.isMocked === true) return { verification: 'NOT_VERIFIED_MOCK_LOCATION', distanceM };
+  const fixAgeMs = input.fixAgeMs == null ? NaN : Number(input.fixAgeMs);
+  if (Number.isFinite(fixAgeMs) && input.maxFixAgeS && fixAgeMs > input.maxFixAgeS * 1000) {
+    return { verification: 'NOT_VERIFIED_STALE_LOCATION', distanceM };
+  }
+  const accuracy = Number(input.accuracyM);
+  if (!Number.isFinite(accuracy) || accuracy <= 0 || accuracy > input.maxAccuracyM) {
+    return { verification: 'NOT_VERIFIED_LOW_ACCURACY', distanceM };
+  }
+  return { verification: distanceM <= input.radiusM ? 'VERIFIED' : 'NOT_VERIFIED_TOO_FAR', distanceM };
+}
+
+/**
+ * Records the partner's arrival on the order exactly once (atomic claim on arrivedAt), with the
+ * fresh location and the server's verification decision. A repeat call returns the first
+ * record unchanged — no duplicate timeline entries or side effects. Shared by the partner's
+ * "I have arrived" action and the customer-refused report.
+ */
+export async function recordPartnerArrival(
+  prisma: any,
+  order: { id: string; status: string; snapshotLatitude?: number | null; snapshotLongitude?: number | null },
+  input: { latitude?: number | null; longitude?: number | null; accuracyM?: number | null; locationError?: string | null; isMocked?: boolean | null; fixAgeMs?: number | null },
+  actor: { vendorId: string },
+): Promise<{ alreadyRecorded: boolean; arrival: { arrivedAt: Date; arrivalVerification: ArrivalVerificationValue; arrivalDistanceM: number | null; arrivalAccuracyM: number | null; arrivalNote: string | null } }> {
+  const read = async (key: keyof typeof ARRIVAL_SETTING_DEFAULTS) => {
+    const row = await prisma.siteSetting.findUnique({ where: { key } });
+    const n = row ? Number(row.value) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : ARRIVAL_SETTING_DEFAULTS[key];
+  };
+  const [radiusM, maxAccuracyM, maxFixAgeS] = await Promise.all([
+    read('arrival_verification_radius_m'), read('arrival_max_gps_accuracy_m'), read('arrival_max_fix_age_s'),
+  ]);
+  const lat = Number.isFinite(Number(input.latitude)) ? Number(input.latitude) : null;
+  const lng = Number.isFinite(Number(input.longitude)) ? Number(input.longitude) : null;
+  const accuracyM = Number.isFinite(Number(input.accuracyM)) ? Number(input.accuracyM) : null;
+  const decided = decideArrivalVerification({
+    latitude: lat, longitude: lng, accuracyM,
+    addressLatitude: order.snapshotLatitude, addressLongitude: order.snapshotLongitude, radiusM, maxAccuracyM,
+    isMocked: input.isMocked === true, fixAgeMs: Number.isFinite(Number(input.fixAgeMs)) && input.fixAgeMs != null ? Number(input.fixAgeMs) : null, maxFixAgeS,
+  });
+  const note = decided.verification === 'NOT_VERIFIED_NO_LOCATION' && input.locationError
+    ? String(input.locationError).slice(0, 200)
+    : decided.verification === 'NOT_VERIFIED_MOCK_LOCATION'
+      ? 'Device reported a mock/simulated location'
+      : decided.verification === 'NOT_VERIFIED_STALE_LOCATION'
+        ? `Location fix was ${Math.round(Number(input.fixAgeMs) / 1000)} s old`
+        : null;
+  const now = new Date();
+  const claimed = await prisma.order.updateMany({
+    where: { id: order.id, arrivedAt: null },
+    data: {
+      arrivedAt: now,
+      // Coordinates are stored only when they were valid — never fabricated or zero-filled.
+      arrivalLatitude: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : lat,
+      arrivalLongitude: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : lng,
+      arrivalAccuracyM: decided.verification === 'NOT_VERIFIED_NO_LOCATION' ? null : accuracyM,
+      arrivalDistanceM: decided.distanceM,
+      arrivalVerification: decided.verification,
+      arrivalNote: note,
+    },
+  });
+  const current = await prisma.order.findUnique({
+    where: { id: order.id },
+    select: { arrivedAt: true, arrivalVerification: true, arrivalDistanceM: true, arrivalAccuracyM: true, arrivalNote: true },
+  });
+  if (claimed.count === 1) {
+    await writeOrderTimeline(prisma, {
+      orderId: order.id, status: order.status, actorId: actor.vendorId, actorRole: 'SERVICE_VENDOR' as any,
+      note: `Partner arrived — ${decided.verification === 'VERIFIED' ? 'location verified' : 'location NOT verified (' + decided.verification + ')'}${decided.distanceM != null ? ', ' + decided.distanceM + ' m from address' : ''}`,
+    });
+  }
+  return { alreadyRecorded: claimed.count !== 1, arrival: current };
 }
 
 // ─── Bundle offer (product + service checked out together) ──────────────────
@@ -732,8 +1111,10 @@ export function addressSnapshotFields(addr?: {
 // this replaces: three drifting hardcoded-9%+9% copies, one of which — the admin
 // "Generate Invoice" button — didn't even share code with the other two).
 export * from './billing-engine';
+export * from './pricing-engine';
+import { pricingSnapshot } from './pricing-engine';
 import {
-  calculateInvoice, stateFromGstin, normalizeState,
+  calculateInvoice, stateFromGstin, normalizeState, isValidGstinFormat,
   type BillingTransactionTypeValue, type BillingLineInput,
 } from './billing-engine';
 
@@ -774,6 +1155,8 @@ export interface InvoiceBuildInput {
   // still reconciles to what the customer actually paid.
   discount?: number;
   discountReducesTaxableValue?: boolean;
+  /** false = the customer document keeps exact paise (see calculateInvoice roundToRupee). */
+  customerRoundToRupee?: boolean;
 }
 
 export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
@@ -781,6 +1164,7 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
     lines: input.customerLines,
     supplierState: input.customerSupplierState ?? input.remontState,
     placeOfSupply: input.placeOfSupply,
+    roundToRupee: input.customerRoundToRupee,
   });
 
   const vendor = input.vendorLines?.length
@@ -788,6 +1172,8 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
         lines: input.vendorLines,
         supplierState: stateFromGstin(input.vendorGstin), // null (unregistered) => no GST fabricated
         placeOfSupply: input.placeOfSupply,
+        // same paise rule as the customer document: these PDFs print no round-off line
+        roundToRupee: input.customerRoundToRupee,
       })
     : null;
 
@@ -798,6 +1184,7 @@ export function buildInvoiceBreakdown(input: InvoiceBuildInput) {
       : remontLines,
     supplierState: input.remontState,
     placeOfSupply: input.remontPlaceOfSupply || input.placeOfSupply,
+    roundToRupee: input.customerRoundToRupee,
   });
 
   const discount = Math.round(((input.discount || 0) + Number.EPSILON) * 100) / 100;
@@ -1023,6 +1410,11 @@ export interface TaxRateResolver {
   // overrideInclusive accepts a Prisma-nullable boolean directly (Product.gstInclusive).
   priceTypeFor(hsnSac?: string | null, categoryId?: string | null, overrideInclusive?: boolean | null): 'INCLUSIVE' | 'EXCLUSIVE';
   defaultHsn: string | null;
+  /** true when a rate was actually configured (override, HSN/category row or blanket row) —
+   * false means rateFor() is only returning the unconfigured default. */
+  hasConfiguredRate?(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): boolean;
+  /** Which configuration produced the rate: 'OVERRIDE', a TaxConfig id, or null (unconfigured). */
+  sourceFor?(hsnSac?: string | null, overridePercent?: any, categoryId?: string | null): string | null;
 }
 export async function buildTaxRateResolver(
   prisma: any,
@@ -1033,6 +1425,8 @@ export async function buildTaxRateResolver(
   const rows = await prisma.taxConfig.findMany({
     where: {
       isActive: true, type: 'GST', appliesTo: { has: appliesTo },
+      // a rule still waiting for CA approval is never used (LEGACY = configured before approvals existed)
+      approvalStatus: { in: ['APPROVED', 'LEGACY'] },
       AND: [
         { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
         { OR: [{ validTo: null }, { validTo: { gte: now } }] },
@@ -1067,6 +1461,19 @@ export async function buildTaxRateResolver(
       if (row.gstApplicable === false) return 0; // exempt — distinct from a genuine 0% NIL rate, but forces the same 0 here
       return Number(row.rate);
     },
+    hasConfiguredRate(hsnSac, overridePercent, categoryId) {
+      if (overridePercent !== undefined && overridePercent !== null && !Number.isNaN(Number(overridePercent))) return true;
+      if (hsnSac && byHsn.has(hsnSac)) return true;
+      if (categoryId && byCategory.has(categoryId)) return true;
+      // Only a genuine blanket row (no HSN, no category) configures everything else — another
+      // category's row must not silently price this product (resolveRow's legacy fallback would).
+      return rows.some((r: any) => !r.hsnCode && !r.productCategoryId);
+    },
+    sourceFor(hsnSac, overridePercent, categoryId) {
+      if (overridePercent !== undefined && overridePercent !== null && !Number.isNaN(Number(overridePercent))) return 'OVERRIDE';
+      if (!this.hasConfiguredRate!(hsnSac, overridePercent, categoryId)) return null;
+      return resolveRow(hsnSac, categoryId)?.id ?? null;
+    },
     priceTypeFor(hsnSac, categoryId, overrideInclusive) {
       if (overrideInclusive !== undefined && overrideInclusive !== null) {
         return overrideInclusive ? 'INCLUSIVE' : 'EXCLUSIVE';
@@ -1089,6 +1496,12 @@ export async function resolveProductGstLine(
   product: { hsnSac?: string | null; gstOverridePercent?: any; gstInclusive?: boolean | null; categoryId: string },
   lineAmount: number,
 ): Promise<{ taxableValue: number; gstAmount: number; ratePercent: number; inclusive: boolean }> {
+  // A product is never sold at a silent 0% because nobody configured its GST: without a product
+  // override, an HSN/category TaxConfig row or a blanket PRODUCT row, checkout refuses it. (An
+  // exempt or nil-rated product is configured explicitly — override 0, or gstApplicable=false.)
+  if (prodTax.hasConfiguredRate && !prodTax.hasConfiguredRate(product.hsnSac, product.gstOverridePercent, product.categoryId)) {
+    throw new BadRequestException(`"${(product as any).name || 'This product'}" can't be sold yet: its GST rate is not configured. An admin must set it (Admin › Taxes, or the product's GST rate).`);
+  }
   const ratePercent = prodTax.rateFor(product.hsnSac, product.gstOverridePercent, product.categoryId);
   const inclusive = prodTax.priceTypeFor(product.hsnSac, product.categoryId, product.gstInclusive) === 'INCLUSIVE';
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -1257,7 +1670,10 @@ export interface BillingCompanyConfig {
   bankName: string; bankIfsc: string; bankAccountNumber: string;
   invoiceTerms: string[];
 }
-const BILLING_CONFIG_DEFAULTS: BillingCompanyConfig = {
+// The company details every invoice was issued with before billing settings existed. Used ONLY for
+// a one-time migration into SiteSetting (group 'billing') when no billing setting exists at all —
+// never as a silent per-field fallback. From then on Admin › Settings › Billing is the only source.
+const LEGACY_BILLING_DETAILS: BillingCompanyConfig = {
   legalName: 'REMONT INDIA PRIVATE LIMITED',
   gstin: '23AAKCR9036L1ZY',
   state: 'Madhya Pradesh',
@@ -1275,25 +1691,47 @@ const BILLING_CONFIG_DEFAULTS: BillingCompanyConfig = {
     'GST as applicable has been charged only on Remont India Private Limited’s own taxable supply, as itemized above.',
   ],
 };
+
+const STANDARD_INVOICE_TERMS = LEGACY_BILLING_DETAILS.invoiceTerms;
+
+/** Billing details for invoices — from saved settings; refuses to invoice with incomplete identity. */
 export async function getBillingCompanyConfig(prisma: any): Promise<BillingCompanyConfig> {
-  const rows = await prisma.siteSetting.findMany({ where: { group: 'billing' } });
+  let rows: { key: string; value: string }[] = await prisma.siteSetting.findMany({ where: { group: 'billing' } });
+  if (!rows.length) {
+    const L = LEGACY_BILLING_DETAILS;
+    const seed: [string, string, string][] = [
+      ['company_legal_name', L.legalName, 'Legal name (as on GST registration)'],
+      ['company_gstin', L.gstin, 'GSTIN'],
+      ['company_address', L.address, 'Registered address'],
+      ['company_mobile', L.mobile, 'Mobile'],
+      ['company_email', L.email, 'Email'],
+      ['company_website', L.website, 'Website'],
+      ['company_bank_name', L.bankName, 'Bank name'],
+      ['company_ifsc', L.bankIfsc, 'Bank IFSC'],
+      ['company_account_number', L.bankAccountNumber, 'Bank account number'],
+      ['invoice_terms', L.invoiceTerms.join('\n'), 'Invoice terms (one per line)'],
+    ];
+    await prisma.siteSetting.createMany({ data: seed.map(([key, value, label]) => ({ key, value, label, group: 'billing' })), skipDuplicates: true });
+    rows = seed.map(([key, value]) => ({ key, value }));
+  }
   const map: Record<string, string> = {};
-  for (const r of rows) map[r.key] = r.value;
-  const gstin = map.company_gstin || BILLING_CONFIG_DEFAULTS.gstin;
+  for (const r of rows) map[r.key] = (r.value ?? '').trim();
+  const missing = ['company_legal_name', 'company_gstin', 'company_address'].filter((k) => !map[k]);
+  if (missing.length) throw new BadRequestException(`Billing settings are incomplete (${missing.join(', ')}) — complete them in Admin › Settings › Billing before invoices can be issued`);
+  const gstin = map.company_gstin.toUpperCase();
+  if (!isValidGstinFormat(gstin)) throw new BadRequestException(`Billing settings: "${gstin}" is not a valid GSTIN`);
   return {
-    legalName: map.company_legal_name || BILLING_CONFIG_DEFAULTS.legalName,
+    legalName: map.company_legal_name,
     gstin,
-    // The GSTIN's own state prefix is authoritative once a GSTIN is set — prevents the
-    // registered state silently drifting out of sync with an admin-edited GSTIN.
-    state: stateFromGstin(gstin) || map.company_state || BILLING_CONFIG_DEFAULTS.state,
-    address: map.company_address || BILLING_CONFIG_DEFAULTS.address,
-    mobile: map.company_mobile || BILLING_CONFIG_DEFAULTS.mobile,
-    email: map.company_email || BILLING_CONFIG_DEFAULTS.email,
-    website: map.company_website || BILLING_CONFIG_DEFAULTS.website,
-    bankName: map.company_bank_name || BILLING_CONFIG_DEFAULTS.bankName,
-    bankIfsc: map.company_ifsc || BILLING_CONFIG_DEFAULTS.bankIfsc,
-    bankAccountNumber: map.company_account_number || BILLING_CONFIG_DEFAULTS.bankAccountNumber,
-    invoiceTerms: map.invoice_terms ? map.invoice_terms.split('\n').map((s) => s.trim()).filter(Boolean) : BILLING_CONFIG_DEFAULTS.invoiceTerms,
+    state: stateFromGstin(gstin) || map.company_state || '',
+    address: map.company_address,
+    mobile: map.company_mobile || '',
+    email: map.company_email || '',
+    website: map.company_website || '',
+    bankName: map.company_bank_name || '',
+    bankIfsc: map.company_ifsc || '',
+    bankAccountNumber: map.company_account_number || '',
+    invoiceTerms: map.invoice_terms ? map.invoice_terms.split('\n').map((t) => t.trim()).filter(Boolean) : STANDARD_INVOICE_TERMS,
   };
 }
 

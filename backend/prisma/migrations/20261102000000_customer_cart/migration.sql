@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS "Cart" (
+    "userId" TEXT NOT NULL,
+    "items" JSONB NOT NULL DEFAULT '[]',
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "Cart_pkey" PRIMARY KEY ("userId"),
+    CONSTRAINT "Cart_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+);

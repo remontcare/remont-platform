@@ -1,17 +1,18 @@
 import {
   Optional,
   Module, Injectable, Controller, Get, Post, Body, Param, Query, UseGuards, Logger,
-  NotFoundException, ForbiddenException, BadRequestException,
+  NotFoundException, ForbiddenException, BadRequestException, UnauthorizedException, ConflictException,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import {
-  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested,
+  IsArray, IsIn, IsOptional, IsString, IsNumber, IsEmail, IsEnum, IsDateString, Matches, Min, ValidateNested, IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { BookingChannel, MasterOrderStatus, OrderStatus, OrderType, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent } from '../../common';
+import { JwtAuthGuard, OptionalJwtAuthGuard, Public, CurrentUser, JwtPayload, addressSnapshotFields, writeOtpLog, writeOrderTimeline, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, isValidIndiaCoords, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, getBundleDiscountPercent, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, resolveBookingMinimumCharge, applyBookingMinimum, resolveCityIdForRules, orderServiceModelFor, priceServiceBookingSnapshot, orderFieldsFromSnapshot, pricingEngineEnabled, type OrderServiceModel } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { CitiesService, CitiesModule } from '../cities/cities.module';
@@ -160,6 +161,8 @@ export class CreateMasterOrderDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() gstin?: string;
   @IsOptional() @IsString() gstBusinessName?: string;
+  // Emergency visit requested (only an EMERGENCY fee rule reads it; no rule = no fee).
+  @IsOptional() @IsBoolean() emergency?: boolean;
   // Phase 1 hardening (M-06) — optional client-supplied dedupe token (e.g. a UUID generated
   // once per "Place Order" press, resent unchanged on any automatic retry). Omit entirely for
   // byte-for-byte today's behaviour; see MasterOrder.idempotencyKey's schema comment.
@@ -193,9 +196,25 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsString() gstBusinessName?: string;
   @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
+  @IsOptional() @IsBoolean() emergency?: boolean;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
   // Optional order-scoped Authorized Person for the service orders of this checkout.
   @IsOptional() @ValidateNested() @Type(() => AuthorizedPersonDto) authorizedPerson?: AuthorizedPersonDto;
+}
+
+/** Public quote — the public checkout's pricing inputs, nothing required beyond the cart. */
+export class PublicMasterQuoteDto {
+  @IsArray() @ValidateNested({ each: true }) @Type(() => MasterCheckoutItemDto) items: MasterCheckoutItemDto[];
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() fullAddress?: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() state?: string;
+  @IsOptional() @IsString() pincode?: string;
+  @IsOptional() @IsNumber() latitude?: number;
+  @IsOptional() @IsNumber() longitude?: number;
+  @IsOptional() @IsString() couponCode?: string;
+  @IsOptional() @IsDateString() slotStart?: string;
+  @IsOptional() @IsBoolean() emergency?: boolean;
 }
 
 interface CheckoutOpts {
@@ -233,6 +252,21 @@ interface PricedGroup {
   // decision.
   productsTaxableAmount?: number;
   productGstOnTop?: number;
+  // SERVICE groups — the booking's effective service GST rate (shared resolver, fallback 18%)
+  // and the minimum-charge top-up (pre-GST) already included in `amount`.
+  serviceGstRatePercent?: number;
+  minimumChargeAdjustment?: number;
+  minimumChargeRuleId?: string | null;
+  // SERVICE groups — pricing model from the category (null = legacy), the summed commission, and
+  // (once discounts are allocated) this booking's own GST split.
+  serviceModel?: OrderServiceModel | null;
+  section95Status?: string | null;
+  commission?: number;
+  serviceGst?: number;
+  feesTotal?: number;
+  lineAmounts?: number[];
+  // the pricing engine's confirmed calculation for this booking (stored on the child order)
+  snapshot?: any;
 }
 
 // ─── Service ───
@@ -265,70 +299,63 @@ export class MasterOrdersService {
     await writeOrderTimeline(this.prisma, { orderId, status: 'AWAITING_SELLER' });
   }
 
-  private async debitWalletForOrder(customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
-    if (!user || Number(user.walletBalance) < amount) throw new BadRequestException('Insufficient wallet balance');
-    const newBalance = Number(user.walletBalance) - amount;
-    await this.prisma.user.update({ where: { id: customerId }, data: { walletBalance: { decrement: amount } } });
-    await this.prisma.walletTransaction.create({
+  /**
+   * Debits the wallet of the order's OWN customer, inside the caller's transaction (so the debit
+   * commits or rolls back with the order state it pays for). A single conditional decrement — the
+   * balance check and the decrement are one statement, so two concurrent debits can never take the
+   * wallet below zero.
+   */
+  private async debitWalletForOrder(tx: any, customerId: string, amount: number, masterOrderId: string, masterOrderNumber: string) {
+    const debited = await tx.user.updateMany({
+      where: { id: customerId, walletBalance: { gte: amount } },
+      data: { walletBalance: { decrement: amount } },
+    });
+    if (debited.count !== 1) throw new BadRequestException('Insufficient wallet balance');
+    const after = await tx.user.findUnique({ where: { id: customerId }, select: { walletBalance: true } });
+    await tx.walletTransaction.create({
       data: {
-        userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount, balanceAfter: newBalance,
+        userId: customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', amount, balanceAfter: after.walletBalance,
         orderId: masterOrderId, notes: `Payment for order ${masterOrderNumber}`,
       },
     });
   }
 
+  /**
+   * Customer-facing cart number, e.g. RM251015-7K3QZP. Previously "count of today's carts + 1",
+   * which two concurrent checkouts computed identically (unique-constraint crash). Now a random
+   * suffix (32^6 ≈ 1.07 billion per day) checked against existing numbers; the @unique column
+   * remains the final guard.
+   */
   async generateMasterOrderNumber(): Promise<string> {
-    const now = new Date();
-    const ymd = now.toISOString().slice(2, 10).replace(/-/g, '');
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-    const countToday = await this.prisma.masterOrder.count({ where: { createdAt: { gte: startOfDay } } });
-    const seq = String(countToday + 1).padStart(3, '0');
-    return `RM${ymd}${seq}`;
+    const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+    const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const bytes = crypto.randomBytes(6);
+      const suffix = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+      const candidate = `RM${ymd}-${suffix}`;
+      if (!(await this.prisma.masterOrder.findUnique({ where: { masterOrderNumber: candidate }, select: { id: true } }))) return candidate;
+    }
+    throw new ConflictException('Could not allocate an order number — please retry');
   }
 
-  // The Child Order Engine: one cart, one checkout, one payment, one order number for the
-  // customer — internally splits into one Order per distinct service and one Order per
-  // distinct product seller, all linked under one MasterOrder.
-  async checkout(dto: CreateMasterOrderDto, opts: CheckoutOpts) {
-    if (!dto.items?.length) throw new BadRequestException('Cart is empty');
-
-    // Idempotency (M-06) — opt-in: a client that sends idempotencyKey gets double-click/
-    // network-retry protection; one that doesn't behaves exactly as before. Checked up front
-    // as a fast path; the @unique constraint (caught below, around the actual insert) is what
-    // closes the race for two concurrent requests racing on the same key, not this read alone.
-    if (dto.idempotencyKey) {
-      const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-      if (existing) return this.resumeCheckoutResponse(existing);
-    }
-
-    // Resolve customer — authenticated customerId, or guest find-or-create by phone
-    // (same pattern as GuestBookingService.book() in orders.module.ts).
-    let customerId = opts.customerId;
-    if (!customerId) {
-      if (!opts.guestPhone || !opts.guestName) throw new BadRequestException('Name and phone required for guest checkout');
-      let user = await this.prisma.user.findUnique({ where: { phone: opts.guestPhone } });
-      if (!user) {
-        user = await this.prisma.user.create({
-          data: { phone: opts.guestPhone, name: opts.guestName, email: opts.guestEmail || undefined, role: UserRole.CUSTOMER, isVerified: false },
-        });
-      }
-      customerId = user.id;
-    }
-
+  private async priceCart(dto: CreateMasterOrderDto, customerId: string | undefined, persist: { persistInlineAddress: boolean; verifiedCustomer?: boolean }) {
     let orderCityId: string | null = null;
     if (dto.city) {
       const cityRow = await this.cities.getByName(dto.city);
       if (cityRow && !cityRow.isActive) throw new BadRequestException(`${cityRow.name} is not currently accepting orders`);
       orderCityId = cityRow?.id || null;
     }
+    // Service rules need the booking's city even without a recognised city name: the customer's
+    // own saved address, else the inline address. Unrecognised → all-city rules only.
+    if (!orderCityId) {
+      orderCityId = await resolveCityIdForRules(this.prisma, { addressId: dto.addressId, customerId, inlineCity: dto.inlineAddress?.city });
+    }
 
     // Fetch + validate every referenced service/product once
     const serviceIds = Array.from(new Set(dto.items.filter((i) => i.type === 'SERVICE').map((i) => i.serviceId).filter(Boolean))) as string[];
     const productIds = Array.from(new Set(dto.items.filter((i) => i.type === 'PRODUCT').map((i) => i.productId).filter(Boolean))) as string[];
     const [services, products] = await Promise.all([
-      this.prisma.service.findMany({ where: { id: { in: serviceIds } } }),
+      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } } } }),
       this.prisma.product.findMany({ where: { id: { in: productIds } } }),
     ]);
     const serviceMap = new Map(services.map((s) => [s.id, s]));
@@ -361,6 +388,8 @@ export class MasterOrdersService {
     // issues this query at all.
     let prodTax: Awaited<ReturnType<typeof buildTaxRateResolver>> | null = null;
     const getProdTax = async () => (prodTax ??= await buildTaxRateResolver(this.prisma, 'PRODUCT'));
+    let svcTaxResolver: Awaited<ReturnType<typeof buildServiceTaxResolver>> | null = null;
+    const getSvcTax = async () => (svcTaxResolver ??= await buildServiceTaxResolver(this.prisma));
     const pricedGroups: PricedGroup[] = [];
     for (const g of groups) {
       if (g.type === 'SERVICE') {
@@ -378,12 +407,43 @@ export class MasterOrdersService {
           }
           const totalPrice = unitPrice * line.quantity;
           amount += totalPrice;
-          commissionByService.set(line.serviceId, await resolveCommission(this.prisma, {
-            serviceId: svc.id, categoryId: svc.categoryId, cityId: orderCityId, amount: totalPrice,
-          }));
           items.push({ serviceId: line.serviceId, quantity: line.quantity, unitPrice, totalPrice });
         }
-        pricedGroups.push({ type: 'SERVICE', amount, categoryId: g.categoryId, items });
+        // Service GST rate per line from the ONE shared source (TaxConfig/SAC or the
+        // service's own override, else the 18% every checkout path already charged).
+        const svcTax = await getSvcTax();
+        const lineRates = items.map((it) => {
+          const svc = serviceMap.get(it.serviceId!)!;
+          return svcTax.rateFor(svc.hsnSac, svc.gstOverridePercent);
+        });
+        const uniformRate = lineRates.every((r) => r === lineRates[0]);
+        const effRate = uniformRate || amount <= 0
+          ? (lineRates[0] ?? SERVICE_GST_FALLBACK_RATE)
+          : items.reduce((sum, it, i) => sum + it.totalPrice * lineRates[i], 0) / amount;
+        // Minimum service charge — per booking, GST-inclusive (MINIMUM_CHARGE rules; none = no-op).
+        const minimum = await resolveBookingMinimumCharge(
+          this.prisma, items.map((it) => ({ serviceId: it.serviceId!, categoryId: serviceMap.get(it.serviceId!)!.categoryId })), orderCityId,
+        );
+        const topUp = applyBookingMinimum(items.map((it) => it.totalPrice), effRate, minimum.minimum);
+        // Commission — the existing rules, unchanged, on each line's amount as actually charged
+        // (its share of any minimum top-up included), resolved once per line as before.
+        for (const [i, it] of items.entries()) {
+          const svc = serviceMap.get(it.serviceId!)!;
+          commissionByService.set(it.serviceId!, await resolveCommission(this.prisma, {
+            serviceId: svc.id, categoryId: svc.categoryId, cityId: orderCityId, amount: topUp.lineAmounts[i],
+          }));
+        }
+        pricedGroups.push({
+          type: 'SERVICE', amount: topUp.adjustment > 0 ? Math.round((amount + topUp.adjustment) * 100) / 100 : amount,
+          categoryId: g.categoryId, items,
+          serviceGstRatePercent: effRate,
+          serviceModel: orderServiceModelFor((serviceMap.get(items[0].serviceId!) as any)?.category?.serviceModel),
+          section95Status: (serviceMap.get(items[0].serviceId!) as any)?.category?.gstSection95Status ?? null,
+          commission: Math.round(items.reduce((sum, it) => sum + (commissionByService.get(it.serviceId!)?.commissionAmount || 0), 0) * 100) / 100,
+          lineAmounts: items.map((_, k) => (topUp.adjustment > 0 ? topUp.lineAmounts[k] : items[k].totalPrice)),
+          minimumChargeAdjustment: topUp.adjustment,
+          minimumChargeRuleId: topUp.adjustment > 0 ? minimum.ruleId : null,
+        });
       } else {
         let amount = 0;
         let productsTaxableAmount = 0, productGstOnTop = 0;
@@ -454,7 +514,17 @@ export class MasterOrdersService {
     // Resolve address — same addressId / inline-address pattern as CreateOrderDto
     let resolvedAddressId = dto.addressId;
     let resolvedAddress: Awaited<ReturnType<typeof this.prisma.address.findUnique>> = null;
-    if (!resolvedAddressId && dto.inlineAddress) {
+    // Where delivery is priced from. Checkout uses the (created or saved) address row; a quote
+    // never creates rows, so it passes the same coordinates/city the row would have held.
+    let deliveryLocation: { addressId?: string; lat?: number; lng?: number; city?: string } = {};
+    if (!persist.persistInlineAddress && !resolvedAddressId && dto.inlineAddress) {
+      const quoteCoordsValid = isValidIndiaCoords(dto.inlineAddress.latitude, dto.inlineAddress.longitude);
+      deliveryLocation = {
+        lat: quoteCoordsValid ? dto.inlineAddress.latitude! : 0,
+        lng: quoteCoordsValid ? dto.inlineAddress.longitude! : 0,
+        city: dto.inlineAddress.city || '',
+      };
+    } else if (!resolvedAddressId && dto.inlineAddress) {
       // Bounds-check client-supplied coords before trusting them for dispatch distance math
       // — same guard publicProductCheckout() already applies; a garbage/out-of-range value
       // (or one of Null Island's (0,0)) is stored as "no coords" rather than corrupting
@@ -462,7 +532,7 @@ export class MasterOrdersService {
       const hasValidCoords = isValidIndiaCoords(dto.inlineAddress.latitude, dto.inlineAddress.longitude);
       resolvedAddress = await this.prisma.address.create({
         data: {
-          userId: customerId,
+          userId: customerId!,
           label: dto.inlineAddress.label || 'Delivery Address',
           fullAddress: dto.inlineAddress.fullAddress,
           city: dto.inlineAddress.city || '',
@@ -473,10 +543,18 @@ export class MasterOrdersService {
         },
       });
       resolvedAddressId = resolvedAddress.id;
+      deliveryLocation = { addressId: resolvedAddressId };
     } else if (resolvedAddressId) {
       // An existing saved address was selected — snapshot it as it is *right now*.
       // Later edits to this Address row must not retroactively change this order.
       resolvedAddress = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
+      // A quote only prices from an address the caller owns (checkout keeps its existing behaviour).
+      if (!persist.persistInlineAddress && resolvedAddress && resolvedAddress.userId !== customerId) {
+        resolvedAddress = null;
+        resolvedAddressId = undefined;
+      } else {
+        deliveryLocation = { addressId: resolvedAddressId };
+      }
     }
 
     // Phase 4 — delivery charge per PRODUCT group (backend/src/modules/logistics). Unlike
@@ -488,7 +566,7 @@ export class MasterOrdersService {
     // simplification, not a tax-correctness claim).
     const groupDelivery = await Promise.all(pricedGroups.map(async (g) => {
       if (g.type !== 'PRODUCT' || !g.items.length) return { tier: null as any, charge: 0 };
-      const eligibility = await this.logistics.checkEligibility({ productId: g.items[0].productId!, addressId: resolvedAddressId });
+      const eligibility = await this.logistics.checkEligibility({ productId: g.items[0].productId!, ...deliveryLocation });
       return { tier: eligibility.tier, charge: eligibility.charge };
     }));
     const deliveryCharge = groupDelivery.reduce((s, d) => s + d.charge, 0);
@@ -510,7 +588,9 @@ export class MasterOrdersService {
     const bundleDiscountPercent = isBundleOrder ? await getBundleDiscountPercent(this.prisma) : 0;
     const bundleDiscount = isBundleOrder ? Math.round(((grossServiceAmount * bundleDiscountPercent) / 100) * 100) / 100 : 0;
 
-    const membershipPct = await this.memberships.getActiveDiscount(customerId);
+    // A membership belongs to a verified account: a guest checkout (customer matched only by a
+    // typed phone number) never gets another account's membership discount.
+    const membershipPct = customerId && persist.verifiedCustomer !== false ? await this.memberships.getActiveDiscount(customerId) : 0;
     const membershipDiscount = Math.round(((subtotal * membershipPct) / 100) * 100) / 100;
 
     let couponDiscount = 0;
@@ -538,11 +618,152 @@ export class MasterOrdersService {
       ? allocateAcrossGroups([grossServiceAmount], subtotal, membershipDiscount + couponDiscount)[0]
       : 0;
     const discountedServiceAmount = Math.max(0, grossServiceAmount - serviceDiscountShare - bundleDiscount);
-    const serviceGstAmount = Math.round(discountedServiceAmount * 0.18 * 100) / 100;
+    // Shared service GST source: each booking's resolved rate (identical to the old flat 18%
+    // whenever every service resolves to the same rate — the case until a CA-approved TaxConfig
+    // is set). Mixed rates use the amount-weighted effective rate.
+    const svcGroupsForRate = pricedGroups.filter((g) => g.type === 'SERVICE');
+    const svcRateList = svcGroupsForRate.map((g) => g.serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE);
+    const svcRateBase = svcGroupsForRate.reduce((sum, g) => sum + g.amount, 0);
+    const effectiveServiceGstRate = !svcRateList.length
+      ? SERVICE_GST_FALLBACK_RATE
+      : svcRateList.every((r) => r === svcRateList[0]) || svcRateBase <= 0
+        ? svcRateList[0]
+        : svcGroupsForRate.reduce((sum, g, k) => sum + g.amount * svcRateList[k], 0) / svcRateBase;
+    let serviceGstAmount = Math.round(discountedServiceAmount * (effectiveServiceGstRate / 100) * 100) / 100;
+    // Service models (ServiceCategory.serviceModel): each booking is priced by the pricing engine —
+    // the same rules, frozen into the snapshot stored on the child order — with that booking's share
+    // of the discounts (the same allocation checkout() uses). Missing, unapproved or conflicting
+    // configuration blocks the checkout instead of guessing a rate.
+    let serviceFeesTotal = 0;
+    if (svcGroupsForRate.some((g) => g.serviceModel) && (await pricingEngineEnabled(this.prisma))) {
+      const discounts = allocateAcrossGroups(pricedGroups.map((g) => g.amount), subtotal, membershipDiscount + couponDiscount);
+      const svcIdx = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
+      const bundles = bundleDiscount > 0 ? allocateAcrossGroups(svcIdx.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount) : [];
+      serviceGstAmount = 0;
+      for (const [k, i] of svcIdx.entries()) {
+        const g = pricedGroups[i];
+        const discount = (discounts[i] || 0) + (bundles[k] || 0);
+        const first = serviceMap.get(g.items[0].serviceId!) as any;
+        const snap = await priceServiceBookingSnapshot(this.prisma, {
+          lines: g.items.map((it, n) => ({ service: serviceMap.get(it.serviceId!) as any, amount: g.lineAmounts?.[n] ?? it.totalPrice })),
+          category: first?.category, cityId: orderCityId, discount,
+          slotStart: (dto as any).slotStart || null, emergency: !!(dto as any).emergency,
+        });
+        if (snap) {
+          g.snapshot = snap;
+          g.serviceGst = snap.result.gstAmount;
+          g.feesTotal = snap.result.feesTotal;
+        } else {
+          g.serviceGst = Math.round(Math.max(0, g.amount - discount) * ((g.serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE) / 100) * 100) / 100;
+        }
+        serviceGstAmount = Math.round((serviceGstAmount + g.serviceGst) * 100) / 100;
+        serviceFeesTotal = Math.round((serviceFeesTotal + (g.feesTotal || 0)) * 100) / 100;
+      }
+    }
     const productGstOnTop = pricedGroups.filter((g) => g.type === 'PRODUCT').reduce((s, g) => s + (g.productGstOnTop || 0), 0);
     const gstAmount = Math.round((serviceGstAmount + productGstOnTop) * 100) / 100;
-    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + gstAmount + deliveryCharge);
-    const totalAmount = Math.max(0, discountedSubtotal + gstAmount + deliveryCharge - walletUsed);
+    const walletUsed = Math.min(dto.walletAmount || 0, discountedSubtotal + serviceFeesTotal + gstAmount + deliveryCharge);
+    const totalAmount = Math.max(0, discountedSubtotal + serviceFeesTotal + gstAmount + deliveryCharge - walletUsed);
+
+
+    return {
+      orderCityId, services, products, groups, pricedGroups, commissionByService, resolvedAddressId, resolvedAddress,
+      groupDelivery, deliveryCharge, grossServiceAmount, grossProductAmount, subtotal, isBundleOrder, bundleDiscountPercent,
+      bundleDiscount, membershipDiscount, couponDiscount, couponId, couponFundedBy, discountedSubtotal, serviceGstAmount,
+      productGstOnTop, gstAmount, walletUsed, totalAmount, serviceFeesTotal,
+    };
+  }
+
+  /**
+   * The price a customer is shown before paying — produced by the SAME priceCart() checkout()
+   * charges with, so quote = checkout total = payment amount. Writes nothing (no guest user,
+   * no address row). A guest is matched by phone only to apply their existing membership, the
+   * same way checkout() resolves them. Commission and other internal splits are not exposed.
+   */
+  async quote(dto: CreateMasterOrderDto, opts: { customerId?: string }) {
+    if (!dto.items?.length) throw new BadRequestException('Cart is empty');
+    // Only an AUTHENTICATED caller's own customer id is ever used. The public quote never looks a
+    // customer up from a typed phone number — that would reveal another person's membership /
+    // coupon eligibility to anyone. Guests are quoted as anonymous; guest checkout pricing itself
+    // is unchanged.
+    const customerId = opts.customerId;
+    const p = await this.priceCart(dto, customerId, { persistInlineAddress: false });
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const minimumChargeAdjustment = round2(p.pricedGroups.reduce((sum, g) => sum + (g.minimumChargeAdjustment || 0), 0));
+    return {
+      currency: 'INR',
+      bookings: p.pricedGroups.map((g) => ({
+        type: g.type,
+        amount: round2(g.amount),
+        minimumChargeAdjustment: g.minimumChargeAdjustment || 0,
+        // service bookings priced by the pricing engine: every charge the customer pays, with its GST
+        ...(g.snapshot ? {
+          serviceModel: g.snapshot.params.model,
+          charges: g.snapshot.result.components.map((c: any) => ({ label: c.label, code: c.code, amount: c.taxable, gstRatePercent: c.ratePercent, gst: c.gst })),
+          total: g.snapshot.result.customerTotal,
+        } : {}),
+        items: g.items.map((it) => ({
+          serviceId: it.serviceId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice,
+        })),
+      })),
+      subtotal: round2(p.subtotal),
+      minimumChargeAdjustment,
+      bundleDiscount: p.bundleDiscount,
+      membershipDiscount: p.membershipDiscount,
+      couponDiscount: p.couponDiscount,
+      serviceGstAmount: p.serviceGstAmount,
+      serviceFeesTotal: p.serviceFeesTotal,
+      productGstAmount: round2(p.productGstOnTop),
+      gstAmount: p.gstAmount,
+      deliveryCharge: p.deliveryCharge,
+      walletUsed: p.walletUsed,
+      totalAmount: round2(p.totalAmount),
+    };
+  }
+
+  // The Child Order Engine: one cart, one checkout, one payment, one order number for the
+  // customer — internally splits into one Order per distinct service and one Order per
+  // distinct product seller, all linked under one MasterOrder.
+  async checkout(dto: CreateMasterOrderDto, opts: CheckoutOpts) {
+    if (!dto.items?.length) throw new BadRequestException('Cart is empty');
+
+    // Idempotency (M-06) — opt-in: a client that sends idempotencyKey gets double-click/
+    // network-retry protection; one that doesn't behaves exactly as before. Checked up front
+    // as a fast path; the @unique constraint (caught below, around the actual insert) is what
+    // closes the race for two concurrent requests racing on the same key, not this read alone.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
+      if (existing) return this.resumeCheckoutResponse(this.assertSameCheckoutOwner(existing, opts));
+    }
+
+    // WALLET OWNERSHIP — a wallet may only be spent by its verified owner, i.e. a caller whose
+    // customerId came from a verified login (JWT). A guest checkout identifies a customer by a
+    // submitted phone number only, which proves nothing, so it can never use a wallet. Checked
+    // before any row is created or any balance is read.
+    if ((dto.walletAmount || 0) > 0 && !opts.customerId) {
+      throw new UnauthorizedException('Please log in to pay with your Remont wallet');
+    }
+
+    // Resolve customer — authenticated customerId, or guest find-or-create by phone
+    // (same pattern as GuestBookingService.book() in orders.module.ts).
+    let customerId = opts.customerId;
+    if (!customerId) {
+      if (!opts.guestPhone || !opts.guestName) throw new BadRequestException('Name and phone required for guest checkout');
+      let user = await this.prisma.user.findUnique({ where: { phone: opts.guestPhone } });
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: { phone: opts.guestPhone, name: opts.guestName, email: opts.guestEmail || undefined, role: UserRole.CUSTOMER, isVerified: false },
+        });
+      }
+      customerId = user.id;
+    }
+
+    const {
+      services, products, groups, pricedGroups, commissionByService, resolvedAddressId, resolvedAddress,
+      groupDelivery, deliveryCharge, grossServiceAmount, grossProductAmount, subtotal, isBundleOrder, bundleDiscountPercent,
+      bundleDiscount, membershipDiscount, couponDiscount, couponId, couponFundedBy, serviceGstAmount,
+      gstAmount, walletUsed, totalAmount,
+    } = await this.priceCart(dto, customerId, { persistInlineAddress: true, verifiedCustomer: !!opts.customerId });
 
     // Checked up front, before any rows are created — the actual debit happens later
     // (immediately below for COD, or in confirmPayment() for ONLINE) so an abandoned or
@@ -613,9 +834,14 @@ export class MasterOrdersService {
     // (denominator = grossServiceAmount, not the combined subtotal — isolated now that
     // products are no longer part of this pool).
     const serviceGroupIndices = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
-    const serviceGstShares = allocateAcrossGroups(serviceGroupIndices.map((i) => pricedGroups[i].amount), grossServiceAmount, serviceGstAmount);
+    const svcGroupRates = serviceGroupIndices.map((i) => pricedGroups[i].serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE);
+    const gstWeights = svcGroupRates.every((r) => r === svcGroupRates[0])
+      ? serviceGroupIndices.map((i) => pricedGroups[i].amount)
+      : serviceGroupIndices.map((i, k) => pricedGroups[i].amount * svcGroupRates[k]);
+    const serviceGstShares = allocateAcrossGroups(gstWeights, gstWeights.reduce((sum, w) => sum + w, 0), serviceGstAmount);
     const groupGst = pricedGroups.map((g, i) => {
       if (g.type === 'PRODUCT') return g.productGstOnTop || 0;
+      if (g.serviceGst != null) return g.serviceGst; // service models: priced per booking in priceCart()
       return serviceGstShares[serviceGroupIndices.indexOf(i)] || 0;
     });
 
@@ -652,6 +878,7 @@ export class MasterOrdersService {
           channel: dto.channel || BookingChannel.WEBSITE,
           status: confirmUpfront ? MasterOrderStatus.CONFIRMED : MasterOrderStatus.PENDING_PAYMENT,
           paymentStatus: PaymentStatus.PENDING,
+          paymentMethod: confirmUpfront ? 'COD' : 'ONLINE',
           grossServiceAmount, grossProductAmount, subtotal,
           couponCode: dto.couponCode, couponDiscount, membershipDiscount,
           walletUsed, gstAmount, deliveryCharge, totalAmount,
@@ -681,7 +908,7 @@ export class MasterOrdersService {
         const childDelivery = groupDelivery[i];
         const serviceAmount = g.type === 'SERVICE' ? g.amount : 0;
         const productsAmount = g.type === 'PRODUCT' ? g.amount : 0;
-        const childTotal = Math.max(0, g.amount - totalChildDiscount + childGst + childDelivery.charge - childWallet);
+        const childTotal = Math.max(0, g.amount - totalChildDiscount + (g.feesTotal || 0) + childGst + childDelivery.charge - childWallet);
         // A bundle's SERVICE child never gets a partner assigned at checkout — see the
         // dispatch-deferral loops below (confirmPayment()/switchToCod()/the COD branch here),
         // which skip RoutingService.route() for it, and ShipmentService.onShipmentDelivered()
@@ -741,6 +968,8 @@ export class MasterOrdersService {
             startOtp, endOtp,
             status: confirmUpfront ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT,
             paymentStatus: PaymentStatus.PENDING,
+            // Every job knows how it is being paid (COD shipments, collections and reports read it).
+            paymentMethod: confirmUpfront ? 'COD' : 'ONLINE',
             serviceAmount, productsAmount, subtotal: g.amount,
             productsTaxableAmount: g.type === 'PRODUCT' ? g.productsTaxableAmount : undefined,
             couponDiscount: childDiscount, gstAmount: childGst, walletUsed: childWallet,
@@ -749,6 +978,10 @@ export class MasterOrdersService {
             bundleDispatchDeferred: deferDispatchForBundle,
             deliveryTier: childDelivery.tier || undefined, deliveryCharge: childDelivery.charge,
             totalAmount: childTotal, remontCommission, vendorPayout,
+            // the pricing engine's confirmed calculation (commission/partner share/GST split + rule IDs)
+            ...(g.type === 'SERVICE' && g.snapshot ? { ...orderFieldsFromSnapshot(g.snapshot), gstAmount: childGst, isEmergency: !!(dto as any).emergency, commissionRuleId: g.snapshot.params.lines[0]?.commission.ruleId ?? null, commissionRuleLabel: g.snapshot.params.lines[0]?.commission.label ?? null } : {}),
+            minimumChargeAdjustment: g.type === 'SERVICE' ? (g.minimumChargeAdjustment || 0) : 0,
+            minimumChargeRuleId: g.type === 'SERVICE' ? (g.minimumChargeRuleId || undefined) : undefined,
             commissionRuleId: primaryRule.ruleId, commissionRuleLabel: primaryRule.ruleLabel,
             productFeeBreakdown: productFeeBreakdown as any,
             guestName: isGuest ? opts.guestName : undefined,
@@ -790,6 +1023,13 @@ export class MasterOrdersService {
         childOrders.push(childOrder);
       }
 
+      // The wallet portion is taken now, atomically with the order rows, for COD and ONLINE alike
+      // (an insufficient balance rolls the whole checkout back). If an ONLINE cart is never paid
+      // and gets cancelled, it is returned automatically (releaseUnpaidOrderWallet).
+      if (walletUsed > 0) {
+        await this.debitWalletForOrder(tx, customerId!, walletUsed, masterOrder.id, masterOrderNumber);
+      }
+
       return { masterOrder, childOrders };
       }));
     } catch (e: any) {
@@ -799,7 +1039,7 @@ export class MasterOrdersService {
       // returns the winner's order instead of surfacing a raw DB error.
       if (dto.idempotencyKey && e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('idempotencyKey')) {
         const existing = await this.prisma.masterOrder.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-        if (existing) return this.resumeCheckoutResponse(existing);
+        if (existing) return this.resumeCheckoutResponse(this.assertSameCheckoutOwner(existing, opts));
       }
       throw e;
     }
@@ -807,12 +1047,7 @@ export class MasterOrdersService {
     if (couponId) await this.coupons.recordUsage(couponId, customerId, masterOrder.id, couponDiscount);
     if (dto.crmRef) this.crmSync?.notify(masterOrder.id, 'order.created', dto.crmRef);
 
-    // COD/Cash confirms immediately, so the wallet portion (if any) is real money owed
-    // right now — debit it now. For ONLINE, the wallet debit happens in confirmPayment()
-    // instead, once the online portion has actually been paid.
-    if (confirmUpfront && walletUsed > 0) {
-      await this.debitWalletForOrder(customerId, walletUsed, masterOrder.id, masterOrder.masterOrderNumber);
-    }
+    // Wallet: taken inside the checkout transaction above (COD and ONLINE).
 
     if (confirmUpfront) {
       for (const child of childOrders) {
@@ -856,6 +1091,13 @@ export class MasterOrdersService {
   // reaching this for one just means "nothing more to do." An ONLINE order still
   // PENDING_PAYMENT needs a fresh gateway order to resume payment (Razorpay/PhonePe orders
   // aren't themselves reusable) — bound to this SAME existing MasterOrder.
+  /** A retried checkout key may only resume the SAME customer's cart — never reveal another's. */
+  private assertSameCheckoutOwner<T extends { customerId: string; guestPhone?: string | null }>(existing: T, opts: CheckoutOpts): T {
+    const same = opts.customerId ? existing.customerId === opts.customerId : !!opts.guestPhone && existing.guestPhone === opts.guestPhone;
+    if (!same) throw new ConflictException('This checkout request key is already used for a different order');
+    return existing;
+  }
+
   private async resumeCheckoutResponse(masterOrder: { id: string; masterOrderNumber: string; totalAmount: any; status: string; customerId: string }) {
     if (masterOrder.status !== MasterOrderStatus.PENDING_PAYMENT) {
       return { masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount: Number(masterOrder.totalAmount), paymentMethod: 'COD', isCOD: true, alreadyProcessed: true };
@@ -923,21 +1165,38 @@ export class MasterOrdersService {
       throw new BadRequestException('Payment amount does not cover the order total. Please contact support.');
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.masterOrder.update({ where: { id: masterOrderId }, data: { paymentId, paymentStatus: 'PAID', status: MasterOrderStatus.CONFIRMED } });
+    // The verified gateway row is PAID (the callback used to leave it PENDING without the webhook).
+    await this.prisma.paymentTransaction.updateMany({
+      where: { orderId: masterOrderId, gatewayOrderId: verifiedGatewayOrderId, status: { not: 'PAID' } },
+      data: { status: 'PAID', gatewayPaymentId: paymentId },
+    });
+    // Exactly one confirmation wins: the PENDING_PAYMENT → CONFIRMED claim is a conditional update,
+    // so a retried or concurrent confirm (browser callback + webhook-driven retry, double click)
+    // can never cascade or debit the wallet a second time. The wallet portion — only checked at
+    // checkout, never taken — is debited from the order's own customer in the same transaction.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.masterOrder.updateMany({
+        where: { id: masterOrderId, status: MasterOrderStatus.PENDING_PAYMENT, paymentStatus: { not: 'PAID' } },
+        data: { paymentId, paymentStatus: 'PAID', status: MasterOrderStatus.CONFIRMED },
+      });
+      if (claim.count !== 1) return false;
       for (const child of existing.childOrders) {
-        await tx.order.update({ where: { id: child.id }, data: { paymentId, paymentStatus: 'PAID', status: OrderStatus.CONFIRMED } });
+        // The cart payment lives on the master order; each job records its own verified share
+        // (its total at this moment), which is what its balance/collection/earnings read.
+        await tx.order.update({
+          where: { id: child.id },
+          data: { paymentId, paymentStatus: 'PAID', paymentMethod: 'ONLINE', cartPaidAmount: child.totalAmount, status: OrderStatus.CONFIRMED },
+        });
         await tx.orderTimeline.create({ data: { orderId: child.id, status: OrderStatus.CONFIRMED } });
       }
+      // Orders created before wallet-at-checkout only reserved their wallet portion: take it now.
+      if (Number(existing.walletUsed) > 0) {
+        const taken = await tx.walletTransaction.findFirst({ where: { userId: existing.customerId, type: 'DEBIT', reason: 'ORDER_PAYMENT', orderId: existing.id }, select: { id: true } });
+        if (!taken) await this.debitWalletForOrder(tx, existing.customerId, Number(existing.walletUsed), existing.id, existing.masterOrderNumber);
+      }
+      return true;
     });
-
-    // The wallet portion (if any) was only reserved-and-checked at checkout time, not
-    // debited — only take the money now that the online payment has actually cleared.
-    // Guarded by the paymentStatus==='PAID' idempotency check above, same as the rest of
-    // this method.
-    if (Number(existing.walletUsed) > 0) {
-      await this.debitWalletForOrder(existing.customerId, Number(existing.walletUsed), existing.id, existing.masterOrderNumber);
-    }
+    if (!won) return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
 
     for (const child of existing.childOrders) {
       // A bundle's SERVICE child (bundleDispatchDeferred) never routes here — see the
@@ -949,6 +1208,15 @@ export class MasterOrdersService {
     this.notifyPaymentSuccess(existing).catch(() => {});
     this.crmSync?.notify(masterOrderId, 'order.paid');
     return this.prisma.masterOrder.findUnique({ where: { id: masterOrderId }, include: { childOrders: true } });
+  }
+
+  /** Razorpay webhook capture for a cart: same verified, once-only confirmation as the callback. */
+  @OnEvent('payment.order.captured', { async: true })
+  async onMasterPaymentCaptured(p: { orderId?: string | null; gatewayPaymentId: string }) {
+    if (!p?.orderId) return;
+    const mo = await this.prisma.masterOrder.findUnique({ where: { id: p.orderId }, select: { id: true, paymentStatus: true } });
+    if (!mo || mo.paymentStatus === 'PAID') return;
+    await this.confirmPayment(mo.id, p.gatewayPaymentId).catch((e) => this.logger.warn(`Webhook cart confirmation ${mo.id}: ${e.message}`));
   }
 
   private async notifyPaymentSuccess(mo: { id: string; customerId: string; guestPhone: string | null; masterOrderNumber: string; totalAmount: any }) {
@@ -1143,6 +1411,12 @@ export class MasterOrdersController {
     return this.authz.attachSafely(res, { masterOrderId: res?.masterOrderId }, authorizedPerson);
   }
 
+  // Same pricing as POST /master-orders, nothing created.
+  @Post('quote')
+  quote(@CurrentUser() u: JwtPayload, @Body() dto: CreateMasterOrderDto) {
+    return this.masterOrders.quote(dto, { customerId: u.sub });
+  }
+
   @Post(':id/confirm-payment')
   confirmPayment(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) {
     return this.masterOrders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub);
@@ -1162,14 +1436,33 @@ export class MasterOrdersController {
 export class PublicMasterOrderController {
   constructor(private masterOrders: MasterOrdersService, private authz: AuthorizedPersonService) {}
 
-  @Public() @Post('checkout')
-  async checkout(@Body() dto: PublicMasterCheckoutDto) {
+  // Same pricing as POST /master-orders/public/checkout, nothing created.
+  @Public() @Post('quote')
+  quote(@Body() dto: PublicMasterQuoteDto) {
+    const quoteDto: CreateMasterOrderDto = {
+      items: dto.items, couponCode: dto.couponCode, city: dto.city, slotStart: dto.slotStart, emergency: dto.emergency,
+      inlineAddress: dto.fullAddress || dto.latitude != null
+        ? { fullAddress: dto.fullAddress || '', city: dto.city, state: dto.state, pincode: dto.pincode, latitude: dto.latitude, longitude: dto.longitude }
+        : undefined,
+    };
+    // `phone` is still accepted (API-compatible) but deliberately not used — see quote().
+    return this.masterOrders.quote(quoteDto, {});
+  }
+
+  // Optional login. With a valid token the order belongs to THAT account (identity from the
+  // verified JWT — the submitted name/phone never select an account) and its wallet may be used.
+  // Without a token this is a guest checkout: no wallet. An invalid/expired token → 401.
+  @Public() @UseGuards(OptionalJwtAuthGuard) @Post('checkout')
+  async checkout(@CurrentUser() u: JwtPayload | undefined, @Body() dto: PublicMasterCheckoutDto) {
+    if (!u && (dto.walletAmount || 0) > 0) {
+      throw new UnauthorizedException('Please log in to pay with your Remont wallet');
+    }
     if (dto.authorizedPerson) this.authz.assertValid(dto.authorizedPerson);
     const items = dto.items;
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
       walletAmount: dto.walletAmount, gstin: dto.gstin, gstBusinessName: dto.gstBusinessName,
-      idempotencyKey: dto.idempotencyKey, crmRef: dto.crmRef,
+      idempotencyKey: dto.idempotencyKey, crmRef: dto.crmRef, emergency: dto.emergency,
       // An order placed from a CRM WhatsApp cart link is a WhatsApp-channel order.
       ...(dto.crmRef ? { channel: BookingChannel.WHATSAPP } : {}),
       slotStart: dto.slotStart, slotEnd: dto.slotEnd, city: dto.city,
@@ -1178,7 +1471,9 @@ export class PublicMasterOrderController {
         latitude: dto.latitude, longitude: dto.longitude,
       },
     };
-    const res: any = await this.masterOrders.checkout(checkoutDto, {
+    const res: any = u
+      ? await this.masterOrders.checkout(checkoutDto, { customerId: u.sub, paymentMethod: dto.paymentMethod })
+      : await this.masterOrders.checkout(checkoutDto, {
       guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email, paymentMethod: dto.paymentMethod,
     });
     return this.authz.attachSafely(res, { masterOrderId: res?.masterOrderId }, dto.authorizedPerson);

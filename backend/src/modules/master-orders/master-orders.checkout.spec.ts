@@ -42,6 +42,7 @@ function makeService() {
       create: jest.fn(),
     },
     commissionRule: { findMany: jest.fn(async () => []) },
+    taxConfig: { findMany: jest.fn(async () => []) }, // no rates configured (production today)
     siteSetting: { findUnique: jest.fn(async () => null) },
     masterOrder: {
       count: jest.fn(async () => 0),
@@ -63,7 +64,7 @@ function makeService() {
         return { ...mo, childOrders };
       }),
     },
-    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })) },
+    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })), updateMany: jest.fn(async () => ({ count: 1 })) },
     walletTransaction: { create: jest.fn() },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
@@ -77,6 +78,15 @@ function makeService() {
             const mo = createdMasterOrders.find((m) => m.id === where.id);
             if (mo) Object.assign(mo, data);
             return mo;
+          }),
+          // conditional claim (confirmPayment): applies only when every where-condition matches
+          updateMany: jest.fn(async ({ where, data }: any) => {
+            const mo = createdMasterOrders.find((m) => m.id === where.id
+              && (where.status === undefined || m.status === where.status)
+              && (where.paymentStatus?.not === undefined || m.paymentStatus !== where.paymentStatus.not));
+            if (!mo) return { count: 0 };
+            Object.assign(mo, data);
+            return { count: 1 };
           }),
         },
         order: {
@@ -485,12 +495,12 @@ describe('MasterOrdersService — Remont One CRM cart links', () => {
     const masterOrders: any = { checkout: jest.fn(async () => ({})) };
     const authz: any = { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) };
     const ctrl = new PublicMasterOrderController(masterOrders, authz);
-    await ctrl.checkout({ name: 'Rahul', phone: '+919812345678', fullAddress: 'Arera Colony', city: 'Bhopal',
+    await ctrl.checkout(undefined, { name: 'Rahul', phone: '+919812345678', fullAddress: 'Arera Colony', city: 'Bhopal',
       items: [{ type: 'SERVICE', serviceId: 'fan-install' }], paymentMethod: 'ONLINE', crmRef: REF } as any);
     const [dto] = masterOrders.checkout.mock.calls[0];
     expect(dto.crmRef).toBe(REF);
     expect(dto.channel).toBe('WHATSAPP');
-    await ctrl.checkout({ name: 'A', phone: '+919800000000', fullAddress: 'x', items: [], paymentMethod: 'COD' } as any);
+    await ctrl.checkout(undefined, { name: 'A', phone: '+919800000000', fullAddress: 'x', items: [], paymentMethod: 'COD' } as any);
     expect(masterOrders.checkout.mock.calls[1][0].channel).toBeUndefined();
   });
 });

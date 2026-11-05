@@ -163,6 +163,7 @@ enum LedgerEntryType {
   HOLD // Vendor Wallet: debit posted when money moves into ANY PartnerHold (warranty/admin-manual)
   HOLD_RELEASE // Vendor Wallet: credit posted when a PartnerHold is released (auto or admin)
   TOP_UP // Vendor Wallet: partner-initiated Razorpay top-up, credited only after server-side payment verification — see WithdrawalService.confirmVendorTopup()
+  CASH_DEPOSIT // In-house technician: verified deposit with Remont of cash collected on a job (clears the COD_COLLECTION debit for that order)
   COD_COLLECTION // Vendor Wallet: debit posted when a vendor collects cash/UPI/card directly from a customer on Remont's behalf — see OrdersService.collectBalance()/collectCod(). The job's own JOB_EARNING credit already reflects the vendor's rightful payout; this debit nets out the cash they're physically holding so pendingPayout never double-counts money the vendor already has in hand.
 }
 
@@ -420,6 +421,66 @@ enum RefundRequestStatus {
   PARTIALLY_APPROVED
   REJECTED
   PROCESSED
+  // Money-moving decision claimed; legs being executed.
+  PROCESSING
+  // Gateway refund accepted by the provider, not yet processed (never "completed").
+  REFUND_PENDING
+  // Provider outcome unknown (timeout / 5xx / conflict) — claim kept; reconcile from Admin › Refunds.
+  NEEDS_ATTENTION
+  // Provider confirmed the gateway refund failed (or rejected it outright) — its claim released.
+  REFUND_FAILED
+}
+
+enum ProviderRefundStatus {
+  CREATED   // persisted, not yet confirmed sent
+  PENDING   // provider accepted it, still processing
+  PROCESSED // provider confirmed processed (final)
+  FAILED    // provider confirmed failed, or definitively rejected the request (final)
+  UNKNOWN   // outcome uncertain — never assumed either way
+}
+
+/// One gateway refund attempt per refund request, with a stable internal id and idempotency key
+/// that every retry reuses (same key + same amount) — so a timeout can never create a second refund.
+model ProviderRefund {
+  id                   String               @id @default(cuid()) // stable internal refund id (also the provider "receipt")
+  refundRequestId      String               @unique
+  refundRequest        RefundRequest        @relation(fields: [refundRequestId], references: [id])
+  paymentTransactionId String
+  gateway              String
+  gatewayPaymentId     String
+  amountPaise          Int
+  idempotencyKey       String               @unique
+  providerRefundId     String?              @unique
+  status               ProviderRefundStatus @default(CREATED)
+  providerStatus       String?
+  attempts             Int                  @default(0)
+  lastError            String?
+  lastCheckedAt        DateTime?
+  processedAt          DateTime?
+  failedAt             DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([status])
+}
+
+/// At most ONE wallet credit per refund request — inserted in the same transaction as the credit,
+/// so two racing retries can never both credit (a new table: the constraint applies with a plain push).
+model RefundWalletCredit {
+  id                  String   @id @default(cuid())
+  refundRequestId     String   @unique
+  walletTransactionId String?
+  createdAt           DateTime @default(now())
+}
+
+/// Webhook de-duplication by the provider's event id (Razorpay x-razorpay-event-id).
+model PaymentWebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String    @unique
+  event       String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
 }
 
 // Default is WALLET_CREDIT per business rule — gateway refund is the exception path
@@ -448,6 +509,7 @@ enum SettlementMode {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model User {
+  cart Cart?
   id            String    @id @default(cuid())
   phone         String    @unique
   email         String?   @unique
@@ -643,8 +705,25 @@ enum CommissionType {
   SLAB
 }
 
+// What a CommissionRule row prices. Same scope/city/priority/effective-date resolution for
+// every type (resolveServiceRule() in common/index.ts) — no second rule system:
+//   COMMISSION          — Remont's commission, deducted from the partner (unchanged behaviour)
+//   MINIMUM_CHARGE      — minimum GST-inclusive amount a customer pays for one service booking
+//   CANCELLATION_CHARGE — the charge an admin MAY approve when a customer cancels/refuses
+//                         after the partner arrived; never deducted automatically
+//   ADDITIONAL_FEE      — a named customer fee (emergency, night visit, convenience, inspection…)
+//                         added only when its condition holds; its own GST (see fee* fields)
+// Existing rows default to COMMISSION, so every current rule keeps working unchanged.
+enum ServiceRuleType {
+  COMMISSION
+  MINIMUM_CHARGE
+  CANCELLATION_CHARGE
+  ADDITIONAL_FEE
+}
+
 model CommissionRule {
   id         String          @id @default(cuid())
+  ruleType   ServiceRuleType @default(COMMISSION)
   scope      CommissionScope
   categoryId String? // required when scope=CATEGORY
   serviceId  String? // required when scope=SERVICE
@@ -654,7 +733,21 @@ model CommissionRule {
   // Percentage (0-100) or flat ₹ amount — ignored when commissionType=SLAB, where
   // slabJson is the source of truth instead.
   value          Decimal        @default(0) @db.Decimal(10, 2)
+  // CANCELLATION_CHARGE only: the minimum penalty when the rule is a percentage
+  // (penalty = max(value% of the service amount, minimumAmount)). null = no minimum.
+  minimumAmount  Decimal?       @db.Decimal(10, 2)
   slabJson       Json? // tiered rules by price range, e.g. [{min,max,type:"PERCENTAGE"|"FLAT",value}]
+
+  // ADDITIONAL_FEE only. One fee per name per booking (the most specific rule wins; an equal tie is
+  // a configuration conflict and blocks pricing). PERCENTAGE is of the discounted service value.
+  feeName        String? // internal key, e.g. EMERGENCY
+  feeDisplayName String? // what the customer sees, e.g. "Emergency service fee"
+  feeCondition   String? // ALWAYS | NIGHT | EMERGENCY
+  feeAppliesTo   String? // ALL | IN_HOUSE | MARKETPLACE (supplier model)
+  feeBeneficiary String? // REMONT (Remont's own charge, taxed by feeSac) | PARTNER (part of the partner's service)
+  feeSac         String? // SAC whose PLATFORM_FEE tax rule taxes a REMONT fee (blank = the platform fee SAC)
+  nightStartHour Int? // NIGHT window in IST, e.g. 21 → 6 (wraps midnight)
+  nightEndHour   Int?
 
   // Higher priority wins when more than one rule matches at the same specificity level.
   // A `stackable` rule ADDS its own amount on top of whichever single rule already won —
@@ -674,6 +767,7 @@ model CommissionRule {
 
   @@index([categoryId, cityId])
   @@index([serviceId, cityId])
+  @@index([ruleType])
 }
 
 // Phase 7 — marketplace fee rules for PRODUCT sellers (commission/marketing/gateway/future
@@ -788,18 +882,33 @@ model ServiceCategory {
   // pending CA confirmation. Nullable/tri-state, defaulting to null (undetermined) for
   // every existing and new category: null = CA_REVIEW_REQUIRED (today's exact behaviour —
   // the partner is invoiced as supplier, Remont only invoices its own fee, unchanged),
-  // 'APPLICABLE'/'NOT_APPLICABLE' is the eventual CA-confirmed answer. Setting this field
-  // alone changes NOTHING in invoice issuance or GST liability — that would require
+  // 'APPLICABLE'/'NOT_APPLICABLE' is the eventual CA-confirmed answer. Since the accounting
+  // completion release this field DRIVES invoice issuance: only 'APPLICABLE' makes an
+  // unregistered EXTERNAL partner's job a section 9(5) supply invoiced by Remont (see
+  // InvoicesService.computeInvoice); null/'NOT_APPLICABLE' never do. Historical note: before that,
+  // setting this field alone changed NOTHING in invoice issuance or GST liability — that would require
   // changing who is treated as the supplier for this category, an invoice-engine change
   // deliberately out of scope until legally confirmed. TCS (see TcsRecord) is also
   // withheld for any category still null here, since s.52(1)'s proviso means TCS and
   // s.9(5) liability are mutually exclusive for the same supply.
   gstSection95Status String? // 'APPLICABLE' | 'NOT_APPLICABLE' | null = CA_REVIEW_REQUIRED
+  // Who supplies this category's services, fixed at checkout (the customer pays before anyone is
+  // assigned): IN_HOUSE = Remont's salaried technicians, one Remont invoice (service + GST);
+  // PARTNER_MARKETPLACE = external partners only: partner's share + Remont platform fee + GST on
+  // the fee (+ the partner's GST if registered, or Remont's under 9(5)). Dispatch follows it.
+  serviceModel       String  @default("PARTNER_MARKETPLACE")
+  // Marketplace only — which partners may take this category's jobs, so the customer's price is final
+  // at checkout: UNREGISTERED_ONLY (no partner GST; 9(5) per gstSection95Status) or REGISTERED_ONLY
+  // (the partner's GST is charged at checkout; only GST-registered partners are dispatched).
+  partnerGstProfile  String  @default("UNREGISTERED_ONLY")
 
   services        Service[]
   subCategories   SubCategory[]
   commissionRules CommissionRule[]
   priceModifiers  ServicePriceModifier[]
+  // RETIRED — duplicated gstSection95Status above and is no longer read anywhere. Kept only so the
+  // deploy's schema sync never drops a column (no destructive migrations).
+  section95Applicable Boolean @default(false)
 }
 
 model SubCategory {
@@ -1905,10 +2014,58 @@ model Order {
   // pattern as the existing login-OTP User.otpLastSentAt below.
   startOtpLastSentAt DateTime?
   endOtpLastSentAt   DateTime?
+  // Wrong-OTP counters (start / completion / extra-work) — locked after OTP_MAX_FAILED_ATTEMPTS
+  // until a new code is sent to the customer, which resets them.
+  startOtpFailedAttempts Int @default(0)
+  endOtpFailedAttempts   Int @default(0)
+  extraOtpFailedAttempts Int @default(0)
+  // A re-sent OTP is valid only until these (the code generated at booking has no expiry).
+  startOtpExpiresAt  DateTime?
+  endOtpExpiresAt    DateTime?
+  // Cart (MasterOrder) online payment allocated to this child order when that payment was
+  // verified — the gateway row lives on the master order, so this is this job's prepaid share.
+  cartPaidAmount     Decimal?  @db.Decimal(10, 2)
+  // Partner earnings for this job: DEFERRED at completion until the customer's payment is
+  // verified, then POSTED once (JOB_EARNING/COMMISSION/HOLD). Null = legacy/not applicable.
+  earningsStatus     String?
+  // Pricing model frozen at checkout from the category: 'IN_HOUSE' | 'MARKETPLACE'. Null = legacy
+  // pricing (GST on the full service, commission inside the price) — older orders keep it.
+  serviceModel       String?
+  // MARKETPLACE only: GST on Remont's platform fee, and GST on the partner's share (the partner's
+  // own GST when registered, Remont's under 9(5)). gstAmount = their sum.
+  platformFeeGst     Decimal   @default(0) @db.Decimal(10, 2)
+  partnerServiceGst  Decimal   @default(0) @db.Decimal(10, 2)
+  // The confirmed price calculation (pricing engine): frozen rates, commission, fees, every component's
+  // taxable value and GST, and the rule IDs used. Invoices and later recalculations reuse it — a rule
+  // changed after booking never alters this booking. Null = booked before the engine.
+  pricingSnapshot    Json?
+  // Customer chose an emergency visit at checkout (only an EMERGENCY fee rule reads it).
+  isEmergency        Boolean   @default(false)
+  earningsPostedAt   DateTime?
+  // Wallet amount returned to the customer when an unpaid order was cancelled (once).
+  walletReleasedAt   DateTime?
   startedAt          DateTime?
   completedAt        DateTime?
   cancelledAt        DateTime?
   cancelReason       String?
+
+  // Minimum service charge (CommissionRule ruleType=MINIMUM_CHARGE) frozen at checkout: the
+  // pre-GST amount added so this service booking's GST-inclusive total reaches the minimum.
+  // Already included in serviceAmount/subtotal; kept separately for the invoice line and
+  // audit. 0 = no minimum applied (every existing order).
+  minimumChargeAdjustment Decimal @default(0) @db.Decimal(10, 2)
+  minimumChargeRuleId     String?
+
+  // Partner "I have arrived" — a fresh location captured at that moment, kept separate from
+  // the order status (which is unchanged) and from periodic tracking. arrivalVerification is
+  // decided server-side from distance/accuracy; never set to VERIFIED without coordinates.
+  arrivedAt           DateTime?
+  arrivalLatitude     Float?
+  arrivalLongitude    Float?
+  arrivalAccuracyM    Float?
+  arrivalDistanceM    Float?
+  arrivalVerification ArrivalVerification?
+  arrivalNote         String?
 
   // Set when OrdersService.autoGenerateInvoice() (fire-and-forget on job completion) throws —
   // previously that failure was only ever logged, leaving the order stuck COMPLETED with no
@@ -2261,6 +2418,14 @@ model Invoice {
   order          Order           @relation(fields: [orderId], references: [id])
   creditNotes    CreditNote[]
   eInvoiceRecord EInvoiceRecord?
+  // Partner job where Remont, as e-commerce operator, issues the customer tax invoice and pays the
+  // GST on the service under section 9(5) (unregistered partner, eligible category).
+  section95         Boolean          @default(false)
+  // GST was collected but neither the partner nor Remont (category not under 9(5)) is liable — needs review.
+  taxReviewRequired Boolean          @default(false)
+  // Incremented on every authorised reissue; earlier versions are kept in InvoiceVersion.
+  version           Int              @default(1)
+  versions          InvoiceVersion[]
 }
 
 // Phase 6 (C-06) — the formal GST adjustment document for a post-invoice refund. An issued
@@ -2290,8 +2455,59 @@ model CreditNote {
 
   invoice Invoice @relation(fields: [invoiceId], references: [id])
 
+  // REFUND (a refund after issue) or INVOICE_CANCELLATION (reverses an invoice that was reissued)
+  kind                  String  @default("REFUND")
+  originalInvoiceNumber String?
+  // Which document of the invoice this note credits: CUSTOMER (the customer page), VENDOR (the partner's
+  // document) or REMONT (Remont's fee/commission invoice). Partner-marketplace refunds credit each
+  // supplier's own document; older notes are all CUSTOMER.
+  documentKind          String  @default("CUSTOMER")
+
   @@index([orderId])
   @@index([refundRequestId])
+}
+
+/// An issued invoice that was superseded by an authorised reissue — its full row as it was issued,
+/// kept immutable for the audit trail (the matching cancellation credit note reverses it).
+model InvoiceVersion {
+  id                   String   @id @default(cuid())
+  invoiceId            String
+  invoice              Invoice  @relation(fields: [invoiceId], references: [id])
+  version              Int
+  invoiceNumber        String
+  vendorDocumentNumber String?
+  remontDocumentNumber String?
+  snapshot             Json
+  reason               String
+  supersededBy         String
+  creditNoteId         String?
+  supersededAt         DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+/// Purchases with input GST (bills from suppliers) — entered by an admin, plus gateway fees, which
+/// the purchase register derives from PaymentTransaction.gatewayFee automatically.
+model PurchaseRecord {
+  id              String   @id @default(cuid())
+  supplierName    String
+  supplierGstin   String?
+  supplierState   String?
+  invoiceNumber   String
+  invoiceDate     DateTime
+  category        String   @default("GENERAL")
+  description     String?
+  hsnSac          String?
+  taxableValue    Decimal  @db.Decimal(12, 2)
+  cgst            Decimal  @default(0) @db.Decimal(12, 2)
+  sgst            Decimal  @default(0) @db.Decimal(12, 2)
+  igst            Decimal  @default(0) @db.Decimal(12, 2)
+  totalValue      Decimal  @db.Decimal(12, 2)
+  itcEligible     Boolean  @default(true)
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@index([invoiceDate])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2471,6 +2687,16 @@ model PaymentTransaction {
   creditedAt        DateTime?
 
   @@index([userId])
+  // Gateway charges on this payment (Razorpay payment.fee / payment.tax, in rupees) — an expense
+  // with input GST. Null until known.
+  gatewayFee      Decimal? @db.Decimal(10, 2)
+  gatewayFeeTax   Decimal? @db.Decimal(10, 2)
+  // Cash a partner reports collecting stays PENDING until confirmed — by the customer's completion
+  // OTP, the customer themselves, or an admin. Who/when confirmed it:
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  verificationMethod String? // COMPLETION_OTP | CUSTOMER | ADMIN
+
   @@index([orderId])
   @@index([masterOrderId])
   @@index([refundRequestId])
@@ -2503,6 +2729,16 @@ model RefundRequest {
   walletCreditAmount  Decimal?            @db.Decimal(10, 2)
   gatewayRefundAmount Decimal?            @db.Decimal(10, 2)
   gatewayRefundId     String?
+  // Set when a support case raised this refund: its amount is then tracked on the case
+  // (SupportCase.refundedTotal) and the partner is never auto-charged for it.
+  supportCaseId       String?
+  // Amount reserved against the booking's refundable limit when a money-moving decision is
+  // claimed (under the booking lock). Released only when the provider confirms a failure.
+  claimedAmount       Decimal             @default(0) @db.Decimal(10, 2)
+  // Admin-decided recovery FROM the partner for this refund (never automatic)
+  partnerRecovery     Decimal?            @db.Decimal(10, 2)
+  partnerRecoveredAt  DateTime?
+  providerRefund      ProviderRefund?
   adminNotes          String?
   approvedBy          String?
   approvedAt          DateTime?
@@ -2515,6 +2751,7 @@ model RefundRequest {
   @@index([masterOrderId])
   @@index([customerId])
   @@index([status])
+  @@index([supportCaseId])
 }
 
 // Append-only audit trail — mirrors the existing OrderTimeline/writeOrderTimeline()
@@ -2549,6 +2786,16 @@ enum SupportItemType {
   SERVICE
 }
 
+enum ArrivalVerification {
+  VERIFIED
+  NOT_VERIFIED_TOO_FAR
+  NOT_VERIFIED_LOW_ACCURACY
+  NOT_VERIFIED_NO_LOCATION
+  NOT_VERIFIED_NO_ADDRESS_COORDINATES
+  NOT_VERIFIED_MOCK_LOCATION
+  NOT_VERIFIED_STALE_LOCATION
+}
+
 enum SupportIssueType {
   // product
   NOT_DELIVERED
@@ -2568,6 +2815,9 @@ enum SupportIssueType {
   PARTNER_DID_NOT_ARRIVE
   SERVICE_STARTED_ISSUE
   SERVICE_COMPLETED_ISSUE_NOT_FIXED
+  // Raised by the PARTNER after arrival when the customer refused the service — always
+  // admin-reviewed, never treated as confirmed customer fault on the partner's word alone.
+  CUSTOMER_REFUSED_SERVICE
   // shared
   OTHER_ISSUE
 }
@@ -2656,6 +2906,29 @@ model SupportCase {
   decidedBy        String?
   decidedAt        DateTime?
   refundRequestId  String?
+
+  // Post-arrival review additions. openedByRole is null for every pre-existing (customer) case.
+  openedByRole         String? // CUSTOMER | SERVICE_VENDOR
+  customerStatement    String? // customer's dispute of a proposed charge, before the decision
+  appealStatement      String? // one appeal after a decision
+  appealedAt           DateTime?
+  // Total refunded to the customer across the decision and any appeal decision — an appeal
+  // can only ever refund the difference, never refund twice.
+  refundedTotal        Decimal   @default(0) @db.Decimal(10, 2)
+  // Admin-decided recovery FROM the partner (a separate, traceable ledger debit — never automatic)
+  partnerRecovery      Decimal?  @db.Decimal(10, 2)
+  partnerRecoveredAt   DateTime?
+  // Cancellation penalty approved by the admin: how much was kept from money actually received,
+  // and how much is only PENDING COLLECTION (never charged automatically, not collected revenue).
+  penaltyAssessed          Decimal?  @db.Decimal(10, 2)
+  penaltyRetained          Decimal?  @db.Decimal(10, 2)
+  penaltyPendingCollection Decimal?  @db.Decimal(10, 2)
+  penaltyAssessedAt        DateTime?
+  // Admin-approved partner compensation; partnerCompensatedAt is the one-time claim that
+  // guarantees the ledger credit is posted at most once.
+  partnerCompensation  Decimal?  @db.Decimal(10, 2)
+  partnerCompensatedAt DateTime?
+  orderCancelledByCase Boolean   @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -2909,6 +3182,7 @@ model PartnerLedgerEntry {
   withdrawalRequestId String?
   notes               String?
   createdBy           String? // admin/agency-owner userId, when manually posted
+  reference           String? // external reference, e.g. a cash-deposit receipt number (unique per technician, enforced in code)
   createdAt           DateTime        @default(now())
 
   vendor ServiceVendor @relation(fields: [vendorId], references: [id])
@@ -3667,6 +3941,13 @@ model TaxConfig {
   validFrom DateTime?
   validTo   DateTime?
 
+  // CA/legal verification. A new or changed rule is PENDING_CA and is never used for pricing until a
+  // super admin records the approval. LEGACY = configured before approvals existed (still used, flagged).
+  approvalStatus String    @default("LEGACY") // LEGACY | PENDING_CA | APPROVED
+  approvedBy     String?
+  approvedAt     DateTime?
+  approvalNote   String?
+
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([appliesTo, hsnCode, isActive])
@@ -4035,4 +4316,14 @@ model PolicyAcceptance {
   @@index([policyId, versionId])
   @@index([userId])
   @@index([subjectType, subjectId])
+}
+
+// A customer's cart, shared by the website, the PWA and the app. Line prices here are display
+// values only: checkout re-prices every line on the server.
+model Cart {
+  userId    String   @id
+  items     Json     @default("[]")
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

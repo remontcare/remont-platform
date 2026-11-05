@@ -31,7 +31,7 @@ function makeService(bundlePercentSetting: string | null = null) {
     },
     commissionRule: { findMany: jest.fn(async () => []) },
     productFeeRule: { findMany: jest.fn(async () => []) },
-    taxConfig: { findMany: jest.fn(async () => TAX_CONFIG_ROWS) },
+    taxConfig: { findMany: jest.fn(async (args?: any) => TAX_CONFIG_ROWS.filter((r: any) => !args?.where?.appliesTo?.has || (r.appliesTo || []).includes(args.where.appliesTo.has))) }, // honours appliesTo like the real DB
     siteSetting: {
       findUnique: jest.fn(async ({ where }: any) =>
         where.key === 'bundle_discount_percent' && bundlePercentSetting !== null
@@ -50,7 +50,7 @@ function makeService(bundlePercentSetting: string | null = null) {
         return { ...mo, childOrders };
       }),
     },
-    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })) },
+    paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID', gatewayOrderId: 'rzp_order_1', gatewayPaymentId: 'pay_1' })), updateMany: jest.fn(async () => ({ count: 1 })) },
     $transaction: jest.fn(async (fn: any) => {
       const tx = {
         product: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -64,6 +64,15 @@ function makeService(bundlePercentSetting: string | null = null) {
             const mo = createdMasterOrders.find((m) => m.id === where.id);
             if (mo) Object.assign(mo, data);
             return mo;
+          }),
+          // conditional claim (confirmPayment): applies only when every where-condition matches
+          updateMany: jest.fn(async ({ where, data }: any) => {
+            const mo = createdMasterOrders.find((m) => m.id === where.id
+              && (where.status === undefined || m.status === where.status)
+              && (where.paymentStatus?.not === undefined || m.paymentStatus !== where.paymentStatus.not));
+            if (!mo) return { count: 0 };
+            Object.assign(mo, data);
+            return { count: 1 };
           }),
         },
         order: {

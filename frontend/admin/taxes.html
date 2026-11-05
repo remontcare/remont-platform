@@ -22,7 +22,7 @@
   <div class="content">
     <div class="card" style="margin-bottom:16px;background:#eff6ff;border-color:#bfdbfe">
       <div class="card-body" style="padding:12px 16px;font-size:13px;color:#1e40af">
-        ℹ️ These rates drive real invoice, checkout, and seller-settlement math. Each Service/Product line first checks its own HSN/SAC against an active rate below with a matching HSN/SAC; if none, a PRODUCT line falls back to its category default (if set here); if still nothing, it falls back to the first active rate for that scope; if nothing is configured at all, ordinary services/products default to 0% GST (never guessed), while Remont's own Platform Fee defaults to 18% (SAC 999799). A Service or Product can also pin its own exact rate/price-treatment directly on its edit screen, which always wins over anything here. For Products, a rate can be marked <strong>GST Included</strong> (price already has tax baked in, e.g. ₹1,180 = ₹1,000 + ₹180 GST) or <strong>Excluded</strong> (tax added on top) — this is never assumed, and old orders keep whatever treatment was resolved at the time, even if you change this later.
+                ℹ️ These rules drive real checkout, invoice and settlement amounts. <strong>A new or changed rule is "Pending CA approval" and is not used until a super admin records the CA's verification.</strong> A service is taxed by the rule for its SAC (or its own pinned rate); Remont's platform fee and other Remont fees by a <em>Platform fee</em> rule for their SAC. <strong>If no approved rule applies, that service cannot be booked</strong> — nothing is ever taxed at a guessed rate. Products: HSN, then category default, then a blanket rule; a product with none can't be sold. Rules marked <em>Legacy</em> were set up before approvals existed and are still used — approve or replace them. Confirmed bookings keep the rates they were priced with.
       </div>
     </div>
     <div class="card">
@@ -123,14 +123,17 @@ function load() {
             ? badge(t.priceType==='GST_INCLUSIVE'?'Included':'Excluded', t.priceType==='GST_INCLUSIVE'?'purple':'blue') + (t.gstApplicable===false?' '+badge('Exempt','red'):'') + (t.productCategory ? '<br><small style="color:#6b7280">'+escape(t.productCategory.name)+'</small>' : '')
             : '—') + '</td>' +
         '<td>' + badge(t.isActive ? 'Active' : 'Inactive', t.isActive ? 'green' : 'gray') + '</td>' +
+        '<td>' + (t.approvalStatus === 'APPROVED' ? badge('Approved', 'green') + '<br><small style="color:#6b7280" title="' + escape(t.approvalNote || '') + '">' + (t.approvedAt ? escape(String(t.approvedAt).slice(0, 10)) : '') + '</small>'
+          : t.approvalStatus === 'PENDING_CA' ? badge('Pending CA approval — not used', 'red') : badge('Legacy — approval not recorded', 'yellow')) + '</td>' +
         '<td><div style="display:flex;gap:4px">' +
+          (t.approvalStatus !== 'APPROVED' && isSuperAdmin() ? '<button class="btn btn-xs btn-success" onclick="approveTax(\'' + t.id + '\')">Approve</button>' : '') +
           '<button class="btn btn-xs btn-outline" onclick=\'openModal(' + JSON.stringify(t) + ')\'>Edit</button>' +
           '<button class="btn btn-xs btn-warning" onclick="toggleActive(\'' + t.id + '\',' + (!t.isActive) + ')">' + (t.isActive ? 'Disable' : 'Enable') + '</button>' +
           '<button class="btn btn-xs" style="background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:3px 8px" onclick="del(\'' + t.id + '\')">Del</button>' +
         '</div></td>' +
       '</tr>';
     }).join('');
-    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>HSN/SAC</th><th>Applies To</th><th>Price / GST</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    document.getElementById('tbl').innerHTML = '<table><thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>HSN/SAC</th><th>Applies To</th><th>Price / GST</th><th>Status</th><th>CA approval</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }).catch(function(e) { document.getElementById('tbl').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
 }
 
@@ -180,6 +183,12 @@ function saveTax() {
   }
   var p = id ? api('PATCH', '/admin/taxes/' + id, data) : api('POST', '/admin/taxes', data);
   p.then(function() { toast(id ? 'Tax updated' : 'Tax created', 'success'); closeModal('tax-overlay'); load(); }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function approveTax(id) {
+  var note = prompt('Record the CA verification (who confirmed it, when, reference). This rule will then be used for real prices.');
+  if (note === null) return;
+  api('POST', '/admin/taxes/' + id + '/approve', { note: note }).then(function() { toast('Approval recorded', 'success'); load(); }).catch(function(e) { toast(e.message, 'error'); });
 }
 
 function toggleActive(id, val) {

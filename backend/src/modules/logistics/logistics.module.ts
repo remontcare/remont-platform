@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Body, Query, Param, UseGuards, BadRequestException, ForbiddenException, NotFoundException, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DeliveryTier, CodSettlementStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -7,6 +7,7 @@ import { MockDeliveryProvider } from './providers/mock-provider';
 import { ShipmentProviderAdapter } from './providers/provider-adapter.interface';
 import { ReverseLogisticsRateEngine } from './reverse-logistics-rate-engine';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
+import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 // Type-only — OrdersModule -> ReturnsModule -> LogisticsModule is an existing chain, and
 // this file needs RoutingService/OrdersModule back, so a normal (value) import here would
 // close that into a real circular require(): whichever of these three files starts loading
@@ -277,6 +278,8 @@ export class ShipmentService {
     // See the type-only import above — the require() below only runs when Nest actually
     // resolves this provider, long after module loading (and any cycle) is done.
     @Inject(forwardRef(() => require('../orders/orders.module').RoutingService)) private routing: RoutingService,
+    // Product tax invoices are issued automatically at hand-over and on delivery (idempotent).
+    @Optional() private invoices?: InvoicesService,
   ) {
     this.providers = { MOCK_DEMO: mockProvider };
   }
@@ -346,6 +349,8 @@ export class ShipmentService {
     });
     await this.prisma.order.update({ where: { id: orderId }, data: { productFulfillmentStage: 'HANDED_TO_LOGISTICS', productFulfillmentAt: new Date() } });
     await writeOrderTimeline(this.prisma, { orderId, status: 'SHIPMENT_CREATED', note: deliveryPartnerId ? 'Delivery partner assigned' : 'No delivery partner available yet' });
+    // The goods leave the seller now — the time of supply for the product invoice.
+    await this.invoices?.autoIssueProductInvoice(orderId);
   }
 
   // Phase 5 — called by DeliveryController.updateShipmentStatus() once a rider marks a
@@ -367,6 +372,8 @@ export class ShipmentService {
     });
     if (claimed.count !== 1) return;
     await writeOrderTimeline(this.prisma, { orderId, status: 'DELIVERED' });
+    // Backstop: issues the invoice if hand-over did not (e.g. it failed then); no-op otherwise.
+    await this.invoices?.autoIssueProductInvoice(orderId);
 
     const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
     const fullOrder = await this.prisma.order.findUnique({
@@ -542,7 +549,7 @@ export class ShipmentController {
 }
 
 @Module({
-  imports: [ProductLedgerModule, forwardRef(() => require('../orders/orders.module').OrdersModule)],
+  imports: [ProductLedgerModule, InvoicesModule, forwardRef(() => require('../orders/orders.module').OrdersModule)],
   controllers: [LogisticsController, ShipmentController],
   providers: [LogisticsService, ShipmentService, MockDeliveryProvider, ReverseLogisticsRateEngine],
   exports: [LogisticsService, ShipmentService, ReverseLogisticsRateEngine],

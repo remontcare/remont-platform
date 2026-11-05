@@ -1,4 +1,5 @@
 import { ProductLedgerService } from './product-ledger.module';
+import { billingFindMany } from '../../common/billing-fixture.test';
 
 /**
  * Phase 7 (C-10) — GST TCS withheld at settlement, seller-wise, and reversed on return.
@@ -20,8 +21,8 @@ function makeService(tcsRate: number | null, companyState = 'Madhya Pradesh') {
   const prisma: any = {
     taxConfig: { findFirst: jest.fn().mockResolvedValue(tcsRate != null ? { rate: tcsRate } : null) },
     siteSetting: {
-      // getBillingCompanyConfig() reads every 'billing'-group row at once — only company_state matters here.
-      findMany: jest.fn(async () => [{ key: 'company_state', value: companyState }]),
+      // getBillingCompanyConfig() reads the saved 'billing' rows; Remont's state comes from its GSTIN.
+      findMany: jest.fn(billingFindMany(companyState)),
     },
   };
   return { service: new ProductLedgerService(prisma), prisma };
