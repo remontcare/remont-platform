@@ -192,9 +192,9 @@ export class ProductsService {
       await this.media?.linkByUrls({ entityType: MediaEntityType.PRODUCT, entityId: product.id, urls: product.images, actor: { id: userId, role: UserRole.PRODUCT_VENDOR } });
     }
 
-    // Background AI enhancement
-    this.runAiEnhancement(product.id, data.name, data.brand, data.images || [])
-      .catch((e) => this.logger.error(`AI enhancement failed: ${e.message}`));
+    // No automatic description: a templated text used to be saved here for every product ("full
+    // warranty and free installation by Remont's verified technicians") — a claim that is not true
+    // for every product. The seller's own description is the only one shown.
 
     return product;
   }
@@ -237,14 +237,6 @@ export class ProductsService {
     });
   }
 
-  /** Rule-based placeholder — swap with OpenAI/Replicate for real LLM */
-  private async runAiEnhancement(productId: string, name: string, brand?: string, images?: string[]) {
-    const desc = `Discover the ${brand ? brand + ' ' : ''}${name} — engineered for everyday excellence. Premium materials, modern design, and trusted quality. Comes with full warranty and free installation by Remont's verified technicians.`;
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: { aiGeneratedDesc: desc, aiEnhancedImgs: images || [] },
-    });
-  }
 }
 
 @ApiTags('Products')
