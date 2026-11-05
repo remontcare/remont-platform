@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { IsString, IsPhoneNumber, IsOptional } from 'class-validator';
 import { UserRole, VendorStatus, OrderStatus, DeleteTargetType, SettlementMode, MediaEntityType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, vendorAllowedForOrder, priceServiceBookingSnapshot, orderFieldsFromSnapshot, resolveServicePricingParams, computeServicePricing, resolveBookingMinimumCharge, applyBookingMinimum, pricingEngineEnabled, PRICING_ENGINE_SETTING, EXTRA_WORK_ITEM_PUBLIC_SELECT } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, slugify, logAudit, writeOrderTimeline, resolveCommission, resolveServiceRule, type ServiceRuleTypeValue, priceServiceBooking, resolveProductFee, haversineKm, isValidIndiaCoords, isVendorLocationEligible, boundingBoxForRadius, MAX_DISPATCH_RADIUS_KM, normalizeSkillKey, NOT_FROZEN_MEMBER_FILTER, resolveBillingTransactionType, ARRIVAL_RESET_DATA, releaseUnpaidOrderWallet, releaseProductStock, vendorAllowedForOrder, priceServiceBookingSnapshot, orderFieldsFromSnapshot, resolveServicePricingParams, computeServicePricing, resolveBookingMinimumCharge, applyBookingMinimum, pricingEngineEnabled, PRICING_ENGINE_SETTING, EXTRA_WORK_ITEM_PUBLIC_SELECT } from '../../common';
 import { ProductLedgerService, ProductLedgerModule } from '../product-ledger/product-ledger.module';
 import { parseAiJson } from '../ai-agent/openai-client';
 import { AiBudgetRefusedError, AiLimitsModule, AiLimitsService, completeWithinBudget } from '../ai-agent/ai-limits';
@@ -1244,6 +1244,8 @@ export class AdminService {
       // Wallet taken for a never-paid order goes straight back; money actually received becomes a
       // refund request for review (this cancellation itself moves no money).
       const walletReturned = await releaseUnpaidOrderWallet(tx, order, `Order ${order.orderNumber} cancelled by Remont before payment`);
+      // Reserved product units go back to inventory (once).
+      await releaseProductStock(tx, order);
       const received = order.paymentStatus === 'PAID' || order.paymentStatus === 'PARTIAL' || Number(order.cartPaidAmount || 0) > 0
         || (!walletReturned && Number(order.walletUsed || 0) > 0);
       if (received) {

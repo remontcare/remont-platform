@@ -13,7 +13,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, releaseUnpaidOrderWallet, logAudit, recalculateServiceOrder, isValidGstinFormat, priceServiceBookingSnapshot, orderFieldsFromSnapshot, vendorAllowedForOrder, EXTRA_WORK_ITEM_PUBLIC_SELECT, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, priceServiceBooking, buildServiceTaxResolver, SERVICE_GST_FALLBACK_RATE, recordPartnerArrival, resolveCityIdForRules, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, releaseUnpaidOrderWallet, releaseProductStock, logAudit, recalculateServiceOrder, isValidGstinFormat, priceServiceBookingSnapshot, orderFieldsFromSnapshot, vendorAllowedForOrder, EXTRA_WORK_ITEM_PUBLIC_SELECT, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -1003,6 +1003,7 @@ export class OrdersService {
         const created = await tx.order.create({
           data: {
             orderNumber, customerId,
+            ...(dto.items?.length ? { stockReservedAt: new Date() } : {}),
             type: dto.type, channel: dto.channel || BookingChannel.WEBSITE,
             serviceId: dto.serviceId, addressId: resolvedAddressId,
             ...addressSnapshotFields(resolvedAddress),
@@ -2011,6 +2012,8 @@ export class OrdersService {
       // when one is already open for this order.
       // Wallet taken at checkout for an order that was never paid goes straight back (once).
       const walletReturned = await releaseUnpaidOrderWallet(tx, order, `Order ${order.orderNumber} cancelled before payment`);
+      // Reserved product units go back to inventory (once).
+      await releaseProductStock(tx, order);
       const received = order.paymentStatus === 'PAID' || order.paymentStatus === 'PARTIAL' || Number(order.cartPaidAmount || 0) > 0
         || (!walletReturned && Number(order.walletUsed || 0) > 0);
       if (received) {
@@ -2366,6 +2369,7 @@ export class GuestBookingService {
         return tx.order.create({
           data: {
             orderNumber, customerId: user.id, type: OrderType.PRODUCT,
+            stockReservedAt: new Date(),
             channel: BookingChannel.WEBSITE, addressId: address.id,
             ...addressSnapshotFields(address),
             guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email || null,

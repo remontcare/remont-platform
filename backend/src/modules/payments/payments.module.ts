@@ -266,6 +266,23 @@ export class PaymentsService implements OnModuleInit {
     return { checked: rows.length, updated, withoutFeeData: noFee, failed, remaining };
   }
 
+  /**
+   * True unless Razorpay positively shows that no payment on this gateway order can still
+   * succeed (none, or all failed). Unreachable/unknown → true, so an unpaid-order expiry never
+   * cancels an order whose money may be arriving. Read-only.
+   */
+  async razorpayPaymentMayBeInProgress(gatewayOrderId: string): Promise<boolean> {
+    if (!this.razorpay) return true;
+    try {
+      const res = await this.razorpay.orders.fetchPayments(gatewayOrderId);
+      const items: any[] = Array.isArray(res?.items) ? res.items : [];
+      return items.some((p) => p?.status !== 'failed');
+    } catch (e) {
+      this.logger.warn(`Razorpay order payments fetch failed for ${gatewayOrderId}: ${e.message}`);
+      return true;
+    }
+  }
+
   async getVerifiedCapturedAmount(gatewayOrderId: string, paymentId: string): Promise<number> {
     if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
     let payment: any;

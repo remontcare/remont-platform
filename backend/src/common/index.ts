@@ -797,6 +797,39 @@ export async function reserveProductStock(tx: any, items: { productId: string; q
   }
 }
 
+/**
+ * Gives an order's reserved product units back to inventory — when it is cancelled, rejected by
+ * the seller, or expires unpaid. At most once per order (atomic claim on stockReleasedAt), and
+ * only for an order whose checkout actually reserved stock (stockReservedAt), so orders placed
+ * before reservation existed never inflate stock. Returns the number of units released.
+ * Call inside the same transaction as the status change.
+ */
+export async function releaseProductStock(
+  tx: any,
+  order: string | { id: string; stockReservedAt?: Date | null; stockReleasedAt?: Date | null },
+): Promise<number> {
+  // With the order row in hand, an order that never reserved (or already released) stock needs no write at all.
+  if (typeof order !== 'string' && (!order.stockReservedAt || order.stockReleasedAt)) return 0;
+  const orderId = typeof order === 'string' ? order : order.id;
+  const claim = await tx.order.updateMany({
+    where: { id: orderId, stockReservedAt: { not: null }, stockReleasedAt: null },
+    data: { stockReleasedAt: new Date() },
+  });
+  if (claim.count !== 1) return 0;
+  const items: { productId: string; quantity: number }[] = await tx.orderItem.findMany({
+    where: { orderId },
+    select: { productId: true, quantity: true },
+  });
+  const qtyByProduct = new Map<string, number>();
+  for (const it of items) if (it.quantity > 0) qtyByProduct.set(it.productId, (qtyByProduct.get(it.productId) || 0) + it.quantity);
+  let released = 0;
+  for (const [productId, quantity] of qtyByProduct) {
+    await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } });
+    released += quantity;
+  }
+  return released;
+}
+
 export async function logAudit(prisma: any, entry: {
   actorId: string;
   actorRole: UserRole;

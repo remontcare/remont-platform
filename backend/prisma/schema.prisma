@@ -2044,6 +2044,11 @@ model Order {
   earningsPostedAt   DateTime?
   // Wallet amount returned to the customer when an unpaid order was cancelled (once).
   walletReleasedAt   DateTime?
+  // Product stock: set when checkout reserved (decremented) this order's units, and when those
+  // units were given back (cancelled, seller-rejected or never paid). Released at most once, and
+  // only for an order that actually reserved stock — older orders never inflate inventory.
+  stockReservedAt   DateTime?
+  stockReleasedAt   DateTime?
   startedAt          DateTime?
   completedAt        DateTime?
   cancelledAt        DateTime?

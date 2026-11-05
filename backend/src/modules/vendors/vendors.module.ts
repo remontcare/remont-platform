@@ -9,7 +9,7 @@ import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorS
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView, ARRIVAL_RESET_DATA, vendorAllowedForOrder } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, releaseProductStock, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView, ARRIVAL_RESET_DATA, vendorAllowedForOrder } from '../../common';
 
 // Columns an unclaimed job offer is read with (eligibility + partnerOfferView) — see
 // partnerOfferView() for why this is an allowlist.
@@ -736,6 +736,9 @@ export class ProductVendorsService {
     await writeOrderTimeline(this.prisma, { orderId, status: 'SELLER_REJECTED', note: reason, actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
 
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    // The rejected units are no longer committed to this order — back to inventory (once). If the
+    // seller rejected because the item is really out of stock, they correct the count in Inventory.
+    if (order.stockReservedAt && !order.stockReleasedAt) await this.prisma.$transaction((tx) => releaseProductStock(tx, order));
     if (['PAID', 'PARTIAL'].includes(order.paymentStatus) && Number(order.totalAmount) > 0) {
       try {
         const rr = await this.refunds.raise(order.customerId, orderId, undefined, `Seller rejected the order${reason ? `: ${reason}` : ''}`, []);

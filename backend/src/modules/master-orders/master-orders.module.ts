@@ -22,6 +22,7 @@ import { PaymentNotificationsService, PaymentNotificationsModule } from '../paym
 import { ShipmentService, LogisticsService, LogisticsModule } from '../logistics/logistics.module';
 import { CrmOrderSyncService, CrmSyncModule } from '../crm-sync/crm-sync.module';
 import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto } from '../authorized-person/authorized-person.module';
+import { StockHoldExpiryService } from './stock-hold-expiry.service';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -959,6 +960,7 @@ export class MasterOrdersService {
           data: {
             orderNumber, masterOrderId: masterOrder.id, customerId,
             type: g.type === 'SERVICE' ? OrderType.SERVICE : OrderType.PRODUCT,
+            ...(g.type === 'PRODUCT' ? { stockReservedAt: new Date() } : {}),
             channel: dto.channel || BookingChannel.WEBSITE,
             serviceId: primaryServiceId,
             addressId: resolvedAddressId,
@@ -1515,7 +1517,7 @@ export class PublicMasterOrderController {
   // a 401 before they ever reach the intended public one. Found via a live end-to-end
   // Razorpay confirm-payment test, not by inspection.
   controllers: [PublicMasterOrderController, MasterOrdersController],
-  providers: [MasterOrdersService],
+  providers: [MasterOrdersService, StockHoldExpiryService],
   exports: [MasterOrdersService],
 })
 export class MasterOrdersModule {}
