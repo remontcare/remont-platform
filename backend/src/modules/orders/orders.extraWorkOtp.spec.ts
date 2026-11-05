@@ -9,7 +9,7 @@ import { ExtraWorkService } from './orders.module';
 function makeService() {
   const prisma: any = {
     serviceVendor: { findUnique: jest.fn().mockResolvedValue({ id: 'v1' }) },
-    order: { findUnique: jest.fn().mockResolvedValue({ id: 'o1', vendorId: 'v1', status: 'STARTED' }) },
+    order: { findUnique: jest.fn().mockResolvedValue({ id: 'o1', vendorId: 'v1', status: 'STARTED' }), updateMany: jest.fn(async () => ({ count: 1 })), update: jest.fn(async () => ({})) },
     extraWorkItem: { findMany: jest.fn().mockResolvedValue([{ id: 'x1' }]), updateMany: jest.fn() },
   };
   return { prisma, service: new ExtraWorkService(prisma, {} as any, {} as any) };

@@ -231,7 +231,7 @@ describe('Audit M5 — the public quote never reveals another person\'s membersh
 
   it('a typed phone number is ignored: no user lookup, no membership discount', async () => {
     const t = withMember();
-    const q = await new PublicMasterOrderController(t.svc).quote({ items, phone: '+919999999999', city: 'Bhopal' } as any);
+    const q = await new PublicMasterOrderController(t.svc, { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) } as any).quote({ items, phone: '+919999999999', city: 'Bhopal' } as any);
     expect(t.prisma.user.findUnique).not.toHaveBeenCalled();
     expect(t.memberships.getActiveDiscount).not.toHaveBeenCalled();
     expect(q.membershipDiscount).toBe(0);

@@ -27,6 +27,8 @@ function makeFlow(orderOverrides: Row = {}) {
   const pick = (row: Row, select?: Row) => (select ? Object.fromEntries(Object.keys(select).map((k) => [k, row[k]])) : { ...row });
 
   const prisma: any = {
+    // GST rate lookup used by the extra-work bill recalculation (no configured rules here)
+    taxConfig: { findMany: jest.fn(async () => []) },
     serviceVendor: { findUnique: jest.fn(async ({ where }) => db.vendors.find((v) => v.userId === where.userId) ?? null) },
     order: {
       findUnique: jest.fn(async ({ include }) => {
@@ -35,6 +37,13 @@ function makeFlow(orderOverrides: Row = {}) {
         return o;
       }),
       update: jest.fn(async ({ data }) => Object.assign(db.order, data)),
+      // Wrong-code counter: models the DB's conditional increment (OTP_MAX_FAILED_ATTEMPTS lock).
+      updateMany: jest.fn(async ({ where, data }) => {
+        const n = db.order.extraOtpFailedAttempts || 0;
+        if (where.extraOtpFailedAttempts?.lt !== undefined && !(n < where.extraOtpFailedAttempts.lt)) return { count: 0 };
+        if (data.extraOtpFailedAttempts?.increment) db.order.extraOtpFailedAttempts = n + data.extraOtpFailedAttempts.increment;
+        return { count: 1 };
+      }),
     },
     extraWorkItem: {
       create: jest.fn(async ({ data }) => {

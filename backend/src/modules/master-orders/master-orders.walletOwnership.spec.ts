@@ -66,12 +66,12 @@ describe('PublicMasterOrderController.checkout — wallet owner comes from the l
   const svc = () => ({ checkout: jest.fn(async () => ({ ok: true })) });
   it('1. unauthenticated request with walletAmount is rejected before the service is called', async () => {
     const s = svc();
-    await expect(Promise.resolve().then(() => new PublicMasterOrderController(s as any).checkout(undefined, body({ walletAmount: 500 }) as any))).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(Promise.resolve().then(() => new PublicMasterOrderController(s as any, { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) } as any).checkout(undefined, body({ walletAmount: 500 }) as any))).rejects.toBeInstanceOf(UnauthorizedException);
     expect(s.checkout).not.toHaveBeenCalled();
   });
   it('2/3. customer A sending B\'s phone/name: the order and wallet owner are A (from the token), the body cannot substitute B', async () => {
     const s = svc();
-    await new PublicMasterOrderController(s as any).checkout({ sub: 'cust-a' } as any, body({ walletAmount: 500 }) as any);
+    await new PublicMasterOrderController(s as any, { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) } as any).checkout({ sub: 'cust-a' } as any, body({ walletAmount: 500 }) as any);
     const [, opts] = s.checkout.mock.calls[0] as any;
     expect(opts.customerId).toBe('cust-a');
     expect(opts.guestPhone).toBeUndefined();
@@ -79,7 +79,7 @@ describe('PublicMasterOrderController.checkout — wallet owner comes from the l
   });
   it('a guest checkout without wallet is unchanged (guest identity, no customerId)', async () => {
     const s = svc();
-    await new PublicMasterOrderController(s as any).checkout(undefined, body() as any);
+    await new PublicMasterOrderController(s as any, { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) } as any).checkout(undefined, body() as any);
     const [, opts] = s.checkout.mock.calls[0] as any;
     expect(opts.customerId).toBeUndefined();
     expect(opts.guestPhone).toBe(USERS['cust-b'].phone);
