@@ -7782,6 +7782,24 @@ window.RemontMedia = (function () {
     document.getElementById('remi-chat-modal').style.display = 'none';
   }
 
+  // Assistant replies use light markdown (**bold**, line breaks, "1) … 2) …" lists). Rendered as
+  // DOM text nodes — never innerHTML — so a reply can never inject markup.
+  function remiSetText(el, text, isUser) {
+    el.textContent = '';
+    text = String(text == null ? '' : text);
+    if (isUser) { el.textContent = text; return; }
+    if ((text.match(/(^|\s)\d{1,2}\)\s/g) || []).length >= 2) text = text.replace(/\s+(\d{1,2}\)\s)/g, '\n$1');
+    text.split(/\r?\n/).forEach(function (line, i) {
+      if (i) el.appendChild(document.createElement('br'));
+      line = line.replace(/^\s*[-*•]\s+/, '• ');
+      line.split(/(\*\*[^*]+\*\*)/).forEach(function (part) {
+        if (!part) return;
+        if (/^\*\*[^*]+\*\*$/.test(part)) { var b = document.createElement('strong'); b.textContent = part.slice(2, -2); el.appendChild(b); }
+        else el.appendChild(document.createTextNode(part.replace(/\*\*/g, '')));
+      });
+    });
+  }
+
   function remiAddBubble(role, text) {
     var msgs = document.getElementById('remi-messages');
     var isUser = role === 'user';
@@ -7791,7 +7809,7 @@ window.RemontMedia = (function () {
     inner.style.cssText = 'max-width:80%;padding:10px 14px;border-radius:' +
       (isUser ? '18px 18px 4px 18px;background:#c4601a;color:#fff' : '18px 18px 18px 4px;background:#fff;color:#111;box-shadow:0 1px 4px rgba(0,0,0,.1)') +
       ';font-size:13px;line-height:1.5';
-    inner.textContent = text;
+    remiSetText(inner, text, isUser);
     bubble.appendChild(inner);
     msgs.appendChild(bubble);
     msgs.scrollTop = msgs.scrollHeight;
@@ -7956,7 +7974,7 @@ window.RemontMedia = (function () {
       var d = res.data || res;
       if (!d || !d.reply) throw new Error('empty reply');
       _remiSessionId = d.sessionId || _remiSessionId;
-      typingEl.textContent = d.reply;
+      remiSetText(typingEl, d.reply, false);
       remiSave('assistant', d.reply);
       remiRenderSuggestions(d.suggestions);
       remiHandleActions(d.actions);
