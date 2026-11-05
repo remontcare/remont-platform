@@ -1312,6 +1312,7 @@ export class MasterOrdersService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: 200,
     });
     return orders.map((o) => ({ ...o, progress: deriveMasterProgress(o.childOrders.map((c) => c.status)) }));
   }
@@ -1333,7 +1334,7 @@ export class MasterOrdersService {
         customer: { select: { phone: true } },
         childOrders: {
           include: {
-            service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
+            service: true, vendor: { select: { id: true, fullName: true, businessName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
             items: { include: { product: true } },
             serviceItems: { include: { service: true } },
           },
@@ -1343,7 +1344,9 @@ export class MasterOrdersService {
     if (!mo) throw new NotFoundException('Order not found');
     const ownerPhone = mo.guestPhone || mo.customer?.phone;
     if (ownerPhone && ownerPhone !== phone) throw new ForbiddenException('Access denied');
-    return { ...mo, progress: deriveMasterProgress(mo.childOrders.map((c) => c.status)) };
+    // No OTPs on this public route: the assigned technician knows the order number and the phone.
+    const childOrders = mo.childOrders.map(({ startOtp, endOtp, ...child }) => child);
+    return { ...mo, childOrders, progress: deriveMasterProgress(mo.childOrders.map((c) => c.status)) };
   }
 
   async adminList(opts: { status?: string; q?: string; limit?: number; offset?: number }) {
@@ -1383,7 +1386,7 @@ export class MasterOrdersService {
         customer: { select: { name: true, phone: true } },
         childOrders: {
           include: {
-            service: true, vendor: { include: { user: { select: { name: true, phone: true } } } },
+            service: true, vendor: { select: { id: true, fullName: true, businessName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
             items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
             serviceItems: { include: { service: true } },
             invoice: true, delivery: true,

@@ -9,7 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Request, Response } from 'express';
-import { UserRole, FulfillmentType, MemberStatus, DeliveryPartnerType } from '@prisma/client';
+import { Prisma, UserRole, FulfillmentType, MemberStatus, DeliveryPartnerType } from '@prisma/client';
 import * as crypto from 'crypto';
 
 // ─── DECORATORS ─────────────────────────────────────────────────────
@@ -107,9 +107,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const res = exception.getResponse();
       message = typeof res === 'string' ? res : (res as any).message || res;
       errorCode = (res as any).error || exception.name;
+    } else if (exception instanceof Prisma.PrismaClientValidationError) {
+      // A malformed request body reached the database layer — the client's mistake, and the
+      // Prisma message (schema fields, server file paths) must never reach the client.
+      status = HttpStatus.BAD_REQUEST;
+      message = 'Invalid request';
+      errorCode = 'BAD_REQUEST';
+      this.logger.warn(`${request.method} ${request.url}: ${exception.message.slice(-300)}`);
     } else if (exception instanceof Error) {
-      message = exception.message;
-      this.logger.error(exception.stack);
+      // Unexpected errors are logged in full; only staff get the detail in the response.
+      const role = (request as any).user?.role;
+      if (role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN) message = exception.message;
+      this.logger.error(`${request.method} ${request.url}: ${exception.stack}`);
     }
 
     response.status(status).json({
@@ -135,6 +144,39 @@ export class TransformInterceptor implements NestInterceptor {
         timestamp: new Date().toISOString(),
       })),
     );
+  }
+}
+
+const OTP_RESPONSE_KEYS = new Set(['startOtp', 'endOtp', 'otp', 'otpCode', 'receiverOtp', 'deliveryOtp', 'pickupOtp']);
+const OTP_HIDDEN_ROLES = new Set<UserRole>([UserRole.SERVICE_VENDOR, UserRole.PRODUCT_VENDOR, UserRole.DELIVERY_PARTNER]);
+
+/**
+ * Removes the customer's verification codes from a response in place. A code proves the
+ * customer agreed only if the person doing the job can't read it — the customer reads it out.
+ * A subtree where the caller is the customer (a partner can book as a customer too) keeps them.
+ */
+export function stripOtpSecrets(value: any, callerId: string, own = false, depth = 0): void {
+  if (!value || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) {
+    for (const item of value) stripOtpSecrets(item, callerId, own, depth + 1);
+    return;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return; // Date, Decimal, Buffer…
+  const isOwn = own || value.customerId === callerId;
+  for (const key of Object.keys(value)) {
+    if (!isOwn && OTP_RESPONSE_KEYS.has(key)) delete value[key];
+    else stripOtpSecrets(value[key], callerId, isOwn, depth + 1);
+  }
+}
+
+/** Applied to every response, so a new endpoint returning an order can't leak the codes. */
+@Injectable()
+export class OtpGuardInterceptor implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    const user = context.switchToHttp().getRequest().user;
+    if (!user?.sub || !OTP_HIDDEN_ROLES.has(user.role)) return next.handle();
+    return next.handle().pipe(map((data) => { stripOtpSecrets(data, user.sub); return data; }));
   }
 }
 

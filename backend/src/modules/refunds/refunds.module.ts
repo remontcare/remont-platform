@@ -107,13 +107,13 @@ export class RefundsService {
   }
 
   async listForCustomer(customerId: string) {
-    return this.prisma.refundRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.refundRequest.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' }, take: 200 });
   }
 
   async listForPartner(vendorUserId: string) {
     const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!v) throw new NotFoundException('Partner profile not found');
-    return this.prisma.refundRequest.findMany({ where: { partnerId: v.id }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.refundRequest.findMany({ where: { partnerId: v.id }, orderBy: { createdAt: 'desc' }, take: 200 });
   }
 
   async listForAdmin(status?: RefundRequestStatus) {

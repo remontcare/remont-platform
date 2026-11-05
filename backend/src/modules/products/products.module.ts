@@ -158,7 +158,8 @@ export class ProductsService {
   async getBySlug(slug: string) {
     const product = await this.prisma.product.findUnique({
       where: { slug },
-      include: { category: true, vendor: true },
+      // Public route: the seller's name only, never their bank, Aadhaar or PAN fields.
+      include: { category: true, vendor: { select: { id: true, businessName: true } } },
     });
     if (!product) throw new NotFoundException('Product not found');
     this.prisma.product.update({ where: { id: product.id }, data: { views: { increment: 1 } } }).catch(() => undefined);

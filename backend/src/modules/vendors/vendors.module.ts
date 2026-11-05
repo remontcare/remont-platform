@@ -69,6 +69,8 @@ const IMAGE_MAGIC_BYTES: Record<string, Buffer> = {
   'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
 };
 function validateDataUrl(field: string, value: string, allowedMagicBytes: Record<string, Buffer>, allowedLabel: string): void {
+  // Checked first: on a very large string the regex below can overflow the stack instead of failing.
+  if (value.length > Math.ceil(MAX_UPLOAD_BYTES * 4 / 3) + 100) throw new BadRequestException(`${field}: file must be under 5MB`);
   const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
   if (!match) throw new BadRequestException(`${field}: invalid file — only ${allowedLabel} uploads are allowed`);
   const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];

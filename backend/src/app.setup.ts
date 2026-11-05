@@ -2,6 +2,7 @@ import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { OtpGuardInterceptor } from './common';
 import { resolveTrustProxyHops } from './common/trust-proxy';
 
 /**
@@ -53,5 +54,5 @@ export function configureHttpApp(app: INestApplication) {
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new TransformInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor(), new OtpGuardInterceptor());
 }

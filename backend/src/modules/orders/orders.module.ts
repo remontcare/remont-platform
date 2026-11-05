@@ -1,6 +1,7 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
   NotFoundException, BadRequestException, ForbiddenException, ConflictException, Logger, Optional, InternalServerErrorException,
+  OnModuleInit,
   ServiceUnavailableException, Inject, forwardRef,
 } from '@nestjs/common';
 import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto, AUTHORIZED_PERSON_PERMISSIONS } from '../authorized-person/authorized-person.module';
@@ -266,6 +267,8 @@ export class DispatchService {
 // path for orders that need a human to just call someone directly.
 @Injectable()
 export class DispatchRetryService {
+  /** About a day of hourly waves; after that the order waits in the admin stuck-orders queue. */
+  static readonly MAX_DISPATCH_ATTEMPTS = 24;
   private readonly logger = new Logger(DispatchRetryService.name);
   constructor(
     private prisma: PrismaService,
@@ -288,6 +291,9 @@ export class DispatchRetryService {
       where: {
         status: OrderStatus.CONFIRMED,
         vendorId: null,
+        // Without these two limits an order nobody takes rings every partner hourly, forever.
+        dispatchAttempts: { lt: DispatchRetryService.MAX_DISPATCH_ATTEMPTS },
+        NOT: { slotStart: { lt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
         // Explicit allowlist guard (not just "lastDispatchedAt is set/stale") — a
         // PROJECT/ADMIN_TEAM order also has lastDispatchedAt: null forever, since
         // RoutingService never calls dispatch() for it. Before this fix that was
@@ -434,11 +440,26 @@ const EXTRA_WORK_APPROVABLE_STATUSES: string[] = ['STARTED', 'IN_PROGRESS', 'EXT
 const EXTRA_WORK_OTP_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
-export class ExtraWorkService {
+export class ExtraWorkService implements OnModuleInit {
   constructor(
     private prisma: PrismaService, private wa: WhatsappService, private paymentNotify: PaymentNotificationsService,
     @Optional() private authz?: AuthorizedPersonService, @Optional() private events?: EventEmitter2,
   ) {}
+
+  /**
+   * Items approved before ExtraWorkItem.status existed get status PENDING when the column is added
+   * (production applies the schema with `prisma db push`, which runs no data migration). Without
+   * this they would show as pending and could be "rejected" while already billed. Idempotent:
+   * touches only rows still out of step; never fails startup.
+   */
+  async onModuleInit() {
+    try {
+      const { count } = await this.prisma.extraWorkItem.updateMany({ where: { customerApproved: true, status: 'PENDING' }, data: { status: 'APPROVED' } });
+      if (count) new Logger(ExtraWorkService.name).log(`Backfilled ${count} approved extra-work item(s) to status APPROVED`);
+    } catch (e: any) {
+      new Logger(ExtraWorkService.name).warn(`Extra-work status backfill skipped: ${e.message}`);
+    }
+  }
 
   async addExtraWork(vendorUserId: string, orderId: string, description: string, amount: number) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
@@ -642,6 +663,7 @@ export class ExtraWorkService {
     this.emitDecided(order, updated!, order.vendor?.userId);
     return updated;
   }
+
 
   private async recalc(orderId: string) {
     // Partner marketplace: GST on the fee + partner share (+ the partner's GST if registered).
@@ -1911,6 +1933,7 @@ export class OrdersService {
         masterOrder: { select: { masterOrderNumber: true, totalAmount: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: 200,
     });
   }
 
@@ -2487,10 +2510,9 @@ export class GuestBookingService {
       totalAmount: order.totalAmount,
       pendingApprovals: order.extraWorkItems.length,
       createdAt: order.createdAt,
-      // Phone ownership already verified above — safe to hand back the OTPs the customer
-      // reads out to the technician to confirm arrival/start and job completion.
-      startOtp: order.startOtpVerified ? undefined : order.startOtp,
-      endOtp: order.startOtpVerified && !order.endOtpVerified ? order.endOtp : undefined,
+      // No OTPs on this public route: the assigned technician knows both the order number and
+      // the customer's phone, so those two prove nothing. Signed-in customers see them in their
+      // orders; "Request OTP again" sends a fresh code to the customer's phone.
     };
   }
 }

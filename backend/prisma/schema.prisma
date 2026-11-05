@@ -1423,6 +1423,7 @@ model ServiceVendor {
   // containment operators (a plain B-tree index cannot); without it, this check degrades to
   // a sequential scan of every ACTIVE+isOnline vendor as the table grows.
   @@index([skills], type: Gin)
+  @@index([isOnline])
 }
 
 model VendorBankUpdateRequest {
@@ -2133,6 +2134,8 @@ model Order {
   @@index([status])
   @@index([type])
   @@index([createdAt])
+  @@index([paymentStatus])
+  @@index([earningsStatus])
 }
 
 // Phase 3 — provider-agnostic shipment record, created post-checkout by
@@ -2190,6 +2193,7 @@ model Shipment {
 
   @@index([deliveryPartnerId])
   @@index([logisticsProviderId])
+  @@index([status])
 }
 
 model OrderItem {
@@ -2228,6 +2232,7 @@ model OrderItem {
   @@index([orderId])
   @@index([pickupLocationId])
   @@index([vendorId])
+  @@index([productId])
 }
 
 // One line item per distinct service inside a service-type Order — lets the Child Order
@@ -2304,7 +2309,6 @@ model ExtraWorkItem {
   otp              String?
   otpVerified      Boolean   @default(false)
   otpLastSentAt    DateTime?
-
   // Decision lifecycle. Only APPROVED is billed (customerApproved stays in step with it —
   // billing/invoices read that flag). A decided item is final: a price change is a new item.
   status           String    @default("PENDING") // PENDING | APPROVED | REJECTED
@@ -2317,6 +2321,8 @@ model ExtraWorkItem {
 
   order  Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   vendor ServiceVendor @relation(fields: [addedBy], references: [id])
+
+  @@index([orderId])
 }
 
 // Someone the customer nominated at booking to handle service approvals for ONE order (e.g.
@@ -2431,6 +2437,7 @@ model Invoice {
   // Incremented on every authorised reissue; earlier versions are kept in InvoiceVersion.
   version           Int              @default(1)
   versions          InvoiceVersion[]
+  @@index([generatedAt])
 }
 
 // Phase 6 (C-06) — the formal GST adjustment document for a post-invoice refund. An issued
@@ -2705,6 +2712,9 @@ model PaymentTransaction {
   @@index([orderId])
   @@index([masterOrderId])
   @@index([refundRequestId])
+  @@index([gatewayOrderId])
+  @@index([gatewayPaymentId])
+  @@index([status, createdAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3193,6 +3203,7 @@ model PartnerLedgerEntry {
   vendor ServiceVendor @relation(fields: [vendorId], references: [id])
 
   @@index([vendorId, createdAt])
+  @@index([orderId])
 }
 
 enum PartnerHoldType {
@@ -3232,6 +3243,7 @@ model PartnerHold {
 
   @@index([vendorId, status])
   @@index([status, releaseDueAt])
+  @@index([releaseDueAt])
 }
 
 // Same proven shape as DeleteRequest (typed status enum + reviewedBy FK + reviewNote)
@@ -3397,6 +3409,7 @@ model WalletTransaction {
 
   @@index([userId, createdAt])
   @@index([refundRequestId])
+  @@index([orderId])
 }
 
 model MembershipPlan {
@@ -3773,6 +3786,7 @@ model Notification {
   deliveries NotificationDelivery[]
 
   @@index([userId, isRead])
+  @@index([userId, createdAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3844,6 +3858,7 @@ model ScheduledNotification {
   sentAt       DateTime?
 
   @@index([status, scheduledFor])
+  @@index([scheduledFor])
 }
 
 // ─── CMS MODELS ────────────────────────────────────────────────────────────
