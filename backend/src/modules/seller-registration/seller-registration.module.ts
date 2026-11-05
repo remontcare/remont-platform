@@ -76,6 +76,23 @@ async function sanitizeDraftData(data: Record<string, any>): Promise<Record<stri
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
+/** What a seller application still lacks before it can be submitted or approved (labels for the message). */
+export function sellerApprovalBlockers(rec: {
+  businessName?: string | null; ownerName?: string | null; phone?: string | null; pickupLocations?: unknown[] | null;
+  bankAccountNumber?: string | null; bankIfsc?: string | null; gstCertificateUrl?: string | null; panCardUrl?: string | null; ownerPhotoUrl?: string | null;
+}): string[] {
+  const missing: string[] = [];
+  if (!rec.businessName) missing.push('business name');
+  if (!rec.ownerName) missing.push('owner name');
+  if (!rec.phone) missing.push('phone number');
+  if (!rec.pickupLocations?.length) missing.push('a pickup location');
+  if (!rec.bankAccountNumber || !rec.bankIfsc) missing.push('bank account details');
+  if (!rec.gstCertificateUrl) missing.push('GST certificate');
+  if (!rec.panCardUrl) missing.push('PAN card');
+  if (!rec.ownerPhotoUrl) missing.push('owner photo');
+  return missing;
+}
+
 @Injectable()
 export class SellerRegistrationService {
   private readonly logger = new Logger(SellerRegistrationService.name);
@@ -320,6 +337,18 @@ export class SellerRegistrationService {
 
     const reg = await this.prisma.sellerRegistration.findUnique({ where: { id }, include: { pickupLocations: true } });
     if (!reg) throw new NotFoundException('Registration not found');
+
+    // Same rule as partner approval: only a submitted, complete application can be approved —
+    // an unsubmitted draft (status defaults to PENDING at init) must never become a seller.
+    if (status === 'APPROVED') {
+      if (!reg.agreedTerms) throw new BadRequestException('This application has not been submitted yet — it can only be approved after the applicant submits it.');
+      if (reg.status === 'APPROVED') throw new BadRequestException('This application is already approved');
+      if (reg.status === 'MORE_INFO' || reg.status === 'REJECTED') {
+        throw new BadRequestException(`This application is ${reg.status === 'MORE_INFO' ? 'waiting for the applicant to update and resubmit it' : 'rejected'} — it cannot be approved now.`);
+      }
+      const blockers = sellerApprovalBlockers(reg);
+      if (blockers.length) throw new BadRequestException(`Cannot approve yet: missing ${blockers.join(', ')}.`);
+    }
 
     const updated = await this.prisma.sellerRegistration.update({
       where: { id },
