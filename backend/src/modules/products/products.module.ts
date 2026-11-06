@@ -10,6 +10,27 @@ import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { assertNoNewInlineImages } from '../media/media.policy';
 
+/**
+ * Product Coverage rule for one city (see ProductsService.list()): 'CITY' = sold here
+ * specifically, 'PAN_INDIA' = sold everywhere incl. here, null = not sold in this city.
+ * Shared with the order "You may also need" suggestions so both apply the same rule.
+ */
+export function productCityReach(
+  p: { coverageType?: string | null; vendor?: { city?: string | null } | null },
+  assignment: { isActive: boolean } | undefined,
+  cityNameLower: string,
+): 'CITY' | 'PAN_INDIA' | null {
+  if (p.coverageType === 'STORE_PICKUP') {
+    return (p.vendor?.city || '').trim().toLowerCase() === cityNameLower ? 'CITY' : null; // hidden everywhere else
+  }
+  if (p.coverageType === 'SELECTED_CITIES' || p.coverageType === 'ZONES') {
+    return assignment?.isActive ? 'CITY' : null; // hidden unless explicitly assigned
+  }
+  // PAN_INDIA
+  if (assignment && !assignment.isActive) return null; // explicitly opted out for this city
+  return 'PAN_INDIA';
+}
+
 // Seller create/update bodies are passed to Prisma, so anything left in them is written.
 // System-managed counters/ids must never be seller-set (fake rating/reviewCount/views), and
 // relation keys must never get through at all: a nested write such as
@@ -86,18 +107,9 @@ export class ProductsService {
     const citySpecific: typeof products = [];
     const panIndia: typeof products = [];
     for (const p of products) {
-      const assignment = assignmentByProduct.get(p.id);
-      if (p.coverageType === 'STORE_PICKUP') {
-        if ((p.vendor?.city || '').trim().toLowerCase() === cityNameLower) citySpecific.push(p);
-        continue; // hidden everywhere else
-      }
-      if (p.coverageType === 'SELECTED_CITIES' || p.coverageType === 'ZONES') {
-        if (assignment?.isActive) citySpecific.push(p);
-        continue; // hidden unless explicitly assigned
-      }
-      // PAN_INDIA
-      if (assignment && !assignment.isActive) continue; // explicitly opted out for this city
-      panIndia.push(p);
+      const reach = productCityReach(p, assignmentByProduct.get(p.id), cityNameLower);
+      if (reach === 'CITY') citySpecific.push(p);
+      else if (reach === 'PAN_INDIA') panIndia.push(p);
     }
     return [...citySpecific, ...panIndia];
   }
