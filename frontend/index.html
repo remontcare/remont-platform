@@ -10478,13 +10478,14 @@ function cartCheckout() {
 
 <!-- ═══ ORDER SUCCESS MODAL ═══ -->
 <div id="order-success-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10200;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:16px;padding:32px 24px;width:400px;max-width:98vw;text-align:center">
+  <div style="background:#fff;border-radius:16px;padding:32px 24px;width:400px;max-width:98vw;max-height:92vh;overflow-y:auto;text-align:center">
     <div style="width:60px;height:60px;background:#ecfdf5;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px">✅</div>
     <h3 style="font-size:20px;font-weight:700;margin-bottom:8px;color:#111">Order Placed!</h3>
     <p style="font-size:14px;color:#6b7280;margin-bottom:6px">Your order number is</p>
     <p id="oss-order-num" style="font-size:18px;font-weight:700;color:#c4601a;margin-bottom:6px">—</p>
     <p id="oss-total" style="font-size:14px;color:#374151;margin-bottom:20px">Amount paid: —</p>
     <p id="oss-payment-note" style="font-size:12px;color:#6b7280;margin-bottom:20px;background:#f9fafb;padding:10px;border-radius:8px"></p>
+    <div id="oss-suggest" style="margin:-8px 0 16px"></div>
     <div style="display:flex;gap:10px">
       <button onclick="closeOrderSuccessModal()" style="flex:1;padding:12px;background:#f3f4f6;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;color:#374151">Close</button>
       <button onclick="closeOrderSuccessModal();openMyOrdersModal()" style="flex:1;padding:12px;background:#c4601a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">View Orders →</button>
@@ -11956,6 +11957,7 @@ function openOrderSuccessModal(orderNum, total, note) {
   document.getElementById('oss-payment-note').textContent = note || '';
   document.getElementById('order-success-modal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
+  showOrderSuccessSuggestions(orderNum);
 }
 
 function closeOrderSuccessModal() {
@@ -12022,6 +12024,76 @@ function closeOrderSuccessModal() {
     if (typeof openCart === 'function') openCart();
   });
 })();
+
+// ── "You may also need" — related products/services for an open order ─────
+// From GET /catalog/suggestions/my-orders: only the signed-in customer's own orders that are
+// bought but not yet invoiced, only real active/in-stock/city-available catalog rows (admin
+// Recommendations first, then category-based matches). Nothing here is invented client-side;
+// an empty or failed response simply shows nothing.
+var _sugItems = {};
+var _sugCache = null;
+function loadOrderSuggestions(force) {
+  if (!localStorage.getItem('remont_token')) return Promise.resolve([]);
+  if (!force && _sugCache && Date.now() - _sugCache.at < 120000) return Promise.resolve(_sugCache.groups);
+  return apiGet('/api/v1/catalog/suggestions/my-orders').then(function(r) {
+    var d = (r && r.data) || r || {};
+    var groups = Array.isArray(d.groups) ? d.groups : [];
+    _sugCache = { at: Date.now(), groups: groups };
+    return groups;
+  }).catch(function() { return []; });
+}
+function renderSuggestStrip(group, title) {
+  if (!group || !group.items || !group.items.length) return '';
+  var cards = group.items.map(function(it) {
+    var key = it.kind + ':' + it.id;
+    _sugItems[key] = it;
+    var img = /^https:\/\//.test(it.imageUrl || '')
+      ? '<img src="' + escHtml(it.imageUrl) + '" alt="" loading="lazy" width="124" height="70" style="width:100%;height:70px;object-fit:cover;border-radius:8px;background:#f3f4f6">'
+      : '<div aria-hidden="true" style="height:70px;border-radius:8px;background:#fff7ed;display:flex;align-items:center;justify-content:center;font-size:26px">' + (it.kind === 'SERVICE' ? '🛠️' : '📦') + '</div>';
+    var tag = it.relationType === 'INSTALLATION_SERVICE' ? 'Installation' : it.relationType === 'REQUIRED' ? 'Needed' : (it.kind === 'SERVICE' ? 'Service' : '');
+    return '<div style="flex:0 0 140px;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:#fff;text-align:left;display:flex;flex-direction:column;gap:4px">' +
+      img +
+      (tag ? '<span style="align-self:flex-start;font-size:10px;font-weight:700;color:#9a3412;background:#ffedd5;border-radius:6px;padding:1px 6px">' + tag + '</span>' : '') +
+      '<div title="' + escHtml(it.name) + '" style="font-size:12px;font-weight:600;color:#111;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:31px">' + escHtml(it.name) + '</div>' +
+      '<div style="font-size:12px;color:#c4601a;font-weight:700">₹' + Number(it.price || 0).toLocaleString('en-IN') +
+        (it.unit ? ' <span style="color:#6b7280;font-weight:400">/ ' + escHtml(it.unit) + '</span>' : '') + '</div>' +
+      '<button type="button" data-sug="' + escHtml(key) + '" onclick="addSuggestedToCart(this.dataset.sug)" style="margin-top:auto;min-height:36px;padding:6px 8px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">+ Add to cart</button>' +
+    '</div>';
+  }).join('');
+  return '<div class="remont-suggest" style="margin-top:10px;text-align:left">' +
+    '<div style="font-size:13px;font-weight:700;color:#374151;margin:0 2px 8px">' + escHtml(title || 'You may also need') + '</div>' +
+    '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch">' + cards + '</div>' +
+  '</div>';
+}
+function addSuggestedToCart(key) {
+  var it = _sugItems[key];
+  if (!it) return;
+  var add = window.addToCart || (typeof addToCart === 'function' ? addToCart : null);
+  if (!add) return;
+  if (it.kind === 'SERVICE') {
+    add({ id: it.id, name: it.name, price: Number(it.price || 0), type: 'service', unit: it.unit || 'per visit', categoryKey: it.categoryKey || '', inclusions: it.inclusions || [] });
+  } else {
+    add({ id: it.id, name: it.name, price: Number(it.price || 0), type: 'product', unit: it.unit || 'piece', vendorId: it.vendorId || null });
+  }
+}
+// Right after checkout: the order just placed is the newest open group. A Razorpay order can
+// still be PENDING_PAYMENT for a moment (webhook), so retry once before giving up silently.
+function showOrderSuccessSuggestions(orderNum) {
+  var box = document.getElementById('oss-suggest');
+  if (!box) return;
+  box.innerHTML = '';
+  function pick(groups) {
+    var g = groups.filter(function(x) { return orderNum && (x.masterOrderNumber === orderNum || (x.orderNumbers || []).indexOf(orderNum) !== -1); })[0] || groups[0];
+    return renderSuggestStrip(g, 'Customers also add');
+  }
+  loadOrderSuggestions(true).then(function(groups) {
+    if (groups.length) { box.innerHTML = pick(groups); return; }
+    setTimeout(function() {
+      if (document.getElementById('order-success-modal').style.display === 'none') return;
+      loadOrderSuggestions(true).then(function(g2) { box.innerHTML = pick(g2); });
+    }, 4000);
+  });
+}
 
 // ── My Orders Modal ─────────────────────────────────────────────────
 
@@ -12309,11 +12381,14 @@ function loadMyOrders() {
   Promise.all([
     apiGet('/api/v1/orders/mine'),
     apiGet('/api/v1/reviews/mine').catch(function(){ return []; }),
-    apiGet('/api/v1/authorized-orders').catch(function(){ return []; })
+    apiGet('/api/v1/authorized-orders').catch(function(){ return []; }),
+    loadOrderSuggestions()
   ]).then(function(results) {
     var res = results[0];
     var reviewsRes = results[1];
     var authRes = results[2];
+    var sugByKey = {};
+    (results[3] || []).forEach(function(g){ sugByKey[g.key] = g; });
     var authHtml = _renderAuthorizedOrders(Array.isArray(authRes) ? authRes : ((authRes && authRes.data) || []));
     var orders = Array.isArray(res) ? res : (res.data || []);
     var reviews = Array.isArray(reviewsRes) ? reviewsRes : (reviewsRes.data || []);
@@ -12336,9 +12411,9 @@ function loadMyOrders() {
     var groups = [];
     var byMaster = {};
     orders.forEach(function(o) {
-      if (!o.masterOrderId) { groups.push({ masterOrderNumber: null, orders: [o] }); return; }
+      if (!o.masterOrderId) { groups.push({ key: o.id, masterOrderNumber: null, orders: [o] }); return; }
       if (!byMaster[o.masterOrderId]) {
-        var g = { masterOrderNumber: (o.masterOrder && o.masterOrder.masterOrderNumber) || null, orders: [] };
+        var g = { key: o.masterOrderId, masterOrderNumber: (o.masterOrder && o.masterOrder.masterOrderNumber) || null, orders: [] };
         byMaster[o.masterOrderId] = g;
         groups.push(g);
       }
@@ -12347,7 +12422,7 @@ function loadMyOrders() {
 
     var html = '';
     groups.forEach(function(group) {
-      var inner = group.orders.map(_renderOrderCard).join('');
+      var inner = group.orders.map(_renderOrderCard).join('') + renderSuggestStrip(sugByKey[group.key]);
       if (group.masterOrderNumber) {
         html += '<div style="border:1.5px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:14px;background:#fafafa">' +
           '<div style="font-size:12px;font-weight:700;color:#6b7280;letter-spacing:.03em;text-transform:uppercase;padding:0 4px 10px">Order ' + escHtml(group.masterOrderNumber) + (group.orders.length > 1 ? ' · ' + group.orders.length + ' parts' : '') + '</div>' +
