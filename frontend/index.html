@@ -3,24 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Remont India — AI-Powered Home Services, Construction & Corporate Marketplace</title>
-<meta name="description" content="Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation. Corporate portal & AMC plans available." />
+<title>Home & Office Services in Bhopal & Indore | Remont India</title>
+<meta name="description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
+<link rel="preload" as="image" href="https://res.cloudinary.com/szokktkz/image/upload/c_limit,f_auto,q_auto,w_300/v1790686974/remont/services/f6af099f-909c-42ea-bf90-0e612657049c.webp" fetchpriority="high" media="(max-width: 768px)" />
 <link rel="canonical" href="https://www.remontindia.com/" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
 
 <!-- Open Graph -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Remont India" />
-<meta property="og:title" content="Remont India — AI-Powered Home Services, Construction & Corporate Marketplace" />
-<meta property="og:description" content="Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation. Corporate portal & AMC plans available." />
+<meta property="og:title" content="Home & Office Services in Bhopal & Indore | Remont India" />
+<meta property="og:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
 <meta property="og:url" content="https://www.remontindia.com/" />
 <meta property="og:locale" content="en_IN" />
 <meta property="og:locale:alternate" content="hi_IN" />
 
 <!-- Twitter Card (no summary_large_image — no real hero image exists yet, see SEO report) -->
 <meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Remont India — AI-Powered Home Services, Construction & Corporate Marketplace" />
-<meta name="twitter:description" content="Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation." />
+<meta name="twitter:title" content="Home & Office Services in Bhopal & Indore | Remont India" />
+<meta name="twitter:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
 
 <!-- JSON-LD structured data — every value below is drawn from content already live on this
      page (title, description, FAQ text, service names, confirmed operating cities). No
@@ -3795,6 +3796,10 @@ window.RemontMedia = (function () {
     <div class="m-section">
       <div class="m-sec-hd"><span data-en="Popular Services" data-hi="लोकप्रिय सेवाएं">Popular Services</span><a data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-svc-scroll" id="m-svc-scroll">
+        <!-- LCP: the first popular service is in the HTML so its image starts loading at once;
+             shared/m-catalog.js replaces this row with the live list (same first image).
+             If the first popular service changes in the admin, update this card + the preload. -->
+        <button type="button" class="mc-pop" data-svc="cmr3tad5r009v7v1za7sxd3uk"><img src="https://res.cloudinary.com/szokktkz/image/upload/c_limit,f_auto,q_auto,w_300/v1790686974/remont/services/f6af099f-909c-42ea-bf90-0e612657049c.webp" alt="Pigeon behind bird safety netting fixed to a window frame" width="150" height="110" fetchpriority="high" decoding="async"><span class="mc-pop-name">Bird Netting Installation (Per Sqft)</span></button>
         <div class="m-svc-card" onclick="openBookingModal('','AC Service & Repair','₹399')">
           <div class="m-svc-img">❄️</div>
           <div class="m-svc-body"><div class="m-svc-name" data-en="AC Repair" data-hi="AC रिपेयर">AC Repair</div><div class="m-svc-stars">⭐ 4.7 (12K+)</div><div class="m-svc-price" data-en="Starts at ₹399" data-hi="₹399 से शुरू">Starts at ₹399</div><button class="m-svc-btn" data-en="Book Now" data-hi="अभी बुक करें">Book Now</button></div>
@@ -5864,7 +5869,7 @@ window.RemontMedia = (function () {
         <label>Current Photo <small style="color:#9ca3af">(optional)</small></label>
         <input type="file" id="qPhotoInput" accept="image/jpeg,image/png,image/webp" onchange="previewQuotePhoto(this)">
         <div id="qPhotoPreviewWrap" style="display:none;margin-top:8px">
-          <img id="qPhotoPreview" style="max-width:120px;border-radius:8px;border:1px solid var(--mist)">
+          <img id="qPhotoPreview" alt="Preview of your uploaded photo" style="max-width:120px;border-radius:8px;border:1px solid var(--mist)">
           <button type="button" onclick="clearQuotePhoto()" style="margin-left:8px;font-size:12px;color:var(--sienna);background:none;border:none;cursor:pointer">Remove</button>
         </div>
       </div>
