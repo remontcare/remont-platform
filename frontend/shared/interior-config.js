@@ -12,7 +12,7 @@
 window.INTERIOR_CONFIG = {
   category: 'interior',
   whatsapp: '919232071064',
-  supportPhone: '+919876543210',
+  supportPhone: '+919232071064',
 
   /* ── serviceType: 'digital' | 'onsite' —
      digital  = deliverable is produced remotely, buyable from anywhere, no

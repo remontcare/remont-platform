@@ -6,6 +6,7 @@
 <title>Home & Office Services in Bhopal & Indore | Remont India</title>
 <meta name="description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
 <link rel="preload" as="image" href="https://res.cloudinary.com/szokktkz/image/upload/c_limit,f_auto,q_auto,w_300/v1790686974/remont/services/f6af099f-909c-42ea-bf90-0e612657049c.webp" fetchpriority="high" media="(max-width: 768px)" />
+<link rel="preload" as="image" href="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&q=85&auto=format" fetchpriority="high" media="(min-width: 769px)" />
 <link rel="canonical" href="https://www.remontindia.com/" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
 
@@ -37,7 +38,7 @@
       "@id": "https://www.remontindia.com/#organization",
       "name": "Remont India",
       "url": "https://www.remontindia.com/",
-      "email": "hello@remontindia.com",
+      "email": "remont.care@remontindia.com",
       "description": "AI-powered home services, construction and corporate maintenance marketplace booking handyman, AC, plumbing, electrical, construction and interior renovation services across Madhya Pradesh.",
       "sameAs": []
     },
@@ -671,17 +672,17 @@
   .slide:nth-child(1) .slide-bg {
     background-image:
       linear-gradient(100deg, rgba(26,26,26,0.82) 0%, rgba(26,26,26,0.4) 50%, rgba(196,96,26,0.25) 100%),
-      url("https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&q=85");
+      url("https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&q=85&auto=format");
   }
   .slide:nth-child(2) .slide-bg {
     background-image:
       linear-gradient(100deg, rgba(26,26,26,0.78) 0%, rgba(26,26,26,0.4) 50%, rgba(107,124,94,0.30) 100%),
-      url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=1600&q=85");
+      url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=1600&q=85&auto=format");
   }
   .slide:nth-child(3) .slide-bg {
     background-image:
       linear-gradient(100deg, rgba(26,26,26,0.82) 0%, rgba(26,26,26,0.4) 50%, rgba(232,166,80,0.25) 100%),
-      url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=1600&q=85");
+      url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=1600&q=85&auto=format");
   }
 
   .hero-grid {
@@ -1789,7 +1790,7 @@
     height: 180px;
     background:
       linear-gradient(rgba(245,240,232,0.85), rgba(245,240,232,0.6)),
-      url("https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600&q=80");
+      url("https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600&q=80&auto=format");
     background-size: cover;
     background-position: center;
     border-radius: var(--radius);
@@ -2529,7 +2530,7 @@
     border: 4px solid #333;
   }
   .phone-2 .phone-screen { background: var(--charcoal); }
-  .phone-2 .p2-img { height: 50%; background: url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80") center/cover; }
+  .phone-2 .p2-img { height: 50%; background: url("https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80&auto=format") center/cover; }
   .phone-2 .p2-body { padding: 12px; color: #fff; }
   .phone-2 .p2-body p { font-size: 8px; color: var(--amber); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
   .phone-2 .p2-body h4 { font-family: var(--ff-display); font-size: 14px; font-weight: 500; }
@@ -2642,7 +2643,7 @@
     font-size: 12.5px;
     flex-wrap: wrap; gap: 12px;
   }
-  .footer-bottom > div { display: flex; gap: 20px; }
+  .footer-bottom > div { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 
   /* ─── SCROLL REVEAL ─── */
   .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
@@ -3645,43 +3646,53 @@ window.RemontMedia = (function () {
 <body>
 
 <!-- Mobile Nav -->
-<div class="mobile-nav" id="mobileNav">
+<div class="mobile-nav" id="mobileNav" role="dialog" aria-modal="true" aria-label="Menu">
+  <button type="button" class="mn-close" onclick="toggleMenu()" aria-label="Close menu">&times;</button>
+  <!-- Phone menu: everything from the desktop top strip lives here (the strip is hidden below 769px). -->
   <div class="grp">
-    <div class="grp-title">Services</div>
-    <a href="#shop">All Services</a>
-    <a href="#shop">Handyman & Repair</a>
-    <a href="#shop">Interior & Renovation</a>
-    <a href="#shop">Construction</a>
-    <a href="#amc">AMC Plans</a>
+    <div class="grp-title" data-en="Book &amp; contact" data-hi="बुकिंग और संपर्क">Book &amp; contact</div>
+    <a href="tel:+919232071064" data-setting="mobile-phone-link"><span aria-hidden="true">📞</span> <span data-en="Call to Book" data-hi="कॉल करके बुक करें">Call to Book</span></a>
+    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="mobile-whatsapp-link"><span aria-hidden="true">💬</span> <span data-en="WhatsApp Booking" data-hi="WhatsApp पर बुकिंग">WhatsApp Booking</span></a>
+    <a href="/?open=book" onclick="mnGo('chat');return false"><span aria-hidden="true">🤖</span> <span data-en="AI Chat Booking (24/7)" data-hi="AI चैट बुकिंग (24/7)">AI Chat Booking (24/7)</span></a>
+    <a href="mailto:remont.care@remontindia.com"><span aria-hidden="true">✉️</span> remont.care@remontindia.com</a>
   </div>
   <div class="grp">
-    <div class="grp-title">Booking</div>
-    <a href="#"><span>🤖</span> AI Chat Booking</a>
-    <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="mobile-whatsapp-link"><span>💬</span> WhatsApp Booking</a>
-    <a href="tel:+919876543210" data-setting="mobile-phone-link"><span>📞</span> Call to Book</a>
+    <div class="grp-title" data-en="Services" data-hi="सेवाएं">Services</div>
+    <a href="/?open=categories" onclick="mnGo('categories');return false" data-en="All Services" data-hi="सभी सेवाएं">All Services</a>
+    <a href="/?open=offers" onclick="mnGo('offers');return false" data-en="Offers" data-hi="ऑफर">Offers</a>
+    <a href="/#amc" onclick="mnGo('amc');return false" data-en="AMC Plans" data-hi="AMC प्लान">AMC Plans</a>
+    <a href="/interior.html" data-en="Interior &amp; Renovation" data-hi="इंटीरियर और रेनोवेशन">Interior &amp; Renovation</a>
+    <a href="/services/construction.html" data-en="Construction" data-hi="कंस्ट्रक्शन">Construction</a>
+    <a href="/shop.html" data-en="Shop Products" data-hi="प्रोडक्ट्स खरीदें">Shop Products</a>
   </div>
   <div class="grp">
-    <div class="grp-title">For Business</div>
-    <a href="#corporate">Corporate Portal Login</a>
-    <a href="#vendor">Become a Service Partner</a>
-    <a href="#">Facility Management</a>
+    <div class="grp-title" data-en="Account" data-hi="खाता">Account</div>
+    <a href="/?open=account" onclick="mnGo('account');return false" data-en="Sign In with OTP" data-hi="OTP से साइन इन">Sign In with OTP</a>
+    <a href="/?open=orders" onclick="mnGo('orders');return false" data-en="My Orders" data-hi="मेरे ऑर्डर">My Orders</a>
+    <a href="/?open=orders" onclick="mnGo('track');return false" data-en="Track Orders" data-hi="ऑर्डर ट्रैक करें">Track Orders</a>
+    <a href="/?open=account" onclick="mnGo('account');return false" data-en="My Wallet" data-hi="मेरा वॉलेट">My Wallet</a>
   </div>
   <div class="grp">
-    <div class="grp-title">Account</div>
-    <a href="#">Sign In with OTP</a>
-    <a href="#" onclick="openTrackingModal();return false">Track Orders</a>
-    <a href="#">My Wallet</a>
+    <div class="grp-title" data-en="For Business &amp; Partners" data-hi="बिज़नेस और पार्टनर">For Business &amp; Partners</div>
+    <a href="/corporate.html" data-en="Corporate Login · Facility Management" data-hi="कॉर्पोरेट लॉगिन · फैसिलिटी मैनेजमेंट">Corporate Login · Facility Management</a>
+    <a href="/partner-register.html" onclick="mnGo('partner');return false" data-en="Become a Service Partner" data-hi="सर्विस पार्टनर बनें">Become a Service Partner</a>
+    <a href="/seller-register.html" data-en="Sell on Remont" data-hi="Remont पर बेचें">Sell on Remont</a>
+  </div>
+  <div class="grp mn-lang" role="group" aria-label="Language">
+    <div class="grp-title">Language / भाषा</div>
+    <button type="button" class="mn-lang-btn" onclick="setSiteLang('EN')">English</button>
+    <button type="button" class="mn-lang-btn" onclick="setSiteLang('HI')">हिंदी</button>
   </div>
   <div style="margin-top: 24px;">
-    <button class="btn-primary" style="width:100%; padding:14px;">Book a Service in 3 Clicks</button>
+    <button type="button" class="btn-primary" style="width:100%; padding:14px;" onclick="mnGo('book')" data-en="Book a Service" data-hi="सर्विस बुक करें">Book a Service</button>
   </div>
 </div>
 
 <!-- ═══ TOP UTILITY STRIP ═══ -->
 <div class="top-strip">
   <div class="left">
-    <span data-setting="support-phone">📞 +91 98765 43210</span>
-    <span data-setting="support-email">✉️ hello@remontindia.com</span>
+    <span data-setting="support-phone">📞 +91 92320 71064</span>
+    <span data-setting="support-email">✉️ remont.care@remontindia.com</span>
     <span data-setting="support-label">🕐 24/7 AI Chat Support</span>
   </div>
   <div class="right">
@@ -3795,7 +3806,7 @@ window.RemontMedia = (function () {
 
     <!-- Popular Services -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Popular Services" data-hi="लोकप्रिय सेवाएं">Popular Services</span><a data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Popular Services" data-hi="लोकप्रिय सेवाएं">Popular Services</span><a href="/?open=categories" onclick="openMobileCatalogPicker();return false" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-svc-scroll" id="m-svc-scroll">
         <!-- LCP: the first popular service is in the HTML so its image starts loading at once;
              shared/m-catalog.js replaces this row with the live list (same first image).
@@ -3848,7 +3859,7 @@ window.RemontMedia = (function () {
 
     <!-- Product Categories -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Top Categories" data-hi="टॉप कैटेगरी">Top Categories</span><a data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Top Categories" data-hi="टॉप कैटेगरी">Top Categories</span><a href="/shop.html" data-en="View all" data-hi="सभी देखें">View all</a></div>
       <div class="m-prod-cats">
         <div class="m-pcat"><div class="m-pcat-icon">❄️</div><div class="m-pcat-name" data-en="AC" data-hi="AC">AC</div></div>
         <div class="m-pcat"><div class="m-pcat-icon">🫧</div><div class="m-pcat-name" data-en="Water Purifier" data-hi="वॉटर प्यूरीफायर">Water Purifier</div></div>
@@ -3861,7 +3872,7 @@ window.RemontMedia = (function () {
 
     <!-- Top Selling Products grid -->
     <div class="m-section">
-      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a data-en="View all" data-hi="सभी देखें">View all</a></div>
+      <div class="m-sec-hd"><span data-en="Top Selling Products" data-hi="टॉप सेलिंग प्रोडक्ट्स">Top Selling Products</span><a href="/shop.html" data-en="View all" data-hi="सभी देखें">View all</a></div>
     </div>
     <div class="m-prod-grid" id="m-prod-grid"></div>
 
@@ -3887,7 +3898,7 @@ window.RemontMedia = (function () {
   <!-- ══ AMC TAB ══ -->
   <div id="mtp-amc" style="display:none">
     <div class="m-section">
-      <div class="m-sec-hd"><span>AMC Plans for Your Home</span><a>View all</a></div>
+      <div class="m-sec-hd"><span>AMC Plans for Your Home</span></div>
     </div>
     <div class="m-amc-grid">
       <div class="m-amc-card">
@@ -4064,7 +4075,7 @@ window.RemontMedia = (function () {
       <a href="#" class="bc-channel"><span class="icn">📱</span> <span data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</span></a>
       <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
       <a href="#" class="bc-channel"><span class="icn">🤖</span> <span data-en="AI Chat" data-hi="AI चैट">AI Chat</span></a>
-      <a href="tel:+919876543210" class="bc-channel"><span class="icn">📞</span> <span data-en="Call Us" data-hi="कॉल करें">Call Us</span></a>
+      <a href="tel:+919232071064" class="bc-channel"><span class="icn">📞</span> <span data-en="Call Us" data-hi="कॉल करें">Call Us</span></a>
       <a href="#" class="bc-channel"><span class="icn">🎙️</span> <span data-en="Voice (Alexa)" data-hi="वॉइस (Alexa)">Voice (Alexa)</span></a>
     </div>
   </div>
@@ -4631,7 +4642,7 @@ window.RemontMedia = (function () {
       <div class="premium-card interior reveal">
         <div class="premium-card-img" data-carousel>
           <div class="pci-track">
-            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=800&q=85')"></div>
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=800&q=85&auto=format')"></div>
           </div>
           <span class="premium-card-tag" data-en="Interior" data-hi="इंटीरियर">Interior</span>
           <span class="premium-availability">Available in your city</span>
@@ -4659,7 +4670,7 @@ window.RemontMedia = (function () {
       <div class="premium-card renovation reveal reveal-d2">
         <div class="premium-card-img" data-carousel>
           <div class="pci-track">
-            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=85')"></div>
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&q=85&auto=format')"></div>
           </div>
           <span class="premium-card-tag" data-en="Renovation" data-hi="रेनोवेशन">Renovation</span>
           <span class="premium-availability">Available in your city</span>
@@ -4686,7 +4697,7 @@ window.RemontMedia = (function () {
       <div class="premium-card construction reveal reveal-d3">
         <div class="premium-card-img" data-carousel>
           <div class="pci-track">
-            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800&q=85')"></div>
+            <div class="pci-slide" style="background-image:url('https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800&q=85&auto=format')"></div>
           </div>
           <span class="premium-card-tag" data-en="Construction" data-hi="कंस्ट्रक्शन">Construction</span>
           <span class="premium-availability">Available in your city</span>
@@ -4886,17 +4897,17 @@ window.RemontMedia = (function () {
       <div class="est-right">
         <div class="est-form-row">
           <div class="est-field">
-            <label data-en="Service Category" data-hi="सर्विस कैटेगरी">Service Category</label>
+            <label for="est-service" data-en="Service Category" data-hi="सर्विस कैटेगरी">Service Category</label>
             <select id="est-service"><option>Loading services…</option></select>
           </div>
           <div class="est-field">
-            <label data-en="City" data-hi="शहर">City</label>
+            <label for="est-city" data-en="City" data-hi="शहर">City</label>
             <select id="est-city"><option>Loading…</option></select>
           </div>
         </div>
         <div class="est-form-row">
           <div class="est-field">
-            <label data-en="Area (sq ft)" data-hi="क्षेत्रफल (वर्ग फीट)">Area (sq ft)</label>
+            <label for="est-sqft" data-en="Area (sq ft)" data-hi="क्षेत्रफल (वर्ग फीट)">Area (sq ft)</label>
             <input type="number" id="est-sqft" value="120" min="1" />
           </div>
           <div class="est-field" id="est-modifier-field" style="display:none">
@@ -5536,12 +5547,12 @@ window.RemontMedia = (function () {
           <div class="phone-sec-title"><span data-en="Hot Deals" data-hi="बेहतरीन डील्स">Hot Deals</span> <span data-en="See all" data-hi="सभी देखें">See all</span></div>
           <div class="phone-prods">
             <div class="phone-prod">
-              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1620626011761-996317b8d101?w=200&q=80');"></div>
+              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1620626011761-996317b8d101?w=200&q=80&auto=format');"></div>
               <div class="phone-prod-name">Mixer Tap</div>
               <div class="phone-prod-price">₹2,499</div>
             </div>
             <div class="phone-prod">
-              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&q=80');"></div>
+              <div class="phone-prod-img" style="background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&q=80&auto=format');"></div>
               <div class="phone-prod-name">LED Light</div>
               <div class="phone-prod-price">₹1,799</div>
             </div>
@@ -5588,11 +5599,11 @@ window.RemontMedia = (function () {
         <div class="trust-badge" data-en="📜 GST Compliant" data-hi="📜 GST कम्प्लायंट">📜 GST Compliant</div>
       </div>
       <div class="footer-social">
-        <a href="#" class="social-btn" data-setting="social-linkedin" target="_blank" rel="noopener">in</a>
-        <a href="#" class="social-btn" data-setting="social-instagram" target="_blank" rel="noopener">ig</a>
-        <a href="#" class="social-btn" data-setting="social-twitter" target="_blank" rel="noopener">𝕏</a>
-        <a href="#" class="social-btn" data-setting="social-youtube" target="_blank" rel="noopener">▶</a>
-        <a href="#" class="social-btn" data-setting="social-facebook" target="_blank" rel="noopener">f</a>
+        <a href="#" class="social-btn" data-setting="social-linkedin" target="_blank" rel="noopener" aria-label="Remont India on LinkedIn">in</a>
+        <a href="#" class="social-btn" data-setting="social-instagram" target="_blank" rel="noopener" aria-label="Remont India on Instagram">ig</a>
+        <a href="#" class="social-btn" data-setting="social-twitter" target="_blank" rel="noopener" aria-label="Remont India on X">𝕏</a>
+        <a href="#" class="social-btn" data-setting="social-youtube" target="_blank" rel="noopener" aria-label="Remont India on YouTube">▶</a>
+        <a href="#" class="social-btn" data-setting="social-facebook" target="_blank" rel="noopener" aria-label="Remont India on Facebook">f</a>
       </div>
     </div>
     <div class="footer-col">
@@ -5621,7 +5632,7 @@ window.RemontMedia = (function () {
       <div class="footer-links">
         <a href="#" data-en="AI Chat Booking" data-hi="AI चैट बुकिंग">AI Chat Booking</a>
         <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="whatsapp-link" data-en="WhatsApp Bot" data-hi="WhatsApp बॉट">WhatsApp Bot</a>
-        <a href="tel:+919876543210" data-setting="mobile-phone-link" data-en="Call Center" data-hi="कॉल सेंटर">Call Center</a>
+        <a href="tel:+919232071064" data-setting="mobile-phone-link" data-en="Call Center" data-hi="कॉल सेंटर">Call Center</a>
         <a href="#" data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</a>
         <a href="#" data-en="Voice (Alexa)" data-hi="वॉइस (Alexa)">Voice (Alexa)</a>
       </div>
@@ -5642,7 +5653,7 @@ window.RemontMedia = (function () {
     <div style="max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
       <div>
         <div style="color:#fff;font-weight:700;font-size:15px;margin-bottom:4px" data-en="📬 Get offers, tips & updates" data-hi="📬 ऑफर, टिप्स और अपडेट पाएं">📬 Get offers, tips & updates</div>
-        <div style="font-size:13px" data-en="Join 50,000+ happy homeowners. No spam, unsubscribe anytime." data-hi="50,000+ संतुष्ट घर मालिकों से जुड़ें। कोई स्पैम नहीं, कभी भी अनसब्सक्राइब करें।">Join 50,000+ happy homeowners. No spam, unsubscribe anytime.</div>
+        <div class="nl-sub" style="font-size:13px" data-en="Join 50,000+ happy homeowners. No spam, unsubscribe anytime." data-hi="50,000+ संतुष्ट घर मालिकों से जुड़ें। कोई स्पैम नहीं, कभी भी अनसब्सक्राइब करें।">Join 50,000+ happy homeowners. No spam, unsubscribe anytime.</div>
       </div>
       <div id="newsletter-form" style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="nl-email" type="email" placeholder="Enter your email" data-en-ph="Enter your email" data-hi-ph="अपना ईमेल दर्ज करें" style="padding:10px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;width:240px;outline:none" />
@@ -5656,7 +5667,7 @@ window.RemontMedia = (function () {
     <div data-legal-footer>
       <a href="/privacy" data-en="Privacy" data-hi="प्राइवेसी">Privacy</a>
       <a href="/terms" data-en="Terms" data-hi="नियम व शर्तें">Terms</a>
-      <a href="#" data-en="Sitemap" data-hi="साइटमैप">Sitemap</a>
+      <a href="/sitemap.xml" data-en="Sitemap" data-hi="साइटमैप">Sitemap</a>
       <a href="/refund-policy" data-en="Refund Policy" data-hi="रिफंड नीति">Refund Policy</a>
       <a href="/shipping-policy" data-en="Shipping Policy" data-hi="शिपिंग नीति">Shipping Policy</a>
     </div>
@@ -6033,10 +6044,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Products",
       productPillText: "Up to 40% off",
       products: [
-        { id: "prod-ac-1", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "Daikin", name: "1.5 Ton 5-Star Split AC Inverter", rating: "4.5", count: "2,341", price: "34,990", was: "44,990", off: "22%", badge: "Bestseller" },
-        { id: "prod-ac-2", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "V-Guard", name: "AC Voltage Stabilizer 4kVA", rating: "4.6", count: "1,890", price: "2,799", was: "3,999", off: "30%" },
-        { id: "prod-ac-3", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80", brand: "Honeywell", name: "Smart WiFi AC Remote Control", rating: "4.3", count: "540", price: "1,499", was: "2,499", off: "40%" },
-        { id: "prod-ac-4", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80", brand: "LG", name: "AC Air Filter Pack of 2", rating: "4.4", count: "1,120", price: "899", was: "1,299", off: "31%", badge: "New", badgeGreen: true }
+        { id: "prod-ac-1", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80&auto=format", brand: "Daikin", name: "1.5 Ton 5-Star Split AC Inverter", rating: "4.5", count: "2,341", price: "34,990", was: "44,990", off: "22%", badge: "Bestseller" },
+        { id: "prod-ac-2", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80&auto=format", brand: "V-Guard", name: "AC Voltage Stabilizer 4kVA", rating: "4.6", count: "1,890", price: "2,799", was: "3,999", off: "30%" },
+        { id: "prod-ac-3", img: "https://images.unsplash.com/photo-1581275288578-bbcfe9d24b8d?w=300&q=80&auto=format", brand: "Honeywell", name: "Smart WiFi AC Remote Control", rating: "4.3", count: "540", price: "1,499", was: "2,499", off: "40%" },
+        { id: "prod-ac-4", img: "https://images.unsplash.com/photo-1631545806609-c66c66e91f9b?w=300&q=80&auto=format", brand: "LG", name: "AC Air Filter Pack of 2", rating: "4.4", count: "1,120", price: "899", was: "1,299", off: "31%", badge: "New", badgeGreen: true }
       ]
     },
     plumbing: {
@@ -6051,10 +6062,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Plumbing Products",
       productPillText: "Brand offers",
       products: [
-        { id: "prod-plumb-1", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Jaquar", name: "Premium Single-Lever Mixer Tap", rating: "4.7", count: "3,210", price: "2,499", was: "3,999", off: "37%", badge: "Bestseller" },
-        { id: "prod-plumb-2", img: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&q=80", brand: "Kohler", name: "Wall-Mounted Toilet Seat — White", rating: "4.6", count: "1,540", price: "8,999", was: "12,500", off: "28%" },
-        { id: "prod-plumb-3", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Kajaria", name: "Marble-Finish Floor Tile (sqft)", rating: "4.5", count: "890", price: "89", was: "140", off: "36%" },
-        { id: "prod-plumb-4", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80", brand: "Hindware", name: "Bathroom Accessories Set (5 pcs)", rating: "4.4", count: "720", price: "1,899", was: "2,999", off: "37%", badge: "Combo", badgeGreen: true }
+        { id: "prod-plumb-1", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80&auto=format", brand: "Jaquar", name: "Premium Single-Lever Mixer Tap", rating: "4.7", count: "3,210", price: "2,499", was: "3,999", off: "37%", badge: "Bestseller" },
+        { id: "prod-plumb-2", img: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&q=80&auto=format", brand: "Kohler", name: "Wall-Mounted Toilet Seat — White", rating: "4.6", count: "1,540", price: "8,999", was: "12,500", off: "28%" },
+        { id: "prod-plumb-3", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80&auto=format", brand: "Kajaria", name: "Marble-Finish Floor Tile (sqft)", rating: "4.5", count: "890", price: "89", was: "140", off: "36%" },
+        { id: "prod-plumb-4", img: "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=300&q=80&auto=format", brand: "Hindware", name: "Bathroom Accessories Set (5 pcs)", rating: "4.4", count: "720", price: "1,899", was: "2,999", off: "37%", badge: "Combo", badgeGreen: true }
       ]
     },
     electrical: {
@@ -6069,10 +6080,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Electrical Products",
       productPillText: "Best price",
       products: [
-        { id: "prod-elec-1", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Philips", name: "Smart LED Ceiling Light 18W", rating: "4.6", count: "3,820", price: "1,299", was: "1,899", off: "32%", badge: "Bestseller" },
-        { id: "prod-elec-2", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Anchor", name: "Modular Switch & Socket Set", rating: "4.5", count: "2,140", price: "899", was: "1,499", off: "40%" },
-        { id: "prod-elec-3", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80", brand: "Wipro", name: "Smart WiFi Ceiling Fan with Light", rating: "4.4", count: "1,540", price: "5,499", was: "7,999", off: "31%" },
-        { id: "prod-elec-4", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80", brand: "Havells", name: "MCB Distribution Box 8-way", rating: "4.5", count: "890", price: "1,499", was: "2,299", off: "35%", badge: "New", badgeGreen: true }
+        { id: "prod-elec-1", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80&auto=format", brand: "Philips", name: "Smart LED Ceiling Light 18W", rating: "4.6", count: "3,820", price: "1,299", was: "1,899", off: "32%", badge: "Bestseller" },
+        { id: "prod-elec-2", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80&auto=format", brand: "Anchor", name: "Modular Switch & Socket Set", rating: "4.5", count: "2,140", price: "899", was: "1,499", off: "40%" },
+        { id: "prod-elec-3", img: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&q=80&auto=format", brand: "Wipro", name: "Smart WiFi Ceiling Fan with Light", rating: "4.4", count: "1,540", price: "5,499", was: "7,999", off: "31%" },
+        { id: "prod-elec-4", img: "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=300&q=80&auto=format", brand: "Havells", name: "MCB Distribution Box 8-way", rating: "4.5", count: "890", price: "1,499", was: "2,299", off: "35%", badge: "New", badgeGreen: true }
       ]
     },
     appliance: {
@@ -6087,10 +6098,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Appliances",
       productPillText: "EMI available",
       products: [
-        { id: "prod-appl-1", img: "https://images.unsplash.com/photo-1610792516775-01de03eae630?w=300&q=80", brand: "Samsung", name: "55\" 4K Smart UHD TV", rating: "4.6", count: "4,310", price: "44,990", was: "62,990", off: "29%", badge: "Bestseller" },
-        { id: "prod-appl-2", img: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=300&q=80", brand: "LG", name: "260L Double Door Refrigerator", rating: "4.5", count: "2,140", price: "26,990", was: "34,990", off: "23%" },
-        { id: "prod-appl-3", img: "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?w=300&q=80", brand: "Bosch", name: "7kg Front Load Washing Machine", rating: "4.7", count: "1,820", price: "32,499", was: "42,999", off: "24%" },
-        { id: "prod-appl-4", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "IFB", name: "25L Convection Microwave Oven", rating: "4.4", count: "1,540", price: "12,499", was: "16,999", off: "26%", badge: "New", badgeGreen: true }
+        { id: "prod-appl-1", img: "https://images.unsplash.com/photo-1610792516775-01de03eae630?w=300&q=80&auto=format", brand: "Samsung", name: "55\" 4K Smart UHD TV", rating: "4.6", count: "4,310", price: "44,990", was: "62,990", off: "29%", badge: "Bestseller" },
+        { id: "prod-appl-2", img: "https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?w=300&q=80&auto=format", brand: "LG", name: "260L Double Door Refrigerator", rating: "4.5", count: "2,140", price: "26,990", was: "34,990", off: "23%" },
+        { id: "prod-appl-3", img: "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?w=300&q=80&auto=format", brand: "Bosch", name: "7kg Front Load Washing Machine", rating: "4.7", count: "1,820", price: "32,499", was: "42,999", off: "24%" },
+        { id: "prod-appl-4", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80&auto=format", brand: "IFB", name: "25L Convection Microwave Oven", rating: "4.4", count: "1,540", price: "12,499", was: "16,999", off: "26%", badge: "New", badgeGreen: true }
       ]
     },
     interior: {
@@ -6105,10 +6116,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Interior Products",
       productPillText: "Premium quality",
       products: [
-        { id: "prod-int-1", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Remont", name: "Premium Modular Wardrobe — 4 Door", rating: "4.7", count: "1,820", price: "38,990", was: "54,000", off: "28%", badge: "Bestseller" },
-        { id: "prod-int-2", img: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=300&q=80", brand: "Wakefit", name: "Queen Bed with Hydraulic Storage", rating: "4.6", count: "2,140", price: "24,999", was: "34,999", off: "29%" },
-        { id: "prod-int-3", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80", brand: "Urban Ladder", name: "Engineered Wood TV Console", rating: "4.5", count: "1,540", price: "18,499", was: "26,999", off: "31%" },
-        { id: "prod-int-4", img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&q=80", brand: "Pepperfry", name: "Recliner Lounge Chair Leatherette", rating: "4.4", count: "890", price: "21,499", was: "29,999", off: "28%", badge: "New", badgeGreen: true }
+        { id: "prod-int-1", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80&auto=format", brand: "Remont", name: "Premium Modular Wardrobe — 4 Door", rating: "4.7", count: "1,820", price: "38,990", was: "54,000", off: "28%", badge: "Bestseller" },
+        { id: "prod-int-2", img: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=300&q=80&auto=format", brand: "Wakefit", name: "Queen Bed with Hydraulic Storage", rating: "4.6", count: "2,140", price: "24,999", was: "34,999", off: "29%" },
+        { id: "prod-int-3", img: "https://images.unsplash.com/photo-1631889993959-41b4e9c6e3c5?w=300&q=80&auto=format", brand: "Urban Ladder", name: "Engineered Wood TV Console", rating: "4.5", count: "1,540", price: "18,499", was: "26,999", off: "31%" },
+        { id: "prod-int-4", img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&q=80&auto=format", brand: "Pepperfry", name: "Recliner Lounge Chair Leatherette", rating: "4.4", count: "890", price: "21,499", was: "29,999", off: "28%", badge: "New", badgeGreen: true }
       ]
     },
     renovation: {
@@ -6123,10 +6134,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Renovation Products",
       productPillText: "Save big",
       products: [
-        { id: "prod-reno-1", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Faber", name: "Auto-Clean Kitchen Chimney 90cm", rating: "4.6", count: "2,890", price: "14,999", was: "22,000", off: "32%", badge: "Bestseller" },
-        { id: "prod-reno-2", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Carysil", name: "Stainless Steel Kitchen Sink", rating: "4.5", count: "1,210", price: "6,499", was: "9,999", off: "35%" },
-        { id: "prod-reno-3", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80", brand: "Glen", name: "4-Burner Glass Hob Auto Ignition", rating: "4.4", count: "1,540", price: "9,499", was: "13,990", off: "32%" },
-        { id: "prod-reno-4", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80", brand: "Sleek", name: "Soft-Close Modular Cabinet Set", rating: "4.7", count: "890", price: "32,990", was: "48,000", off: "31%", badge: "New", badgeGreen: true }
+        { id: "prod-reno-1", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80&auto=format", brand: "Faber", name: "Auto-Clean Kitchen Chimney 90cm", rating: "4.6", count: "2,890", price: "14,999", was: "22,000", off: "32%", badge: "Bestseller" },
+        { id: "prod-reno-2", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80&auto=format", brand: "Carysil", name: "Stainless Steel Kitchen Sink", rating: "4.5", count: "1,210", price: "6,499", was: "9,999", off: "35%" },
+        { id: "prod-reno-3", img: "https://images.unsplash.com/photo-1574269910231-bc508bcb40b6?w=300&q=80&auto=format", brand: "Glen", name: "4-Burner Glass Hob Auto Ignition", rating: "4.4", count: "1,540", price: "9,499", was: "13,990", off: "32%" },
+        { id: "prod-reno-4", img: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&q=80&auto=format", brand: "Sleek", name: "Soft-Close Modular Cabinet Set", rating: "4.7", count: "890", price: "32,990", was: "48,000", off: "31%", badge: "New", badgeGreen: true }
       ]
     },
     construction: {
@@ -6141,10 +6152,10 @@ window.RemontMedia = (function () {
       productTitle: "Construction Materials",
       productPillText: "Bulk rates",
       products: [
-        { id: "prod-const-1", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "UltraTech", name: "PPC Cement 50kg Bag", rating: "4.7", count: "3,400", price: "385", was: "450", off: "14%", badge: "Bulk" },
-        { id: "prod-const-2", img: "https://images.unsplash.com/photo-1581094488379-6c2d96a45e1d?w=300&q=80", brand: "TATA TISCON", name: "TMT Steel Bar Fe-500 (per tonne)", rating: "4.6", count: "1,890", price: "62,990", was: "68,000", off: "7%" },
-        { id: "prod-const-3", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80", brand: "JK Lakshmi", name: "Wall Putty 40kg Bag", rating: "4.5", count: "1,240", price: "1,099", was: "1,350", off: "19%" },
-        { id: "prod-const-4", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80", brand: "Asian Paints", name: "Primer 20L Bucket", rating: "4.4", count: "890", price: "3,499", was: "4,500", off: "22%", badge: "New", badgeGreen: true }
+        { id: "prod-const-1", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80&auto=format", brand: "UltraTech", name: "PPC Cement 50kg Bag", rating: "4.7", count: "3,400", price: "385", was: "450", off: "14%", badge: "Bulk" },
+        { id: "prod-const-2", img: "https://images.unsplash.com/photo-1581094488379-6c2d96a45e1d?w=300&q=80&auto=format", brand: "TATA TISCON", name: "TMT Steel Bar Fe-500 (per tonne)", rating: "4.6", count: "1,890", price: "62,990", was: "68,000", off: "7%" },
+        { id: "prod-const-3", img: "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=300&q=80&auto=format", brand: "JK Lakshmi", name: "Wall Putty 40kg Bag", rating: "4.5", count: "1,240", price: "1,099", was: "1,350", off: "19%" },
+        { id: "prod-const-4", img: "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=300&q=80&auto=format", brand: "Asian Paints", name: "Primer 20L Bucket", rating: "4.4", count: "890", price: "3,499", was: "4,500", off: "22%", badge: "New", badgeGreen: true }
       ]
     },
     cleaning: {
@@ -6159,10 +6170,10 @@ window.RemontMedia = (function () {
       productTitle: "Related Cleaning Products",
       productPillText: "Stock up",
       products: [
-        { id: "prod-clean-1", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Dyson", name: "V11 Cordless Stick Vacuum Cleaner", rating: "4.8", count: "1,290", price: "44,999", was: "54,990", off: "18%", badge: "Premium" },
-        { id: "prod-clean-2", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Eureka Forbes", name: "Robotic Floor Cleaner Smart", rating: "4.5", count: "890", price: "18,499", was: "24,999", off: "26%" },
-        { id: "prod-clean-3", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80", brand: "Lifebuoy", name: "Surface Cleaner Disinfectant 1.5L", rating: "4.4", count: "3,210", price: "299", was: "450", off: "33%" },
-        { id: "prod-clean-4", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80", brand: "Scotch-Brite", name: "Premium Microfiber Mop Bucket Set", rating: "4.5", count: "2,140", price: "1,499", was: "2,299", off: "35%", badge: "Combo", badgeGreen: true }
+        { id: "prod-clean-1", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80&auto=format", brand: "Dyson", name: "V11 Cordless Stick Vacuum Cleaner", rating: "4.8", count: "1,290", price: "44,999", was: "54,990", off: "18%", badge: "Premium" },
+        { id: "prod-clean-2", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80&auto=format", brand: "Eureka Forbes", name: "Robotic Floor Cleaner Smart", rating: "4.5", count: "890", price: "18,499", was: "24,999", off: "26%" },
+        { id: "prod-clean-3", img: "https://images.unsplash.com/photo-1583947581924-860bda3fb1e1?w=300&q=80&auto=format", brand: "Lifebuoy", name: "Surface Cleaner Disinfectant 1.5L", rating: "4.4", count: "3,210", price: "299", was: "450", off: "33%" },
+        { id: "prod-clean-4", img: "https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&q=80&auto=format", brand: "Scotch-Brite", name: "Premium Microfiber Mop Bucket Set", rating: "4.5", count: "2,140", price: "1,499", was: "2,299", off: "35%", badge: "Combo", badgeGreen: true }
       ]
     }
   };
@@ -6218,8 +6229,9 @@ window.RemontMedia = (function () {
   function catIconHtml(cat) {
     var url = cat.logoUrl || cat.imageUrl;
     if (!url) return '<span>'+(cat.icon||'🔧')+'</span>';
-    url = String(url).replace(/"/g,'&quot;');
-    return '<img src="'+url+'" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\';">'+
+    // An icon is shown at about 40px: ask Cloudinary for a small variant, not the 1200px upload.
+    url = String(url).replace(/(res\.cloudinary\.com\/[^"]*\/upload\/[^"]*)\bw_1200\b/, '$1w_160').replace(/"/g,'&quot;');
+    return '<img src="'+url+'" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\';">'+
       '<span style="display:none">'+(cat.icon||'🔧')+'</span>';
   }
 
@@ -6643,6 +6655,21 @@ window.RemontMedia = (function () {
   });
 
   function toggleMenu() { document.getElementById('mobileNav').classList.toggle('open'); }
+  // Phone menu items: close the menu, then reuse the action the bottom bar / mobile home already has.
+  function mnGo(action) {
+    toggleMenu();
+    var shell = window.RemontShellAction;
+    if (action === 'chat') action = 'book';
+    if (action === 'amc') {
+      var t = document.querySelectorAll('#mobile-app .m-tab')[2];
+      if (t && window.switchMTab) { window.switchMTab('amc', t); t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      return;
+    }
+    if (action === 'track') { openTrackingModal(); return; }
+    if (action === 'partner') { if (window.openPartnerFlow) window.openPartnerFlow(); else window.location.href = '/partner-register.html'; return; }
+    if (shell) shell(action);
+    else if (action === 'book') openRemiChat();
+  }
 
   // ═══════════════════════════════════════════════════════════════════
   // SITE LANGUAGE TOGGLE (EN / हिंदी) — static UI text only.
@@ -8824,7 +8851,7 @@ window.RemontMedia = (function () {
       }
     }
     popup.innerHTML =
-      '<button class="pd-close" onclick="document.getElementById(\'prod-detail-popup\').style.display=\'none\'">×</button>' +
+      '<button type="button" class="pd-close" aria-label="Close" onclick="document.getElementById(\'prod-detail-popup\').style.display=\'none\'">×</button>' +
       '<h4>' + escHtml(name) + '</h4>' +
       (unit ? '<div class="pd-unit">Sold per: ' + escHtml(unit) + '</div>' : '') +
       (desc ? '<p>' + escHtml(desc) + '</p>' : '') +
@@ -9788,7 +9815,7 @@ window.RemontMedia = (function () {
 
   <!-- Header -->
   <div class="bm-header">
-   <button onclick="closeBookingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+   <button type="button" aria-label="Close booking form" onclick="closeBookingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
    <div style="font-size:13px;color:#c4601a;font-weight:700;margin-bottom:12px" id="bm-service">Book Service</div>
    <div class="bm-steps">
     <div class="bm-step active" id="bm-step-1"><div class="bm-step-dot">1</div><div class="bm-step-label">Details</div></div>
@@ -9935,7 +9962,7 @@ window.RemontMedia = (function () {
 <!-- ═══ ORDER TRACKING MODAL ═══ -->
 <div id="tracking-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto">
   <div style="background:#fff;border-radius:20px;max-width:460px;width:100%;padding:28px 24px;position:relative;margin:auto">
-    <button class="tap-target-fix" onclick="closeTrackingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
+    <button type="button" class="tap-target-fix" aria-label="Close order tracking" onclick="closeTrackingModal()" style="position:absolute;top:14px;right:16px;border:none;background:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1">×</button>
     <div style="font-size:22px;margin-bottom:4px">📦</div>
     <h3 style="font-size:19px;font-weight:700;color:#111;margin:0 0 4px">Track Your Order</h3>
     <p style="font-size:13px;color:#6b7280;margin:0 0 20px">Enter your order number and registered phone number.</p>
@@ -9999,7 +10026,7 @@ window.RemontMedia = (function () {
 <div id="svc-detail-overlay" onclick="if(event.target===this)closeSvcDetail()">
   <div id="svc-detail-modal" style="position:relative">
     <div class="sdm-handle"></div>
-    <button class="sdm-close" onclick="closeSvcDetail()">×</button>
+    <button type="button" class="sdm-close" aria-label="Close service details" onclick="closeSvcDetail()">×</button>
     <div id="svc-detail-content"></div>
   </div>
 </div>
@@ -10011,7 +10038,7 @@ window.RemontMedia = (function () {
       <div style="font-size:18px;font-weight:700;color:#111">Your Cart</div>
       <div style="font-size:12px;color:#6b7280;margin-top:2px" id="cartCount">0 items</div>
     </div>
-    <button onclick="closeCart()" style="background:none;border:none;cursor:pointer;padding:8px;border-radius:8px;color:#6b7280;font-size:22px;line-height:1">×</button>
+    <button type="button" aria-label="Close cart" onclick="closeCart()" style="background:none;border:none;cursor:pointer;padding:8px;border-radius:8px;color:#6b7280;font-size:22px;line-height:1">×</button>
   </div>
   <div id="cartItems" style="flex:1;overflow-y:auto;padding:16px 20px"></div>
   <div id="cartFooter" style="border-top:1px solid #f3f4f6;padding:16px 20px"></div>
@@ -14146,10 +14173,10 @@ window.closeCustPartner = function() {
   const defaults = {
     siteName: 'REMONT',
     siteTagline: 'INDIA',
-    supportPhone: '+91 98765 43210',
-    supportEmail: 'hello@remontindia.com',
+    supportPhone: '+91 92320 71064',
+    supportEmail: 'remont.care@remontindia.com',
     supportLabel: '24/7 AI Chat Support',
-    whatsappNumber: '+919876543210',
+    whatsappNumber: '+919232071064',
     whatsappMessage: 'Hi Remont, I want a quote',
   };
 
@@ -14247,11 +14274,10 @@ window.closeCustPartner = function() {
     };
     Object.keys(socialMap).forEach(function (key) {
       var url = socialMap[key];
-      if (url) {
-        document.querySelectorAll('[data-setting="' + key + '"]').forEach(function (el) {
-          el.href = url;
-        });
-      }
+      // A profile the CMS has no URL for is hidden rather than left as a link to "#".
+      document.querySelectorAll('[data-setting="' + key + '"]').forEach(function (el) {
+        if (url) { el.href = url; el.hidden = false; } else { el.hidden = true; }
+      });
     });
   }
 

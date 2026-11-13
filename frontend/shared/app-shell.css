@@ -142,7 +142,8 @@
   #remi-input { font-size: 16px !important; min-height: 44px; box-sizing: border-box; } /* below 16px, iOS zooms the page on focus */
 
   /* ── Installed app: no browser-style site navigation ── */
-  .as-standalone .mobile-nav, .as-standalone .hamburger, .as-standalone #hamburger, .as-standalone .mobile-menu-btn, .as-standalone footer { display: none !important; }
+  /* The menu stays: it now holds Offers, language and contact options that the bar does not. */
+  .as-standalone .hamburger, .as-standalone #hamburger, .as-standalone .mobile-menu-btn, .as-standalone footer { display: none !important; }
 }
 
 /* Desktop never shows the app's notices, but an update must still be offered there. */
@@ -154,4 +155,86 @@
   .as-notice.as-update .as-notice-actions { display: flex; gap: 8px; }
   .as-notice.as-update button { min-height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #fff; background: none; color: #fff; font-weight: 700; cursor: pointer; }
   .as-notice.as-update button.primary { background: #C2410C; border-color: #C2410C; }
+}
+
+/* ── Text contrast (WCAG AA 4.5:1): the old brand orange #C4601A is 4.17:1 on white. #C2410C
+ * (5.2:1) is the orange phones already use, so desktop and the static pages now match. ── */
+:root { --sienna: #C2410C; --sage: #5E6E52; --success: #3F6E3E; }
+.top-strip .strip-btn.whatsapp { background: #15803D; }
+.sub-svc-card .svc-incl { color: #3F6E3E; }
+.loc-btn-allow { background: #C2410C !important; }
+.promo-item .badge { background: #B4400C !important; color: #fff !important; }
+/* Links inside text must not rely on colour alone (WCAG 1.4.1). */
+nav.crumbs a { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Keyboard focus is always visible (WCAG 2.4.7). Older page rules set outline:none on many
+ * controls, so this wins over them; :focus-visible keeps it off for mouse and touch taps. ── */
+:focus-visible { outline: 3px solid #1D4ED8 !important; outline-offset: 2px !important; }
+footer :focus-visible, header.site :focus-visible, .top-strip :focus-visible, .as-notice :focus-visible,
+#premium :focus-visible, #dispatch :focus-visible, #corporate :focus-visible { outline-color: #93C5FD !important; }
+.as-nav :focus-visible { outline-offset: -3px !important; }
+
+@media (max-width: 768px) {
+  /* ── Bottom bar: Call · WhatsApp · Book Now · Categories · Account ── */
+  .as-call svg { color: #1D4ED8; }
+  .as-wa svg { color: #15803D; }
+  .as-book span { white-space: nowrap; font-size: 11px; letter-spacing: -.1px; }
+
+  /* ── Phone menu (everything from the desktop top strip) ── */
+  .mobile-nav { padding-top: 64px; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+  .mn-close {
+    position: absolute; top: max(10px, env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px;
+    border: 0; border-radius: 50%; background: #F2F4F7; color: #0F172A; font-size: 26px; line-height: 1; cursor: pointer;
+  }
+  .mobile-nav .grp a { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 2px 0; }
+  .mn-lang { display: flex; flex-wrap: wrap; gap: 8px; }
+  .mn-lang .grp-title { flex-basis: 100%; margin-bottom: 4px; }
+  .mn-lang-btn { min-height: 44px; padding: 0 20px; border: 1.5px solid #E6E8EC; border-radius: 999px; background: #fff; color: #0F172A; font: 600 15px/1 var(--ff-body, system-ui, sans-serif); cursor: pointer; }
+
+  /* ── Booking form: a full-screen sheet; the form scrolls, Continue stays pinned at the bottom ── */
+  #booking-modal.bm-wrap { padding: 0; align-items: stretch; overflow: hidden; }
+  #booking-modal .bm-box { max-width: none; width: 100%; height: 100%; height: 100dvh; margin: 0; border-radius: 0; display: flex; flex-direction: column; }
+  #booking-modal .bm-header { flex: none; padding: max(14px, env(safe-area-inset-top)) 16px 12px; }
+  #booking-modal .bm-header > button:first-child { width: 44px; height: 44px; top: max(6px, env(safe-area-inset-top)) !important; right: 6px !important; }
+  #booking-modal .bm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 16px; }
+  #booking-modal .bm-footer { flex: none; position: sticky; bottom: 0; background: #fff; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 12px rgba(15, 23, 42, .06); }
+  #booking-modal .bm-next, #booking-modal .bm-back { min-height: 48px; }
+  #booking-modal .bm-step-label { font-size: 12px; }
+  #booking-modal .bm-lbl { font-size: 12px; }
+  #booking-modal label { font-size: 15px; }
+
+  /* ── Form fields: 44px tall, and 16px text so iOS does not zoom on focus ── */
+  input:not([type=radio]):not([type=checkbox]):not([type=range]):not([type=hidden]), select, textarea { min-height: 44px; font-size: 16px !important; box-sizing: border-box; }
+  form button, .pl-submit, #newsletter-form button { min-height: 44px; }
+
+  /* ── Tap targets (min 44 × 44) on the home page ── */
+  .header-right .icon-btn, .header-right .menu-icon { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  .header-right .menu-icon { flex-direction: column; }
+  .header-search .ai-mic-btn, .header-search .search-btn-icon { width: 44px; height: 44px; flex: none; }
+  .m-loc-change { min-height: 44px; padding: 0 6px; }
+  .m-tab { min-height: 44px; }
+  .m-sec-hd a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; cursor: pointer; }
+  .m-promo-btn, .m-prod-cart-btn, .m-prod-promo-btn, .m-amc-help-btn { min-height: 44px; }
+  .dc-add { width: 44px !important; height: 44px !important; }
+  .footer-social .social-btn { width: 44px; height: 44px; }
+  .footer-links a { display: inline-flex; align-items: center; min-height: 44px; }
+  .footer-bottom [data-legal-footer] a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 2px; }
+  .cm-close { width: 44px !important; height: 44px !important; flex: none; }
+  #loc-banner .loc-actions button { min-height: 44px; }
+  #loc-banner .loc-btn-dismiss { min-width: 44px; }
+
+  /* ── Body text: at least 16px on phones ── */
+  .footer-desc, #loc-banner .loc-text, .city-modal .cm-head p { font-size: 16px; }
+  .nl-sub { font-size: 16px !important; } /* overrides its inline 13px */
+
+  /* ── Static service / city / info pages (shared inline styles) ── */
+  header.site .brand { display: inline-flex; align-items: center; min-height: 44px; }
+  header.site .btn, .cta-row .btn { min-height: 44px; }
+  nav.crumbs a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
+  /* Category / city chips: one row that scrolls sideways instead of wrapping into a tall block */
+  .chips { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; scroll-snap-type: x proximity; padding-bottom: 4px; margin-right: -20px; padding-right: 20px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; white-space: nowrap; display: inline-flex; align-items: center; padding: 0 14px; scroll-snap-align: start; }
+  .chip a { display: inline-flex; align-items: center; min-height: 44px; }
+  .faq-item p, footer.site { font-size: 16px; }
 }

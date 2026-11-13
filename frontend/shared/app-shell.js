@@ -23,8 +23,23 @@
     return null;
   }
 
-  // ─── Bottom navigation (Home, Categories, raised Book, Offers, Account: same as the app) ───
+  // ─── Bottom navigation: Call, WhatsApp, raised Book Now, Categories, Account ───
+  // Call and WhatsApp are the two fastest ways to book from a phone, so they sit in the bar.
+  // Home is the header logo; Offers is in the menu (and still opens from /?open=offers).
+  // Fallbacks are the CMS support_phone / whatsapp_number; a page's own links win (the home
+  // page rewrites them from CMS settings, service pages carry a service-specific message).
+  var SUPPORT_TEL = '+919232071064';
+  var SUPPORT_WA = 'https://wa.me/919232071064?text=' + encodeURIComponent('Hi Remont, I want to book a service');
+  function pageLink(selectors, fallback) {
+    for (var i = 0; i < selectors.length; i++) {
+      var a = document.querySelector(selectors[i]);
+      if (a && a.getAttribute('href')) return a.getAttribute('href');
+    }
+    return fallback;
+  }
   var ICONS = {
+    call: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+    whatsapp: '<path d="M3 21l1.7-5A8.5 8.5 0 1 1 8 19.3z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1.2-1.4-1.9-1-1 .8a4 4 0 0 1-2.2-2.2l.8-1-1-1.9z"/>',
     home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
     categories: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
     offers: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.4"/>',
@@ -49,6 +64,7 @@
   function runAction(name) {
     if (ACTIONS[name]) ACTIONS[name]();
   }
+  window.RemontShellAction = runAction; // used by the home page's phone menu
   function tab(action, label, iconName) {
     var href = action === 'home' ? '/' : '/?open=' + action;
     return '<a class="as-tab" href="' + href + '" data-action="' + action + '">' + icon(iconName) + '<span>' + label + '</span></a>';
@@ -57,9 +73,20 @@
     var nav = document.createElement('nav');
     nav.className = 'as-nav';
     nav.setAttribute('aria-label', 'Main');
-    nav.innerHTML = tab('home', 'Home', 'home') + tab('categories', 'Categories', 'categories') +
-      '<a class="as-book" href="/?open=book" data-action="book" aria-label="Book a service">' + icon('plus') + '<span>Book</span></a>' +
-      tab('offers', 'Offers', 'offers') + tab('account', 'Account', 'account');
+    nav.innerHTML =
+      '<a class="as-tab as-call" href="tel:' + SUPPORT_TEL + '" aria-label="Call Remont to book">' + icon('call') + '<span>Call</span></a>' +
+      '<a class="as-tab as-wa" href="' + SUPPORT_WA + '" target="_blank" rel="noopener" aria-label="Book on WhatsApp">' + icon('whatsapp') + '<span>WhatsApp</span></a>' +
+      '<a class="as-book" href="/?open=book" data-action="book" aria-label="Book a service now">' + icon('plus') + '<span>Book Now</span></a>' +
+      tab('categories', 'Categories', 'categories') + tab('account', 'Account', 'account');
+    // Pick up the page's current numbers at tap time: CMS settings arrive after the nav is built.
+    var call = nav.querySelector('.as-call'), wa = nav.querySelector('.as-wa');
+    var syncContacts = function () {
+      call.setAttribute('href', pageLink(['[data-setting="mobile-phone-link"]', 'main a[href^="tel:"]', 'a[href^="tel:"]'], 'tel:' + SUPPORT_TEL));
+      wa.setAttribute('href', pageLink(['[data-setting="mobile-whatsapp-link"]', 'main a[href*="wa.me/"]', 'a[href*="wa.me/"]'], SUPPORT_WA));
+    };
+    syncContacts();
+    nav.addEventListener('pointerdown', syncContacts);
+    nav.addEventListener('focusin', syncContacts);
     nav.addEventListener('click', function (e) {
       var link = e.target.closest('[data-action]');
       if (!link || !isHomePage()) return;
@@ -159,6 +186,7 @@
     { el: 'quoteModal', close: 'closeQuotationModal', visible: function (el) { return el.classList.contains('open'); } },
     { el: 'premiumLeadModal', close: 'closePremiumLeadModal', visible: function (el) { return el.classList.contains('open'); } },
     { el: 'booking-success', close: 'closeBookingSuccess' },
+    { el: 'mobileNav', close: 'toggleMenu', visible: function (el) { return el.classList.contains('open'); } },
   ];
   // Some modals stay display:flex and fade in with opacity and pointer-events instead.
   function shown(el) {
