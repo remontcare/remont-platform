@@ -3640,6 +3640,7 @@ window.RemontMedia = (function () {
 <script src="/shared/cart-sync.js"></script>
 <script src="/shared/app-shell.js" defer></script>
 <script src="/shared/m-catalog.js" defer></script>
+<script src="/shared/remont-attribution.js" defer></script>
 </head>
 <body>
 
@@ -6850,7 +6851,7 @@ window.RemontMedia = (function () {
     fetch('/api/v1/crm/leads/capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         customerName: name,
         customerPhone: phone,
         cityName: city,
@@ -6858,7 +6859,7 @@ window.RemontMedia = (function () {
         serviceInterested: _premiumLeadLabel,
         estimatedValue: budgetValue ? Number(budgetValue) : undefined,
         notes: notesParts.join(' | '),
-      }),
+      }, window.RemontAttribution ? window.RemontAttribution.fields() : {})),
     }).then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
@@ -6985,7 +6986,7 @@ window.RemontMedia = (function () {
       return fetch('/api/v1/crm/leads/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(Object.assign({
           customerName: name,
           customerPhone: phone,
           cityName: city,
@@ -6993,7 +6994,7 @@ window.RemontMedia = (function () {
           serviceInterested: serviceInterested,
           notes: notesParts.join(' | '),
           photoUrl: photoUrl || undefined,
-        }),
+        }, window.RemontAttribution ? window.RemontAttribution.fields() : {})),
       });
     };
 
