@@ -219,6 +219,7 @@ footer :focus-visible, header.site :focus-visible, .top-strip :focus-visible, .a
   .footer-social .social-btn { width: 44px; height: 44px; }
   .footer-links a { display: inline-flex; align-items: center; min-height: 44px; }
   .footer-bottom [data-legal-footer] a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 2px; }
+  #ap-shop-all-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; box-sizing: border-box; }
   .cm-close { width: 44px !important; height: 44px !important; flex: none; }
   #loc-banner .loc-actions button { min-height: 44px; }
   #loc-banner .loc-btn-dismiss { min-width: 44px; }

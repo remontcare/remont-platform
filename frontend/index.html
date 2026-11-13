@@ -2644,6 +2644,7 @@
     flex-wrap: wrap; gap: 12px;
   }
   .footer-bottom > div { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+  .footer-bottom [data-legal-footer] a { display: inline-flex; align-items: center; min-height: 24px; }
 
   /* ─── SCROLL REVEAL ─── */
   .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
@@ -3747,9 +3748,9 @@ window.RemontMedia = (function () {
       <span class="label" id="currentCity">Mumbai</span>
       <span class="city-arrow">▼</span>
     </button>
-    <button class="icon-btn" onclick="openMyOrdersModal()">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      <span class="label" data-en="My Orders" data-hi="मेरे ऑर्डर">My Orders</span>
+    <button type="button" class="icon-btn" onclick="openMyOrdersModal()" aria-labelledby="hdr-my-orders-label">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span class="label" id="hdr-my-orders-label" data-en="My Orders" data-hi="मेरे ऑर्डर">My Orders</span>
     </button>
     <button class="icon-btn cart-btn" onclick="openCart()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
