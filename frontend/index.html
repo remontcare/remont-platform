@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Home & Office Services in Bhopal & Indore | Remont India</title>
-<meta name="description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
+<title>Home & Office Services in Bhopal & Vadodara | Remont India</title>
+<meta name="description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal and Vadodara. Get a free quote." />
 <link rel="preload" as="image" href="https://res.cloudinary.com/szokktkz/image/upload/c_limit,f_auto,q_auto,w_300/v1790686974/remont/services/f6af099f-909c-42ea-bf90-0e612657049c.webp" fetchpriority="high" media="(max-width: 768px)" />
 <link rel="preload" as="image" href="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&q=85&auto=format" fetchpriority="high" media="(min-width: 769px)" />
 <link rel="canonical" href="https://www.remontindia.com/" />
@@ -13,16 +13,16 @@
 <!-- Open Graph -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Remont India" />
-<meta property="og:title" content="Home & Office Services in Bhopal & Indore | Remont India" />
-<meta property="og:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
+<meta property="og:title" content="Home & Office Services in Bhopal & Vadodara | Remont India" />
+<meta property="og:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal and Vadodara. Get a free quote." />
 <meta property="og:url" content="https://www.remontindia.com/" />
 <meta property="og:locale" content="en_IN" />
 <meta property="og:locale:alternate" content="hi_IN" />
 
 <!-- Twitter Card (no summary_large_image — no real hero image exists yet, see SEO report) -->
 <meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Home & Office Services in Bhopal & Indore | Remont India" />
-<meta name="twitter:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal, Indore and Madhya Pradesh. Get a free quote." />
+<meta name="twitter:title" content="Home & Office Services in Bhopal & Vadodara | Remont India" />
+<meta name="twitter:description" content="Home repairs, interiors and construction, plus office fit-outs and facility maintenance in Bhopal and Vadodara. Get a free quote." />
 
 <!-- JSON-LD structured data — every value below is drawn from content already live on this
      page (title, description, FAQ text, service names, confirmed operating cities). No
@@ -50,13 +50,7 @@
       "description": "Book home services in 3 clicks. AI chat booking, instant vendor dispatch, transparent GST invoices. Handyman, AC, plumbing, electrical, construction, interior renovation. Corporate portal & AMC plans available.",
       "areaServed": [
         { "@type": "City", "name": "Bhopal" },
-        { "@type": "City", "name": "Indore" },
-        { "@type": "City", "name": "Jabalpur" },
-        { "@type": "City", "name": "Gwalior" },
-        { "@type": "City", "name": "Ujjain" },
-        { "@type": "City", "name": "Sagar" },
-        { "@type": "City", "name": "Satna" },
-        { "@type": "City", "name": "Rewa" }
+        { "@type": "City", "name": "Vadodara" }
       ],
       "address": {
         "@type": "PostalAddress",
@@ -394,6 +388,7 @@
   }
   .icon-btn:hover { color: var(--sienna); }
   .icon-btn .label { font-size: 10px; font-weight: 600; letter-spacing: 0.4px; margin-top: 2px; text-transform: uppercase; }
+  .icon-btn .badge:empty { display: none; }
   .icon-btn .badge {
     position: absolute;
     top: 0; right: 4px;
@@ -2467,6 +2462,8 @@
     flex-shrink: 0;
   }
   .app-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .app-store-btn.app-store-soon { cursor: default; opacity: .75; }
+  .app-store-btn.app-store-soon:hover { transform: none; }
   .app-store-btn {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 18px;
@@ -2622,6 +2619,8 @@
     color: rgba(255,255,255,0.7);
   }
   .footer-social { display: flex; gap: 8px; margin-top: 20px; }
+  /* The hidden attribute must win over the display set below (unset social profiles, Download App). */
+  .social-btn[hidden], .strip-btn[hidden] { display: none !important; }
   .social-btn {
     width: 34px; height: 34px;
     border-radius: 50%;
@@ -3708,14 +3707,14 @@ window.RemontMedia = (function () {
     <a href="#corporate" class="strip-btn" data-en="🏢 Corporate Login" data-hi="🏢 कॉर्पोरेट लॉगिन">🏢 Corporate Login</a>
     <span class="strip-divider"></span>
     <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="strip-btn whatsapp" data-setting="whatsapp-link" data-en="💬 WhatsApp Book" data-hi="💬 WhatsApp पर बुक करें">💬 WhatsApp Book</a>
-    <a href="#" class="strip-btn highlight" data-en="📱 Download App" data-hi="📱 ऐप डाउनलोड करें">📱 Download App</a>
+    <a href="#app-cta" class="strip-btn highlight" hidden data-en="📱 Download App" data-hi="📱 ऐप डाउनलोड करें">📱 Download App</a><!-- shown again once the app is in the stores -->
   </div>
 </div>
 
 <!-- ═══ MAIN HEADER ═══ -->
 <header id="header">
   <div class="logo">
-    <img id="header-logo-img" src="" alt="Remont India" style="display:none;height:36px;width:auto;object-fit:contain">
+    <img id="header-logo-img" alt="Remont India" style="display:none;height:36px;width:auto;object-fit:contain">
     <div class="logo-mark" id="header-logo-mark"></div>
     <div class="logo-text-wrap">
       <span class="logo-text" data-setting="site-name">REMONT</span>
@@ -4015,9 +4014,8 @@ window.RemontMedia = (function () {
         <button class="btn-ghost" data-en="Browse Services →" data-hi="सेवाएं देखें →">Browse Services →</button>
       </div>
       <div class="slide-trust">
-        <div>⭐ <strong>4.8/5</strong> · <span data-en="50K+ reviews" data-hi="50K+ रिव्यू">50K+ reviews</span></div>
         <div>🛡️ <strong>Verified</strong> <span data-en="vendors" data-hi="वेंडर">vendors</span></div>
-        <div>📍 <strong>32+</strong> <span data-en="cities" data-hi="शहर">cities</span></div>
+        <div>📍 <span data-en="Live in" data-hi="उपलब्ध:">Live in</span> <strong class="live-cities-text">Bhopal &amp; Vadodara</strong></div>
       </div>
     </div>
 
@@ -4072,12 +4070,11 @@ window.RemontMedia = (function () {
   <div class="bc-inner">
     <div class="bc-title" data-en="📡 Book via Any Channel" data-hi="📡 किसी भी चैनल से बुक करें">📡 Book via Any Channel</div>
     <div class="bc-channels">
-      <a href="#" class="bc-channel"><span class="icn">🌐</span> <span data-en="Website" data-hi="वेबसाइट">Website</span></a>
-      <a href="#" class="bc-channel"><span class="icn">📱</span> <span data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</span></a>
+      <a href="/services" class="bc-channel"><span class="icn">🌐</span> <span data-en="Website" data-hi="वेबसाइट">Website</span></a>
+      <a href="#app-cta" class="bc-channel"><span class="icn">📱</span> <span data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</span></a>
       <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" class="bc-channel whatsapp"><span class="icn">💬</span> WhatsApp</a>
-      <a href="#" class="bc-channel"><span class="icn">🤖</span> <span data-en="AI Chat" data-hi="AI चैट">AI Chat</span></a>
+      <a href="/?open=book" class="bc-channel" onclick="openRemiChat();return false"><span class="icn">🤖</span> <span data-en="AI Chat" data-hi="AI चैट">AI Chat</span></a>
       <a href="tel:+919232071064" class="bc-channel"><span class="icn">📞</span> <span data-en="Call Us" data-hi="कॉल करें">Call Us</span></a>
-      <a href="#" class="bc-channel"><span class="icn">🎙️</span> <span data-en="Voice (Alexa)" data-hi="वॉइस (Alexa)">Voice (Alexa)</span></a>
     </div>
   </div>
 </div>
@@ -4090,7 +4087,7 @@ window.RemontMedia = (function () {
         <div class="section-label" data-en="Services + Products" data-hi="सेवाएं + प्रोडक्ट्स">Services + Products</div>
         <h2 data-en="Pick a Service, &lt;strong&gt;Shop Related Products&lt;/strong&gt;" data-hi="सेवा चुनें, &lt;strong&gt;संबंधित प्रोडक्ट्स खरीदें&lt;/strong&gt;">Pick a Service, <strong>Shop Related Products</strong></h2>
       </div>
-      <a href="#" class="btn-outline" data-en="Browse All →" data-hi="सभी देखें →">Browse All →</a>
+      <a href="/services" class="btn-outline" data-en="Browse All →" data-hi="सभी देखें →">Browse All →</a>
     </div>
 
     <div class="shop-grid reveal">
@@ -4712,7 +4709,7 @@ window.RemontMedia = (function () {
           <ul class="premium-features">
             <li data-en="Architect-led design" data-hi="आर्किटेक्ट-लेड डिज़ाइन">Architect-led design</li>
             <li data-en="Vastu-compliant planning" data-hi="वास्तु-अनुकूल प्लानिंग">Vastu-compliant planning</li>
-            <li data-en="BBMP/local approvals support" data-hi="BBMP/लोकल अप्रूवल सपोर्ट">BBMP/local approvals support</li>
+            <li data-en="Municipal / local approvals support" data-hi="नगर निगम / लोकल अप्रूवल सपोर्ट">Municipal / local approvals support</li>
             <li data-en="Milestone-based payments" data-hi="माइलस्टोन-आधारित पेमेंट">Milestone-based payments</li>
           </ul>
           <div class="premium-meta">
@@ -4728,7 +4725,7 @@ window.RemontMedia = (function () {
         <h4 data-en="Not sure where to start?" data-hi="शुरुआत कहां से करें, समझ नहीं आ रहा?">Not sure where to start?</h4>
         <p data-en="Talk to our senior project consultant — 30-minute free consultation, no obligation." data-hi="हमारे सीनियर प्रोजेक्ट कंसल्टेंट से बात करें — 30-मिनट की फ्री कंसल्टेशन, कोई बाध्यता नहीं।">Talk to our senior project consultant — 30-minute free consultation, no obligation.</p>
       </div>
-      <a href="#" class="ps-btn" onclick="event.preventDefault();openPremiumLeadModal('Free Project Consultation')" data-en="Book Free Consultation →" data-hi="फ्री कंसल्टेशन बुक करें →">Book Free Consultation →</a>
+      <a href="/interior.html" class="ps-btn" onclick="event.preventDefault();openPremiumLeadModal('Free Project Consultation')" data-en="Book Free Consultation →" data-hi="फ्री कंसल्टेशन बुक करें →">Book Free Consultation →</a>
     </div>
   </div>
 </section>
@@ -4752,7 +4749,7 @@ window.RemontMedia = (function () {
         <div class="tc-step-num">02</div>
         <h4 data-en="Confirm Slot & Address" data-hi="स्लॉट और पता कन्फर्म करें">Confirm Slot & Address</h4>
         <p data-en="Auto-detected address. Pick a time slot. Optional photo upload for accuracy." data-hi="पता अपने आप डिटेक्ट होता है। टाइम स्लॉट चुनें। सटीकता के लिए फोटो अपलोड करना वैकल्पिक है।">Auto-detected address. Pick a time slot. Optional photo upload for accuracy.</p>
-        <div class="demo"><strong data-en="Auto-picked:" data-hi="अपने आप चुना गया:">Auto-picked:</strong>Today, 3-5 PM · Andheri W</div>
+        <div class="demo"><strong data-en="Auto-picked:" data-hi="अपने आप चुना गया:">Auto-picked:</strong>Today, 3-5 PM · MP Nagar, Bhopal</div>
       </div>
       <div class="tc-step reveal reveal-d3">
         <div class="tc-step-num">03</div>
@@ -4780,7 +4777,6 @@ window.RemontMedia = (function () {
     <span class="promo-dot"></span>
     <span class="promo-item" data-en="⚡ 60-Second Booking via WhatsApp" data-hi="⚡ WhatsApp से 60 सेकंड में बुकिंग">⚡ 60-Second Booking via WhatsApp</span>
     <span class="promo-dot"></span>
-    <span class="promo-item" data-en="🏢 Corporate Portal Now Live" data-hi="🏢 कॉर्पोरेट पोर्टल अब लाइव है">🏢 Corporate Portal Now Live</span>
     <span class="promo-dot"></span>
     <span class="promo-item" data-en="🎁 Refer & Earn ₹500 in Wallet" data-hi="🎁 रेफर करें और वॉलेट में ₹500 पाएं">🎁 Refer & Earn ₹500 in Wallet</span>
     <span class="promo-dot"></span>
@@ -4792,7 +4788,6 @@ window.RemontMedia = (function () {
     <span class="promo-dot"></span>
     <span class="promo-item" data-en="⚡ 60-Second Booking via WhatsApp" data-hi="⚡ WhatsApp से 60 सेकंड में बुकिंग">⚡ 60-Second Booking via WhatsApp</span>
     <span class="promo-dot"></span>
-    <span class="promo-item" data-en="🏢 Corporate Portal Now Live" data-hi="🏢 कॉर्पोरेट पोर्टल अब लाइव है">🏢 Corporate Portal Now Live</span>
     <span class="promo-dot"></span>
     <span class="promo-item" data-en="🎁 Refer & Earn ₹500 in Wallet" data-hi="🎁 रेफर करें और वॉलेट में ₹500 पाएं">🎁 Refer & Earn ₹500 in Wallet</span>
     <span class="promo-dot"></span>
@@ -5370,7 +5365,7 @@ window.RemontMedia = (function () {
     <div style="max-width:600px;" class="reveal">
       <div class="section-label" data-en="For Service Professionals" data-hi="सर्विस प्रोफेशनल्स के लिए">For Service Professionals</div>
       <h2 class="section-title" data-en="Earn With &lt;strong&gt;Remont India&lt;/strong&gt;" data-hi="&lt;strong&gt;Remont India&lt;/strong&gt; के साथ कमाएं">Earn With <strong>Remont India</strong></h2>
-      <p class="section-sub" data-en="Join 8,000+ verified service partners earning steady income with guaranteed leads, transparent payouts, and full app support." data-hi="8,000+ वेरिफाइड सर्विस पार्टनर्स से जुड़ें जो गारंटीड लीड्स, पारदर्शी पेआउट और पूरे ऐप सपोर्ट के साथ स्थिर कमाई कर रहे हैं।">Join 8,000+ verified service partners earning steady income with guaranteed leads, transparent payouts, and full app support.</p>
+      <p class="section-sub" data-en="Join Remont's verified service partners for steady work with leads near you, transparent payouts, and full app support." data-hi="Remont के वेरिफाइड सर्विस पार्टनर्स से जुड़ें — आपके पास के लीड्स, पारदर्शी पेआउट और पूरे ऐप सपोर्ट के साथ नियमित काम।">Join Remont's verified service partners for steady work with leads near you, transparent payouts, and full app support.</p>
     </div>
 
     <div class="vendor-card-grid">
@@ -5384,7 +5379,6 @@ window.RemontMedia = (function () {
           <div class="vf-item" data-en="In-app wallet & earnings dashboard" data-hi="इन-ऐप वॉलेट और कमाई डैशबोर्ड">In-app wallet & earnings dashboard</div>
           <div class="vf-item" data-en="VIP queue for top-rated pros" data-hi="टॉप-रेटेड प्रोफेशनल्स के लिए VIP क्यू">VIP queue for top-rated pros</div>
           <div class="vf-item" data-en="Onboarding & uniform support" data-hi="ऑनबोर्डिंग और यूनिफॉर्म सपोर्ट">Onboarding & uniform support</div>
-          <div class="vf-item" data-en="Avg earnings ₹35K+/month" data-hi="औसत कमाई ₹35K+/महीना">Avg earnings ₹35K+/month</div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px">
           <a href="/partner-register" class="btn-hero" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none" data-en="Apply as Partner →" data-hi="पार्टनर के लिए आवेदन करें →">Apply as Partner →</a>
@@ -5414,22 +5408,13 @@ window.RemontMedia = (function () {
   <div class="inner">
     <div style="text-align:center;" class="reveal">
       <div class="section-label" style="justify-content:center;" data-en="Now Serving" data-hi="अभी उपलब्ध">Now Serving</div>
-      <h2 class="section-title" data-en="Available in &lt;strong&gt;32+ Cities&lt;/strong&gt;" data-hi="&lt;strong&gt;32+ शहरों&lt;/strong&gt; में उपलब्ध">Available in <strong>32+ Cities</strong></h2>
-      <p class="section-sub" style="margin:14px auto 0;" data-en="Multi-city, multi-language. Expanding globally soon." data-hi="मल्टी-सिटी, मल्टी-लैंग्वेज। जल्द ही ग्लोबल विस्तार।">Multi-city, multi-language. Expanding globally soon.</p>
+      <h2 class="section-title" data-en="Live in &lt;strong class=&quot;live-cities-text&quot;&gt;Bhopal &amp;amp; Vadodara&lt;/strong&gt;" data-hi="&lt;strong class=&quot;live-cities-text&quot;&gt;Bhopal &amp;amp; Vadodara&lt;/strong&gt; में उपलब्ध">Live in <strong class="live-cities-text">Bhopal &amp; Vadodara</strong></h2>
+      <p class="section-sub" style="margin:14px auto 0;" data-en="More cities are coming soon." data-hi="जल्द ही और शहरों में।">More cities are coming soon.</p>
     </div>
-    <div class="cities-grid">
-      <div class="city-card reveal"><div class="city-flag">🏙️</div><div class="city-name">Mumbai</div><div class="city-count" data-en="680+ pros" data-hi="680+ प्रोफेशनल">680+ pros</div></div>
-      <div class="city-card reveal reveal-d1"><div class="city-flag">🌆</div><div class="city-name">Delhi NCR</div><div class="city-count" data-en="820+ pros" data-hi="820+ प्रोफेशनल">820+ pros</div></div>
-      <div class="city-card reveal reveal-d2"><div class="city-flag">🏞️</div><div class="city-name">Bangalore</div><div class="city-count" data-en="540+ pros" data-hi="540+ प्रोफेशनल">540+ pros</div></div>
-      <div class="city-card reveal reveal-d3"><div class="city-flag">🏛️</div><div class="city-name">Hyderabad</div><div class="city-count" data-en="380+ pros" data-hi="380+ प्रोफेशनल">380+ pros</div></div>
-      <div class="city-card reveal reveal-d4"><div class="city-flag">🌅</div><div class="city-name">Pune</div><div class="city-count" data-en="320+ pros" data-hi="320+ प्रोफेशनल">320+ pros</div></div>
-      <div class="city-card reveal reveal-d4"><div class="city-flag">🏰</div><div class="city-name">Chennai</div><div class="city-count" data-en="290+ pros" data-hi="290+ प्रोफेशनल">290+ pros</div></div>
-      <div class="city-card reveal"><div class="city-flag">🌉</div><div class="city-name">Kolkata</div><div class="city-count" data-en="240+ pros" data-hi="240+ प्रोफेशनल">240+ pros</div></div>
-      <div class="city-card reveal reveal-d1"><div class="city-flag">🏞️</div><div class="city-name">Ahmedabad</div><div class="city-count" data-en="190+ pros" data-hi="190+ प्रोफेशनल">190+ pros</div></div>
-      <div class="city-card reveal reveal-d2"><div class="city-flag">🌃</div><div class="city-name">Jaipur</div><div class="city-count" data-en="160+ pros" data-hi="160+ प्रोफेशनल">160+ pros</div></div>
-      <div class="city-card reveal reveal-d3"><div class="city-flag">🏟️</div><div class="city-name">Lucknow</div><div class="city-count" data-en="130+ pros" data-hi="130+ प्रोफेशनल">130+ pros</div></div>
-      <div class="city-card reveal reveal-d4"><div class="city-flag">🌄</div><div class="city-name">Indore</div><div class="city-count" data-en="110+ pros" data-hi="110+ प्रोफेशनल">110+ pros</div></div>
-      <a class="city-card reveal reveal-d4" href="/cities" style="display:block"><div class="city-flag">➕</div><div class="city-name" data-en="22 More" data-hi="22 और">22 More</div><div class="city-count" data-en="View all →" data-hi="सभी देखें →">View all →</div></a>
+    <!-- Filled from GET /api/v1/cities (the city picker's list) by renderLiveCities(); these two are the no-JS fallback. -->
+    <div class="cities-grid" id="live-cities-grid">
+      <div class="city-card"><div class="city-flag">📍</div><div class="city-name">Bhopal</div><div class="city-count" data-en="Live now" data-hi="अभी उपलब्ध">Live now</div></div>
+      <div class="city-card"><div class="city-flag">📍</div><div class="city-name">Vadodara</div><div class="city-count" data-en="Live now" data-hi="अभी उपलब्ध">Live now</div></div>
     </div>
   </div>
 </section>
@@ -5511,20 +5496,20 @@ window.RemontMedia = (function () {
         <div class="app-feat-item" data-en="Push notifications" data-hi="पुश नोटिफिकेशन">Push notifications</div>
       </div>
       <div class="app-btns">
-        <a href="#" class="app-store-btn">
-          <span class="store-icon">🍎</span>
+        <div class="app-store-btn app-store-soon" role="note">
+          <span class="store-icon" aria-hidden="true">🍎</span>
           <div>
-            <div class="app-store-lbl" data-en="Download on" data-hi="डाउनलोड करें">Download on</div>
+            <div class="app-store-lbl" data-en="Coming soon on" data-hi="जल्द आ रहा है">Coming soon on</div>
             <div class="app-store-name">App Store</div>
           </div>
-        </a>
-        <a href="#" class="app-store-btn">
-          <span class="store-icon">▶️</span>
+        </div>
+        <div class="app-store-btn app-store-soon" role="note">
+          <span class="store-icon" aria-hidden="true">▶️</span>
           <div>
-            <div class="app-store-lbl" data-en="Get it on" data-hi="यहां से पाएं">Get it on</div>
+            <div class="app-store-lbl" data-en="Coming soon on" data-hi="जल्द आ रहा है">Coming soon on</div>
             <div class="app-store-name">Google Play</div>
           </div>
-        </a>
+        </div>
       </div>
     </div>
     <div class="app-phones reveal reveal-d2">
@@ -5586,7 +5571,7 @@ window.RemontMedia = (function () {
   <div class="footer-grid">
     <div class="footer-brand">
       <div class="logo">
-        <img id="footer-logo-img" src="" alt="Remont India" style="display:none;height:36px;width:auto;object-fit:contain">
+        <img id="footer-logo-img" alt="Remont India" style="display:none;height:36px;width:auto;object-fit:contain">
         <div class="logo-mark" id="footer-logo-mark"></div>
         <div class="logo-text-wrap">
           <span class="logo-text" data-setting="site-name">REMONT</span>
@@ -5602,8 +5587,8 @@ window.RemontMedia = (function () {
       <div class="footer-social">
         <a href="#" class="social-btn" data-setting="social-linkedin" target="_blank" rel="noopener" aria-label="Remont India on LinkedIn">in</a>
         <a href="#" class="social-btn" data-setting="social-instagram" target="_blank" rel="noopener" aria-label="Remont India on Instagram">ig</a>
-        <a href="#" class="social-btn" data-setting="social-twitter" target="_blank" rel="noopener" aria-label="Remont India on X">𝕏</a>
-        <a href="#" class="social-btn" data-setting="social-youtube" target="_blank" rel="noopener" aria-label="Remont India on YouTube">▶</a>
+        <a href="#" class="social-btn" hidden data-setting="social-twitter" target="_blank" rel="noopener" aria-label="Remont India on X">𝕏</a>
+        <a href="#" class="social-btn" hidden data-setting="social-youtube" target="_blank" rel="noopener" aria-label="Remont India on YouTube">▶</a>
         <a href="#" class="social-btn" data-setting="social-facebook" target="_blank" rel="noopener" aria-label="Remont India on Facebook">f</a>
       </div>
     </div>
@@ -5622,20 +5607,19 @@ window.RemontMedia = (function () {
       <h3 data-en="For Business" data-hi="बिज़नेस के लिए">For Business</h3>
       <div class="footer-links">
         <a href="#corporate" data-en="Corporate Portal" data-hi="कॉर्पोरेट पोर्टल">Corporate Portal</a>
-        <a href="#" data-en="Facility Management" data-hi="फैसिलिटी मैनेजमेंट">Facility Management</a>
-        <a href="#" data-en="B2B AMC Plans" data-hi="B2B AMC प्लान">B2B AMC Plans</a>
+        <a href="/contact.html" data-en="Facility Management" data-hi="फैसिलिटी मैनेजमेंट">Facility Management</a>
+        <a href="/contact.html" data-en="B2B AMC Plans" data-hi="B2B AMC प्लान">B2B AMC Plans</a>
         <a href="#vendor" data-en="Become a Partner" data-hi="पार्टनर बनें">Become a Partner</a>
-        <a href="#" data-en="Bulk Orders" data-hi="बल्क ऑर्डर">Bulk Orders</a>
+        <a href="/contact.html" data-en="Bulk Orders" data-hi="बल्क ऑर्डर">Bulk Orders</a>
       </div>
     </div>
     <div class="footer-col">
       <h3 data-en="Booking" data-hi="बुकिंग">Booking</h3>
       <div class="footer-links">
-        <a href="#" data-en="AI Chat Booking" data-hi="AI चैट बुकिंग">AI Chat Booking</a>
+        <a href="/?open=book" onclick="openRemiChat();return false" data-en="AI Chat Booking" data-hi="AI चैट बुकिंग">AI Chat Booking</a>
         <a href="https://wa.me/919232071064?text=Hi%20Remont%2C%20I%20want%20a%20quote" target="_blank" rel="noopener" data-setting="whatsapp-link" data-en="WhatsApp Bot" data-hi="WhatsApp बॉट">WhatsApp Bot</a>
         <a href="tel:+919232071064" data-setting="mobile-phone-link" data-en="Call Center" data-hi="कॉल सेंटर">Call Center</a>
-        <a href="#" data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</a>
-        <a href="#" data-en="Voice (Alexa)" data-hi="वॉइस (Alexa)">Voice (Alexa)</a>
+        <a href="#app-cta" data-en="Mobile App" data-hi="मोबाइल ऐप">Mobile App</a>
       </div>
     </div>
     <div class="footer-col">
@@ -5654,7 +5638,7 @@ window.RemontMedia = (function () {
     <div style="max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
       <div>
         <div style="color:#fff;font-weight:700;font-size:15px;margin-bottom:4px" data-en="📬 Get offers, tips & updates" data-hi="📬 ऑफर, टिप्स और अपडेट पाएं">📬 Get offers, tips & updates</div>
-        <div class="nl-sub" style="font-size:13px" data-en="Join 50,000+ happy homeowners. No spam, unsubscribe anytime." data-hi="50,000+ संतुष्ट घर मालिकों से जुड़ें। कोई स्पैम नहीं, कभी भी अनसब्सक्राइब करें।">Join 50,000+ happy homeowners. No spam, unsubscribe anytime.</div>
+        <div class="nl-sub" style="font-size:13px" data-en="Offers, home-care tips and updates. No spam, unsubscribe anytime." data-hi="ऑफर, होम-केयर टिप्स और अपडेट। कोई स्पैम नहीं, कभी भी अनसब्सक्राइब करें।">Offers, home-care tips and updates. No spam, unsubscribe anytime.</div>
       </div>
       <div id="newsletter-form" style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="nl-email" type="email" placeholder="Enter your email" data-en-ph="Enter your email" data-hi-ph="अपना ईमेल दर्ज करें" style="padding:10px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;width:240px;outline:none" />
@@ -5664,7 +5648,7 @@ window.RemontMedia = (function () {
     </div>
   </div>
   <div class="footer-bottom">
-    <span>© 2026 Remont India Technologies Pvt. Ltd.</span>
+    <span>© 2026 Remont India Pvt. Ltd.</span>
     <div data-legal-footer>
       <a href="/privacy" data-en="Privacy" data-hi="प्राइवेसी">Privacy</a>
       <a href="/terms" data-en="Terms" data-hi="नियम व शर्तें">Terms</a>
@@ -5882,7 +5866,7 @@ window.RemontMedia = (function () {
         <label>Current Photo <small style="color:#9ca3af">(optional)</small></label>
         <input type="file" id="qPhotoInput" accept="image/jpeg,image/png,image/webp" onchange="previewQuotePhoto(this)">
         <div id="qPhotoPreviewWrap" style="display:none;margin-top:8px">
-          <img id="qPhotoPreview" alt="Preview of your uploaded photo" style="max-width:120px;border-radius:8px;border:1px solid var(--mist)">
+          <img id="qPhotoPreview" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="Preview of your uploaded photo" style="max-width:120px;border-radius:8px;border:1px solid var(--mist)">
           <button type="button" onclick="clearQuotePhoto()" style="margin-left:8px;font-size:12px;color:var(--sienna);background:none;border:none;cursor:pointer">Remove</button>
         </div>
       </div>
@@ -5988,7 +5972,7 @@ window.RemontMedia = (function () {
       <!-- OSM map preview (shows after GPS capture or address lookup) -->
       <div id="loc-map-preview" style="display:none;margin-bottom:14px;border-radius:10px;overflow:hidden;border:1.5px solid #e5e7eb">
         <div style="background:#f9fafb;padding:6px 10px;font-size:11px;color:#6b7280;display:flex;align-items:center;gap:4px">
-          <span>🗺</span><span>Map Preview · <a href="#" id="loc-map-full-link" target="_blank" rel="noopener" style="color:#c4601a;text-decoration:none">Open in Maps ↗</a></span>
+          <span>🗺</span><span>Map Preview · <a href="https://www.openstreetmap.org/" id="loc-map-full-link" target="_blank" rel="noopener" style="color:#c4601a;text-decoration:none">Open in Maps ↗</a></span>
         </div>
         <iframe id="loc-map-iframe" src="" width="100%" height="200" frameborder="0" loading="lazy" style="display:block"></iframe>
       </div>
@@ -6264,7 +6248,7 @@ window.RemontMedia = (function () {
       <div class="product-row-title">
         ${d.productTitle}
         <span class="pill">${d.productPillText}</span>
-        <span class="view-all">View All <span>→</span></span>
+        <a class="view-all" href="${(d.productCatKey !== undefined ? d.productCatKey : d.key) ? '/shop?category=' + encodeURIComponent(d.productCatKey !== undefined ? d.productCatKey : d.key) : '/shop'}">View All <span aria-hidden="true">→</span></a>
       </div>
       <div class="product-grid">
         ${d.products.map(p => `
@@ -6279,8 +6263,8 @@ window.RemontMedia = (function () {
               <div class="product-brand">${escHtml(p.brand)}</div>
               <div class="product-name">${escHtml(p.name)}</div>
               <div>
-                <span class="product-rating">${escHtml(p.rating)} ★</span>
-                <span class="product-rating-count">(${escHtml(p.count)})</span>
+                ${p.rating ? `<span class="product-rating">${escHtml(p.rating)} ★</span>` : ''}
+                ${p.rating && p.count ? `<span class="product-rating-count">(${escHtml(p.count)})</span>` : ''}
                 ${p.unit ? `<span style="font-size:10px;color:#9ca3af;margin-left:4px">/ ${escHtml(p.unit)}</span>` : ''}
               </div>
               <div class="product-price">
@@ -6312,7 +6296,6 @@ window.RemontMedia = (function () {
           <p>${escHtml(d.subtitle)}</p>
         </div>
         <div class="panel-head-right">
-          <span class="panel-pill">⭐ 4.8 / 5.0</span>
           <span class="panel-pill green">3-Click Book</span>
         </div>
       </div>
@@ -6351,7 +6334,6 @@ window.RemontMedia = (function () {
           <p>${d.subtitle}</p>
         </div>
         <div class="panel-head-right">
-          <span class="panel-pill">⭐ 4.8 / 5.0</span>
           <span class="panel-pill green">3-Click Book</span>
         </div>
       </div>
@@ -8778,6 +8760,8 @@ window.RemontMedia = (function () {
       Object.keys(grouped).forEach(function(catKey) {
         var fkey = keyMap[catKey] || catKey.toLowerCase().replace(/_/g,'-');
         var products = grouped[catKey] || [];
+        // "View All" opens /shop on this category, or the whole shop when it has no products
+        if (serviceData[fkey]) serviceData[fkey].productCatKey = products.length ? catKey : '';
         if (!products.length || !serviceData[fkey]) return;
         serviceData[fkey].products = products.map(function(p){
           return {
@@ -8787,8 +8771,8 @@ window.RemontMedia = (function () {
             desc: p.description || '',
             unit: p.unit || 'piece',
             specs: p.specifications || {},
-            rating: p.rating ? p.rating.toFixed(1) : '4.5',
-            count: p.reviewCount ? p.reviewCount.toLocaleString() : '—',
+            rating: p.rating ? p.rating.toFixed(1) : '',
+            count: p.reviewCount ? p.reviewCount.toLocaleString() : '',
             price: Number(p.price).toLocaleString('en-IN'),
             priceNum: Number(p.price),
             was: p.mrp ? Number(p.mrp).toLocaleString('en-IN') : null,
@@ -8815,6 +8799,9 @@ window.RemontMedia = (function () {
     var headerBadge = document.getElementById('cartBadgeHeader');
     if (headerBadge) headerBadge.textContent = total || '';
   }
+
+  // cart-sync.js fires this for sign-out, account cart sync and changes made in another tab.
+  window.addEventListener('remont-cart-changed', updateCartBadge);
 
   function addToCart(item) {
     var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
@@ -9006,19 +8993,24 @@ window.RemontMedia = (function () {
 
   updateCartBadge();
 
+  // Cities section + hero stat show exactly the cities the city picker offers.
+  function renderLiveCities(cities) {
+    var names = (cities || []).filter(function (c) { return c && c.name && c.isActive !== false; }).map(function (c) { return String(c.name); });
+    if (!names.length) return; // keep the static fallback
+    var list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1];
+    document.querySelectorAll('.live-cities-text').forEach(function (el) { el.textContent = list; });
+    var grid = document.getElementById('live-cities-grid');
+    if (grid) grid.innerHTML = names.map(function (n) {
+      return '<div class="city-card"><div class="city-flag">📍</div><div class="city-name">' + escHtml(n) + '</div><div class="city-count" data-en="Live now" data-hi="अभी उपलब्ध">Live now</div></div>';
+    }).join('');
+  }
+
   // ── Load site settings ─────────────────────────────────────────────
   function loadSiteSettings() {
     apiGet('/api/v1/cms/settings?group=stats').then(function(settings) {
       if (!settings) return;
-      // Update hero trust bar
-      if (settings.total_cities) {
-        var cityEl = document.querySelector('.slide-trust div:nth-child(3)');
-        if (cityEl) cityEl.innerHTML = '📍 <strong>' + settings.total_cities + '+</strong> cities';
-      }
-      if (settings.total_reviews) {
-        var reviewEl = document.querySelector('.slide-trust div:first-child');
-        if (reviewEl) reviewEl.innerHTML = '⭐ <strong>4.8/5</strong> · ' + (Number(settings.total_reviews)/1000).toFixed(0) + 'K+ reviews';
-      }
+      // The hero no longer shows total_cities / total_reviews: cities come from the live city
+      // list (renderLiveCities) and there is no rating claim until real reviews exist.
     }).catch(function(){});
   }
 
@@ -9028,6 +9020,7 @@ window.RemontMedia = (function () {
     apiGet('/api/v1/cities').then(function(data) {
       var cities = Array.isArray(data) ? data : (data && data.data ? data.data : []);
       buildCityModal(cities);
+      renderLiveCities(cities);
     }).catch(function(){});
 
     // 2. Load service categories with services
@@ -10299,7 +10292,7 @@ function cartCheckout() {
           <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Wallet Balance</div>
           <div style="display:flex;align-items:center;gap:8px">
             <div id="acct-wallet" style="font-size:20px;font-weight:700;color:#c4601a">₹—</div>
-            <a href="#" onclick="openWalletTopupModal();return false" style="font-size:11px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add</a>
+            <a href="/?open=account" onclick="openWalletTopupModal();return false" style="font-size:11px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add</a>
           </div>
         </div>
         <div style="padding:16px 24px">
@@ -10458,7 +10451,7 @@ function cartCheckout() {
             <input type="checkbox" id="co-use-wallet" onchange="recalcTotals()" />
             <span style="font-size:13px;font-weight:600;color:#111">💰 Use wallet balance <span style="color:#6b7280;font-weight:400">(₹<span id="co-wallet-balance">0</span> available)</span></span>
           </span>
-          <a href="#" onclick="openWalletTopupModal();return false" style="font-size:12px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add Money</a>
+          <a href="/?open=account" onclick="openWalletTopupModal();return false" style="font-size:12px;color:#c4601a;font-weight:600;text-decoration:underline;white-space:nowrap">+ Add Money</a>
         </label>
       </div>
 
@@ -14136,7 +14129,7 @@ window.closeCustPartner = function() {
               <div class="pid-footer-lbl">Verified &<br>Trusted</div>
             </div>
             <div class="pid-qr-box">
-              <img id="pid-qr-img" src="" alt="QR" style="width:100%;height:100%">
+              <img id="pid-qr-img" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="QR" style="width:100%;height:100%">
             </div>
           </div>
         </div><!-- /.pid-card-wrap -->
