@@ -3744,7 +3744,7 @@ window.RemontMedia = (function () {
     </div>
     <button class="icon-btn city-selector" onclick="openCityModal()" title="Change your city">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-      <span class="label" id="currentCity">Mumbai</span>
+      <span class="label" id="currentCity">Bhopal</span>
       <span class="city-arrow">▼</span>
     </button>
     <button type="button" class="icon-btn" onclick="openMyOrdersModal()" aria-labelledby="hdr-my-orders-label">
@@ -6718,7 +6718,10 @@ window.RemontMedia = (function () {
     'Indore':    ['ac','plumbing','electrical','cleaning'],
   };
 
-  let currentCity = localStorage.getItem('remont_city') || 'Mumbai';
+  // Shown and used for service availability until the user chooses a city. Only a city the user
+  // actually chose (city picker or GPS) is sent to chat, booking or checkout — see chosenCity().
+  let currentCity = localStorage.getItem('remont_city') || 'Bhopal';
+  function chosenCity() { try { return localStorage.getItem('remont_city') || ''; } catch (e) { return ''; } }
 
   function openCityModal() {
     document.getElementById('cityBackdrop').classList.add('open');
@@ -7385,7 +7388,7 @@ window.RemontMedia = (function () {
       return; // GPS city not in our service area
     }
 
-    if (matched === currentCity) return; // already on the right city
+    if (matched === currentCity && chosenCity() === matched) return; // already on the right city
 
     // Update header city label and currentCity state (without closing modals)
     currentCity = matched;
@@ -7756,7 +7759,7 @@ window.RemontMedia = (function () {
     if (chatMsgEl) chatMsgEl.textContent = '...';
     var chatBody = {
       message: message,
-      city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+      city: chosenCity() || undefined,
       customerPhone: localStorage.getItem('remont_phone') || undefined
     };
     // The server rejects an expired/invalid token with 401 instead of ignoring it; chat is
@@ -7961,7 +7964,7 @@ window.RemontMedia = (function () {
     var body = JSON.stringify({
       message: msg,
       sessionId: _remiSessionId,
-      city: typeof currentCity !== 'undefined' ? currentCity : undefined,
+      city: chosenCity() || undefined,
       // Already-known customer identity — reused as-is from the same key
       // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
       // customer is never asked their phone number again in chat.
@@ -9133,8 +9136,8 @@ window.RemontMedia = (function () {
     bookingCities.forEach(function(c) {
       sel.innerHTML += '<option value="' + c.id + '">' + c.name + '</option>';
     });
-    if (typeof currentCity !== 'undefined' && currentCity) {
-      Array.from(sel.options).forEach(function(o) { if (o.textContent === currentCity) o.selected = true; });
+    if (chosenCity()) {
+      Array.from(sel.options).forEach(function(o) { if (o.textContent === chosenCity()) o.selected = true; });
     }
 
     // Autofill from profile if logged in
@@ -9326,7 +9329,7 @@ window.RemontMedia = (function () {
   function bmRefreshServerQuote() {
     var svcId = document.getElementById('bm-svc-id').value;
     if (!svcId) return;
-    var body = JSON.stringify({ items: [{ type: 'SERVICE', serviceId: svcId, quantity: 1 }], city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined });
+    var body = JSON.stringify({ items: [{ type: 'SERVICE', serviceId: svcId, quantity: 1 }], city: chosenCity() || undefined });
     fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
       .then(function(r) { return r.json().catch(function() { return null; }).then(function(j) { return { ok: r.ok, j: j }; }); })
       .then(function(rr) {
@@ -11039,7 +11042,7 @@ function openCheckoutModal() {
     });
   }
   if (coCitySel && !coCitySel.value) {
-    var preferCity = (savedLoc && savedLoc.city) || (typeof currentCity !== 'undefined' ? currentCity : '');
+    var preferCity = (savedLoc && savedLoc.city) || chosenCity();
     if (preferCity) {
       Array.from(coCitySel.options).forEach(function(o) { if (o.value === preferCity) o.selected = true; });
     }
@@ -11205,7 +11208,7 @@ function _coQuoteBody() {
     items: cart.map(function(i) {
       return i.type === 'service' ? { type: 'SERVICE', serviceId: i.id, quantity: i.qty || 1 } : { type: 'PRODUCT', productId: i.id, quantity: i.qty || 1 };
     }),
-    city: (typeof currentCity !== 'undefined' && currentCity) ? currentCity : undefined,
+    city: chosenCity() || undefined,
     couponCode: _coCoupon ? _coCoupon.code : undefined,
     latitude: savedLoc && savedLoc.latitude ? savedLoc.latitude : undefined,
     longitude: savedLoc && savedLoc.longitude ? savedLoc.longitude : undefined,
@@ -14206,7 +14209,7 @@ window.closeCustPartner = function() {
     const logoUrl = settings.logo_url || settings.logo || '';
     const siteDesc = settings.site_description || settings.brand_description || '';
 
-    document.title = siteName + ' — AI-Powered Home Services';
+    // The page keeps its own SEO <title>; the site name only fills the logo text below.
 
     // Logo image — show <img> if logo_url is set, else show CSS logo-mark
     ['header-logo-img', 'footer-logo-img'].forEach(function (imgId) {

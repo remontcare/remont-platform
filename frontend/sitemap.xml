@@ -76,6 +76,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://www.remontindia.com/cities/vadodara</loc>
+    <lastmod>2026-11-13</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://www.remontindia.com/cities/indore</loc>
     <lastmod>2026-07-18</lastmod>
     <changefreq>monthly</changefreq>
