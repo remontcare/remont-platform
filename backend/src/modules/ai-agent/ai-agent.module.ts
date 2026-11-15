@@ -263,7 +263,7 @@ export class AiAgentService {
           if (customerName) knownFacts.push(`Name: ${customerName}`);
           if (customerPhone) knownFacts.push('Phone number: already on file — do not ask for it');
           knownFacts.push(cartNames.length
-            ? 'Already in the cart (do NOT add these again unless the customer explicitly asks for more): ' + cartNames.join('; ')
+            ? 'Already in the cart (do NOT add these again unless the customer explicitly asks for more; if the customer wants to check out or pay, just tell them to tap "Book Now" on the cart card or open the cart — no cart tools): ' + cartNames.join('; ')
             : 'The cart is currently empty.');
           const contextMsg: OpenAiMessage[] = knownFacts.length
             ? [{ role: 'system', content: `Already known about this customer — do not ask for these again:\n${knownFacts.join('\n')}` }]
@@ -325,6 +325,9 @@ export class AiAgentService {
             try {
               msg = await openAiChatWithTools(this.openaiKey, this.openaiModel, convo, tools, {
                 maxTokens: maxOutput, temperature: 0.6,
+                // Last round: no more tool calls, so the customer always gets a real answer (a model
+                // retrying a refused duplicate add used to exhaust the rounds and hit the generic fallback).
+                toolChoice: rounds > 1 && round === rounds - 1 ? 'none' : 'auto',
                 timeoutMs: Math.min(cfg?.['ai.request.timeoutMs'] ?? 20000, remainingMs),
                 onUsage: (u) => { usage = u; },
               });

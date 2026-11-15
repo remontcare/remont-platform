@@ -123,6 +123,21 @@ describe('AiAgentService.chat — two tabs sending at the same moment', () => {
     expect(adds(b)).toBe(1);
   });
 
+  it('a model that keeps calling tools still ends with a real answer (last round has no tools)', async () => {
+    mockedChat.mockReset();
+    const choices: string[] = [];
+    mockedChat.mockImplementation(async (_k: string, _m: string, _c: any[], _t: any, opts: any) => {
+      choices.push(opts.toolChoice);
+      return opts.toolChoice === 'none'
+        ? { role: 'assistant', content: 'Aapke cart me already hai — Book Now dabaiye.' }
+        : { role: 'assistant', content: null, tool_calls: [{ id: 'c' + Math.random(), type: 'function', function: { name: 'add_service_to_cart', arguments: '{"serviceId":"svc-1","name":"Pest"}' } }] };
+    });
+    const res: any = await service().chat({ message: 'ab checkout karna hai', clientId: 'c'.repeat(32), cart: [{ id: 'svc-1', name: 'Pest', qty: 1 }] } as any);
+    expect(choices).toEqual(['auto', 'auto', 'auto', 'none']);
+    expect(res.reply).toBe('Aapke cart me already hai — Book Now dabaiye.');
+    expect((res.actions || []).length).toBe(0); // already in the cart: never re-added
+  });
+
   it('a signed-in customer in two tabs (no browser id needed) → exactly one add', async () => {
     const svc = service();
     const actor = { userId: 'user-1' };
