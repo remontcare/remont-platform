@@ -24,7 +24,8 @@
  *                                   addToCart()/openCart()/wa.me links — no new client code invented,
  *                                   only a small dispatcher added in index.html to call them.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.module';
 import { LeadSource } from '@prisma/client';
 import { OpenAiTool } from './openai-client';
 import { redactForLog } from './ai-redaction';
@@ -56,6 +57,15 @@ export interface ToolContext {
   channel?: string;
   /** Tools this caller may use (server-decided from the authenticated role). Unset = none. */
   allowedTools?: readonly string[];
+  /** Item id -> quantity already in the customer's cart (sent by the browser with each message). */
+  cart?: Map<string, number>;
+  /** Items added during this one chat request — the same item is never added twice per request. */
+  addedThisTurn?: Set<string>;
+  /**
+   * Claims an item for this customer for a short window (atomic, server-side). False = another
+   * request — e.g. a second browser tab — has just added it, so this one must not add it again.
+   */
+  claimCartAdd?: (itemId: string) => Promise<boolean>;
 }
 
 // ─── Who may use which chat tool ─────────────────────────────────────────────────────────
@@ -190,17 +200,19 @@ export const AI_CHAT_TOOLS: OpenAiTool[] = [
     function: {
       name: 'add_service_to_cart',
       description:
-        "Add a specific real service (from search_services) to the customer's cart on the website, after they've clearly agreed (e.g. said 'yes', 'book kar do', 'okay'). Only call this after explicit confirmation, never automatically.",
+        "Add a specific real service (from search_services) to the customer's cart on the website, after they've clearly agreed (e.g. said 'yes', 'book kar do', 'okay'). Use the exact id from search_services results — never make up an id. Call it ONCE per service the customer asked for; services already in the cart are listed in the context and must not be added again unless the customer explicitly asks for more/another (then set addAnother: true). Only call this after explicit confirmation, never automatically.",
       parameters: {
         type: 'object',
         properties: {
-          serviceId: { type: 'string' },
+          serviceId: { type: 'string', description: 'The exact id from search_services results' },
           name: { type: 'string' },
-          price: { type: 'number', description: 'The real basePrice returned by search_services/get_estimate — never invent a number' },
+          price: { type: 'number', description: 'Informational only — the server uses the catalogue price' },
           unit: { type: 'string' },
           categoryKey: { type: 'string' },
+          quantity: { type: 'integer', description: 'How many the customer asked for (default 1)' },
+          addAnother: { type: 'boolean', description: 'true ONLY when the customer explicitly asked for more/another of a service already in the cart' },
         },
-        required: ['serviceId', 'name', 'price'],
+        required: ['serviceId', 'name'],
       },
     },
   },
@@ -208,16 +220,18 @@ export const AI_CHAT_TOOLS: OpenAiTool[] = [
     type: 'function',
     function: {
       name: 'add_product_to_cart',
-      description: "Add a specific real product (from search_products) to the customer's cart, after explicit confirmation.",
+      description: "Add a specific real product (from search_products) to the customer's cart, after explicit confirmation. Use the exact id from search_products — never make up an id. Once per product; products already in the cart must not be added again unless the customer explicitly asks for more (then set addAnother: true).",
       parameters: {
         type: 'object',
         properties: {
-          productId: { type: 'string' },
+          productId: { type: 'string', description: 'The exact id from search_products results' },
           name: { type: 'string' },
-          price: { type: 'number' },
+          price: { type: 'number', description: 'Informational only — the server uses the catalogue price' },
           unit: { type: 'string' },
+          quantity: { type: 'integer', description: 'How many the customer asked for (default 1)' },
+          addAnother: { type: 'boolean', description: 'true ONLY when the customer explicitly asked for more of a product already in the cart' },
         },
-        required: ['productId', 'name', 'price'],
+        required: ['productId', 'name'],
       },
     },
   },
@@ -329,6 +343,7 @@ export class AiToolExecutor {
     private estimatesSvc: EstimatesService,
     private partnerReg: PartnerRegistrationService,
     private sellerReg: SellerRegistrationService,
+    @Optional() private prisma?: PrismaService,
   ) {}
 
   async execute(toolName: string, rawArgs: any, ctx: ToolContext): Promise<ToolResult> {
@@ -350,9 +365,9 @@ export class AiToolExecutor {
         case 'get_estimate':
           return { result: await this.getEstimate(args, ctx) };
         case 'add_service_to_cart':
-          return this.addServiceToCart(args);
+          return await this.addServiceToCart(args, ctx);
         case 'add_product_to_cart':
-          return this.addProductToCart(args);
+          return await this.addProductToCart(args, ctx);
         case 'create_lead':
           return { result: await this.createLead(args, ctx) };
         case 'create_site_visit_request':
@@ -412,22 +427,64 @@ export class AiToolExecutor {
     });
   }
 
-  private addServiceToCart(args: any): ToolResult {
+  // A cart add is only emitted for a real, active catalogue item at its catalogue price (the model
+  // used to invent ids like "general-pest-control" and ₹0 prices, which then broke checkout), at most
+  // once per item per chat request, and never again for an item already in the cart unless the
+  // customer explicitly asked for more (addAnother). Returns the reason to the model otherwise.
+  private async cartGuard(id: string, args: any, ctx: ToolContext): Promise<ToolResult | null> {
+    if (ctx.addedThisTurn?.has(id)) return { result: { added: false, duplicate: true, note: 'Already added in this reply — not added again.' } };
+    const inCart = ctx.cart?.get(id);
+    if (inCart && args.addAnother !== true) {
+      return { result: { added: false, alreadyInCart: true, quantityInCart: inCart, note: 'Already in the customer\'s cart. Do not add it again unless the customer explicitly asks for more; then call with addAnother: true.' } };
+    }
+    // Concurrent requests (two tabs, a retried request) both see a cart without the item, so the
+    // cart snapshot alone cannot stop them: only the first atomic claim may add it. An explicit
+    // request for more (addAnother) is a new intent and is not blocked.
+    if (args.addAnother !== true && ctx.claimCartAdd && !(await ctx.claimCartAdd(id))) {
+      return { result: { added: false, duplicate: true, recentlyAdded: true, note: 'This item was added to this customer\'s cart moments ago (possibly from another window). Do not add it again unless the customer confirms they want one more; then call with addAnother: true.' } };
+    }
+    return null;
+  }
+
+  private quantity(args: any): number {
+    const q = Math.floor(Number(args.quantity) || 1);
+    return Math.min(20, Math.max(1, q));
+  }
+
+  private async addServiceToCart(args: any, ctx: ToolContext = {}): Promise<ToolResult> {
+    const id = String(args.serviceId || '').trim();
+    const svc: any = id ? await this.servicesSvc.getService(id, ctx.city).catch(() => null) : null;
+    if (!svc || svc.isActive === false) {
+      return { result: { added: false, error: 'Unknown or inactive serviceId. Call search_services and use an id exactly as returned — never make one up.' } };
+    }
+    const blocked = await this.cartGuard(id, args, ctx);
+    if (blocked) return blocked;
     const item = {
-      id: args.serviceId, name: args.name, price: Number(args.price) || 0,
-      type: 'service', unit: args.unit || 'per visit', categoryKey: args.categoryKey || '',
+      id, name: svc.name, price: Number(svc.basePrice) || 0,
+      type: 'service', unit: svc.unit || 'per visit', categoryKey: svc.category?.key || args.categoryKey || '',
+      qty: this.quantity(args),
     };
+    ctx.addedThisTurn?.add(id);
     return {
       result: { added: true, item },
       action: { type: 'ADD_SERVICE_TO_CART', payload: item },
     };
   }
 
-  private addProductToCart(args: any): ToolResult {
+  private async addProductToCart(args: any, ctx: ToolContext = {}): Promise<ToolResult> {
+    const id = String(args.productId || '').trim();
+    const p: any = id && this.prisma ? await this.prisma.product.findUnique({ where: { id } }).catch(() => null) : null;
+    if (!p || p.isActive === false) {
+      return { result: { added: false, error: 'Unknown or inactive productId. Call search_products and use an id exactly as returned — never make one up.' } };
+    }
+    const blocked = await this.cartGuard(id, args, ctx);
+    if (blocked) return blocked;
     const item = {
-      id: args.productId, name: args.name, price: Number(args.price) || 0,
-      type: 'product', unit: args.unit || 'piece',
+      id, name: p.name, price: Number(p.price) || 0,
+      type: 'product', unit: p.unit || 'piece',
+      qty: this.quantity(args),
     };
+    ctx.addedThisTurn?.add(id);
     return {
       result: { added: true, item },
       action: { type: 'ADD_PRODUCT_TO_CART', payload: item },

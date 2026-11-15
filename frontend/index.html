@@ -7851,7 +7851,7 @@ window.RemontMedia = (function () {
   function remiSend() {
     var input = document.getElementById('remi-input');
     var msg = (input.value || '').trim();
-    if (!msg) return;
+    if (!msg || _remiBusy) return; // keep the typed text until REMI has answered
     input.value = '';
     remiSendMessage(msg);
   }
@@ -7915,9 +7915,13 @@ window.RemontMedia = (function () {
   function remiHandleActions(actions) {
     if (!actions || !actions.length) return;
     var cartChanged = false;
+    var addedNow = {}; // one reply never adds the same item twice
     actions.forEach(function(a) {
       try {
         if ((a.type === 'ADD_SERVICE_TO_CART' || a.type === 'ADD_PRODUCT_TO_CART') && typeof addToCart === 'function') {
+          var addId = a.payload && a.payload.id;
+          if (!addId || addedNow[addId]) return;
+          addedNow[addId] = true;
           addToCart(a.payload);
           cartChanged = true;
         } else if (a.type === 'OPEN_CART' && typeof openCart === 'function') {
@@ -7969,7 +7973,35 @@ window.RemontMedia = (function () {
     } catch (e) { /* private mode */ }
   }
 
+  // One message at a time: a second tap on a suggestion chip or "+ Add Service" while REMI is still
+  // answering used to start a second request, and both could add the same service to the cart.
+  var _remiBusy = false;
+  // What is already in the cart, so REMI does not add it again (it never saw the cart before).
+  function remiCartSnapshot() {
+    try {
+      return JSON.parse(localStorage.getItem('remont_cart') || '[]').slice(0, 50).map(function (i) {
+        return { id: String(i.id || ''), name: String(i.name || '').slice(0, 80), qty: i.qty || 1, type: i.type || '' };
+      });
+    } catch (e) { return []; }
+  }
+
+  // One random id per browser (all tabs share localStorage): lets the server refuse a second tab's
+  // simultaneous add of the same item. Not used for anything else.
+  function remiClientId() {
+    try {
+      var id = localStorage.getItem('remont_remi_client');
+      if (!id || !/^[a-f0-9]{32}$/.test(id)) {
+        var a = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(a);
+        id = Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        localStorage.setItem('remont_remi_client', id);
+      }
+      return id;
+    } catch (e) { return undefined; }
+  }
+
   function remiSendMessage(msg) {
+    if (_remiBusy) return false;
+    _remiBusy = true;
     remiRememberContact(msg);
     remiAddBubble('user', msg);
     remiSave('user', msg);
@@ -7982,7 +8014,9 @@ window.RemontMedia = (function () {
       // Already-known customer identity — reused as-is from the same key
       // _loadAccountData() populates from GET /api/v1/users/me, so a logged-in
       // customer is never asked their phone number again in chat.
-      customerPhone: localStorage.getItem('remont_phone') || undefined
+      customerPhone: localStorage.getItem('remont_phone') || undefined,
+      cart: remiCartSnapshot(),
+      clientId: remiClientId()
     });
     // Signed in, the assistant can look up this customer's own bookings. An expired token is
     // rejected (401) rather than ignored, so the message is retried as a guest.
@@ -8004,6 +8038,7 @@ window.RemontMedia = (function () {
     };
     send(!!token)
     .then(function(res) {
+      _remiBusy = false;
       var d = res.data || res;
       if (!d || !d.reply) throw new Error('empty reply');
       _remiSessionId = d.sessionId || _remiSessionId;
@@ -8013,6 +8048,7 @@ window.RemontMedia = (function () {
       remiHandleActions(d.actions);
     })
     .catch(function(err) {
+      _remiBusy = false;
       var why = err && err.name === 'AbortError' ? 'The assistant took too long to answer.' : 'Could not reach the assistant right now.';
       typingEl.textContent = why + ' Please try again in a moment.';
     });
@@ -8823,7 +8859,7 @@ window.RemontMedia = (function () {
   function addToCart(item) {
     var c = JSON.parse(localStorage.getItem('remont_cart') || '[]');
     var existing = c.find(function(x){ return x.id === item.id; });
-    if (existing) { existing.qty = (existing.qty || 1) + 1; }
+    if (existing) { existing.qty = (existing.qty || 1) + (Number(item.qty) > 0 ? Number(item.qty) : 1); }
     else { c.push(Object.assign({ qty: 1 }, item)); }
     localStorage.setItem('remont_cart', JSON.stringify(c));
     cart = c;
@@ -10966,16 +11002,8 @@ function openCheckoutModal() {
   if (useWalletBox) useWalletBox.checked = false;
 
   // Populate order summary line items (pricing totals are computed by recalcTotals())
-  var html = '';
-  cart.forEach(function(item) {
-    var qty = item.qty || 1;
-    var lineTotal = (item.price || 0) * qty;
-    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
-      '<div><div style="font-size:14px;font-weight:500;color:#111">' + escHtml(item.name) + '</div>' +
-      '<div style="font-size:12px;color:#6b7280;margin-top:2px">Qty: ' + qty + ' × ₹' + Number(item.price||0).toLocaleString('en-IN') + '</div></div>' +
-      '<div style="font-size:14px;font-weight:600;color:#374151">₹' + lineTotal.toLocaleString('en-IN') + '</div></div>';
-  });
-  document.getElementById('co-items').innerHTML = html;
+  _coQuoteError = null;
+  _coRenderItems(cart);
 
   // Wallet — shown as a payment mode for any logged-in customer, alongside Pay Online,
   // regardless of current balance, so "+ Add Money" is always reachable (previously this
@@ -11222,6 +11250,52 @@ function handleCheckoutSubmit() {
 var _coDeliveryCharge = 0;
 // ── Server quote (POST /master-orders/public/quote) — writes nothing; same pricing as checkout.
 var _coQuote = null, _coQuoteFor = null, _coQuoteTimer = null, _coQuoteInflight = null;
+var _coQuoteError = null; // { key, message } of the last failed server quote for the current cart
+var CO_QUOTE_TIMEOUT_MS = 20000;
+// The server could not price the cart: say why, offer Retry, or Remove for an item that no longer
+// exists (e.g. an old chat add with an invalid id). Totals stay unavailable — never ₹0 or an estimate.
+function _coShowQuoteError() {
+  var el = document.getElementById('co-msg');
+  if (!el || !_coQuoteError) return;
+  var m = /(?:Service|Product) not found or inactive: (\S+)/.exec(_coQuoteError.message || '');
+  var cart = [];
+  try { cart = JSON.parse(localStorage.getItem('remont_cart') || '[]'); } catch (e) {}
+  var gone = m ? cart.filter(function (i) { return String(i.id) === m[1]; })[0] : null;
+  var btn = 'margin-left:8px;padding:6px 12px;border:1.5px solid #C2410C;border-radius:8px;background:#fff;color:#C2410C;font-weight:700;cursor:pointer;min-height:36px';
+  el.innerHTML = gone
+    ? '\u201C' + escHtml(gone.name) + '\u201D is no longer available, so GST and the total cannot be calculated.' +
+      '<button type="button" style="' + btn + '" data-id="' + escHtml(String(gone.id)) + '" onclick="_coRemoveUnavailable(this.getAttribute(\'data-id\'))">Remove it</button>'
+    : 'We could not calculate GST and the total' + (_coQuoteError.timeout ? ' (the server took too long)' : '') + '. Please try again.' +
+      '<button type="button" style="' + btn + '" onclick="_coRetryQuote()">Retry</button>';
+  el.style.display = '';
+}
+function _coRenderItems(cart) {
+  var html = '';
+  cart.forEach(function(item) {
+    var qty = item.qty || 1;
+    var lineTotal = (item.price || 0) * qty;
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
+      '<div><div style="font-size:14px;font-weight:500;color:#111">' + escHtml(item.name) + '</div>' +
+      '<div style="font-size:12px;color:#6b7280;margin-top:2px">Qty: ' + qty + ' × ₹' + Number(item.price||0).toLocaleString('en-IN') + '</div></div>' +
+      '<div style="font-size:14px;font-weight:600;color:#374151">₹' + lineTotal.toLocaleString('en-IN') + '</div></div>';
+  });
+  document.getElementById('co-items').innerHTML = html;
+}
+function _coRetryQuote() {
+  _coQuoteError = null; _coQuoteFor = null;
+  var el = document.getElementById('co-msg'); if (el) el.style.display = 'none';
+  recalcTotals();
+}
+function _coRemoveUnavailable(id) {
+  var cart = [];
+  try { cart = JSON.parse(localStorage.getItem('remont_cart') || '[]'); } catch (e) {}
+  cart = cart.filter(function (i) { return String(i.id) !== String(id); });
+  localStorage.setItem('remont_cart', JSON.stringify(cart));
+  if (typeof updateCartBadge === 'function') updateCartBadge();
+  if (!cart.length) { closeCheckoutModal(); return; }
+  _coRenderItems(cart);
+  _coRetryQuote();
+}
 function _coQuoteBody() {
   var cart = JSON.parse(localStorage.getItem('remont_cart') || '[]');
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
@@ -11265,9 +11339,13 @@ function _coScheduleQuote(key) {
     // the public quote, which never looks anyone up by phone (privacy) — a member checking out
     // as a guest sees their member discount once the order is placed.
     var token = localStorage.getItem('remont_token');
+    // A quote that never answers must not leave the totals on "Calculating…" for ever.
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timedOut = false;
+    var killer = ctl && setTimeout(function () { timedOut = true; ctl.abort(); }, CO_QUOTE_TIMEOUT_MS);
     var publicQuote = function() {
       return fetch((API_BASE || '') + '/api/v1/master-orders/public/quote', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key,
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key, signal: ctl ? ctl.signal : undefined,
       });
     };
     var req = publicQuote;
@@ -11279,16 +11357,26 @@ function _coScheduleQuote(key) {
       });
       req = function() {
         return fetch((API_BASE || '') + '/api/v1/master-orders/quote', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: authBody,
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: authBody, signal: ctl ? ctl.signal : undefined,
         }).then(function(r) { return r.status === 401 ? publicQuote() : r; }); // expired session → guest quote
       };
     }
     req().then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.message || r.status); return d; }); })
       .then(function(res) {
-        _coQuote = res.data || res; _coQuoteFor = key; _coQuoteInflight = null;
+        clearTimeout(killer);
+        _coQuote = res.data || res; _coQuoteFor = key; _coQuoteInflight = null; _coQuoteError = null;
+        var el = document.getElementById('co-msg'); if (el && /GST and the total/.test(el.textContent)) el.style.display = 'none';
         recalcTotals();
       })
-      .catch(function() { _coQuoteInflight = null; /* keep the estimate; checkout re-prices on the server */ });
+      .catch(function(err) {
+        clearTimeout(killer);
+        _coQuoteInflight = null;
+        // Only the request for the cart currently on screen reports an error.
+        if (key !== _coQuoteKey()) return;
+        _coQuoteError = { key: key, message: (err && err.message) || '', timeout: timedOut };
+        recalcTotals();
+        _coShowQuoteError();
+      });
   }, 300);
 }
 
@@ -11333,8 +11421,10 @@ function recalcTotals() {
     _coRenderCharges(_coQuote);
   } else {
     _coRenderCharges(null);
-    _coScheduleQuote(quoteKey);
+    // After a failed quote, wait for Retry (or a cart change) instead of re-requesting on every keystroke.
+    if (!(_coQuoteError && _coQuoteError.key === quoteKey)) _coScheduleQuote(quoteKey);
   }
+  var quoteFailed = !hasQuote && !!(_coQuoteError && _coQuoteError.key === quoteKey);
   var emRow = document.getElementById('co-emergency-row');
   if (emRow) emRow.style.display = (document.getElementById('co-slot-row') || {}).style && document.getElementById('co-slot-row').style.display !== 'none' ? 'block' : 'none';
   var minLine = document.getElementById('co-min-line');
@@ -11363,7 +11453,7 @@ function recalcTotals() {
   } else {
     couponLine.style.display = 'none';
   }
-  document.getElementById('co-gst').textContent = hasQuote ? '₹' + gst.toLocaleString('en-IN') : 'Calculating…';
+  document.getElementById('co-gst').textContent = hasQuote ? '₹' + gst.toLocaleString('en-IN') : (quoteFailed ? 'Not available' : 'Calculating…');
   var deliveryLine = document.getElementById('co-delivery-line');
   if (_coDeliveryCharge > 0) {
     deliveryLine.style.display = 'flex';
@@ -11378,7 +11468,7 @@ function recalcTotals() {
   } else {
     walletLine.style.display = 'none';
   }
-  document.getElementById('co-total').textContent = hasQuote ? '₹' + total.toLocaleString('en-IN') : 'Calculating…';
+  document.getElementById('co-total').textContent = hasQuote ? '₹' + total.toLocaleString('en-IN') : (quoteFailed ? 'Not available' : 'Calculating…');
   return { quoted: hasQuote, subtotal: subtotal, couponDiscount: couponDiscount, bundleDiscount: bundleDiscount, gst: gst, deliveryCharge: _coDeliveryCharge, walletApplied: walletApplied, total: total };
 }
 
@@ -11642,7 +11732,8 @@ function submitCheckoutOrder() {
   // never place an order on a price the customer hasn't seen from the server
   if (!totals.quoted) {
     btn.disabled = false; btn.textContent = paymentMethod === 'COD' ? 'Place Order (Cash) →' : 'Pay Online →';
-    showCoMsg('Calculating the final price — please try again in a moment');
+    if (_coQuoteError) _coShowQuoteError();
+    else showCoMsg('Calculating the final price — please try again in a moment');
     return;
   }
   var useWalletEl = document.getElementById('co-use-wallet');

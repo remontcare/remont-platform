@@ -3,7 +3,15 @@ import { AiToolExecutor, SUPPORT_WHATSAPP, CHAT_TOOL_ALLOWLIST } from './ai-tool
 
 function makeDeps() {
   return {
-    servicesSvc: { search: jest.fn(async (): Promise<any> => []) },
+    servicesSvc: {
+      search: jest.fn(async (): Promise<any> => []),
+      getService: jest.fn(async (id: string): Promise<any> => {
+        if (id === 'svc-1') return { id: 'svc-1', name: 'AC Service', basePrice: 499, unit: 'per visit', isActive: true, category: { key: 'ac' } };
+        if (id === 'svc-off') return { id: 'svc-off', name: 'Old Service', basePrice: 100, isActive: false, category: { key: 'x' } };
+        throw new Error('Service not found');
+      }),
+    },
+    prisma: { product: { findUnique: jest.fn(async ({ where }: any): Promise<any> => (where.id === 'p-1' ? { id: 'p-1', name: 'Bathroom Mixer', price: 1200, unit: 'piece', isActive: true } : null)) } },
     productsSvc: { list: jest.fn(async (): Promise<any> => []) },
     citiesSvc: { getByName: jest.fn(async (): Promise<any> => null), getActiveServicesForCity: jest.fn(async (): Promise<any> => []) },
     crm: { captureLead: jest.fn(async (data: any) => ({ id: 'lead-1', ...data })) },
@@ -15,7 +23,7 @@ function makeDeps() {
 // These tests act as the public website chat: the executor only runs tools on the caller's
 // server-decided allow-list, so every call carries the PUBLIC list unless a test overrides it.
 function makeExecutor(deps = makeDeps()) {
-  const exec = new AiToolExecutor(deps.servicesSvc as any, deps.productsSvc as any, deps.citiesSvc as any, deps.crm as any, deps.estimatesSvc as any, deps.partnerReg as any, deps.sellerReg as any);
+  const exec = new AiToolExecutor(deps.servicesSvc as any, deps.productsSvc as any, deps.citiesSvc as any, deps.crm as any, deps.estimatesSvc as any, deps.partnerReg as any, deps.sellerReg as any, deps.prisma as any);
   const execute = exec.execute.bind(exec);
   exec.execute = (name: string, args: any, ctx: any = {}) => execute(name, args, { allowedTools: CHAT_TOOL_ALLOWLIST.PUBLIC, ...ctx });
   return { exec, deps };
@@ -60,18 +68,67 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
     expect(deps.estimatesSvc.estimate).toHaveBeenCalledWith({ serviceId: 'svc-1', city: 'Indore', sqft: 120 });
   });
 
-  it('add_service_to_cart makes no DB call — returns a FrontendAction for the browser\'s existing addToCart()', async () => {
+  it('add_service_to_cart checks the real catalogue and uses its name/price — returns a FrontendAction for addToCart()', async () => {
     const { exec, deps } = makeExecutor();
-    const { result, action } = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service', price: 499, unit: 'per visit', categoryKey: 'ac' }, {});
-    expect(result).toEqual({ added: true, item: { id: 'svc-1', name: 'AC Service', price: 499, type: 'service', unit: 'per visit', categoryKey: 'ac' } });
-    expect(action).toEqual({ type: 'ADD_SERVICE_TO_CART', payload: { id: 'svc-1', name: 'AC Service', price: 499, type: 'service', unit: 'per visit', categoryKey: 'ac' } });
+    // the model's own price/name are ignored: catalogue values win
+    const { result, action } = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'whatever', price: 0, unit: 'per visit', categoryKey: 'ac' }, {});
+    const item = { id: 'svc-1', name: 'AC Service', price: 499, type: 'service', unit: 'per visit', categoryKey: 'ac', qty: 1 };
+    expect(result).toEqual({ added: true, item });
+    expect(action).toEqual({ type: 'ADD_SERVICE_TO_CART', payload: item });
+    expect(deps.servicesSvc.getService).toHaveBeenCalledWith('svc-1', undefined);
     expect(deps.crm.captureLead).not.toHaveBeenCalled();
   });
 
-  it('add_product_to_cart returns the matching product FrontendAction', async () => {
+  it('add_product_to_cart returns the matching product FrontendAction at the catalogue price', async () => {
     const { exec } = makeExecutor();
-    const { action } = await exec.execute('add_product_to_cart', { productId: 'p-1', name: 'Bathroom Mixer', price: 1200 }, {});
-    expect(action).toEqual({ type: 'ADD_PRODUCT_TO_CART', payload: { id: 'p-1', name: 'Bathroom Mixer', price: 1200, type: 'product', unit: 'piece' } });
+    const { action } = await exec.execute('add_product_to_cart', { productId: 'p-1', name: 'Bathroom Mixer', price: 1 }, {});
+    expect(action).toEqual({ type: 'ADD_PRODUCT_TO_CART', payload: { id: 'p-1', name: 'Bathroom Mixer', price: 1200, type: 'product', unit: 'piece', qty: 1 } });
+  });
+
+  it('a made-up or inactive id is refused — no cart action (was: "general-pest-control" at ₹0 broke checkout)', async () => {
+    const { exec } = makeExecutor();
+    for (const [tool, args] of [
+      ['add_service_to_cart', { serviceId: 'general-pest-control', name: 'General Pest Control', price: 0 }],
+      ['add_service_to_cart', { serviceId: 'svc-off', name: 'Old Service' }],
+      ['add_service_to_cart', { name: 'No id' }],
+      ['add_product_to_cart', { productId: 'bathroom-mixer', name: 'Bathroom Mixer' }],
+    ] as const) {
+      const { result, action } = await exec.execute(tool, args, {});
+      expect(action).toBeUndefined();
+      expect((result as any).added).toBe(false);
+      expect((result as any).error).toMatch(/never make one up/);
+    }
+  });
+
+  it('the same item is added at most once per chat request', async () => {
+    const { exec } = makeExecutor();
+    const ctx = { cart: new Map<string, number>(), addedThisTurn: new Set<string>() };
+    const first = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service' }, ctx);
+    const second = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service' }, ctx);
+    const third = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service', addAnother: true }, ctx);
+    expect(first.action).toBeDefined();
+    expect(second.action).toBeUndefined();
+    expect((second.result as any).duplicate).toBe(true);
+    expect(third.action).toBeUndefined();
+  });
+
+  it('an item already in the cart is not added again unless the customer explicitly asked for more', async () => {
+    const { exec } = makeExecutor();
+    const blocked = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service' }, { cart: new Map([['svc-1', 1]]), addedThisTurn: new Set() });
+    expect(blocked.action).toBeUndefined();
+    expect(blocked.result).toMatchObject({ added: false, alreadyInCart: true, quantityInCart: 1 });
+    const more = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service', addAnother: true }, { cart: new Map([['svc-1', 1]]), addedThisTurn: new Set() });
+    expect(more.action).toMatchObject({ type: 'ADD_SERVICE_TO_CART', payload: { id: 'svc-1', qty: 1 } });
+  });
+
+  it('quantity is honoured and clamped to 1..20', async () => {
+    const { exec } = makeExecutor();
+    const two = await exec.execute('add_service_to_cart', { serviceId: 'svc-1', name: 'AC Service', quantity: 2 }, {});
+    expect((two.action as any).payload.qty).toBe(2);
+    const huge = await exec.execute('add_product_to_cart', { productId: 'p-1', name: 'Mixer', quantity: 500 }, {});
+    expect((huge.action as any).payload.qty).toBe(20);
+    const junk = await exec.execute('add_product_to_cart', { productId: 'p-1', name: 'Mixer', quantity: 'abc' }, {});
+    expect((junk.action as any).payload.qty).toBe(1);
   });
 
   it('create_lead calls the real public CRM capture endpoint with AI_CHAT source', async () => {

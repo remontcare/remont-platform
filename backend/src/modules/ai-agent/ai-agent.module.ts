@@ -152,6 +152,8 @@ export class AiAgentService {
   // a runaway loop from an unexpected model response pattern. Admin-tunable lower
   // via ai.tools.maxRounds, never higher than this.
   private static readonly MAX_TOOL_ROUNDS = 4;
+  /** Window in which a second add of the same item for the same customer counts as a duplicate. */
+  static readonly CART_CLAIM_MS = 60_000;
 
   async chat(input: {
     sessionId?: string;
@@ -162,6 +164,10 @@ export class AiAgentService {
     customerName?: string;
     customerEmail?: string;
     city?: string;
+    /** The customer's current cart (id, name, qty) — so REMI never re-adds what is already there. */
+    cart?: unknown;
+    /** Random id this browser keeps in localStorage — shared by all its tabs (duplicate-add guard only). */
+    clientId?: unknown;
   }, actor: AiActor = {}) {
     const cfg = this.limits ? await this.limits.config() : null;
     const maxChars = cfg?.['ai.message.maxChars'] ?? 1000;
@@ -178,6 +184,22 @@ export class AiAgentService {
     // A logged-in caller's phone is the verified one from their account; an anonymous visitor's
     // is unverified and only ever used for lead capture — never sent to the AI provider.
     const customerPhone = actor.userId ? (actor.phone || undefined) : field(input.customerPhone);
+    // Cart snapshot from the browser: untrusted, so only well-formed entries, capped in size.
+    const cartQty = new Map<string, number>();
+    const cartNames: string[] = [];
+    if (Array.isArray(input.cart)) {
+      for (const it of input.cart.slice(0, 50)) {
+        const id = it && typeof (it as any).id === 'string' ? (it as any).id.trim().slice(0, 64) : '';
+        if (!id) continue;
+        const q = Math.min(999, Math.max(1, Math.floor(Number((it as any).qty) || 1)));
+        cartQty.set(id, (cartQty.get(id) || 0) + q);
+        const nm = typeof (it as any).name === 'string' ? (it as any).name.replace(/[^\p{L}\p{N} ()&,./+-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+        if (nm && cartNames.length < 20) cartNames.push(nm + ' × ' + q);
+      }
+    }
+    // Owner of duplicate-add claims: the signed-in user; for a guest, this browser (all its tabs share
+    // the id); the network identity only as a last resort. Not an identity for anything else.
+    const clientId = typeof input.clientId === 'string' && /^[a-f0-9]{16,64}$/.test(input.clientId) ? input.clientId : '';
     const channel = typeof input.channel === 'string' && (Object.values(BookingChannel) as string[]).includes(input.channel)
       ? (input.channel as BookingChannel) : BookingChannel.AI_CHAT;
     // `<id>.<hmac>` from a previous reply; a bare id is accepted only for the logged-in owner.
@@ -217,6 +239,7 @@ export class AiAgentService {
 
       const audience = audienceForRole(actor.userId ? actor.role : null);
       const budget = this.limits ? await this.limits.budgetAllows(admission.identityKey, !actor.userId) : { allowed: true };
+      const cartOwner = actor.userId ? admission.identityKey : (clientId ? `c:${clientId}` : admission.identityKey);
       if (!budget.allowed) this.logger.warn(`AI budget/quota reached (${budget.reason}) — rule-based reply for ${admission.identityKey}`);
 
       // No limits service in production → no paid call at all (fail closed); unit tests may omit it.
@@ -227,6 +250,11 @@ export class AiAgentService {
             city, customerName, customerPhone, customerEmail,
             sessionId: session?.id, channel,
             allowedTools: CHAT_TOOL_ALLOWLIST[audience],
+            cart: cartQty,
+            addedThisTurn: new Set<string>(),
+            claimCartAdd: this.limits
+              ? (itemId: string) => this.limits!.claimOnce(`cart:${cartOwner}:${itemId}`, AiAgentService.CART_CLAIM_MS)
+              : undefined,
           };
           // What's already known — so the model never re-asks. The phone NUMBER itself is not
           // sent to the provider; tools get it from ctx on the server.
@@ -234,6 +262,9 @@ export class AiAgentService {
           if (city) knownFacts.push(`City: ${city}`);
           if (customerName) knownFacts.push(`Name: ${customerName}`);
           if (customerPhone) knownFacts.push('Phone number: already on file — do not ask for it');
+          knownFacts.push(cartNames.length
+            ? 'Already in the cart (do NOT add these again unless the customer explicitly asks for more): ' + cartNames.join('; ')
+            : 'The cart is currently empty.');
           const contextMsg: OpenAiMessage[] = knownFacts.length
             ? [{ role: 'system', content: `Already known about this customer — do not ask for these again:\n${knownFacts.join('\n')}` }]
             : [];
