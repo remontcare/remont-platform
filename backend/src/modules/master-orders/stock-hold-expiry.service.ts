@@ -45,10 +45,15 @@ export class StockHoldExpiryService {
     const stale = await this.prisma.order.findMany({
       where: {
         status: OrderStatus.PENDING_PAYMENT, paymentStatus: { notIn: ['PAID', 'PARTIAL'] },
-        stockReservedAt: { not: null, lt: cutoff }, stockReleasedAt: null,
+        OR: [
+          { stockReservedAt: { not: null, lt: cutoff }, stockReleasedAt: null },
+          // A services-only online order reserves no stock, but an abandoned payment must not
+          // leave it pending for ever (it showed as an order). Same window, same safe cancel.
+          { stockReservedAt: null, paymentMethod: 'ONLINE', createdAt: { lt: cutoff } },
+        ],
       },
       select: { id: true, masterOrderId: true },
-      orderBy: { stockReservedAt: 'asc' }, take: 100,
+      orderBy: { createdAt: 'asc' }, take: 100,
     });
     // A cart is one payment: it expires as a whole (its master id is what the gateway order is on).
     const units = new Map<string, { masterOrderId?: string; orderId?: string }>();

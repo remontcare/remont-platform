@@ -793,7 +793,7 @@ export class AdminService {
   async orderStats() {
     const [total, newOrders, active, completed, cancelled, revenue, stuck] = await Promise.all([
       this.prisma.order.count(),
-      this.prisma.order.count({ where: { status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } } }),
+      this.prisma.order.count({ where: { status: 'CONFIRMED' } }), // unpaid online attempts are not new orders
       this.prisma.order.count({ where: { status: { in: ['VENDOR_ASSIGNED', 'VENDOR_EN_ROUTE', 'STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'] } } }),
       this.prisma.order.count({ where: { status: 'COMPLETED' } }),
       this.prisma.order.count({ where: { status: 'CANCELLED' } }),
@@ -963,6 +963,12 @@ export class AdminService {
     // own ProductVendor/Seller (see ProductVendorsService.myOrders()).
     const existing = await this.prisma.order.findUnique({ where: { id: orderId }, select: { serviceId: true, vendorId: true, arrivedAt: true, serviceModel: true, pricingSnapshot: true } });
     if (!existing) throw new NotFoundException();
+    // A partner may only be assigned to a confirmed order — never to an unpaid online order.
+    const lifecycle = await this.prisma.order.findUnique({ where: { id: orderId }, select: { status: true } });
+    if (lifecycle?.status === 'PENDING_PAYMENT') {
+      throw new BadRequestException('This order is not confirmed — the online payment was not completed. A partner can be assigned only after payment.');
+    }
+    if (lifecycle?.status === 'CANCELLED') throw new BadRequestException('This order is cancelled.');
     if (!existing.serviceId) {
       throw new BadRequestException('This order has no service — a Service Partner cannot be assigned to a product-only order.');
     }

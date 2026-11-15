@@ -10,7 +10,8 @@ function makeDb(seed: { products?: any[]; orders?: any[]; items?: any[]; masters
     products: seed.products || [], orders: seed.orders || [], items: seed.items || [],
     masters: seed.masters || [], txs: seed.txs || [], refunds: [] as any[], settings: seed.settings || [], timeline: [] as any[],
   };
-  const matches = (row: any, where: any = {}) => Object.entries(where).every(([k, v]: [string, any]) => {
+  const matches = (row: any, where: any = {}): boolean => Object.entries(where).every(([k, v]: [string, any]) => {
+    if (k === 'OR') return (v as any[]).some((sub) => matches(row, sub));
     if (v && typeof v === 'object' && !(v instanceof Date)) {
       if ('not' in v && v.not === null && row[k] == null) return false;
       if ('lt' in v && !(row[k] != null && row[k] < v.lt)) return false;
@@ -106,6 +107,40 @@ describe('StockHoldExpiryService', () => {
     const off = unpaidCart({ settings: [{ key: 'product_stock_hold_minutes', value: '0' }] });
     expect(await svc(off.prisma).s.sweep(now)).toEqual({ expired: 0, skipped: 0 });
     expect(off.db.products[0].stock).toBe(1);
+  });
+
+  // A cancelled/abandoned online payment on a services-only cart reserved no stock, so it used to
+  // stay PENDING_PAYMENT for ever and looked like an order. It now expires with the same safety.
+  const serviceOnly = (over: any = {}) => makeDb({
+    masters: [{ id: 'm2', status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', customerId: 'c1', masterOrderNumber: 'RM-2' }],
+    orders: [{ id: 's1', masterOrderId: 'm2', orderNumber: 'REM-9', status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', paymentMethod: 'ONLINE', customerId: 'c1', walletUsed: 0, stockReservedAt: null, stockReleasedAt: null, createdAt: reserved }],
+    txs: [{ orderId: 'm2', status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: 'order_S' }],
+    ...over,
+  });
+
+  it('cancels a services-only unpaid ONLINE cart after the window (it used to stay pending for ever)', async () => {
+    const { db, prisma } = serviceOnly();
+    const { s, payments } = svc(prisma);
+    expect(await s.sweep(now)).toEqual({ expired: 1, skipped: 0 });
+    expect(payments.razorpayPaymentMayBeInProgress).toHaveBeenCalledWith('order_S');
+    expect(db.masters[0].status).toBe('CANCELLED');
+    expect(db.orders[0]).toMatchObject({ status: 'CANCELLED', cancelReason: STOCK_HOLD_EXPIRED_REASON });
+  });
+
+  it('a services-only unpaid cart is kept inside the window and while Razorpay may still succeed', async () => {
+    const early = serviceOnly();
+    expect(await svc(early.prisma).s.sweep(new Date('2026-11-05T09:00:00Z'))).toEqual({ expired: 0, skipped: 0 });
+    const inFlight = serviceOnly();
+    expect(await svc(inFlight.prisma, true).s.sweep(now)).toEqual({ expired: 0, skipped: 1 });
+    expect(inFlight.db.orders[0].status).toBe('PENDING_PAYMENT');
+  });
+
+  it('never touches a confirmed Cash on Service order or a paid one', async () => {
+    const cod = serviceOnly({ orders: [{ id: 's1', masterOrderId: 'm2', orderNumber: 'REM-9', status: 'CONFIRMED', paymentStatus: 'PENDING', paymentMethod: 'COD', customerId: 'c1', walletUsed: 0, stockReservedAt: null, stockReleasedAt: null, createdAt: reserved }] });
+    expect(await svc(cod.prisma).s.sweep(now)).toEqual({ expired: 0, skipped: 0 });
+    expect(cod.db.orders[0].status).toBe('CONFIRMED');
+    const paid = serviceOnly({ orders: [{ id: 's1', masterOrderId: 'm2', orderNumber: 'REM-9', status: 'PENDING_PAYMENT', paymentStatus: 'PAID', paymentMethod: 'ONLINE', customerId: 'c1', walletUsed: 0, stockReservedAt: null, stockReleasedAt: null, createdAt: reserved }] });
+    expect(await svc(paid.prisma).s.sweep(now)).toEqual({ expired: 0, skipped: 0 });
   });
 
   it('skips a cart that already has a PAID transaction, or a non-Razorpay pending one', async () => {

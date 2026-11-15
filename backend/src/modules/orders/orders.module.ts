@@ -64,7 +64,7 @@ class PublicProductCheckoutDto {
 }
 
 // ─── Guest Booking DTO ───
-class GuestBookingDto {
+export class GuestBookingDto {
   @IsString() name: string;
   @IsString() phone: string;
   @IsOptional() @IsEmail() email?: string;
@@ -80,7 +80,7 @@ class GuestBookingDto {
   @IsOptional() @IsEnum(BookingChannel) channel?: BookingChannel;
   // Defaults to COD for older/other clients that don't send it yet — matches the
   // pre-existing behavior this field's absence used to (silently) produce.
-  @IsOptional() @IsIn(['ONLINE', 'COD']) paymentMethod?: 'ONLINE' | 'COD';
+  @IsIn(['ONLINE', 'COD'], { message: 'Please choose a payment method: Pay Online or Cash on Service.' }) paymentMethod: 'ONLINE' | 'COD';
   // Phase 8 (M-06) — this guest SERVICE booking path was the one remaining order-creation
   // path with no idempotency support at all (CreateOrderDto/PublicProductCheckoutDto/
   // CreateMasterOrderDto all already have this — see their matching M-06 comments).
@@ -145,6 +145,8 @@ export class DispatchService {
       include: { address: true, service: { include: { category: true } } },
     });
     if (!order?.address || !order.service) return [];
+    // A partner is never offered an unpaid (or cancelled) order, whichever path asks.
+    if (order.status === OrderStatus.PENDING_PAYMENT || order.status === OrderStatus.CANCELLED) return [];
 
     const { latitude: lat, longitude: lng } = order.address;
     // ServiceCategory.key is stored however an admin typed it when the category was
@@ -356,6 +358,11 @@ export class RoutingService {
       include: { service: true, address: true, customer: { select: { name: true, phone: true } } },
     });
     if (!order || !order.service) return; // product-only child orders have nothing to route
+    // Never route an order that is not confirmed (unpaid online, or cancelled) — whoever calls this.
+    if (order.status === OrderStatus.PENDING_PAYMENT || order.status === OrderStatus.CANCELLED) {
+      this.logger.warn(`Routing refused for ${order.orderNumber}: order is ${order.status}`);
+      return;
+    }
 
     const fulfillmentType = order.service.fulfillmentType || 'DIRECT_PARTNER';
     // Allowlist check (see VENDOR_DISPATCHABLE_FULFILLMENT_TYPES) — anything not
@@ -1919,7 +1926,8 @@ export class OrdersService {
 
   async myOrders(customerId: string, status?: OrderStatus) {
     return this.prisma.order.findMany({
-      where: { customerId, ...(status ? { status } : {}) },
+      // An online payment that was never completed is not an order: it is never listed to the customer.
+      where: { customerId, ...(status ? { status } : {}), NOT: { paymentMethod: 'ONLINE', paymentStatus: { in: ['PENDING', 'INITIATED', 'FAILED', 'CANCELLED'] }, status: { in: ['PENDING_PAYMENT', 'CANCELLED'] } } },
       include: {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
@@ -2175,7 +2183,9 @@ export class GuestBookingService {
     // gateway signature, below. Previously this method ignored paymentMethod entirely and
     // always auto-confirmed, so a customer choosing "Pay Online" in the booking modal was
     // silently booked without ever being charged.
-    const isCOD = dto.paymentMethod !== 'ONLINE';
+    // Only an explicit Cash on Service choice is COD (a missing method used to become a confirmed COD order).
+    if (dto.paymentMethod !== 'ONLINE' && dto.paymentMethod !== 'COD') throw new BadRequestException('Please choose a payment method: Pay Online or Cash on Service.');
+    const isCOD = dto.paymentMethod === 'COD';
     let order;
     try {
       order = await this.prisma.order.create({

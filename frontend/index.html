@@ -9142,7 +9142,7 @@ window.RemontMedia = (function () {
   window._bmStep = 1;
   window._bmCoupon = null; // { code, discount, couponId }
   window._bmPriceNum = 0;
-  window._bmPayMethod = 'COD';
+  window._bmPayMethod = null; // chosen by the customer in step 3 — never a default
   window._bmSavedAddrs = [];
 
   // Finds which category owns a given sub-service id — lets openBookingModal gate on
@@ -9173,7 +9173,8 @@ window.RemontMedia = (function () {
     var pNum = svcPrice ? parseFloat(svcPrice.replace(/[^0-9.]/g,'').replace(/,/g,'')) || 0 : 0;
     window._bmPriceNum = pNum;
     window._bmCoupon = null;
-    window._bmPayMethod = 'COD';
+    window._bmPayMethod = null;
+    document.querySelectorAll('.bm-pay-opt').forEach(function (o) { o.classList.remove('sel'); var r = o.querySelector('input'); if (r) r.checked = false; });
     _bmGpsChecked = false; // re-check GPS proximity fresh for every new booking session
     _bmApplyPaymentEligibility(svcId);
 
@@ -9264,6 +9265,7 @@ window.RemontMedia = (function () {
 
   function bmSelPay(method, el) {
     window._bmPayMethod = method;
+    var radio = el && el.querySelector('input'); if (radio) radio.checked = true;
     document.querySelectorAll('.bm-pay-opt').forEach(function(o){ o.classList.remove('sel'); });
     el.classList.add('sel');
   }
@@ -9286,9 +9288,8 @@ window.RemontMedia = (function () {
       if (svc && svc.paymentMode === 'ONLINE_ONLY') {
         codLabel.style.display = 'none';
         note.style.display = '';
-        window._bmPayMethod = 'ONLINE';
+        if (window._bmPayMethod === 'COD') window._bmPayMethod = null; // Cash is not allowed here
         codLabel.classList.remove('sel');
-        onlineLabel.classList.add('sel');
       }
     }).catch(function() {
       // Can't confirm eligibility — leave the default showing. The backend re-checks
@@ -9539,6 +9540,10 @@ window.RemontMedia = (function () {
     var bmAp = apCollect('bm');
     if (bmAp.error) { showToast(bmAp.error, 'error'); return; }
 
+    if (window._bmPayMethod !== 'ONLINE' && window._bmPayMethod !== 'COD') {
+      showToast('Please choose how you want to pay: Pay Online or Cash on Service', 'error');
+      return;
+    }
     var btn = document.getElementById('bm-next-btn');
     btn.textContent = 'Booking…'; btn.disabled = true;
 
@@ -9546,7 +9551,7 @@ window.RemontMedia = (function () {
       name: name, phone: phone, serviceId: svcId, cityId: cityId,
       fullAddress: fullAddress,
       slotDate: date, slotTime: time, channel: 'WEBSITE',
-      paymentMethod: window._bmPayMethod || 'COD'
+      paymentMethod: window._bmPayMethod
     };
     if (pincode) payload.pincode = pincode;
     // Thread through the already-captured GPS fix (used just above for the proximity
@@ -9944,10 +9949,10 @@ window.RemontMedia = (function () {
   <!-- STEP 3: Payment Method -->
   <div class="bm-panel" id="bm-panel-3">
    <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:14px;text-transform:uppercase;letter-spacing:.5px">Choose Payment Method</div>
-   <label class="bm-pay-opt sel" id="bm-pay-cod" onclick="bmSelPay('COD',this)">
-    <input type="radio" name="bm-pay" value="COD" checked>
+   <label class="bm-pay-opt" id="bm-pay-cod" onclick="bmSelPay('COD',this)">
+    <input type="radio" name="bm-pay" value="COD">
     <span class="po-icon">💵</span>
-    <div><div class="po-title">Cash on Delivery</div><div class="po-sub">Pay when our professional arrives</div></div>
+    <div><div class="po-title">Cash on Service</div><div class="po-sub">Pay the professional after the job</div></div>
    </label>
    <label class="bm-pay-opt" id="bm-pay-online" onclick="bmSelPay('ONLINE',this)">
     <input type="radio" name="bm-pay" value="ONLINE">
@@ -9960,11 +9965,11 @@ window.RemontMedia = (function () {
 
    <!-- Shown only if an online payment attempt fails/is dismissed -->
    <div id="bm-payment-failed" style="display:none;background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:14px 16px;margin-top:14px">
-    <div style="font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:4px">⚠️ Payment Failed</div>
+    <div style="font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:4px">⚠️ Payment was not completed. Your booking has not been confirmed.</div>
     <div id="bm-payment-failed-reason" style="font-size:13px;color:#7f1d1d;margin-bottom:12px"></div>
     <div style="display:flex;gap:10px">
      <button onclick="bmRetryPayment()" style="flex:1;padding:10px;background:#c4601a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Retry Payment</button>
-     <button onclick="bmSwitchToCOD()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">Pay via Cash Instead</button>
+     <button onclick="bmSwitchToCOD()" style="flex:1;padding:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#374151">Pay by Cash on Service instead</button>
     </div>
    </div>
 
@@ -10510,8 +10515,8 @@ function cartCheckout() {
 
       <h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:10px">Payment Method</h4>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <label class="co-payment-label" id="co-online-label" style="flex:1;border:2px solid #c4601a;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
-          <input type="radio" name="co-payment" value="ONLINE" checked onchange="updatePaymentUI()">
+        <label class="co-payment-label" id="co-online-label" style="flex:1;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+          <input type="radio" name="co-payment" value="ONLINE" onchange="updatePaymentUI()">
           <div><div style="font-size:13px;font-weight:600">💳 Pay Online</div><div style="font-size:11px;color:#6b7280">UPI, Card, Net Banking</div></div>
         </label>
         <label class="co-payment-label" id="co-cod-label" style="flex:1;border:2px solid #e5e7eb;border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px">
@@ -11003,6 +11008,8 @@ function openCheckoutModal() {
 
   // Populate order summary line items (pricing totals are computed by recalcTotals())
   _coQuoteError = null;
+  // Every checkout starts with no payment method chosen.
+  document.querySelectorAll('input[name="co-payment"]').forEach(function (r) { r.checked = false; });
   _coRenderItems(cart);
 
   // Wallet — shown as a payment mode for any logged-in customer, alongside Pay Online,
@@ -11171,14 +11178,16 @@ function showCoMsg(msg) {
 // them stuck retrying the same failed gateway.
 function showCoPaymentFailed(reason, isMaster) {
   var el = document.getElementById('co-msg');
-  if (!el) { if (typeof showToast === 'function') showToast('Payment Failed. Your order has not been confirmed.', 'error'); return; }
+  if (!el) { if (typeof showToast === 'function') showToast('Payment was not completed. Your order has not been confirmed.', 'error'); return; }
   var offerCod = !window._coOnlineOnlyService && !!_checkoutOrderId;
+  var retryBtn = _checkoutOrderId ? '<button type="button" onclick="_coRetryOnlinePayment()" style="padding:6px 14px;background:#c4601a;border:1.5px solid #c4601a;color:#fff;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;min-height:40px">Retry Payment</button>' : '';
   el.innerHTML =
     '<div style="text-align:left">' +
-      '<div style="font-weight:700;color:#ef4444;margin-bottom:2px">Payment Failed. Your order has not been confirmed.</div>' +
+      '<div style="font-weight:700;color:#ef4444;margin-bottom:2px">Payment was not completed. Your order has not been confirmed.</div>' +
       (reason ? '<div style="font-size:12px;color:#6b7280;margin-bottom:8px">' + escHtml(reason) + '</div>' : '') +
+      retryBtn +
       (offerCod
-        ? '<button type="button" onclick="coSwitchToCod(' + (isMaster ? 'true' : 'false') + ',this)" style="padding:6px 14px;background:#fff;border:1.5px solid #c4601a;color:#c4601a;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Switch to Cash on Delivery</button>'
+        ? '<button type="button" onclick="coSwitchToCod(' + (isMaster ? 'true' : 'false') + ',this)" style="padding:6px 14px;background:#fff;border:1.5px solid #c4601a;color:#c4601a;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;min-height:40px;margin-left:8px">Pay by Cash on Service instead</button>'
         : '') +
     '</div>';
   el.style.display = '';
@@ -11189,6 +11198,13 @@ function showCoPaymentFailed(reason, isMaster) {
 // second/duplicate order alongside the one already sitting PENDING_PAYMENT from the first
 // attempt. Server re-validates COD eligibility (Service.paymentMode) regardless of what the
 // client believed was available.
+// Retry the SAME unpaid order online (no new order is created).
+function _coRetryOnlinePayment() {
+  var o = document.querySelector('input[name="co-payment"][value="ONLINE"]');
+  if (o) { o.checked = true; if (typeof updatePaymentUI === 'function') updatePaymentUI(); }
+  handleCheckoutSubmit();
+}
+
 function coSwitchToCod(isMaster, btnEl) {
   if (!_checkoutOrderId) { showToast('No pending order to switch.', 'error'); return; }
   var phoneEl = document.getElementById('co-phone');
@@ -11641,14 +11657,14 @@ function updatePaymentUI() {
     }
     if (btn) { btn.disabled = true; btn.textContent = 'Split into separate orders to continue'; }
   } else if (forceCod) {
-    if (codRadio) { codRadio.checked = true; codRadio.disabled = false; }
+    if (codRadio) { codRadio.disabled = false; } // the customer still taps it — never chosen for them
     if (onlineRadio) { onlineRadio.checked = false; onlineRadio.disabled = true; }
     if (onlineLabel) { onlineLabel.style.opacity = '0.45'; onlineLabel.style.pointerEvents = 'none'; }
     if (codLabel) { codLabel.style.opacity = '1'; codLabel.style.pointerEvents = 'auto'; }
     if (codOnlyNote) codOnlyNote.style.display = 'block';
     if (btn) btn.disabled = false;
   } else if (forceOnline) {
-    if (onlineRadio) { onlineRadio.checked = true; onlineRadio.disabled = false; }
+    if (onlineRadio) { onlineRadio.disabled = false; } // the customer still taps it — never chosen for them
     if (codRadio) { codRadio.checked = false; codRadio.disabled = true; }
     if (codLabel) { codLabel.style.opacity = '0.45'; codLabel.style.pointerEvents = 'none'; }
     if (onlineLabel) { onlineLabel.style.opacity = '1'; onlineLabel.style.pointerEvents = 'auto'; }
@@ -11665,7 +11681,7 @@ function updatePaymentUI() {
 
   var sel = document.querySelector('input[name="co-payment"]:checked');
   var isCOD = sel && sel.value === 'COD';
-  if (btn && !conflict) btn.textContent = isCOD ? 'Place Order (Cash) →' : 'Pay Online →';
+  if (btn && !conflict) btn.textContent = !sel ? 'Choose a payment method' : (isCOD ? 'Place Order (Cash on Service) →' : 'Pay Online →');
   document.querySelectorAll('.co-payment-label').forEach(function(l) {
     var inp = l.querySelector('input[type="radio"]');
     l.style.borderColor = (inp && inp.checked) ? '#c4601a' : '#e5e7eb';
@@ -11705,7 +11721,9 @@ function submitCheckoutOrder() {
   if (coAp.error) { showCoMsg(coAp.error); return; }
 
   var paymentEl = document.querySelector('input[name="co-payment"]:checked');
-  var paymentMethod = paymentEl ? paymentEl.value : 'ONLINE';
+  // No default: the customer must choose Pay Online or Cash on Service.
+  if (!paymentEl) { showCoMsg('Please choose how you want to pay: Pay Online or Cash on Service.'); return; }
+  var paymentMethod = paymentEl.value;
 
   var btn = document.getElementById('co-submit-btn');
   btn.textContent = paymentMethod === 'COD' ? 'Placing order…' : 'Creating order…';

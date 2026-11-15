@@ -57,7 +57,7 @@
     <div class="pipeline">
       <span class="pipeline-step active" data-s="" onclick="setPipeline(this,'')">All</span>
       <span class="pipeline-arrow">›</span>
-      <span class="pipeline-step" data-s="PENDING_PAYMENT" onclick="setPipeline(this,'PENDING_PAYMENT')">Pending Payment</span>
+      <span class="pipeline-step" data-s="PENDING_PAYMENT" onclick="setPipeline(this,'PENDING_PAYMENT')">Unpaid — not confirmed</span>
       <span class="pipeline-arrow">›</span>
       <span class="pipeline-step" data-s="CONFIRMED" onclick="setPipeline(this,'CONFIRMED')">Confirmed</span>
       <span class="pipeline-arrow">›</span>
@@ -251,7 +251,6 @@ var CHANNEL_COLORS = {
   AI_CHAT: '#8b5cf6', CRM_AGENT: '#f97316', MOBILE_APP: '#ec4899',
 };
 var STATUS_NEXT = {
-  PENDING_PAYMENT: 'CONFIRMED',
   CONFIRMED: 'VENDOR_ASSIGNED',
   VENDOR_ASSIGNED: 'VENDOR_EN_ROUTE',
   VENDOR_EN_ROUTE: 'IN_PROGRESS',
@@ -521,7 +520,7 @@ function openDetail(orderId) {
 
 function buildDetailPipeline(currentSt) {
   var steps = [
-    {s:'PENDING_PAYMENT',label:'Pending'},
+    {s:'PENDING_PAYMENT',label:'Unpaid'},
     {s:'CONFIRMED',label:'Confirmed'},
     {s:'VENDOR_ASSIGNED',label:'Assigned'},
     {s:'VENDOR_EN_ROUTE',label:'En Route'},

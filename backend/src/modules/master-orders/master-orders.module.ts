@@ -204,6 +204,11 @@ export class PublicMasterCheckoutDto {
 }
 
 /** Public quote — the public checkout's pricing inputs, nothing required beyond the cart. */
+/** Signed-in checkout (POST /master-orders): the customer must choose how to pay — never a default. */
+export class AuthMasterCheckoutDto extends CreateMasterOrderDto {
+  @IsIn(['ONLINE', 'COD'], { message: 'Please choose a payment method: Pay Online or Cash on Service.' }) paymentMethod: 'ONLINE' | 'COD';
+}
+
 export class PublicMasterQuoteDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => MasterCheckoutItemDto) items: MasterCheckoutItemDto[];
   @IsOptional() @IsString() phone?: string;
@@ -726,6 +731,10 @@ export class MasterOrdersService {
   // customer — internally splits into one Order per distinct service and one Order per
   // distinct product seller, all linked under one MasterOrder.
   async checkout(dto: CreateMasterOrderDto, opts: CheckoutOpts) {
+    // No default and nothing written first: an order is only ever created for a payment method the customer chose.
+    if (opts.paymentMethod !== 'ONLINE' && opts.paymentMethod !== 'COD') {
+      throw new BadRequestException('Please choose a payment method: Pay Online or Cash on Service.');
+    }
     if (!dto.items?.length) throw new BadRequestException('Cart is empty');
 
     // Idempotency (M-06) — opt-in: a client that sends idempotencyKey gets double-click/
@@ -780,7 +789,7 @@ export class MasterOrdersService {
     // the job, same as COD collects at the door); both just mean "don't charge upfront
     // online," so one flag covers both. A coupon-applied order is forced to ONLINE by the
     // frontend (nothing to enforce server-side beyond what's already validated above).
-    const paymentMethod = opts.paymentMethod || 'ONLINE';
+    const paymentMethod = opts.paymentMethod;
     const confirmUpfront = paymentMethod === 'COD';
 
     // Service-level payment restriction (admin-configurable, Service.paymentMode) — the
@@ -1300,7 +1309,8 @@ export class MasterOrdersService {
 
   async findMine(customerId: string) {
     const orders = await this.prisma.masterOrder.findMany({
-      where: { customerId },
+      // An online payment that was never completed is not an order: it is never listed to the customer.
+      where: { customerId, NOT: { paymentMethod: 'ONLINE', paymentStatus: { in: ['PENDING', 'INITIATED', 'FAILED', 'CANCELLED'] }, status: { in: ['PENDING_PAYMENT', 'CANCELLED'] } } },
       include: {
         address: true,
         childOrders: {
@@ -1409,10 +1419,10 @@ export class MasterOrdersController {
   constructor(private masterOrders: MasterOrdersService, private authz: AuthorizedPersonService) {}
 
   @Post()
-  async checkout(@CurrentUser() u: JwtPayload, @Body() dto: CreateMasterOrderDto) {
+  async checkout(@CurrentUser() u: JwtPayload, @Body() dto: AuthMasterCheckoutDto) {
     const { authorizedPerson, ...checkoutDto } = dto;
     if (authorizedPerson) this.authz.assertValid(authorizedPerson);
-    const res: any = await this.masterOrders.checkout(checkoutDto as CreateMasterOrderDto, { customerId: u.sub });
+    const res: any = await this.masterOrders.checkout(checkoutDto as CreateMasterOrderDto, { customerId: u.sub, paymentMethod: dto.paymentMethod });
     return this.authz.attachSafely(res, { masterOrderId: res?.masterOrderId }, authorizedPerson);
   }
 
