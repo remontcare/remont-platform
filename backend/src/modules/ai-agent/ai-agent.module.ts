@@ -7,7 +7,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
-import { BookingChannel, LeadSource, UserRole } from '@prisma/client';
+import { BookingChannel, Language, LeadSource, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload } from '../../common';
 import { AiLimitsService, AiLimitsModule, AiReservation, AiBudgetRefusedError, completeWithinBudget, estimateTokens, isApprovedModel, parseSessionRef, signSessionId } from './ai-limits';
@@ -245,9 +245,16 @@ export class AiAgentService {
           // 2+-hits threshold for MIXED misses short Hinglish phrases like "Kitchen
           // renovate karna hai" (one marker word), and the model's own read of those
           // is already good — a hard override here would wrongly force English onto them.
-          const langMsg: OpenAiMessage[] = hasNoHindiSignal(message)
-            ? [{ role: 'system', content: "The customer's latest message is in English with no Hindi/Hinglish words. Reply in plain English." }]
-            : [];
+          // The reply after a tool call (cart, estimate) was drifting to English, so Hindi and
+          // Hinglish get the same explicit reminder English already had.
+          const langMsg: OpenAiMessage[] = [{
+            role: 'system',
+            content: hasNoHindiSignal(message)
+              ? "The customer's latest message is in English with no Hindi/Hinglish words. Reply in plain English."
+              : lang === Language.HI
+                ? "The customer's latest message is in Hindi (Devanagari). Reply in natural Hindi (Devanagari), including after any tool call."
+                : "The customer's latest message is in Hinglish (Hindi in Roman script). Reply in natural Hinglish in Roman script, including after any tool call — not in English.",
+          }];
 
           // Bounded history (cost grows with every re-sent turn) and every user/assistant line
           // pseudonymised: phone/email/OTP/Aadhaar/PAN/bank details never reach the provider.

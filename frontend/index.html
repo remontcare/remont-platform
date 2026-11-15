@@ -7956,7 +7956,21 @@ window.RemontMedia = (function () {
     } catch (e) {}
   })();
 
+  // A name or mobile number the customer types in chat is kept for this browser so checkout
+  // can pre-fill them (only empty fields; a signed-in profile always wins).
+  function remiRememberContact(msg) {
+    try {
+      var c = JSON.parse(localStorage.getItem('remont_chat_contact') || '{}');
+      var ph = String(msg).match(/(?:^|\D)(?:\+?91[ -]?)?([6-9]\d{9})(?!\d)/);
+      if (ph) c.phone = ph[1];
+      var nm = String(msg).match(/(?:mera naam|my name is|naam)\s+(?:hai\s+)?([A-Za-z][A-Za-z.]*(?:\s+[A-Za-z][A-Za-z.]*){0,2}?)(?=\s+(?:hai|h|he|and|aur)\b|\s*[,.!]|\s*\d|\s*$)/i);
+      if (nm && !/^(hai|kya|nahi)$/i.test(nm[1])) c.name = nm[1].replace(/\b\w/g, function (x) { return x.toUpperCase(); });
+      if (ph || nm) localStorage.setItem('remont_chat_contact', JSON.stringify(c));
+    } catch (e) { /* private mode */ }
+  }
+
   function remiSendMessage(msg) {
+    remiRememberContact(msg);
     remiAddBubble('user', msg);
     remiSave('user', msg);
     document.getElementById('remi-suggestions').innerHTML = '';
@@ -11007,6 +11021,13 @@ function openCheckoutModal() {
     if (storedUser.name)  document.getElementById('co-name').value  = storedUser.name;
     if (storedUser.phone) document.getElementById('co-phone').value = storedUser.phone.replace('+91','');
   }
+  // Else what the customer told REMI in chat (name / mobile), for fields still empty.
+  try {
+    var chatContact = JSON.parse(localStorage.getItem('remont_chat_contact') || '{}');
+    var coN = document.getElementById('co-name'), coP = document.getElementById('co-phone');
+    if (chatContact.name && !coN.value) coN.value = chatContact.name;
+    if (chatContact.phone && !coP.value) coP.value = chatContact.phone;
+  } catch (e) { /* ignore */ }
 
   // Pre-fill address from saved LocationService data
   var savedLoc = (typeof LocationService !== 'undefined') ? LocationService.get() : null;
