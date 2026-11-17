@@ -20,6 +20,7 @@ import { DispatchService, RoutingService, OrdersModule } from '../orders/orders.
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 import { ShipmentService, LogisticsService, LogisticsModule } from '../logistics/logistics.module';
 import { CrmOrderSyncService, CrmSyncModule } from '../crm-sync/crm-sync.module';
+import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto } from '../authorized-person/authorized-person.module';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -166,6 +167,8 @@ export class CreateMasterOrderDto {
   // Set when the cart came from a Remont One CRM WhatsApp cart link (ai-catalog
   // cart-link): lets CrmOrderSyncService report this real order back to the CRM.
   @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
+  // Optional order-scoped Authorized Person for the service orders of this checkout.
+  @IsOptional() @ValidateNested() @Type(() => AuthorizedPersonDto) authorizedPerson?: AuthorizedPersonDto;
 }
 
 export class PublicMasterCheckoutDto {
@@ -191,6 +194,8 @@ export class PublicMasterCheckoutDto {
   @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @Matches(/^[a-f0-9]{32}$/) crmRef?: string;
   @IsIn(['ONLINE', 'COD']) paymentMethod: 'ONLINE' | 'COD';
+  // Optional order-scoped Authorized Person for the service orders of this checkout.
+  @IsOptional() @ValidateNested() @Type(() => AuthorizedPersonDto) authorizedPerson?: AuthorizedPersonDto;
 }
 
 interface CheckoutOpts {
@@ -829,6 +834,21 @@ export class MasterOrdersService {
     const frontendUrl = process.env.FRONTEND_URL || 'https://remont.in';
     const payOrder: any = await this.payments.initiatePayment(customerId, totalAmount, masterOrder.id, frontendUrl);
 
+    // PAYMENT SYNCHRONIZATION FIX (Nov 17, 2026): Verify that the payment
+    // transaction was actually created before returning checkout response. This
+    // prevents returning a successful checkout when the underlying transaction
+    // creation failed, which would leave the order in an unrecoverable sync state.
+    if (payOrder.txId) {
+      const verifyTx = await this.prisma.paymentTransaction.findUnique({
+        where: { id: payOrder.txId },
+        select: { id: true, status: true, gatewayOrderId: true },
+      });
+      if (!verifyTx) {
+        this.logger.error(`Checkout verification failed: Transaction ${payOrder.txId} not found after initiatePayment for order ${masterOrder.id}`);
+        throw new BadRequestException('Payment system temporary issue. Please try checkout again.');
+      }
+    }
+
     if (payOrder.gateway === 'PHONEPE') {
       return {
         masterOrderNumber: masterOrder.masterOrderNumber, masterOrderId: masterOrder.id, totalAmount,
@@ -1128,11 +1148,14 @@ export class MasterOrdersService {
 @ApiBearerAuth() @UseGuards(JwtAuthGuard)
 @Controller('master-orders')
 export class MasterOrdersController {
-  constructor(private masterOrders: MasterOrdersService) {}
+  constructor(private masterOrders: MasterOrdersService, private authz: AuthorizedPersonService) {}
 
   @Post()
-  checkout(@CurrentUser() u: JwtPayload, @Body() dto: CreateMasterOrderDto) {
-    return this.masterOrders.checkout(dto, { customerId: u.sub });
+  async checkout(@CurrentUser() u: JwtPayload, @Body() dto: CreateMasterOrderDto) {
+    const { authorizedPerson, ...checkoutDto } = dto;
+    if (authorizedPerson) this.authz.assertValid(authorizedPerson);
+    const res: any = await this.masterOrders.checkout(checkoutDto as CreateMasterOrderDto, { customerId: u.sub });
+    return this.authz.attachSafely(res, { masterOrderId: res?.masterOrderId }, authorizedPerson);
   }
 
   @Post(':id/confirm-payment')
@@ -1152,10 +1175,11 @@ export class MasterOrdersController {
 @ApiTags('Master Orders')
 @Controller('master-orders/public')
 export class PublicMasterOrderController {
-  constructor(private masterOrders: MasterOrdersService) {}
+  constructor(private masterOrders: MasterOrdersService, private authz: AuthorizedPersonService) {}
 
   @Public() @Post('checkout')
-  checkout(@Body() dto: PublicMasterCheckoutDto) {
+  async checkout(@Body() dto: PublicMasterCheckoutDto) {
+    if (dto.authorizedPerson) this.authz.assertValid(dto.authorizedPerson);
     const items = dto.items;
     const checkoutDto: CreateMasterOrderDto = {
       items, channel: dto.channel, couponCode: dto.couponCode,
@@ -1169,9 +1193,10 @@ export class PublicMasterOrderController {
         latitude: dto.latitude, longitude: dto.longitude,
       },
     };
-    return this.masterOrders.checkout(checkoutDto, {
+    const res: any = await this.masterOrders.checkout(checkoutDto, {
       guestName: dto.name, guestPhone: dto.phone, guestEmail: dto.email, paymentMethod: dto.paymentMethod,
     });
+    return this.authz.attachSafely(res, { masterOrderId: res?.masterOrderId }, dto.authorizedPerson);
   }
 
   @Public() @Post('confirm-payment')
@@ -1201,7 +1226,7 @@ export class PublicMasterOrderController {
 
 // ─── Module ───
 @Module({
-  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule, LogisticsModule, CrmSyncModule],
+  imports: [CouponsModule, MembershipsModule, CitiesModule, PaymentsModule, OrdersModule, PaymentNotificationsModule, LogisticsModule, CrmSyncModule, AuthorizedPersonModule],
   // PublicMasterOrderController MUST be registered before MasterOrdersController —
   // Express/Nest matches routes in registration order, and MasterOrdersController's
   // POST /master-orders/:id/confirm-payment (a wildcard :id) would otherwise swallow

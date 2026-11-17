@@ -130,9 +130,21 @@ export class PaymentsService implements OnModuleInit {
       receipt: `rcpt_${Date.now()}`,
       notes: { orderId, amcSubscriptionId, userId },
     });
-    const tx = await this.prisma.paymentTransaction.create({
-      data: { orderId, amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
-    });
+
+    // PAYMENT SYNCHRONIZATION FIX (Nov 17, 2026): Ensure transaction is created
+    // before returning to caller. If create() fails, the checkout response must not
+    // succeed, so the client knows to retry rather than believing a transaction exists.
+    let tx;
+    try {
+      tx = await this.prisma.paymentTransaction.create({
+        data: { orderId, amcSubscriptionId, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id },
+      });
+      this.logger.debug(`Transaction created: ${tx.id} for Razorpay order ${rzpOrder.id}`);
+    } catch (e: any) {
+      this.logger.error(`CRITICAL: PaymentTransaction.create() failed for order ${orderId}: ${e.message}`);
+      throw new BadRequestException('Payment system temporary issue. Please retry checkout.');
+    }
+
     return { gateway: 'RAZORPAY', gatewayOrderId: rzpOrder.id, amount, currency: 'INR', keyId: this.razorpayKeyId, txId: tx.id };
   }
 
@@ -370,6 +382,20 @@ export class PaymentsService implements OnModuleInit {
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity;
       const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId: payment.order_id } });
+      if (!tx) {
+        // PAYMENT SYNCHRONIZATION FIX (Nov 17, 2026): Log critical when webhook
+        // captures a payment but we have no matching transaction record. This indicates
+        // either the initiate-payment step failed, or there's orphaned data. Admin
+        // must investigate and potentially manually reconcile via repair-payment.ts.
+        this.logger.error(
+          `CRITICAL: Webhook payment.captured [${payment.id}] for gateway order [${payment.order_id}] ` +
+          `but NO PaymentTransaction found. Amount: ${Number(payment.amount) / 100}. ` +
+          `This order will not sync automatically. Admin must investigate.`,
+        );
+        // Could emit event for admin dashboard alert here in future
+        return { received: true }; // Don't fail the webhook, but it won't sync
+      }
+
       if (tx) {
         await this.prisma.paymentTransaction.update({
           where: { id: tx.id },
