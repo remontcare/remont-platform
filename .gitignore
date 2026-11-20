@@ -14,3 +14,9 @@ coverage/
 prisma/dev.db
 prisma/migrations/dev/
 graphify-out/
+.vercel
+
+# Claude Code local config. settings.json can hold API tokens in permission rules,
+# so keep it out of git — one `git add .` would otherwise commit live credentials.
+.claude/settings.json
+.claude/settings.local.json

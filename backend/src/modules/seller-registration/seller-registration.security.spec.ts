@@ -19,13 +19,13 @@ describe('SellerRegistrationService saveStep mass-assignment protection', () => 
   it('never writes agreedTerms/agreedAt/userId from client-supplied step data', async () => {
     const { service, prisma } = makeService();
     prisma.sellerRegistration.findUnique.mockResolvedValue({
-      registrationId: 'SR-1', agreedTerms: false, status: 'PENDING', currentStep: 1,
+      registrationId: 'SR-1', phone: '+919876543210', agreedTerms: false, status: 'PENDING', currentStep: 1,
     });
     prisma.sellerRegistration.update.mockResolvedValue({});
 
     await service.saveStep('SR-1', 2, {
       businessName: 'Attacker Store', agreedTerms: true, agreedAt: new Date().toISOString(), userId: 'some-other-user-id',
-    });
+    }, { sub: 'u1', phone: '+919876543210' } as any);
 
     const writeData = prisma.sellerRegistration.update.mock.calls[0][0].data;
     expect(writeData.agreedTerms).toBeUndefined();

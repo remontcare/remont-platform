@@ -1,7 +1,9 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
   NotFoundException, BadRequestException, ForbiddenException, Logger, Optional, InternalServerErrorException,
+  ServiceUnavailableException, ConflictException, Inject, forwardRef,
 } from '@nestjs/common';
+import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto, AUTHORIZED_PERSON_PERMISSIONS } from '../authorized-person/authorized-person.module';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -11,7 +13,7 @@ import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock } from '../../common';
+import { JwtAuthGuard, CurrentUser, JwtPayload, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, MAX_DISPATCH_RADIUS_KM, boundingBoxForRadius, normalizeSkillKey, writeOrderTimeline, addressSnapshotFields, writeOtpLog, OTP_REGEN_COOLDOWN_SECONDS, resolveCommission, resolveProductFee, resolveProductGstLine, buildTaxRateResolver, PLATFORM_FEE_DEFAULT_RATE, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, NOT_FROZEN_MEMBER_FILTER, applySellerFundedDiscountToProductGst, buildDiscountAllocationData, reserveProductStock, EXTRA_WORK_ITEM_PUBLIC_SELECT, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED } from '../../common';
 import { CouponsService, CouponsModule } from '../coupons/coupons.module';
 import { MembershipsService, MembershipsModule } from '../memberships/memberships.module';
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -24,9 +26,14 @@ import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { MediaModule } from '../media/media.module';
 import { MediaService, PublicMedia } from '../media/media.service';
 import { isInlineImage } from '../media/media.policy';
+import { Throttle } from '@nestjs/throttler';
 
 /** Upper bound on completion photos per job — each one is virus-scanned and uploaded. */
 const MAX_COMPLETION_PHOTOS = 20;
+
+/** Start/completion/extra-work codes are 4 digits, so the global 200/min limit would allow
+ *  brute-forcing one in under an hour; a technician only ever needs a few tries. */
+const OTP_VERIFY_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 // ─── Public Product Checkout DTO ───
 class PublicCheckoutItemDto {
@@ -77,6 +84,8 @@ class GuestBookingDto {
   // CreateMasterOrderDto all already have this — see their matching M-06 comments).
   // Optional/opt-in: omitted entirely is byte-for-byte today's behaviour.
   @IsOptional() @IsString() idempotencyKey?: string;
+  // Optional order-scoped Authorized Person (see authorized-person.module.ts); absent = unchanged.
+  @IsOptional() @ValidateNested() @Type(() => AuthorizedPersonDto) authorizedPerson?: AuthorizedPersonDto;
 }
 
 // ─── DTOs ───
@@ -115,6 +124,8 @@ class CreateOrderDto {
   // MasterOrder.idempotencyKey's schema comment for the full rationale. Omitted entirely,
   // this is byte-for-byte today's behaviour.
   @IsOptional() @IsString() idempotencyKey?: string;
+  // Optional order-scoped Authorized Person (see authorized-person.module.ts); absent = unchanged.
+  @IsOptional() @ValidateNested() @Type(() => AuthorizedPersonDto) authorizedPerson?: AuthorizedPersonDto;
 }
 
 // ─── Dispatch (smart vendor matching) ───
@@ -248,10 +259,23 @@ export class DispatchService {
 @Injectable()
 export class DispatchRetryService {
   private readonly logger = new Logger(DispatchRetryService.name);
-  constructor(private prisma: PrismaService, private dispatch: DispatchService) {}
+  constructor(
+    private prisma: PrismaService,
+    private dispatch: DispatchService,
+    // forwardRef + a structural type: RoutingService is declared further down this file, and
+    // naming the class as the parameter type would make decorator metadata read it before it
+    // exists. Optional so a released scheduled order still gets the partner offer wave if
+    // routing is ever unavailable.
+    @Optional() @Inject(forwardRef(() => RoutingService)) private routing?: { route(orderId: string): Promise<void> },
+  ) {}
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async sweep() {
+    const cfg = await loadScheduledDispatchConfig(this.prisma);
+    // A release is never more than max(lead, 24 h) before its slot, so anything further out
+    // is left out at the DB level — far-future scheduled orders must not fill the `take`
+    // page every sweep. The exact per-order release check happens below.
+    const horizon = new Date(Date.now() + Math.max(cfg.leadMinutes * 60_000, 24 * 60 * 60 * 1000) + 60 * 60 * 1000);
     const stale = await this.prisma.order.findMany({
       where: {
         status: OrderStatus.CONFIRMED,
@@ -271,12 +295,20 @@ export class DispatchRetryService {
           { lastDispatchedAt: null },
           { lastDispatchedAt: { lte: new Date(Date.now() - 60 * 60 * 1000) } },
         ],
+        // Scheduled jobs join this queue only once their release window is near.
+        AND: [{ OR: [{ slotStart: null }, { slotStart: { lte: horizon } }] }],
       },
-      select: { id: true, orderNumber: true },
+      select: { id: true, orderNumber: true, slotStart: true, routingDecision: true },
       take: 100,
     });
     for (const o of stale) {
-      await this.dispatch.dispatch(o.id).catch((err) => this.logger.error(`Retry-dispatch failed for ${o.orderNumber}: ${err.message}`));
+      if (isScheduledForLater(o.slotStart, cfg)) continue;
+      // The first release of a held scheduled order goes back through routing (in-house
+      // staff first, then the partner offer wave) exactly as an immediate order does.
+      const run = o.routingDecision === ROUTING_DECISION_SCHEDULED && this.routing
+        ? this.routing.route(o.id)
+        : this.dispatch.dispatch(o.id);
+      await run.catch((err) => this.logger.error(`Retry-dispatch failed for ${o.orderNumber}: ${err.message}`));
     }
     if (stale.length) this.logger.log(`🔁 Re-dispatched ${stale.length} stuck order(s)`);
   }
@@ -324,6 +356,19 @@ export class RoutingService {
       return;
     }
 
+    // Future-dated job: hold it unassigned until its release window (see scheduledReleaseAt).
+    // DispatchRetryService's 10-minute sweep routes it again once the window opens, so it is
+    // never missed; until then dispatchAttempts stays 0, which already keeps it out of every
+    // technician's available-jobs list and the accept path.
+    if (order.slotStart && !order.vendorId) {
+      const cfg = await loadScheduledDispatchConfig(this.prisma);
+      if (isScheduledForLater(order.slotStart, cfg)) {
+        await this.prisma.order.update({ where: { id: orderId }, data: { routingDecision: ROUTING_DECISION_SCHEDULED } });
+        this.logger.log(`🗓️ ${order.orderNumber} scheduled — dispatch opens ${scheduledReleaseAt(order.slotStart, cfg).toISOString()}`);
+        return;
+      }
+    }
+
     const cityName = order.address?.city || (order as any).snapshotCity || null;
     // Same normalization gap as DispatchService.dispatch()'s `skill` — Service.requiredSkills
     // is stored however an admin typed/selected it, while every vendor's skills array is
@@ -367,27 +412,85 @@ export class RoutingService {
 }
 
 // ─── Extra work service ───
+/** Order states in which extra work can be added and approved (the job is in progress). */
+const EXTRA_WORK_APPROVABLE_STATUSES: string[] = ['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'];
+/** Same 10-minute validity the customer's OTP message states. */
+const EXTRA_WORK_OTP_TTL_MS = 10 * 60 * 1000;
+
 @Injectable()
-class ExtraWorkService {
-  constructor(private prisma: PrismaService, private wa: WhatsappService, private paymentNotify: PaymentNotificationsService) {}
+export class ExtraWorkService {
+  constructor(
+    private prisma: PrismaService, private wa: WhatsappService, private paymentNotify: PaymentNotificationsService,
+    @Optional() private authz?: AuthorizedPersonService, @Optional() private events?: EventEmitter2,
+  ) {}
 
   async addExtraWork(vendorUserId: string, orderId: string, description: string, amount: number) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
     const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
     if (!vendor) throw new ForbiddenException();
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { customer: true, service: { select: { name: true } } } });
     if (!order) throw new NotFoundException();
     if (order.vendorId !== vendor.id) throw new ForbiddenException();
-    if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+    if (!EXTRA_WORK_APPROVABLE_STATUSES.includes(order.status)) {
       throw new BadRequestException('Cannot add extras at this stage');
     }
+    // Always a NEW pending item — an approved amount is never edited; a changed price is a new request.
     const extra = await this.prisma.extraWorkItem.create({
-      data: { orderId, description, amount, addedBy: vendor.id, customerApproved: false },
+      data: { orderId, description, amount, addedBy: vendor.id, customerApproved: false, status: 'PENDING' },
+      select: EXTRA_WORK_ITEM_PUBLIC_SELECT,
     });
     await this.recalc(orderId);
     await this.prisma.order.update({ where: { id: orderId }, data: { status: 'EXTRA_WORK_ADDED' } });
     await this.wa.sendExtraWorkApproval(order.customer.phone, order.orderNumber, description, amount);
+    // The order's Authorized Person (if any) can decide too — tell them the same way.
+    const authorized = await this.authz?.activeForOrder(orderId, AUTHORIZED_PERSON_PERMISSIONS.DECIDE_EXTRA_WORK);
+    if (authorized) {
+      this.wa.sendExtraWorkApproval(authorized.phone, order.orderNumber, description, amount).catch(() => {});
+    }
+    this.events?.emit('extraWork.requested', {
+      orderId, orderNumber: order.orderNumber, serviceName: order.service?.name || 'Service',
+      extraWorkId: extra.id, description, amount, customerId: order.customerId, authorizedPhone: authorized?.phone ?? null,
+    });
     return extra;
+  }
+
+  /**
+   * Who may decide on an extra-work item: the order's customer, or its ACTIVE Authorized
+   * Person (phone in the caller's JWT). Never the technician on the job. Checked server-side
+   * on every decision — hiding buttons is not the control.
+   */
+  private async loadForDecision(actor: JwtPayload, extraId: string) {
+    if (typeof extraId !== 'string' || !extraId) throw new NotFoundException();
+    const extra = await this.prisma.extraWorkItem.findUnique({
+      where: { id: extraId },
+      include: { order: { include: { customer: true, vendor: { select: { userId: true } } } } },
+    });
+    if (!extra) throw new NotFoundException();
+    const order = extra.order;
+    if (order.vendor?.userId && order.vendor.userId === actor?.sub) {
+      throw new ForbiddenException('The technician cannot approve or reject their own extra work');
+    }
+    let by: 'CUSTOMER' | 'AUTHORIZED_PERSON';
+    if (order.customerId === actor?.sub) by = 'CUSTOMER';
+    else if (await this.authz?.activeFor(order.id, actor?.phone, AUTHORIZED_PERSON_PERMISSIONS.DECIDE_EXTRA_WORK)) by = 'AUTHORIZED_PERSON';
+    else throw new ForbiddenException();
+    if (!EXTRA_WORK_APPROVABLE_STATUSES.includes(order.status)) {
+      throw new BadRequestException('Extra work can no longer be approved or rejected for this job');
+    }
+    return { extra, order, by };
+  }
+
+  private async decidedConflict(extraId: string) {
+    const current = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, select: { status: true } });
+    return new ConflictException(`This extra work was already ${(current?.status || 'decided').toLowerCase()}`);
+  }
+
+  private emitDecided(order: { id: string; orderNumber: string }, item: { id: string; description: string; amount: any; status: string; rejectionReason?: string | null }, vendorUserId?: string | null) {
+    if (!vendorUserId) return;
+    this.events?.emit('extraWork.decided', {
+      orderId: order.id, orderNumber: order.orderNumber, extraWorkId: item.id, description: item.description,
+      amount: Number(item.amount), decision: item.status, reason: item.rejectionReason ?? null, vendorUserId,
+    });
   }
 
   async requestOtp(vendorUserId: string, orderId: string) {
@@ -399,27 +502,39 @@ class ExtraWorkService {
     if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
       throw new BadRequestException('Cannot confirm extras at this stage');
     }
-    const pending = await this.prisma.extraWorkItem.findFirst({
-      where: { orderId, customerApproved: false },
-      orderBy: { createdAt: 'desc' },
+    // One code confirms every item still awaiting the customer — the partner app sends all
+    // its new items and then asks for a single OTP, so tying the code to only the newest
+    // item left the others unbilled while the app showed them as approved.
+    const pending = await this.prisma.extraWorkItem.findMany({
+      where: { orderId, status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!pending) throw new NotFoundException('No pending extra work item for this order');
+    if (!pending.length) throw new NotFoundException('No pending extra work item for this order');
 
-    if (pending.otpLastSentAt) {
-      const secsSince = (Date.now() - pending.otpLastSentAt.getTime()) / 1000;
+    const lastSent = Math.max(0, ...pending.map((p) => p.otpLastSentAt?.getTime() ?? 0));
+    if (lastSent) {
+      const secsSince = (Date.now() - lastSent) / 1000;
       if (secsSince < OTP_REGEN_COOLDOWN_SECONDS) {
         throw new BadRequestException(`Please wait ${Math.ceil(OTP_REGEN_COOLDOWN_SECONDS - secsSince)}s before requesting another OTP`);
       }
     }
 
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const phone = order.guestPhone || order.customer?.phone;
+    if (!phone) throw new BadRequestException('This order has no customer mobile number to send the OTP to');
+
+    const ids = pending.map((p) => p.id);
+    const total = Math.round(pending.reduce((s, p) => s + Number(p.amount), 0) * 100) / 100;
+    const otp = crypto.randomInt(1000, 10000).toString();
     const now = new Date();
-    await this.prisma.extraWorkItem.update({ where: { id: pending.id }, data: { otp, otpLastSentAt: now } });
-    const phone = order.guestPhone || order.customer.phone;
-    if (phone) {
-      this.wa.sendExtraWorkOtp(phone, order.orderNumber, otp).catch(() => {});
+    await this.prisma.extraWorkItem.updateMany({ where: { id: { in: ids }, status: 'PENDING' }, data: { otp, otpLastSentAt: now } });
+
+    // Wait for the provider: a code the customer never receives must not be reported as sent.
+    const sent = await this.wa.sendExtraWorkOtp(phone, order.orderNumber, otp, total).catch(() => null);
+    if (!sent?.delivered) {
+      await this.prisma.extraWorkItem.updateMany({ where: { id: { in: ids }, status: 'PENDING' }, data: { otp: null, otpLastSentAt: null } });
+      throw new ServiceUnavailableException('Could not send the OTP to the customer. They can approve the extra work in their Remont app, or try again.');
     }
-    return { extraWorkItemId: pending.id, sentAt: now };
+    return { extraWorkItemId: ids[ids.length - 1], extraWorkItemIds: ids, totalAmount: total, sentAt: now };
   }
 
   async verifyOtp(vendorUserId: string, orderId: string, otp: string) {
@@ -428,36 +543,80 @@ class ExtraWorkService {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException();
     if (order.vendorId !== vendor.id) throw new ForbiddenException();
+    // `otp` goes straight into a Prisma `where`: a missing value would drop the filter
+    // entirely and an object (e.g. { not: null }) would act as an operator — either way
+    // approving the charge without the customer's code. Only a plain numeric code may match.
+    if (typeof otp !== 'string' || !/^\d{4,6}$/.test(otp)) throw new BadRequestException('Invalid OTP');
 
-    const pending = await this.prisma.extraWorkItem.findFirst({
-      where: { orderId, customerApproved: false, otp },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!pending) throw new BadRequestException('Invalid OTP');
+    // Approving a charge after the job is closed would silently change a completed bill.
+    if (!EXTRA_WORK_APPROVABLE_STATUSES.includes(order.status)) {
+      throw new BadRequestException('Extra work can no longer be approved for this job');
+    }
 
-    const updated = await this.prisma.extraWorkItem.update({
-      where: { id: pending.id },
-      data: { otpVerified: true, customerApproved: true, approvedAt: new Date() },
+    const matched = await this.prisma.extraWorkItem.findMany({
+      where: { orderId, status: 'PENDING', otp },
+      select: { id: true, otpLastSentAt: true },
     });
+    if (!matched.length) throw new BadRequestException('Invalid OTP');
+    if (matched.some((m) => !m.otpLastSentAt || Date.now() - m.otpLastSentAt.getTime() > EXTRA_WORK_OTP_TTL_MS)) {
+      throw new BadRequestException('This OTP has expired — request a new one');
+    }
+
+    // Single use: the code is cleared as the items are approved, and only still-unapproved
+    // rows are touched, so a replayed or concurrent request approves nothing twice.
+    const ids = matched.map((m) => m.id);
+    const { count } = await this.prisma.extraWorkItem.updateMany({
+      where: { id: { in: ids }, status: 'PENDING', otp },
+      data: {
+        otpVerified: true, customerApproved: true, approvedAt: new Date(), otp: null,
+        status: 'APPROVED', approvedByType: 'CUSTOMER_OTP', approvedByUserId: order.customerId,
+      },
+    });
+    if (!count) throw new BadRequestException('Invalid OTP');
     await this.recalc(orderId);
-    return updated;
+    const approved = await this.prisma.extraWorkItem.findMany({ where: { id: { in: ids } }, select: EXTRA_WORK_ITEM_PUBLIC_SELECT });
+    approved.forEach((item) => this.emitDecided(order, item, vendorUserId));
+    return approved;
   }
 
-  async approve(customerId: string, extraId: string) {
-    const extra = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, include: { order: { include: { customer: true } } } });
-    if (!extra) throw new NotFoundException();
-    if (extra.order.customerId !== customerId) throw new ForbiddenException();
-    const updated = await this.prisma.extraWorkItem.update({
-      where: { id: extraId },
-      data: { customerApproved: true, approvedAt: new Date() },
+  /** Customer or Authorized Person approves — the first decision wins and locks the item. */
+  async approve(actor: JwtPayload, extraId: string) {
+    const { extra, order, by } = await this.loadForDecision(actor, extraId);
+    const { count } = await this.prisma.extraWorkItem.updateMany({
+      where: { id: extraId, status: 'PENDING' },
+      data: {
+        status: 'APPROVED', customerApproved: true, approvedAt: new Date(), otp: null,
+        approvedByType: by, approvedByUserId: actor.sub,
+      },
     });
+    if (!count) throw await this.decidedConflict(extraId);
     await this.recalc(extra.orderId);
+    const updated = await this.prisma.extraWorkItem.findUnique({ where: { id: extraId }, select: EXTRA_WORK_ITEM_PUBLIC_SELECT });
     // Additional-work approval increases the order's outstanding balance — let the
     // customer know right away rather than surprising them at completion time.
     this.paymentNotify.balanceDue(
-      extra.order.customerId, extra.order.customer.phone, extra.order.orderNumber,
+      order.customerId, order.customer.phone, order.orderNumber,
       Number(extra.amount), 'additional work approved', extra.orderId,
     ).catch(() => {});
+    this.emitDecided(order, updated!, order.vendor?.userId);
+    return updated;
+  }
+
+  /** Customer or Authorized Person rejects — never billed; final like an approval. */
+  async reject(actor: JwtPayload, extraId: string, reason?: string) {
+    if (reason !== undefined && reason !== null && typeof reason !== 'string') throw new BadRequestException('Invalid reason');
+    const cleanReason = reason?.trim().slice(0, 300) || null;
+    const { extra, order, by } = await this.loadForDecision(actor, extraId);
+    const { count } = await this.prisma.extraWorkItem.updateMany({
+      where: { id: extraId, status: 'PENDING' },
+      data: {
+        status: 'REJECTED', rejectedAt: new Date(), otp: null,
+        rejectedByType: by, rejectedByUserId: actor.sub, rejectionReason: cleanReason,
+      },
+    });
+    if (!count) throw await this.decidedConflict(extraId);
+    const updated = await this.prisma.extraWorkItem.findUnique({ where: { id: extra.id }, select: EXTRA_WORK_ITEM_PUBLIC_SELECT });
+    this.emitDecided(order, updated!, order.vendor?.userId);
     return updated;
   }
 
@@ -1409,7 +1568,7 @@ export class OrdersService {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
         vendor: { select: { id: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
-        address: true, extraWorkItems: true, delivery: true,
+        address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT }, delivery: true,
         // Phase 3 — demo/mock shipment tracking (backend/src/modules/logistics). Shows the
         // last-persisted status immediately; the frontend separately calls
         // GET /logistics/shipments/:id to refresh it live (that's where status actually
@@ -1429,7 +1588,7 @@ export class OrdersService {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
         vendor: { select: { id: true, userId: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
-        address: true, extraWorkItems: true, invoice: true, delivery: true,
+        address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT }, invoice: true, delivery: true,
         timeline: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -1936,7 +2095,7 @@ export class GuestBookingService {
         service: { select: { name: true, imageUrl: true } },
         vendor: { select: { id: true, fullName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
         address: { select: { city: true, fullAddress: true } },
-        extraWorkItems: { where: { customerApproved: false } },
+        extraWorkItems: { where: { status: 'PENDING' } },
         customer: { select: { phone: true } },
       },
     });
@@ -1970,9 +2129,14 @@ export class GuestBookingService {
 @ApiBearerAuth() @UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
-  constructor(private orders: OrdersService, private extras: ExtraWorkService) {}
+  constructor(private orders: OrdersService, private extras: ExtraWorkService, private authz: AuthorizedPersonService) {}
 
-  @Post() create(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) { return this.orders.create(u.sub, dto); }
+  @Post() async create(@CurrentUser() u: JwtPayload, @Body() dto: CreateOrderDto) {
+    const { authorizedPerson, ...orderDto } = dto;
+    if (authorizedPerson) this.authz.assertValid(authorizedPerson);
+    const res: any = await this.orders.create(u.sub, orderDto as CreateOrderDto);
+    return this.authz.attachSafely(res, { orderId: res?.id }, authorizedPerson);
+  }
   @Post(':id/confirm-payment') pay(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { paymentId: string; gatewayOrderId?: string; signature?: string }) { return this.orders.confirmPayment(id, b.paymentId, b.gatewayOrderId, b.signature, u.sub); }
   @Get('mine') mine(@CurrentUser() u: JwtPayload, @Query('status') s?: OrderStatus) { return this.orders.myOrders(u.sub, s); }
   @Get(':id') one(@CurrentUser() u: JwtPayload, @Param('id') id: string) { return this.orders.getOne(u.sub, id); }
@@ -1983,21 +2147,28 @@ export class OrdersController {
   @Post(':id/regenerate-otp') regenerateOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { type: 'START' | 'END' }) {
     return this.orders.regenerateOtp(u.sub, id, b.type);
   }
+  @Throttle(OTP_VERIFY_THROTTLE)
   @Post(':id/verify-otp') verify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
     return this.orders.verifyStartOtp(u.sub, id, b.otp);
   }
   @Post(':id/extra-work') addExtra(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { description: string; amount: number }) {
     return this.extras.addExtraWork(u.sub, id, b.description, b.amount);
   }
+  // Customer or the order's Authorized Person (see ExtraWorkService.loadForDecision).
   @Patch('extra-work/:extraId/approve') approveExtra(@CurrentUser() u: JwtPayload, @Param('extraId') id: string) {
-    return this.extras.approve(u.sub, id);
+    return this.extras.approve(u, id);
+  }
+  @Patch('extra-work/:extraId/reject') rejectExtra(@CurrentUser() u: JwtPayload, @Param('extraId') id: string, @Body() b: { reason?: string }) {
+    return this.extras.reject(u, id, b?.reason);
   }
   @Post(':id/extra-work/otp') extraOtp(@CurrentUser() u: JwtPayload, @Param('id') id: string) {
     return this.extras.requestOtp(u.sub, id);
   }
+  @Throttle(OTP_VERIFY_THROTTLE)
   @Post(':id/extra-work/verify-otp') extraVerify(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string }) {
     return this.extras.verifyOtp(u.sub, id, b.otp);
   }
+  @Throttle(OTP_VERIFY_THROTTLE)
   @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string }) {
     return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl);
   }
@@ -2038,9 +2209,14 @@ export class OrdersController {
 @ApiTags('Booking')
 @Controller('orders/public')
 export class PublicBookingController {
-  constructor(private guest: GuestBookingService, private orders: OrdersService) {}
+  constructor(private guest: GuestBookingService, private orders: OrdersService, private authz: AuthorizedPersonService) {}
 
-  @Post('book') book(@Body() dto: GuestBookingDto) { return this.guest.book(dto); }
+  @Post('book') async book(@Body() dto: GuestBookingDto) {
+    const { authorizedPerson, ...bookingDto } = dto;
+    if (authorizedPerson) this.authz.assertValid(authorizedPerson);
+    const res: any = await this.guest.book(bookingDto as GuestBookingDto);
+    return this.authz.attachSafely(res, { orderId: res?.orderId }, authorizedPerson);
+  }
   @Post('checkout') checkout(@Body() dto: PublicProductCheckoutDto) { return this.guest.publicProductCheckout(dto); }
 
   // Atomic verify+confirm for Razorpay guest checkout
@@ -2075,7 +2251,7 @@ export class PublicBookingController {
 }
 
 @Module({
-  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule, ReturnsModule, MediaModule],
+  imports: [CouponsModule, MembershipsModule, WhatsappModule, CitiesModule, PaymentsModule, PaymentNotificationsModule, PartnerLedgerModule, InvoicesModule, ReturnsModule, MediaModule, AuthorizedPersonModule],
   controllers: [OrdersController, PublicBookingController],
   providers: [OrdersService, DispatchService, RoutingService, ExtraWorkService, GuestBookingService, DispatchRetryService],
   exports: [OrdersService, DispatchService, RoutingService],

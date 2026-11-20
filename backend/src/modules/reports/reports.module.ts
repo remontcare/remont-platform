@@ -5,6 +5,7 @@ import Excel from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, getBillingCompanyConfig } from '../../common';
 import { UserRole } from '@prisma/client';
+import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from './seller-reports';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GST / Accounting / Ledger Excel exports — every row is read from already-
@@ -447,7 +448,22 @@ export class ReportsService {
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @Controller('admin/reports')
 export class ReportsController {
-  constructor(private reports: ReportsService) {}
+  constructor(private reports: ReportsService, private sellerReports: SellerReportsService) {}
+
+  // ─── Seller sales & stock — one seller (vendorId) or all sellers consolidated ───
+  @Get('seller-sales')
+  async sellerSales(@Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const report = await this.sellerReports.salesReport({ ...parseSalesFilter(q), vendorId: q.vendorId || undefined }, 'ADMIN');
+    return this.sellerReports.send(res, 'sales', format, 'ADMIN', report, q.vendorId ? 'seller-sales-report' : 'all-sellers-sales-report');
+  }
+
+  @Get('seller-stock')
+  async sellerStock(@Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const report = await this.sellerReports.stockReport({ ...parseStockFilter(q), vendorId: q.vendorId || undefined }, 'ADMIN');
+    return this.sellerReports.send(res, 'stock', format, 'ADMIN', report, q.vendorId ? 'seller-stock-report' : 'all-sellers-stock-report');
+  }
 
   @Get('gst')
   async gst(@Query('from') from: string, @Query('to') to: string, @Res() res: Response) {
@@ -500,5 +516,5 @@ export class ReportsController {
   }
 }
 
-@Module({ controllers: [ReportsController], providers: [ReportsService], exports: [ReportsService] })
+@Module({ controllers: [ReportsController], providers: [ReportsService, SellerReportsService], exports: [ReportsService, SellerReportsService] })
 export class ReportsModule {}

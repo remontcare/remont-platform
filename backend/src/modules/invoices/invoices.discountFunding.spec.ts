@@ -16,7 +16,7 @@ import { InvoicesService } from './invoices.module';
 function baseOrder(overrides: any = {}) {
   return {
     id: 'o1', customerId: 'cust-1', vendor: { userId: 'vendor-user-a', staffType: 'PARTNER', gstin: null },
-    invoice: null, orderNumber: 'REM-1', type: 'SERVICE',
+    invoice: null, status: 'COMPLETED', orderNumber: 'REM-1', type: 'SERVICE',
     subtotal: 1000, totalAmount: 1180, gstAmount: 180, serviceAmount: 1000,
     remontCommission: 150, platformCharges: 0, snapshotState: 'Madhya Pradesh',
     billingTransactionType: null, couponDiscount: 0, membershipDiscount: 0, discountAllocation: null,

@@ -78,7 +78,8 @@ describe('Vendor dispatch visibility boundary', () => {
       expect(call.where.service.category).toBeUndefined();
       // ...and the category key must actually be fetched so isEligibleForOrder() has
       // something to normalize and compare in-app.
-      expect(call.include.service.select.category).toEqual({ select: { key: true } });
+      // (Read via an explicit `select` since offers were minimized — see partnerOfferView.)
+      expect(call.select.service.select.category).toEqual({ select: { key: true } });
     });
 
     it('returns a released, dispatchable, skill-matching order the query hands back', async () => {

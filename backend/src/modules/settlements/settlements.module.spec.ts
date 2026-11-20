@@ -3,23 +3,32 @@ import { SettlementsService } from './settlements.module';
 
 function makeFakePrisma(vendor: { id: string; pendingPayout: number } | null) {
   const state = { pendingPayout: vendor?.pendingPayout ?? 0 };
-  const settlementCreate = jest.fn(async (args: any) => ({ id: 'settlement-1', ...args.data }));
+  const settlements: any[] = [];
+  const settlementCreate = jest.fn(async (args: any) => {
+    const row = { id: `settlement-${settlements.length + 1}`, ...args.data };
+    settlements.push(row);
+    return row;
+  });
+  const settlementFindFirst = jest.fn(async (args: any) => {
+    return settlements.find((s) => s.vendorId === args.where.vendorId && s.referenceNumber === args.where.referenceNumber) || null;
+  });
+  const vendorFindUnique = jest.fn(async () => (vendor ? { ...vendor, pendingPayout: state.pendingPayout } : null));
   const vendorUpdate = jest.fn(async (args: any) => {
     if (args.data.pendingPayout?.decrement != null) state.pendingPayout -= args.data.pendingPayout.decrement;
     return { ...vendor, pendingPayout: state.pendingPayout };
   });
   const prisma: any = {
-    serviceVendor: {
-      findUnique: jest.fn(async () => (vendor ? { ...vendor, pendingPayout: state.pendingPayout } : null)),
-      update: vendorUpdate,
-    },
-    partnerSettlement: {
-      create: settlementCreate,
-      findMany: jest.fn(async () => []),
-    },
+    serviceVendor: { findUnique: vendorFindUnique, update: vendorUpdate },
+    partnerSettlement: { create: settlementCreate, findMany: jest.fn(async () => []), findFirst: settlementFindFirst },
+    // The real implementation takes a FOR UPDATE row lock inside the transaction before
+    // re-reading the balance — modeled here by having the tx's own serviceVendor.findUnique
+    // read the SAME live `state` every call, so two sequential record() calls against this
+    // fixture see each other's already-committed decrements exactly as serialized Postgres
+    // transactions would (see withdrawal.spec.ts for the same idiom).
     $transaction: jest.fn(async (fn: any) => fn({
-      partnerSettlement: { create: settlementCreate },
-      serviceVendor: { update: vendorUpdate },
+      $queryRaw: jest.fn(),
+      partnerSettlement: { create: settlementCreate, findFirst: settlementFindFirst },
+      serviceVendor: { findUnique: vendorFindUnique, update: vendorUpdate },
     })),
   };
   return { prisma, state };
@@ -84,5 +93,37 @@ describe('SettlementsService.record', () => {
       expect.anything(), 'v1', 'WITHDRAWAL', -400,
       expect.objectContaining({ withdrawalRequestId: 'wr-1' }),
     );
+  });
+
+  // C-12 — double-payout race: the balance check used to read pendingPayout BEFORE the
+  // transaction that debits it, so two concurrent/near-simultaneous payout requests for the
+  // same vendor could both pass a stale check and both debit, overdrawing the balance. The
+  // check now happens inside the same (mocked, serialized) transaction as the debit.
+  it('two simultaneous payouts for the same vendor: the second sees the first\'s already-committed decrement and fails safely instead of overdrawing', async () => {
+    const { prisma, state } = makeFakePrisma({ id: 'v1', pendingPayout: 1000 });
+    const svc = new SettlementsService(prisma, makeLedger() as any);
+
+    const first = await svc.record('v1', 700, 'CASH' as any, 'admin-1');
+    expect(first).toBeTruthy();
+    expect(state.pendingPayout).toBe(300);
+
+    await expect(svc.record('v1', 700, 'CASH' as any, 'admin-1')).rejects.toThrow(BadRequestException);
+    // Balance must never go negative — the second attempt is rejected, not partially applied.
+    expect(state.pendingPayout).toBe(300);
+  });
+
+  // Same payout request retried: a referenceNumber acts as an idempotent financial
+  // reference — a retried call with the same (vendorId, referenceNumber) returns the
+  // original settlement instead of creating (and debiting) a second one.
+  it('retrying the same payout with the same referenceNumber returns the original settlement, debited only once', async () => {
+    const { prisma, state } = makeFakePrisma({ id: 'v1', pendingPayout: 1000 });
+    const svc = new SettlementsService(prisma, makeLedger() as any);
+
+    const first = await svc.record('v1', 400, 'UPI' as any, 'admin-1', 'REF-DUP-1');
+    const retried = await svc.record('v1', 400, 'UPI' as any, 'admin-1', 'REF-DUP-1');
+
+    expect(retried.id).toBe(first.id);
+    expect(state.pendingPayout).toBe(600); // decremented exactly once, not twice
+    expect(prisma.partnerSettlement.create).toHaveBeenCalledTimes(1);
   });
 });

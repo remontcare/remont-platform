@@ -1,4 +1,6 @@
-import { Module, Injectable, Controller, Get, Query, Param, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Module, Injectable, Controller, Get, Query, Param, BadRequestException, Logger, NotFoundException, ServiceUnavailableException,
+} from '@nestjs/common';
 import { Public } from '../../common';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -12,6 +14,15 @@ export interface ReverseGeocodeResult {
   country: string;
   pincode: string;
   provider: string;    // 'nominatim' | 'google' | 'manual'
+}
+
+export interface IfscResult {
+  ifsc: string;
+  bank: string;
+  branch: string;
+  address: string;
+  city: string;
+  state: string;
 }
 
 export interface PincodeResult {
@@ -100,6 +111,46 @@ export class LocationService {
     };
   }
 
+  // Successful IFSC lookups rarely change — cache them so repeated form edits don't re-hit
+  // the upstream service. Bounded so it can never grow without limit.
+  private readonly ifscCache = new Map<string, IfscResult>();
+
+  /**
+   * IFSC → bank + branch, using Razorpay's public IFSC service (ifsc.razorpay.com) — FREE,
+   * open data, no API key. Only the IFSC code is sent. Used by seller registration so the
+   * bank name / branch are filled from an authoritative source instead of typed by hand.
+   */
+  async lookupIfsc(code: string): Promise<IfscResult> {
+    const ifsc = String(code || '').trim().toUpperCase();
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+      throw new BadRequestException('Enter a valid 11-character IFSC (e.g. HDFC0001234)');
+    }
+    const cached = this.ifscCache.get(ifsc);
+    if (cached) return cached;
+
+    let res: Response;
+    try {
+      res = await fetch(`https://ifsc.razorpay.com/${ifsc}`, { signal: AbortSignal.timeout(6000) });
+    } catch {
+      throw new ServiceUnavailableException('IFSC lookup is unavailable right now — enter bank details manually');
+    }
+    if (res.status === 404) throw new NotFoundException('IFSC code not found');
+    if (!res.ok) throw new ServiceUnavailableException('IFSC lookup is unavailable right now — enter bank details manually');
+
+    const d: any = await res.json();
+    const result: IfscResult = {
+      ifsc,
+      bank:    String(d?.BANK || ''),
+      branch:  String(d?.BRANCH || ''),
+      address: String(d?.ADDRESS || ''),
+      city:    String(d?.CITY || d?.DISTRICT || ''),
+      state:   String(d?.STATE || ''),
+    };
+    if (this.ifscCache.size >= 2000) this.ifscCache.clear();
+    this.ifscCache.set(ifsc, result);
+    return result;
+  }
+
   /**
    * Open navigation in Google Maps using standard URL — NO API key needed.
    * Returns the URL; frontend opens it in a new tab.
@@ -142,6 +193,13 @@ export class LocationController {
   @Get('pincode/:pin')
   async pincode(@Param('pin') pin: string) {
     return this.loc.lookupPincode(pin);
+  }
+
+  /** IFSC → bank name + branch (seller registration bank step). */
+  @Public()
+  @Get('ifsc/:code')
+  ifsc(@Param('code') code: string) {
+    return this.loc.lookupIfsc(code);
   }
 
   /** Navigation URL builder — no API key */

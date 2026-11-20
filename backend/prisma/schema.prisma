@@ -1952,6 +1952,7 @@ model Order {
   items           OrderItem[]
   serviceItems    OrderServiceItem[]
   extraWorkItems  ExtraWorkItem[]
+  authorizedPerson OrderAuthorizedPerson?
   invoice         Invoice?
   reviews         Review[]
   lead            Lead?            @relation(fields: [leadId], references: [id])
@@ -2142,8 +2143,40 @@ model ExtraWorkItem {
   otpVerified      Boolean   @default(false)
   otpLastSentAt    DateTime?
 
+  // Decision lifecycle. Only APPROVED is billed (customerApproved stays in step with it —
+  // billing/invoices read that flag). A decided item is final: a price change is a new item.
+  status           String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedByType   String? // CUSTOMER | AUTHORIZED_PERSON | CUSTOMER_OTP
+  approvedByUserId String?
+  rejectedAt       DateTime?
+  rejectedByType   String? // CUSTOMER | AUTHORIZED_PERSON
+  rejectedByUserId String?
+  rejectionReason  String?
+
   order  Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   vendor ServiceVendor @relation(fields: [addedBy], references: [id])
+}
+
+// Someone the customer nominated at booking to handle service approvals for ONE order (e.g.
+// a family member at home). They sign in with their own phone + OTP like any user; this row
+// is the only thing that grants them access, and only to this order.
+model OrderAuthorizedPerson {
+  id           String    @id @default(cuid())
+  orderId      String    @unique
+  customerId   String
+  name         String
+  phone        String // +91XXXXXXXXXX — matched against the phone in the caller's JWT
+  relationship String?
+  status       String    @default("ACTIVE") // ACTIVE | REVOKED
+  permissions  String[]  @default(["VIEW_ORDER", "DECIDE_EXTRA_WORK"])
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([phone, status])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3744,6 +3777,12 @@ model PartnerRegistration {
   currentStep Int     @default(1)
   status      String  @default("PENDING") // PENDING | APPROVED | REJECTED | HOLD | MORE_DOCS
   adminNotes  String?
+
+  // Admin's per-document KYC review, keyed by document field (idProofFront, panCardUrl, …):
+  // { status: VERIFIED | REJECTED, reason?, byUserId, byName, at }. Cleared for a document
+  // when the applicant replaces it. Approval requires every required document VERIFIED.
+  // History of each decision is kept in AuditLog (targetType PartnerRegistration).
+  documentReview Json?
 
   // Phase 2 — set when an agency owner invites this person as a team member;
   // _activatePartner() reads this to set the new ServiceVendor's agencyOwnerId.

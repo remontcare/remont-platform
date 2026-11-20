@@ -152,6 +152,8 @@ input:focus,textarea:focus,select:focus{outline:none}
 
 <div class="pr-body">
 
+  <div id="more-info-banner" class="gps-strip error" style="display:none;margin-bottom:16px"></div>
+
   <!-- STEP 1: BUSINESS DETAILS -->
   <div id="step-1" class="step-card">
     <div class="step-tag">Step 1 of 7</div>
@@ -248,7 +250,7 @@ input:focus,textarea:focus,select:focus{outline:none}
       <div class="field"><label>City <span class="req">*</span></label><input type="text" id="f-city" placeholder="Bhopal"></div>
       <div class="field"><label>State <span class="req">*</span></label><input type="text" id="f-state" placeholder="Madhya Pradesh"></div>
     </div>
-    <div class="field"><label>PIN Code <span class="req">*</span></label><input type="tel" id="f-pincode" maxlength="6" placeholder="462023"></div>
+    <div class="field"><label>PIN Code <span class="req">*</span></label><input type="tel" id="f-pincode" maxlength="6" placeholder="462023" oninput="this.value=this.value.replace(/\D/g,'');onPincodeInput(this.value,'f-city','f-state')"></div>
 
     <div id="step3-msg" class="field-error" style="margin-bottom:12px"></div>
     <div class="btn-row">
@@ -296,9 +298,10 @@ input:focus,textarea:focus,select:focus{outline:none}
 
     <div class="field"><label>Account Holder Name <span class="req">*</span></label><input type="text" id="f-bank-holder" placeholder="As per bank records"></div>
     <div class="field"><label>Bank Name <span class="req">*</span></label><input type="text" id="f-bank-name" placeholder="e.g. HDFC Bank"></div>
+    <div class="field"><label>IFSC Code <span class="req">*</span></label><input type="text" id="f-ifsc" maxlength="11" placeholder="HDFC0001234" style="text-transform:uppercase" oninput="onIfscInput()"><div class="field-hint" id="ifsc-hint">Bank name and branch are filled in from the IFSC.</div></div>
     <div class="field-row">
-      <div class="field"><label>Account Number <span class="req">*</span></label><input type="text" id="f-acc-num" placeholder="Account number"></div>
-      <div class="field"><label>IFSC Code <span class="req">*</span></label><input type="text" id="f-ifsc" placeholder="HDFC0001234" style="text-transform:uppercase"></div>
+      <div class="field"><label>Account Number <span class="req">*</span></label><input type="text" id="f-acc-num" inputmode="numeric" maxlength="18" placeholder="Account number" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div class="field"><label>Confirm Account Number <span class="req">*</span></label><input type="text" id="f-acc-num2" inputmode="numeric" maxlength="18" placeholder="Re-enter account number" oninput="this.value=this.value.replace(/\D/g,'')" onpaste="return false"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Branch</label><input type="text" id="f-bank-branch" placeholder="Branch name"></div>
@@ -351,6 +354,15 @@ input:focus,textarea:focus,select:focus{outline:none}
 var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
 var currentStep = 1;
 var registrationId = localStorage.getItem('sr_reg_id') || null;
+// The registration API only serves the applicant's own application, identified by the
+// session token /auth/verify-otp returns. Kept for this tab only (sessionStorage).
+var srToken = null;
+try { srToken = sessionStorage.getItem('sr_token'); } catch (e) {}
+function srHeaders() {
+  var h = {'Content-Type':'application/json'};
+  if (srToken) h['Authorization'] = 'Bearer ' + srToken;
+  return h;
+}
 var regStatus = null;
 var otpVerified = false;
 var files = {};
@@ -381,18 +393,20 @@ function goStep(n) {
   buildProgress(n);
   window.scrollTo({top: 0, behavior: 'smooth'});
   autoSave(n);
-  if (n === 4) setTimeout(renderPickupMaps, 50);
+  if (n === 4) { if (!pickups.length) addPickupLocation(); else renderPickupList(); setTimeout(renderPickupMaps, 50); }
 }
 
 function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
 function showMsg(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg || ''; el.style.display = msg ? '' : 'none'; } }
 
 // ── AUTOSAVE ──
+// Saves the steps the applicant has already been through (1..step-1) — never the fields of
+// the step being entered, which are still empty and would wipe a resumed draft's values.
 function autoSave(step) {
-  if (!registrationId) return;
+  if (!registrationId || draftLoading) return;
   fetch(API_BASE + '/api/v1/seller-registration/save-step', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({registrationId: registrationId, step: step, data: collectStepData(step)})
+    method: 'POST', headers: srHeaders(),
+    body: JSON.stringify({registrationId: registrationId, step: step, data: collectStepData(step - 1)})
   }).catch(function(){});
 }
 
@@ -400,9 +414,9 @@ function collectStepData(step) {
   var d = {};
   if (step >= 1) {
     d.businessName = val('f-business-name'); d.ownerName = val('f-owner-name');
-    d.businessType = val('f-business-type'); d.gstNumber = val('f-gst');
-    d.panNumber = val('f-pan'); d.aadhaarNumber = val('f-aadhaar');
-    d.cin = val('f-cin'); d.msmeNumber = val('f-msme');
+    d.businessType = val('f-business-type'); d.gstNumber = val('f-gst').toUpperCase();
+    d.panNumber = val('f-pan').toUpperCase(); d.aadhaarNumber = val('f-aadhaar');
+    d.cin = val('f-cin').toUpperCase(); d.msmeNumber = val('f-msme').toUpperCase();
   }
   if (step >= 2) {
     d.alternatePhone = val('f-alt-phone') ? '+91' + val('f-alt-phone') : undefined;
@@ -416,18 +430,32 @@ function collectStepData(step) {
   }
   if (step >= 6) {
     d.bankAccountHolder = val('f-bank-holder'); d.bankName = val('f-bank-name');
-    d.bankAccountNumber = val('f-acc-num'); d.bankIfsc = val('f-ifsc');
+    d.bankAccountNumber = val('f-acc-num'); d.bankIfsc = val('f-ifsc').toUpperCase();
     d.bankBranch = val('f-bank-branch'); d.upiId = val('f-upi');
   }
   return d;
 }
 
+// Same format rules as the Seller App's registration wizard.
+var RE = {
+  gst: /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/, pan: /^[A-Z]{5}\d{4}[A-Z]$/, aadhaar: /^\d{12}$/,
+  mobile: /^[6-9]\d{9}$/, email: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, pin: /^[1-9]\d{5}$/,
+  ifsc: /^[A-Z]{4}0[A-Z0-9]{6}$/, account: /^\d{6,18}$/, upi: /^[\w.\-]{2,}@[a-zA-Z]{2,}$/,
+};
+
 // ── STEP 1 ──
+function step1Error() {
+  if (!val('f-business-name')) return 'Business name is required';
+  if (!val('f-owner-name')) return 'Owner name is required';
+  if (val('f-gst') && !RE.gst.test(val('f-gst').toUpperCase())) return 'Enter a valid 15-character GSTIN (e.g. 22AAAAA0000A1Z5)';
+  if (val('f-pan') && !RE.pan.test(val('f-pan').toUpperCase())) return 'Enter a valid PAN (e.g. ABCDE1234F)';
+  if (val('f-aadhaar') && !RE.aadhaar.test(val('f-aadhaar'))) return 'Aadhaar number must be 12 digits';
+  return '';
+}
 function handleStep1() {
-  if (!val('f-business-name')) { showMsg('step1-msg', 'Business name is required'); return; }
-  if (!val('f-owner-name')) { showMsg('step1-msg', 'Owner name is required'); return; }
-  showMsg('step1-msg', '');
-  goStep(2);
+  var e = step1Error();
+  showMsg('step1-msg', e);
+  if (!e) goStep(2);
 }
 
 // ── STEP 2: OTP ──
@@ -435,27 +463,38 @@ var otpTimer = null, otpResendCooldown = 0;
 function sendOtp(isResend) {
   var phone = val('f-phone');
   if (phone.length !== 10) { showMsg('step2-msg', 'Enter a valid 10-digit mobile number'); return; }
+  if (!RE.mobile.test(phone)) { showMsg('step2-msg', 'Enter a valid 10-digit mobile number'); return; }
   var btn = document.getElementById('otp-send-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   showMsg('step2-msg', '');
-  document.getElementById('otp-section').style.display = '';
-  document.getElementById('otp-0').focus();
-  startOtpTimer(60);
-  btn.disabled = false; btn.textContent = 'Resend';
 
   fetch(API_BASE + '/api/v1/auth/send-otp', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({phone: '+91' + phone, role: 'PRODUCT_VENDOR'})
-  }).then(function(){
-    return fetch(API_BASE + '/api/v1/seller-registration/init', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone: '+91' + phone})
+  }).then(function(r){
+    if (r.ok) {
+      document.getElementById('otp-section').style.display = '';
+      document.getElementById('otp-0').focus();
+      startOtpTimer(60);
+      return;
+    }
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      showMsg('step2-msg', (res && res.message) || 'Could not send OTP. Please try again.');
     });
+  }).catch(function(){ showMsg('step2-msg', 'Could not send OTP. Check your connection and try again.'); })
+    .then(function(){ btn.disabled = false; btn.textContent = 'Resend'; });
+}
+
+// Create/resume the application — only after OTP verification, with the verified token.
+function initRegistration() {
+  return fetch(API_BASE + '/api/v1/seller-registration/init', {
+    method: 'POST', headers: srHeaders(),
+    body: JSON.stringify({phone: '+91' + val('f-phone')})
   }).then(function(r){ return r.json(); }).then(function(res) {
     var d = res.data || res;
     if (d && d.registrationId) { registrationId = d.registrationId; localStorage.setItem('sr_reg_id', registrationId); }
     regStatus = d;
-  }).catch(function(){});
+  });
 }
 
 function startOtpTimer(sec) {
@@ -499,8 +538,13 @@ function verifyOtp() {
     body: JSON.stringify({phone: phone, otp: otp, name: val('f-owner-name') || 'Seller', role: 'PRODUCT_VENDOR'})
   }).then(function(r){ return r.json(); }).then(function(res) {
     var d = res.data || res;
-    if (d.accessToken || (d.user && d.user.id)) { markOtpVerified(); }
-    else { showMsg('otp-verify-msg', d.message || 'Invalid OTP'); }
+    if (d.accessToken) {
+      srToken = d.accessToken;
+      try { sessionStorage.setItem('sr_token', srToken); } catch (e) {}
+      // A failed init is retried from Continue (handleStep2) — the OTP is already used up.
+      return initRegistration().catch(function(){}).then(markOtpVerified);
+    }
+    showMsg('otp-verify-msg', d.message || 'Invalid OTP');
   }).catch(function(){ showMsg('otp-verify-msg', 'Verification error. Try again.'); });
 }
 
@@ -527,20 +571,115 @@ function markOtpVerified() {
 
   document.getElementById('otp-verified-badge').style.display = 'flex';
   document.getElementById('step2-extra').style.display = '';
+  if (regStatus && regStatus.status === 'MORE_INFO') {
+    var banner = document.getElementById('more-info-banner');
+    banner.textContent = 'Our team needs more information on your application' + (regStatus.adminNotes ? ': ' + regStatus.adminNotes : '.') + ' Update the details below and submit again.';
+    banner.style.display = 'flex';
+  }
+  // An existing draft (started here or in the Seller App) or a MORE_INFO application.
+  if (regStatus && regStatus.isNew === false && !draftPromise) draftPromise = loadDraft();
 }
 
+// ── DRAFT RESUME ──
+var draftLoading = false, draftPromise = null, resumeStep = null;
+function loadDraft() {
+  draftLoading = true;
+  return fetch(API_BASE + '/api/v1/seller-registration/draft/' + encodeURIComponent(registrationId), { headers: srHeaders() })
+    .then(function(r){ if (!r.ok) throw new Error('draft'); return r.json(); })
+    .then(function(res){ prefillDraft(res.data || res); })
+    .catch(function(){ /* pre-fill is a convenience — the applicant can still enter everything */ })
+    .then(function(){ draftLoading = false; });
+}
+function setIfEmpty(id, v) {
+  var el = document.getElementById(id);
+  if (el && !el.value.trim() && v !== null && v !== undefined && v !== '') el.value = v;
+}
+function localMobile(v) { return String(v || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, ''); }
+function prefillDraft(d) {
+  [['f-business-name','businessName'],['f-owner-name','ownerName'],['f-business-type','businessType'],['f-gst','gstNumber'],
+   ['f-pan','panNumber'],['f-aadhaar','aadhaarNumber'],['f-cin','cin'],['f-msme','msmeNumber'],['f-email','email'],
+   ['f-reg-address','registeredAddress'],['f-office-address','officeAddress'],['f-warehouse-address','warehouseAddress'],
+   ['f-city','city'],['f-state','state'],['f-pincode','pincode'],['f-bank-holder','bankAccountHolder'],['f-bank-name','bankName'],
+   ['f-acc-num','bankAccountNumber'],['f-acc-num2','bankAccountNumber'],['f-ifsc','bankIfsc'],['f-bank-branch','bankBranch'],['f-upi','upiId'],
+  ].forEach(function(m){ setIfEmpty(m[0], d[m[1]]); });
+  setIfEmpty('f-alt-phone', localMobile(d.alternatePhone));
+  setIfEmpty('f-whatsapp', localMobile(d.whatsappNumber));
+  DOC_FIELDS.forEach(function(f){ if (d[f.key] && !files[f.key]) { files[f.key] = '[uploaded]'; showDocPreview(f.key, null, 'Uploaded earlier — tap above to replace'); } });
+  ['warehouseImages','storeImages'].forEach(function(k){
+    if (Array.isArray(d[k]) && d[k].length && !files[k]) { files[k] = d[k].slice(); updateListCount(k); }
+  });
+  if (!pickups.length && Array.isArray(d.pickupLocations)) {
+    pickups = d.pickupLocations.map(function(l, i){
+      return {
+        id: 'pk' + Date.now() + i, name: l.name || '', contactPerson: l.contactPerson || '',
+        mobile: localMobile(l.mobile), alternateMobile: localMobile(l.alternateMobile), address: l.address || '',
+        landmark: l.landmark || '', city: l.city || '', state: l.state || '', pincode: l.pincode || '',
+        latitude: l.latitude, longitude: l.longitude, formattedAddress: l.formattedAddress || undefined,
+        pinned: typeof l.latitude === 'number' && typeof l.longitude === 'number', isPrimary: !!l.isPrimary,
+      };
+    });
+    if (pickups.length && !pickups.some(function(p){ return p.isPrimary; })) pickups[0].isPrimary = true;
+    renderPickupList();
+  }
+  // Continue at the first step that still needs something (same as the app).
+  var checks = [[3, step3Error], [4, step4Error], [5, step5Error], [6, step6Error]];
+  resumeStep = 7;
+  for (var i = 0; i < checks.length; i++) { if (checks[i][1]()) { resumeStep = checks[i][0]; break; } }
+}
+
+function step2Error() {
+  if (val('f-alt-phone') && !RE.mobile.test(val('f-alt-phone'))) return 'Enter a valid 10-digit alternate mobile number';
+  if (val('f-whatsapp') && !RE.mobile.test(val('f-whatsapp'))) return 'Enter a valid 10-digit WhatsApp number';
+  if (val('f-email') && !RE.email.test(val('f-email'))) return 'Enter a valid email address';
+  return '';
+}
 function handleStep2() {
   if (!otpVerified) { showMsg('step2-msg', 'Please verify your mobile number first.'); return; }
-  showMsg('step2-msg', '');
-  goStep(3);
+  var e = step2Error();
+  showMsg('step2-msg', e);
+  if (e) return;
+  if (registrationId && regStatus) {
+    (draftPromise || Promise.resolve()).then(function(){
+      // Business details typed before verification may differ from the saved draft — recheck.
+      var e1 = step1Error();
+      if (e1) { goStep(1); showMsg('step1-msg', e1); return; }
+      goStep(resumeStep || 3);
+    });
+    return;
+  }
+  // init didn't complete right after verification — retry it with the verified token.
+  initRegistration().then(function(){
+    if (regStatus && (regStatus.alreadyApproved || regStatus.alreadySubmitted)) { markOtpVerified(); return; }
+    if (!registrationId) { showMsg('step2-msg', 'Could not start your application. Please try again.'); return; }
+    markOtpVerified();
+    handleStep2();
+  }).catch(function(){ showMsg('step2-msg', 'Could not start your application. Please try again.'); });
 }
 
 // ── STEP 3 ──
+function step3Error() {
+  if (!val('f-reg-address')) return 'Registered address is required';
+  if (!val('f-city') || !val('f-state')) return 'City and state are required';
+  if (!RE.pin.test(val('f-pincode'))) return 'Enter a valid 6-digit PIN code';
+  return '';
+}
 function handleStep3() {
-  if (!val('f-reg-address')) { showMsg('step3-msg', 'Registered address is required'); return; }
-  if (!val('f-city') || !val('f-state') || !val('f-pincode')) { showMsg('step3-msg', 'City, state and PIN code are required'); return; }
-  showMsg('step3-msg', '');
-  goStep(4);
+  var e = step3Error();
+  showMsg('step3-msg', e);
+  if (!e) goStep(4);
+}
+
+// PIN → city/state (existing /location/pincode lookup); only fills fields that are empty.
+function onPincodeInput(pin, cityId, stateId, onFill) {
+  if (!RE.pin.test(pin)) return;
+  fetch(API_BASE + '/api/v1/location/pincode/' + pin)
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(res){
+      var g = res && (res.data || res);
+      if (!g) return;
+      if (onFill) { onFill(g); return; }
+      setIfEmpty(cityId, g.city); setIfEmpty(stateId, g.state);
+    }).catch(function(){});
 }
 
 // ── STEP 4: PICKUP LOCATIONS ──
@@ -549,7 +688,9 @@ function addPickupLocation() {
     id: 'pk' + Date.now() + Math.random().toString(36).slice(2,6),
     name: '', contactPerson: '', mobile: '', alternateMobile: '',
     address: '', landmark: '', city: val('f-city') || '', state: val('f-state') || '', pincode: val('f-pincode') || '',
-    latitude: 23.2599, longitude: 77.4126, // sensible India default until GPS/drag sets a real one
+    // No coordinates until the seller places the pin — the map only opens on MAP_DEFAULT_VIEW,
+    // which must never be saved as anyone's pickup point.
+    latitude: null, longitude: null, pinned: false,
     isPrimary: pickups.length === 0,
   };
   pickups.push(p);
@@ -572,7 +713,30 @@ function setPrimaryPickup(id) {
 
 function updatePickupField(id, field, value) {
   var p = pickups.filter(function(x){ return x.id === id; })[0];
-  if (p) p[field] = value;
+  if (!p) return;
+  p[field] = value;
+  if (field === 'pincode') onPincodeInput(value, null, null, function(g){
+    if (!p.city && g.city) setPickupField(p, 'city', g.city);
+    if (!p.state && g.state) setPickupField(p, 'state', g.state);
+  });
+}
+// Writes a value to both the pickup model and its visible input.
+function setPickupField(p, field, value) {
+  p[field] = value;
+  var el = document.getElementById('pk-' + p.id + '-' + field);
+  if (el) el.value = value;
+}
+function pinStatusHtml(p) {
+  return p.pinned
+    ? '✅ Pinned at ' + Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5) + (p.formattedAddress ? ' — ' + esc(p.formattedAddress) : '')
+    : '📍 Not pinned yet — tap the map at your exact pickup point, drag the pin there, or use your current location.';
+}
+function setPickupPin(p, lat, lng) {
+  p.latitude = lat; p.longitude = lng; p.pinned = true;
+  if (p._marker) { p._marker.setLatLng([lat, lng]); p._marker.setOpacity(1); }
+  var st = document.getElementById('pin-status-' + p.id);
+  if (st) { st.innerHTML = pinStatusHtml(p); st.className = 'gps-strip success'; }
+  reverseGeocodePickup(p, lat, lng);
 }
 
 function renderPickupList() {
@@ -586,27 +750,28 @@ function renderPickupList() {
         (pickups.length > 1 ? '<button class="remove-pickup" onclick="removePickup(\'' + p.id + '\')">Remove</button>' : '') +
       '</div></div>' +
       '<div class="field-row">' +
-        '<div class="field"><label>Pickup Name</label><input value="' + esc(p.name) + '" placeholder="e.g. Main Warehouse" oninput="updatePickupField(\'' + p.id + '\',\'name\',this.value)"></div>' +
-        '<div class="field"><label>Contact Person</label><input value="' + esc(p.contactPerson) + '" oninput="updatePickupField(\'' + p.id + '\',\'contactPerson\',this.value)"></div>' +
+        '<div class="field"><label>Pickup Name <span class="req">*</span></label><input id="pk-' + p.id + '-name" value="' + esc(p.name) + '" placeholder="e.g. Main Warehouse" oninput="updatePickupField(\'' + p.id + '\',\'name\',this.value)"></div>' +
+        '<div class="field"><label>Contact Person</label><input id="pk-' + p.id + '-contactPerson" value="' + esc(p.contactPerson) + '" oninput="updatePickupField(\'' + p.id + '\',\'contactPerson\',this.value)"></div>' +
       '</div>' +
       '<div class="field-row">' +
-        '<div class="field"><label>Mobile Number</label><input value="' + esc(p.mobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'mobile\',this.value)"></div>' +
-        '<div class="field"><label>Alternate Mobile</label><input value="' + esc(p.alternateMobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'alternateMobile\',this.value)"></div>' +
+        '<div class="field"><label>Mobile Number</label><input id="pk-' + p.id + '-mobile" value="' + esc(p.mobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'mobile\',this.value)"></div>' +
+        '<div class="field"><label>Alternate Mobile</label><input id="pk-' + p.id + '-alternateMobile" value="' + esc(p.alternateMobile) + '" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'alternateMobile\',this.value)"></div>' +
       '</div>' +
-      '<div class="field"><label>Complete Address</label><textarea rows="2" oninput="updatePickupField(\'' + p.id + '\',\'address\',this.value)">' + esc(p.address) + '</textarea></div>' +
+      '<div class="field"><label>Complete Address <span class="req">*</span></label><textarea id="pk-' + p.id + '-address" rows="2" oninput="updatePickupField(\'' + p.id + '\',\'address\',this.value)">' + esc(p.address) + '</textarea></div>' +
       '<div class="field-row">' +
-        '<div class="field"><label>Landmark</label><input value="' + esc(p.landmark) + '" oninput="updatePickupField(\'' + p.id + '\',\'landmark\',this.value)"></div>' +
-        '<div class="field"><label>City</label><input value="' + esc(p.city) + '" oninput="updatePickupField(\'' + p.id + '\',\'city\',this.value)"></div>' +
+        '<div class="field"><label>Landmark</label><input id="pk-' + p.id + '-landmark" value="' + esc(p.landmark) + '" oninput="updatePickupField(\'' + p.id + '\',\'landmark\',this.value)"></div>' +
+        '<div class="field"><label>City <span class="req">*</span></label><input id="pk-' + p.id + '-city" value="' + esc(p.city) + '" oninput="updatePickupField(\'' + p.id + '\',\'city\',this.value)"></div>' +
       '</div>' +
       '<div class="field-row">' +
-        '<div class="field"><label>State</label><input value="' + esc(p.state) + '" oninput="updatePickupField(\'' + p.id + '\',\'state\',this.value)"></div>' +
-        '<div class="field"><label>Pincode</label><input value="' + esc(p.pincode) + '" maxlength="6" oninput="updatePickupField(\'' + p.id + '\',\'pincode\',this.value)"></div>' +
+        '<div class="field"><label>State <span class="req">*</span></label><input id="pk-' + p.id + '-state" value="' + esc(p.state) + '" oninput="updatePickupField(\'' + p.id + '\',\'state\',this.value)"></div>' +
+        '<div class="field"><label>Pincode <span class="req">*</span></label><input id="pk-' + p.id + '-pincode" value="' + esc(p.pincode) + '" maxlength="6" oninput="this.value=this.value.replace(/\\D/g,\'\');updatePickupField(\'' + p.id + '\',\'pincode\',this.value)"></div>' +
       '</div>' +
-      '<label style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">GPS Location <span class="req" style="color:var(--sienna)">*</span></label>' +
+      '<label style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Pickup Point on Map <span class="req" style="color:var(--sienna)">*</span></label>' +
       '<div style="display:flex;gap:8px;margin-bottom:8px">' +
         '<button type="button" class="gps-btn" onclick="useCurrentLocation(\'' + p.id + '\')">📡 Use Current Location</button>' +
-        '<span class="field-hint" style="align-self:center">or drag the pin below</span>' +
+        '<span class="field-hint" style="align-self:center">or tap the map / drag the pin</span>' +
       '</div>' +
+      '<div id="pin-status-' + p.id + '" class="gps-strip ' + (p.pinned ? 'success' : 'error') + '" style="margin-bottom:0">' + pinStatusHtml(p) + '</div>' +
       '<div id="map-' + p.id + '" class="leaflet-map"></div>' +
     '</div>';
   }).join('');
@@ -617,72 +782,85 @@ function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'
 // Free, keyless interactive map (Leaflet + OpenStreetMap tiles) — satisfies "drag pin / search
 // / current location" without a paid Google Maps API key, per the confirmed no-external-API
 // constraint for this build.
+// Where an UNPINNED map opens — a view only, never a saved coordinate.
+var MAP_DEFAULT_VIEW = { lat: 23.2599, lng: 77.4126, zoom: 12 };
 function renderPickupMaps() {
   pickups.forEach(function(p) {
     var mapEl = document.getElementById('map-' + p.id);
     if (!mapEl || mapEl._leaflet_id) return; // already initialized
-    var map = L.map('map-' + p.id).setView([p.latitude, p.longitude], 13);
+    var at = p.pinned ? [p.latitude, p.longitude] : [MAP_DEFAULT_VIEW.lat, MAP_DEFAULT_VIEW.lng];
+    var map = L.map('map-' + p.id).setView(at, p.pinned ? 16 : MAP_DEFAULT_VIEW.zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-    var marker = L.marker([p.latitude, p.longitude], { draggable: true }).addTo(map);
+    // Faded until the seller actually places it.
+    var marker = L.marker(at, { draggable: true, opacity: p.pinned ? 1 : 0.45 }).addTo(map);
     marker.on('dragend', function() {
       var pos = marker.getLatLng();
-      p.latitude = pos.lat; p.longitude = pos.lng;
-      reverseGeocodePickup(p, pos.lat, pos.lng);
+      setPickupPin(p, pos.lat, pos.lng);
     });
-    map.on('click', function(e) {
-      marker.setLatLng(e.latlng);
-      p.latitude = e.latlng.lat; p.longitude = e.latlng.lng;
-      reverseGeocodePickup(p, e.latlng.lat, e.latlng.lng);
-    });
+    map.on('click', function(e) { setPickupPin(p, e.latlng.lat, e.latlng.lng); });
     p._map = map; p._marker = marker;
   });
 }
 
 function useCurrentLocation(id) {
-  if (!navigator.geolocation) { alert('GPS not supported on this device/browser'); return; }
+  if (!navigator.geolocation) { alert('GPS is not supported on this device/browser. Please tap your pickup point on the map.'); return; }
   navigator.geolocation.getCurrentPosition(function(pos) {
     var p = pickups.filter(function(x){ return x.id === id; })[0];
     if (!p) return;
-    p.latitude = pos.coords.latitude; p.longitude = pos.coords.longitude;
-    if (p._map && p._marker) {
-      p._map.setView([p.latitude, p.longitude], 16);
-      p._marker.setLatLng([p.latitude, p.longitude]);
-    }
-    reverseGeocodePickup(p, p.latitude, p.longitude);
-  }, function() { alert('Location permission denied. Please drag the pin on the map instead.'); }, { enableHighAccuracy: true, timeout: 12000 });
+    if (p._map) p._map.setView([pos.coords.latitude, pos.coords.longitude], 17);
+    setPickupPin(p, pos.coords.latitude, pos.coords.longitude);
+  }, function() { alert('Could not get your location. Please tap your pickup point on the map or drag the pin there.'); }, { enableHighAccuracy: true, timeout: 12000 });
 }
 
 function reverseGeocodePickup(p, lat, lng) {
   fetch(API_BASE + '/api/v1/location/reverse-geocode?lat=' + lat + '&lng=' + lng)
-    .then(function(r){ return r.json(); })
+    .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(res) {
-      var geo = res.data || res;
-      p.formattedAddress = geo && geo.fullAddress ? geo.fullAddress : undefined;
-      if (geo && geo.city && !p.city) p.city = geo.city;
+      var geo = res && (res.data || res);
+      if (!geo || p.latitude !== lat || p.longitude !== lng) return; // pin moved again meanwhile
+      p.formattedAddress = geo.fullAddress || undefined;
+      // Fill only what the seller hasn't typed (same as the app).
+      if (!p.address && geo.fullAddress) setPickupField(p, 'address', geo.fullAddress);
+      if (!p.city && geo.city) setPickupField(p, 'city', geo.city);
+      if (!p.state && geo.state) setPickupField(p, 'state', geo.state);
+      if (!p.pincode && geo.pincode) setPickupField(p, 'pincode', String(geo.pincode));
+      var st = document.getElementById('pin-status-' + p.id);
+      if (st) st.innerHTML = pinStatusHtml(p);
     }).catch(function(){});
 }
 
-function handleStep4() {
-  if (!pickups.length) { showMsg('step4-msg', 'Add at least one pickup location'); return; }
+function step4Error() {
+  if (!pickups.length) return 'Add at least one pickup location';
   for (var i = 0; i < pickups.length; i++) {
-    var p = pickups[i];
-    if (!p.name || !p.address || !p.city || !p.state || !p.pincode) {
-      showMsg('step4-msg', 'Fill in all required fields for Pickup Location ' + (i+1));
-      return;
-    }
+    var p = pickups[i], n = 'Pickup Location ' + (i + 1) + ': ';
+    if (!String(p.name).trim()) return n + 'enter a name';
+    if (p.mobile && !RE.mobile.test(p.mobile)) return n + 'enter a valid 10-digit mobile';
+    if (p.alternateMobile && !RE.mobile.test(p.alternateMobile)) return n + 'enter a valid 10-digit alternate mobile';
+    if (!String(p.address).trim()) return n + 'enter the address';
+    if (!String(p.city).trim() || !String(p.state).trim()) return n + 'enter the city and state';
+    if (!RE.pin.test(p.pincode)) return n + 'enter a valid 6-digit PIN code';
+    if (!p.pinned) return n + 'pin the exact location on the map';
   }
-  showMsg('step4-msg', '');
+  return '';
+}
+function handleStep4() {
+  var e = step4Error();
+  showMsg('step4-msg', e);
+  if (e) return;
   var btn = document.getElementById('step4-btn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   fetch(API_BASE + '/api/v1/seller-registration/pickup-locations', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: srHeaders(),
     body: JSON.stringify({ registrationId: registrationId, locations: pickups.map(function(p){
       return { name: p.name, contactPerson: p.contactPerson, mobile: p.mobile ? '+91'+p.mobile : undefined,
         alternateMobile: p.alternateMobile ? '+91'+p.alternateMobile : undefined, address: p.address, landmark: p.landmark,
         city: p.city, state: p.state, pincode: p.pincode, latitude: p.latitude, longitude: p.longitude,
         formattedAddress: p.formattedAddress, isPrimary: p.isPrimary };
     }) })
-  }).then(function(r){ return r.json(); }).then(function() {
-    goStep(5);
+  }).then(function(r){
+    if (r.ok) { goStep(5); return; }
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      showMsg('step4-msg', (res && res.message) || 'Could not save pickup locations. Please try again.');
+    });
   }).catch(function() { showMsg('step4-msg', 'Could not save pickup locations. Please try again.'); })
     .then(function(){ btn.disabled = false; btn.textContent = 'Continue →'; });
 }
@@ -703,75 +881,144 @@ function buildDocGrid() {
     return '<div>' +
       '<div class="doc-label">' + d.label + (d.opt ? ' <span class="opt">(optional)</span>' : '') + '</div>' +
       '<div class="upload-area" onclick="document.getElementById(\'file-' + d.key + '\').click()">' +
-        '<input type="file" id="file-' + d.key + '" accept="image/*,.pdf" onchange="handleFile(this,\'' + d.key + '\')">' +
+        '<input type="file" id="file-' + d.key + '" accept="' + IMAGE_ACCEPT + ',.pdf,application/pdf" onchange="handleFile(this,\'' + d.key + '\')">' +
         '<div class="ua-icon">📎</div><div class="ua-text">Tap to upload</div>' +
       '</div>' +
       '<div class="upload-preview" id="preview-' + d.key + '"><img class="up-thumb" id="thumb-' + d.key + '"><div class="up-info"><div class="up-name" id="name-' + d.key + '"></div></div><span class="up-remove" onclick="removeFile(\'' + d.key + '\')">✕</span></div>' +
     '</div>';
   }).join('');
-  html += '<div><div class="doc-label">Warehouse Images <span class="opt">(optional, multiple)</span></div><div class="upload-area" onclick="document.getElementById(\'file-warehouseImages\').click()"><input type="file" id="file-warehouseImages" accept="image/*" multiple onchange="handleMultiFile(this,\'warehouseImages\')"><div class="ua-icon">🏭</div><div class="ua-text">Tap to upload</div></div><div id="count-warehouseImages" class="field-hint"></div></div>';
-  html += '<div><div class="doc-label">Store Images <span class="opt">(optional, multiple)</span></div><div class="upload-area" onclick="document.getElementById(\'file-storeImages\').click()"><input type="file" id="file-storeImages" accept="image/*" multiple onchange="handleMultiFile(this,\'storeImages\')"><div class="ua-icon">🏪</div><div class="ua-text">Tap to upload</div></div><div id="count-storeImages" class="field-hint"></div></div>';
+  [['warehouseImages','Warehouse Images','🏭'],['storeImages','Store Images','🏪']].forEach(function(m){
+    html += '<div><div class="doc-label">' + m[1] + ' <span class="opt">(optional, up to ' + MAX_LIST_IMAGES + ')</span></div><div class="upload-area" onclick="document.getElementById(\'file-' + m[0] + '\').click()"><input type="file" id="file-' + m[0] + '" accept="' + IMAGE_ACCEPT + '" multiple onchange="handleMultiFile(this,\'' + m[0] + '\')"><div class="ua-icon">' + m[2] + '</div><div class="ua-text">Tap to upload</div></div><div class="field-hint"><span id="count-' + m[0] + '"></span> <button type="button" id="clear-' + m[0] + '" style="display:none;color:var(--error);font-size:11px;font-weight:600" onclick="clearListImages(\'' + m[0] + '\')">Remove all</button></div></div>';
+  });
   document.getElementById('doc-grid').innerHTML = html;
 }
 
+// Same limits as the Seller App and the backend KYC validator (assertSafeKycDocument).
+var MAX_DOC_BYTES = 5 * 1024 * 1024, MAX_LIST_IMAGES = 10;
+var IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+var IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp';
+function fileTypeError(f, allowPdf) {
+  var ok = IMAGE_TYPES.indexOf(f.type) !== -1 || (allowPdf && f.type === 'application/pdf');
+  if (!ok) return allowPdf ? 'Only JPG, PNG, WebP or PDF files are allowed' : 'Only JPG, PNG or WebP photos are allowed';
+  if (f.size > MAX_DOC_BYTES) return 'File must be under 5MB';
+  return '';
+}
+function showDocPreview(key, dataUrl, name) {
+  document.getElementById('preview-' + key).classList.add('show');
+  var thumb = document.getElementById('thumb-' + key);
+  if (dataUrl && /^data:image\//.test(dataUrl)) { thumb.src = dataUrl; thumb.classList.remove('pdf-icon'); thumb.textContent = ''; }
+  else { thumb.removeAttribute('src'); thumb.classList.add('pdf-icon'); thumb.textContent = dataUrl ? '📄' : '✓'; }
+  document.getElementById('name-' + key).textContent = name;
+}
 function handleFile(input, key) {
   var f = input.files[0]; if (!f) return;
-  if (f.size > 5*1024*1024) { alert('File too large — max 5MB'); return; }
+  var err = fileTypeError(f, true);
+  if (err) { showMsg('step5-msg', err + ' (' + f.name + ')'); input.value = ''; return; }
+  showMsg('step5-msg', '');
   var reader = new FileReader();
   reader.onload = function(e) {
     files[key] = e.target.result;
-    var isImg = f.type.startsWith('image/');
-    document.getElementById('preview-' + key).classList.add('show');
-    var thumb = document.getElementById('thumb-' + key);
-    if (isImg) { thumb.src = e.target.result; thumb.classList.remove('pdf-icon'); thumb.style.display=''; thumb.textContent=''; }
-    else { thumb.removeAttribute('src'); thumb.classList.add('pdf-icon'); thumb.textContent = '📄'; }
-    document.getElementById('name-' + key).textContent = f.name;
+    showDocPreview(key, e.target.result, f.name);
   };
   reader.readAsDataURL(f);
 }
-function removeFile(key) { delete files[key]; document.getElementById('preview-' + key).classList.remove('show'); document.getElementById('file-' + key).value=''; }
+// Sends null on the next save so a document stored earlier is actually removed.
+function removeFile(key) { files[key] = null; document.getElementById('preview-' + key).classList.remove('show'); document.getElementById('file-' + key).value=''; }
 
+function updateListCount(key) {
+  var n = (files[key] || []).length;
+  document.getElementById('count-' + key).textContent = n ? n + ' image(s) added' : '';
+  document.getElementById('clear-' + key).style.display = n ? '' : 'none';
+}
+function clearListImages(key) { files[key] = []; updateListCount(key); }
 function handleMultiFile(input, key) {
   files[key] = files[key] || [];
   var fs = Array.from(input.files);
-  var loaded = 0;
+  input.value = '';
+  var errors = [];
+  fs = fs.filter(function(f){ var e = fileTypeError(f, false); if (e) errors.push(f.name + ': ' + e); return !e; });
+  var room = MAX_LIST_IMAGES - files[key].length;
+  if (fs.length > room) { errors.push('At most ' + MAX_LIST_IMAGES + ' images — ' + (fs.length - Math.max(room, 0)) + ' not added'); fs = fs.slice(0, Math.max(room, 0)); }
+  showMsg('step5-msg', errors.join('. '));
   fs.forEach(function(f) {
-    if (f.size > 5*1024*1024) { loaded++; return; }
     var reader = new FileReader();
-    reader.onload = function(e) {
-      files[key].push(e.target.result);
-      loaded++;
-      if (loaded === fs.length) document.getElementById('count-' + key).textContent = files[key].length + ' image(s) uploaded';
-    };
+    reader.onload = function(e) { files[key].push(e.target.result); updateListCount(key); };
     reader.readAsDataURL(f);
   });
 }
 
+function step5Error() {
+  var required = [['gstCertificateUrl','GST Certificate'],['panCardUrl','PAN Card'],['ownerPhotoUrl','Owner photo']];
+  for (var i = 0; i < required.length; i++) if (!files[required[i][0]]) return required[i][1] + ' is required';
+  return '';
+}
 function handleStep5() {
-  if (!files['gstCertificateUrl']) { showMsg('step5-msg', 'GST Certificate is required'); return; }
-  if (!files['panCardUrl']) { showMsg('step5-msg', 'PAN Card is required'); return; }
-  if (!files['ownerPhotoUrl']) { showMsg('step5-msg', 'Owner photo is required'); return; }
-  showMsg('step5-msg', '');
+  var e = step5Error();
+  showMsg('step5-msg', e);
+  if (e) return;
   var btn = document.getElementById('step5-btn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   var data = {};
-  DOC_FIELDS.forEach(function(d) { if (files[d.key]) data[d.key] = files[d.key]; });
+  DOC_FIELDS.forEach(function(d) { if (files[d.key] !== undefined) data[d.key] = files[d.key]; });
   if (files.warehouseImages) data.warehouseImages = files.warehouseImages;
   if (files.storeImages) data.storeImages = files.storeImages;
   fetch(API_BASE + '/api/v1/seller-registration/save-step', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: srHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: 5, data: data})
-  }).then(function(){ goStep(6); })
+  }).then(function(r){
+    // The server validates every document (type, content, virus scan) — show its reason
+    // instead of moving on as if the files had been saved.
+    if (r.ok) { goStep(6); return; }
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      showMsg('step5-msg', (res && res.message) || 'Could not save documents. Please try again.');
+    });
+  })
     .catch(function(){ showMsg('step5-msg', 'Could not save documents. Please try again.'); })
     .then(function(){ btn.disabled = false; btn.textContent = 'Continue →'; });
 }
 
 // ── STEP 6 ──
+// IFSC → bank + branch via the existing backend lookup (GET /location/ifsc/:code). Any
+// failure leaves the fields editable so the seller can type them in manually.
+var ifscSeq = 0;
+function onIfscInput() {
+  var el = document.getElementById('f-ifsc');
+  el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var code = el.value, hint = document.getElementById('ifsc-hint'), seq = ++ifscSeq;
+  hint.style.color = '';
+  if (!RE.ifsc.test(code)) { hint.textContent = code.length === 11 ? 'IFSC must look like HDFC0001234 (4 letters, 0, 6 letters/digits).' : 'Bank name and branch are filled in from the IFSC.'; return; }
+  hint.textContent = 'Checking IFSC…';
+  fetch(API_BASE + '/api/v1/location/ifsc/' + code)
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(res){ return { ok: r.ok, status: r.status, d: res.data || res }; }); })
+    .then(function(x){
+      if (seq !== ifscSeq) return; // a newer code was typed meanwhile
+      if (x.ok && x.d && x.d.bank) {
+        document.getElementById('f-bank-name').value = x.d.bank;
+        if (x.d.branch) document.getElementById('f-bank-branch').value = x.d.branch;
+        hint.textContent = '✓ Verified: ' + [x.d.bank, x.d.branch, x.d.city].filter(Boolean).join(' · ');
+        hint.style.color = '#166534';
+      } else if (x.status === 404) {
+        hint.textContent = 'IFSC code not found. Please check it.'; hint.style.color = 'var(--error)';
+      } else {
+        hint.textContent = 'Could not verify the IFSC right now — enter the bank name and branch yourself.';
+      }
+    }).catch(function(){
+      if (seq === ifscSeq) hint.textContent = 'Could not verify the IFSC right now — enter the bank name and branch yourself.';
+    });
+}
+
+function step6Error() {
+  if (!val('f-bank-holder')) return 'Account holder name is required';
+  if (!RE.ifsc.test(val('f-ifsc').toUpperCase())) return 'Enter a valid 11-character IFSC (e.g. HDFC0001234)';
+  if (!val('f-bank-name')) return 'Bank name is required';
+  if (!RE.account.test(val('f-acc-num'))) return 'Enter a valid bank account number (6-18 digits)';
+  if (val('f-acc-num2') !== val('f-acc-num')) return 'Account numbers do not match';
+  if (val('f-upi') && !RE.upi.test(val('f-upi'))) return 'Enter a valid UPI ID (e.g. name@bank)';
+  return '';
+}
 function handleStep6() {
-  if (!val('f-bank-holder') || !val('f-bank-name') || !val('f-acc-num') || !val('f-ifsc')) {
-    showMsg('step6-msg', 'Account holder, bank name, account number and IFSC are required'); return;
-  }
-  showMsg('step6-msg', '');
-  goStep(7);
+  var e = step6Error();
+  showMsg('step6-msg', e);
+  if (!e) goStep(7);
 }
 
 // ── STEP 7: SUBMIT ──
@@ -783,15 +1030,20 @@ function toggleAgree() {
 
 function submitApplication() {
   if (!agreedTerms) { showMsg('step7-msg', 'Please accept the policies to continue'); return; }
+  var checks = [[1, step1Error], [2, step2Error], [3, step3Error], [4, step4Error], [5, step5Error], [6, step6Error]];
+  for (var i = 0; i < checks.length; i++) {
+    var bad = checks[i][1]();
+    if (bad) { goStep(checks[i][0]); showMsg('step' + checks[i][0] + '-msg', bad); return; }
+  }
   var btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
 
   fetch(API_BASE + '/api/v1/seller-registration/save-step', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: srHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: 7, data: { agreedTerms: true }})
   }).then(function() {
     return fetch(API_BASE + '/api/v1/seller-registration/submit', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: srHeaders(),
       body: JSON.stringify({registrationId: registrationId})
     });
   }).then(function(r){ return r.json(); }).then(function(res) {
@@ -799,6 +1051,7 @@ function submitApplication() {
     if (d && d.status === 'PENDING') {
       document.querySelectorAll('[id^="step-"]').forEach(function(el){ el.style.display='none'; });
       document.getElementById('progress-wrap').style.display = 'none';
+      document.getElementById('more-info-banner').style.display = 'none';
       document.getElementById('success-reg-id').textContent = d.registrationId || registrationId;
       document.getElementById('success-screen').classList.add('show');
       window.scrollTo({top:0, behavior:'smooth'});

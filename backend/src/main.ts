@@ -4,6 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { resolveTrustProxyHops } from './common/trust-proxy';
 
 function assertRequiredEnv() {
   const logger = new Logger('Bootstrap');
@@ -23,6 +24,12 @@ async function bootstrap() {
     rawBody: true,
     bodyParser: true,
   });
+
+  // Rate limits key on req.ip — make it the real client address behind Railway's edge proxy
+  // (see common/trust-proxy.ts for why this is exactly the hop count, never `true`).
+  const proxyHops = resolveTrustProxyHops();
+  if (proxyHops > 0) app.getHttpAdapter().getInstance().set('trust proxy', proxyHops);
+  new Logger('Bootstrap').log(`trust proxy hops: ${proxyHops}`);
 
   // Increase body limit to 15MB for base64 document uploads in partner registration
   const express = require('express');

@@ -1,14 +1,24 @@
 import {
   Module, Injectable, Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
-  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional, InternalServerErrorException,
+  NotFoundException, ForbiddenException, BadRequestException, Logger, Optional, InternalServerErrorException, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView } from '../../common';
+
+// Columns an unclaimed job offer is read with (eligibility + partnerOfferView) — see
+// partnerOfferView() for why this is an allowlist.
+const OFFER_ORDER_SELECT = {
+  id: true, orderNumber: true, status: true, vendorId: true, totalAmount: true, serviceAmount: true, vendorPayout: true,
+  createdAt: true, slotStart: true, slotEnd: true,
+  service: { select: { name: true, categoryId: true, category: { select: { key: true } } } },
+  address: { select: { city: true, area: true, latitude: true, longitude: true } },
+} as const;
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -18,6 +28,11 @@ import { RefundsService, RefundsModule } from '../refunds/refunds.module';
 import { WarrantyService, WarrantyModule } from '../warranty/warranty.module';
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
+import { MEDIA_UPLOAD_THROTTLE } from '../media/media.policy';
+import { ReportsModule } from '../reports/reports.module';
+import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from '../reports/seller-reports';
+import { assertSafeKycDocument } from '../uploads/kyc-document';
+import { Throttle } from '@nestjs/throttler';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -52,10 +67,6 @@ const IMAGE_MAGIC_BYTES: Record<string, Buffer> = {
   'image/jpeg': Buffer.from([0xff, 0xd8, 0xff]),
   'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
 };
-const DOCUMENT_MAGIC_BYTES: Record<string, Buffer> = {
-  ...IMAGE_MAGIC_BYTES,
-  'application/pdf': Buffer.from([0x25, 0x50, 0x44, 0x46]),
-};
 function validateDataUrl(field: string, value: string, allowedMagicBytes: Record<string, Buffer>, allowedLabel: string): void {
   const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
   if (!match) throw new BadRequestException(`${field}: invalid file — only ${allowedLabel} uploads are allowed`);
@@ -71,9 +82,10 @@ function validateDataUrl(field: string, value: string, allowedMagicBytes: Record
 function validatePhotoDataUrl(value: string): void {
   validateDataUrl('photoBase64', value, IMAGE_MAGIC_BYTES, 'JPG or PNG');
 }
-function validateDocumentImageDataUrl(value: string): void {
-  validateDataUrl('imageBase64', value, DOCUMENT_MAGIC_BYTES, 'JPG, PNG, or PDF');
-}
+// Document types are free-form on the partner web portal (it prompts for e.g. POLICE_CERT),
+// so the format is validated rather than a fixed list. This also guarantees `type` is a plain
+// string before it reaches a Prisma `where` (an object there would act as a query operator).
+const DOCUMENT_TYPE_PATTERN = /^[A-Z][A-Z0-9_]{1,39}$/;
 
 // ─── Service Vendor ───
 @Injectable()
@@ -91,6 +103,34 @@ export class ServiceVendorsService {
     // fields are never copied from a vendor-controlled request.
     const skills = Array.from(new Set(data.skills.map(normalizeSkillKey).filter(Boolean)));
     if (!skills.length) throw new BadRequestException('At least one valid skill is required');
+    const existing = await this.prisma.serviceVendor.findUnique({ where: { userId } });
+
+    // Matching integrity: dispatch matches skills against ServiceCategory keys and baseCity
+    // against the order's city, so a typo here silently means "never offered a job". New
+    // values must therefore be a real active category / served city. Values the partner
+    // already has are always accepted (existing records and re-submits keep working), and
+    // an unconfigured catalog/city table never blocks onboarding.
+    const newSkills = skills.filter((s) => !(existing?.skills ?? []).includes(s));
+    if (newSkills.length) {
+      const categories = await this.activeRows(() => this.prisma.serviceCategory.findMany({ where: { isActive: true }, select: { key: true } }));
+      if (categories.length) {
+        const known = new Set(categories.map((c: { key: string }) => normalizeSkillKey(c.key)));
+        if (newSkills.some((s) => !known.has(s))) {
+          throw new BadRequestException('Choose your skill from the list of Remont services.');
+        }
+      }
+    }
+    let baseCity = data.baseCity.trim();
+    if (!baseCity) throw new BadRequestException('City is required');
+    const cityChanging = !existing || (existing.status !== 'ACTIVE' && baseCity.toLowerCase() !== (existing.baseCity || '').toLowerCase());
+    if (cityChanging) {
+      const cities = await this.activeRows(() => this.prisma.city.findMany({ where: { isActive: true }, select: { name: true } }));
+      if (cities.length) {
+        const match = cities.find((c: { name: string }) => c.name.toLowerCase() === baseCity.toLowerCase());
+        if (!match) throw new BadRequestException('Choose your city from the list of cities Remont serves.');
+        baseCity = match.name; // canonical spelling — what dispatch compares against
+      }
+    }
     const safeData = {
       fullName: data.fullName.trim(),
       skills,
@@ -102,17 +142,25 @@ export class ServiceVendorsService {
     // Base Hold starts at the platform default on first registration only — never
     // overwritten on a later profile-edit upsert, so an admin's per-vendor adjustment sticks.
     const baseHoldAmount = await this.ledger.getBaseHoldDefault();
-    const existing = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     // baseCity is only ever written directly here for a brand-new registration or while
     // still pending approval. Once a vendor is ACTIVE, this upsert must never silently
     // change it — a city change directly affects job-assignment eligibility, so it must
     // go through requestCityUpdate() (VendorCityUpdateRequest) + admin approval instead.
-    const cityWrite = !existing || existing.status !== 'ACTIVE' ? { baseCity: data.baseCity.trim() } : {};
+    const cityWrite = !existing || existing.status !== 'ACTIVE' ? { baseCity } : {};
     return this.prisma.serviceVendor.upsert({
       where: { userId },
-      create: { userId, baseHoldAmount, baseCity: data.baseCity.trim(), ...safeData },
+      create: { userId, baseHoldAmount, baseCity, ...safeData },
       update: { ...safeData, ...cityWrite },
     });
+  }
+
+  /** Reference-table read for registration validation; an unavailable table reads as empty. */
+  private async activeRows(read: () => Promise<any[]>): Promise<any[]> {
+    try {
+      return (await read()) ?? [];
+    } catch {
+      return [];
+    }
   }
 
   async requestCityUpdate(userId: string, data: { requestedCity: string; reason?: string }) {
@@ -177,7 +225,12 @@ export class ServiceVendorsService {
   }
 
   async upsertDocument(userId: string, type: string, imageBase64: string) {
-    validateDocumentImageDataUrl(imageBase64);
+    if (typeof type !== 'string' || !DOCUMENT_TYPE_PATTERN.test(type)) {
+      throw new BadRequestException('type: invalid document type');
+    }
+    // Real signature + image decode + ClamAV, the same primitives every other upload uses.
+    // KYC stays a private data URL, never a public Cloudinary URL (see uploads/kyc-document.ts).
+    await assertSafeKycDocument('imageBase64', imageBase64);
     const vendor = await this.prisma.serviceVendor.findUnique({ where: { userId } });
     if (!vendor) throw new NotFoundException('Vendor profile not found');
     const existing = await this.prisma.vendorDocument.findFirst({ where: { vendorId: vendor.id, type } });
@@ -345,7 +398,7 @@ export class ServiceVendorsService {
       where: { vendorId: v.id, serviceId: { not: null }, ...(status ? { status: status as OrderStatus } : {}) },
       include: {
         customer: { select: { name: true, phone: true } },
-        service: true, address: true, extraWorkItems: true,
+        service: true, address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -386,12 +439,9 @@ export class ServiceVendorsService {
         dispatchAttempts: { gte: 1 },
         service: { fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
       },
-      include: {
-        service: { select: { name: true, categoryId: true, category: { select: { key: true } } } },
-        // Use coordinates only for eligibility; do not reveal an unassigned customer's
-        // full address, pincode or precise location.
-        address: { select: { city: true, latitude: true, longitude: true } },
-      },
+      // Only what eligibility + partnerOfferView() need — never the whole Order row.
+      // Coordinates are read for eligibility/distance only and are not returned.
+      select: OFFER_ORDER_SELECT,
       orderBy: { createdAt: 'asc' },
       // Raised from 50 now that category is no longer filtered at the DB level — without
       // headroom here, a busy multi-category order queue could push this vendor's own
@@ -399,10 +449,60 @@ export class ServiceVendorsService {
       take: 200,
     });
 
+    const cfg = await loadScheduledDispatchConfig(this.prisma);
     return orders
+      // Belt-and-braces for future-dated orders dispatched before the release window existed.
+      .filter((o) => !isScheduledForLater(o.slotStart, cfg))
       .filter((o) => this.isEligibleForOrder(v, o))
       .slice(0, 20)
-      .map(({ address, ...order }) => ({ ...order, address: address ? { city: address.city } : null }));
+      // distanceKm: computed per request from the vendor's latest GPS fix — never stored, so
+      // it always reflects where the technician is now. Null without a fresh fix/coordinates.
+      .map((o) => partnerOfferView(o, { distanceKm: this.distanceKmFromVendor(v, o.address) }));
+  }
+
+  /**
+   * Read-only preview of future scheduled jobs this vendor could be offered once their
+   * dispatch window opens (RoutingService holds them as routingDecision 'SCHEDULED').
+   * Accepting stays impossible until release: acceptJob() requires dispatchAttempts >= 1.
+   * No distance — the technician's location on the service day isn't known yet.
+   */
+  async upcomingScheduledJobs(userId: string) {
+    const v = await this.requireActiveVendor(userId);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        vendorId: null,
+        status: OrderStatus.CONFIRMED,
+        dispatchAttempts: 0,
+        routingDecision: ROUTING_DECISION_SCHEDULED,
+        slotStart: { gt: new Date() },
+        service: { fulfillmentType: { in: VENDOR_DISPATCHABLE_FULFILLMENT_TYPES } },
+      },
+      select: OFFER_ORDER_SELECT,
+      orderBy: { slotStart: 'asc' },
+      take: 200,
+    });
+    const cfg = await loadScheduledDispatchConfig(this.prisma);
+    return orders
+      // Skill must match; location is checked against the base city as well as the current
+      // fix, since where the technician is right now says little about the service day.
+      .filter((o) => this.isEligibleForOrder(v, o) || this.isSkillAndBaseCityMatch(v, o))
+      .slice(0, 20)
+      .map((o) => partnerOfferView(o, { releaseAt: o.slotStart ? scheduledReleaseAt(o.slotStart, cfg) : null }));
+  }
+
+  private isSkillAndBaseCityMatch(vendor: any, order: any): boolean {
+    const rawSkill = order.service?.category?.key;
+    const skill = rawSkill ? normalizeSkillKey(rawSkill) : null;
+    if (!skill || !vendor.skills.includes(skill)) return false;
+    const city = order.address?.city;
+    return !!city && !!vendor.baseCity && city.toLowerCase() === vendor.baseCity.toLowerCase();
+  }
+
+  private distanceKmFromVendor(vendor: any, address: { latitude?: number | null; longitude?: number | null } | null): number | null {
+    const fresh = vendor.currentLatitude != null && vendor.currentLongitude != null && vendor.lastLocationUpdate != null &&
+      Date.now() - new Date(vendor.lastLocationUpdate).getTime() < LOCATION_STALE_AFTER_MS;
+    if (!fresh || !isValidIndiaCoords(address?.latitude, address?.longitude)) return null;
+    return Math.round(haversineKm(vendor.currentLatitude, vendor.currentLongitude, address!.latitude!, address!.longitude!) * 10) / 10;
   }
 
   async acceptJob(userId: string, orderId: string) {
@@ -420,6 +520,9 @@ export class ServiceVendorsService {
     // an orderId, independent of whatever the client actually listed.
     if (!this.isReleasedForVendorDispatch(order)) {
       throw new ForbiddenException('This job is not available to your vendor account');
+    }
+    if (isScheduledForLater(order.slotStart, await loadScheduledDispatchConfig(this.prisma))) {
+      throw new BadRequestException('This scheduled job opens for acceptance closer to its service date');
     }
     if (!this.isEligibleForOrder(v, order)) {
       throw new ForbiddenException('This job is not available to your vendor account');
@@ -488,7 +591,7 @@ export class ServiceVendorsService {
       where: { id: orderId },
       include: {
         customer: { select: { name: true, phone: true } },
-        service: true, address: true, extraWorkItems: true,
+        service: true, address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT },
       },
     });
     if (!order) throw new NotFoundException();
@@ -508,7 +611,9 @@ export class ServiceVendorsController {
   constructor(private vs: ServiceVendorsService) {}
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: ServiceVendorRegistrationDto) { return this.vs.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.vs.profile(u.sub); }
+  @Throttle(MEDIA_UPLOAD_THROTTLE)
   @Patch('me/photo') photo(@CurrentUser() u: JwtPayload, @Body() b: { photoBase64: string }) { return this.vs.updatePhoto(u.sub, b.photoBase64); }
+  @Throttle(MEDIA_UPLOAD_THROTTLE)
   @Post('me/documents') doc(@CurrentUser() u: JwtPayload, @Body() b: { type: string; imageBase64: string }) { return this.vs.upsertDocument(u.sub, b.type, b.imageBase64); }
   @Post('me/bank-update-request') bankReq(@CurrentUser() u: JwtPayload, @Body() b: { accountName: string; accountNumber: string; ifsc: string }) { return this.vs.requestBankUpdate(u.sub, b); }
   @Post('me/city-update-request') cityReq(@CurrentUser() u: JwtPayload, @Body() b: { requestedCity: string; reason?: string }) { return this.vs.requestCityUpdate(u.sub, b); }
@@ -520,6 +625,7 @@ export class ServiceVendorsController {
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
   @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }
   @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub); }
+  @Get('me/upcoming-scheduled-jobs') upcomingScheduled(@CurrentUser() u: JwtPayload) { return this.vs.upcomingScheduledJobs(u.sub); }
   @Get('me/jobs/:orderId') jobDetail(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.getJobDetail(u.sub, id); }
   @Post('me/jobs/:orderId/accept') accept(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.acceptJob(u.sub, id); }
   @Post('me/jobs/:orderId/reject') reject(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.rejectJob(u.sub, id); }
@@ -538,6 +644,32 @@ const FULFILLMENT_STAGE_NEXT: Record<string, string[]> = {
   HANDED_TO_LOGISTICS: [],
 };
 
+// The only ProductVendor fields a seller may change about themselves via
+// POST /vendors/product/register — the delivery-eligibility inputs that seller.html's and the
+// app's "Store settings" send. Everything else on the row (bank details, GST/PAN, payout
+// totals, status, userId, e-invoice flag) is set by onboarding/admin/ledger flows only;
+// passing the raw body through previously let a seller rewrite any of them, including their
+// payout bank account, with no admin review. Unknown/invalid fields are ignored, not errors.
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+export function pickSellerSelfEditableFields(data: any): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!data || typeof data !== 'object') return out;
+  for (const k of ['isOpen', 'offersInstantDelivery', 'offersSameDayDelivery'] as const) {
+    if (typeof data[k] === 'boolean') out[k] = data[k];
+  }
+  for (const k of ['operatingHoursOpen', 'operatingHoursClose'] as const) {
+    if (data[k] === null || data[k] === '') out[k] = null;
+    else if (typeof data[k] === 'string' && HHMM.test(data[k])) out[k] = data[k];
+    else if (data[k] !== undefined) throw new BadRequestException(`${k} must be in HH:MM format`);
+  }
+  if (data.processingTimeMinutes !== undefined) {
+    const n = Number(data.processingTimeMinutes);
+    if (!Number.isInteger(n) || n < 0 || n > 7 * 24 * 60) throw new BadRequestException('processingTimeMinutes must be a whole number of minutes');
+    out.processingTimeMinutes = n;
+  }
+  return out;
+}
+
 @Injectable()
 export class ProductVendorsService {
   private readonly logger = new Logger(ProductVendorsService.name);
@@ -554,6 +686,9 @@ export class ProductVendorsService {
     if (!v) throw new NotFoundException('Seller profile not found');
     return v;
   }
+
+  /** The caller's own seller profile (reports scope every query to its id). */
+  requireOwnVendor(userId: string) { return this.requireVendor(userId); }
 
   // Server-side ownership check — never trust a bare orderId from the client alone, mirrors
   // myOrders()'s own product.vendorId scoping.
@@ -655,10 +790,10 @@ export class ProductVendorsService {
     const v = await this.requireVendor(userId);
     const wc = await this.prisma.warrantyCase.findUnique({ where: { id: warrantyCaseId } });
     if (!wc) throw new NotFoundException();
-    if (wc.productId) {
-      const product = await this.prisma.product.findUnique({ where: { id: wc.productId } });
-      if (!product || product.vendorId !== v.id) throw new ForbiddenException('This warranty case does not belong to your products');
-    }
+    // A case with no product (e.g. a service warranty) has no seller — it must not be
+    // reviewable by any seller just because there is no product to check ownership against.
+    const product = wc.productId ? await this.prisma.product.findUnique({ where: { id: wc.productId } }) : null;
+    if (!product || product.vendorId !== v.id) throw new ForbiddenException('This warranty case does not belong to your products');
     await this.warranty.recordSellerRecommendation(warrantyCaseId, decision, userId, notes);
     return this.prisma.warrantyCase.findUniqueOrThrow({ where: { id: warrantyCaseId } });
   }
@@ -670,12 +805,11 @@ export class ProductVendorsService {
   // let anyone activate a full seller account with mobile+OTP alone, bypassing the entire
   // application/document/admin-approval flow.
   async register(userId: string, data: any) {
-    const { status, rating, totalEarnings, ...safeData } = data;
     const existing = await this.prisma.productVendor.findUnique({ where: { userId } });
     if (!existing) {
       throw new NotFoundException('No approved seller profile found — apply via seller-register.html and wait for admin approval before editing your profile');
     }
-    return this.prisma.productVendor.update({ where: { userId }, data: safeData });
+    return this.prisma.productVendor.update({ where: { userId }, data: pickSellerSelfEditableFields(data) });
   }
 
   async profile(userId: string) {
@@ -876,7 +1010,26 @@ export class ProductVendorsService {
 @Roles(UserRole.PRODUCT_VENDOR)
 @Controller('vendors/product')
 export class ProductVendorsController {
-  constructor(private pv: ProductVendorsService) {}
+  constructor(private pv: ProductVendorsService, private reports: SellerReportsService) {}
+
+  // ─── Sales & stock reports — always this seller's own data: the vendorId is resolved from
+  // the JWT here and any vendorId in the query string is ignored. ───
+  @Get('me/reports/sales')
+  async salesReport(@CurrentUser() u: JwtPayload, @Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const v = await this.pv.requireOwnVendor(u.sub);
+    const report = await this.reports.salesReport({ ...parseSalesFilter(q), vendorId: v.id }, 'SELLER');
+    return this.reports.send(res, 'sales', format, 'SELLER', report, 'sales-report');
+  }
+
+  @Get('me/reports/stock')
+  async stockReport(@CurrentUser() u: JwtPayload, @Query() q: Record<string, string>, @Res() res: Response) {
+    const format = parseFormat(q.format);
+    const v = await this.pv.requireOwnVendor(u.sub);
+    const report = await this.reports.stockReport({ ...parseStockFilter(q), vendorId: v.id }, 'SELLER');
+    return this.reports.send(res, 'stock', format, 'SELLER', report, 'stock-report');
+  }
+
   @Post('register') reg(@CurrentUser() u: JwtPayload, @Body() b: any) { return this.pv.register(u.sub, b); }
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.pv.profile(u.sub); }
   @Get('me/dashboard') dash(@CurrentUser() u: JwtPayload) { return this.pv.dashboard(u.sub); }
@@ -1012,7 +1165,7 @@ export class AgencyController {
 }
 
 @Module({
-  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule, MediaModule],
+  imports: [WhatsappModule, PartnerRegistrationModule, PartnerLedgerModule, LogisticsModule, ReturnsModule, RefundsModule, WarrantyModule, MediaModule, ReportsModule],
   controllers: [ServiceVendorsController, ProductVendorsController, AgencyController],
   providers: [ServiceVendorsService, ProductVendorsService, AgencyService],
   exports: [ServiceVendorsService, ProductVendorsService],

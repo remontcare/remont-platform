@@ -195,12 +195,36 @@ describe('ProductVendorsService.register security boundary', () => {
     };
     const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any, {} as any);
 
-    await service.register('user-1', { businessName: 'Updated Name', status: 'ACTIVE' });
+    await service.register('user-1', {
+      isOpen: false, operatingHoursOpen: '09:00', operatingHoursClose: null,
+      offersInstantDelivery: true, offersSameDayDelivery: false, processingTimeMinutes: 45,
+      status: 'ACTIVE',
+    });
 
     expect(prisma.productVendor.update).toHaveBeenCalledWith({
       where: { userId: 'user-1' },
-      data: { businessName: 'Updated Name' },
+      data: {
+        isOpen: false, operatingHoursOpen: '09:00', operatingHoursClose: null,
+        offersInstantDelivery: true, offersSameDayDelivery: false, processingTimeMinutes: 45,
+      },
     });
+  });
+
+  it('never lets a seller rewrite bank, payout, identity or ownership fields', async () => {
+    const prisma: any = {
+      productVendor: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'vendor-1', userId: 'user-1', status: 'ACTIVE' }),
+        update: jest.fn().mockResolvedValue({ id: 'vendor-1' }),
+      },
+    };
+    const service = new ProductVendorsService(prisma, {} as any, {} as any, {} as any, {} as any);
+
+    await service.register('user-1', {
+      bankAccountNumber: '999', bankIfsc: 'EVIL0000001', pendingPayout: 1e9, totalEarnings: 1e9,
+      userId: 'someone-else', gstNumber: 'X', eInvoiceEnabled: true, rating: 5, status: 'ACTIVE', isOpen: true,
+    });
+
+    expect(prisma.productVendor.update).toHaveBeenCalledWith({ where: { userId: 'user-1' }, data: { isOpen: true } });
   });
 });
 

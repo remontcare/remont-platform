@@ -254,7 +254,8 @@ input:focus,textarea:focus,select:focus{outline:none}
   background:linear-gradient(135deg,var(--sienna),var(--amber));
   padding:14px 16px;display:flex;align-items:center;gap:10px;color:#fff;
 }
-.ai-panel-head .ai-avatar{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
+.remi-photo{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:center 35%;display:block}
+.ai-panel-head .ai-avatar{position:relative;flex-shrink:0;width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
 .ai-panel-head .ai-name{font-weight:700;font-size:14px}
 .ai-panel-head .ai-status{font-size:11px;opacity:.85}
 .ai-panel-close{margin-left:auto;background:rgba(255,255,255,.2);border:none;color:#fff;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
@@ -808,7 +809,7 @@ input:focus,textarea:focus,select:focus{outline:none}
 </button>
 <div class="ai-panel" id="ai-panel">
   <div class="ai-panel-head">
-    <div class="ai-avatar">🤖</div>
+    <div class="ai-avatar">🤖<picture><source srcset="/remi-avatar-96.webp 1x, /remi-avatar-256.webp 2x" type="image/webp"><img class="remi-photo" src="/remi-avatar-256.jpg" alt="Remi, Remont AI assistant" width="36" height="36" decoding="async" onerror="this.closest('picture').remove()"></picture></div>
     <div><div class="ai-name">Remi AI</div><div class="ai-status" data-en="● Onboarding Assistant" data-hi="● ऑनबोर्डिंग सहायक">● Onboarding Assistant</div></div>
     <button class="ai-panel-close" onclick="toggleAI()">✕</button>
   </div>
@@ -834,6 +835,21 @@ var currentStep = 1;
 var registrationId = localStorage.getItem('pr_reg_id') || null;
 var regStatus = null; // {alreadyApproved, alreadySubmitted, status} from partner-registration/init
 var otpVerified = false;
+// The registration API only serves the applicant's own application, identified by the
+// session token /auth/verify-otp returns. Kept for this tab only (sessionStorage); an older
+// copy this page used to leave in localStorage is cleared.
+var prToken = null;
+try { prToken = sessionStorage.getItem('pr_token'); localStorage.removeItem('pr_token'); } catch (e) {}
+var regInitDone = false; // partner-registration/init succeeded with the verified token
+function prHeaders() {
+  var h = {'Content-Type': 'application/json'};
+  if (prToken) h['Authorization'] = 'Bearer ' + prToken;
+  return h;
+}
+function serverMessage(body, fallback) {
+  var m = body && (body.message || body.error);
+  return (Array.isArray(m) ? m.join(' ') : m) || fallback;
+}
 var selections = { gender: null, exp: null, 'id-type': null, police: null, relation: null };
 var files = {};
 var agreements = { terms: false, bg: false, comm: false, std: false };
@@ -857,6 +873,7 @@ var CATS = [];
 var CAT_SUBCATS = {}; // categoryKey -> [{key, name}], only for categories that have any
 var selectedCats = [];
 var selectedSubCats = {}; // categoryKey -> [subCategoryKey, ...]
+var catsReady = Promise.resolve(); // set to the category grid load on DOMContentLoaded
 
 function loadCategories() {
   return fetch(API_BASE + '/api/v1/services/categories')
@@ -928,7 +945,7 @@ function autoSave(step) {
   var data = collectStepData(step);
   fetch(API_BASE + '/api/v1/partner-registration/save-step', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: prHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: step, data: data})
   }).catch(function(){});
 }
@@ -1026,21 +1043,106 @@ function sendOtp(isResend) {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({phone: '+91' + phone, role: 'SERVICE_VENDOR'})
-  }).then(function(r){ return r.json(); }).then(function(res) {
-    // Init registration draft
-    return fetch(API_BASE + '/api/v1/partner-registration/init', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phone: '+91' + phone, language: LANG})
-    });
-  }).then(function(r){ if(r) return r.json(); }).then(function(res) {
-    var d = (res && res.data) || res;
-    if (d && d.registrationId) {
-      registrationId = d.registrationId;
-      localStorage.setItem('pr_reg_id', registrationId);
-    }
-    regStatus = d && d.status ? d : null;
   }).catch(function(){});
+}
+
+// Create/resume the registration draft — only after OTP verification, with the verified
+// token (the server takes the phone from the token). Rejects with the server's message.
+function initRegistration() {
+  return fetch(API_BASE + '/api/v1/partner-registration/init', {
+    method: 'POST',
+    headers: prHeaders(),
+    body: JSON.stringify({phone: '+91' + val('f-phone'), language: LANG})
+  }).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      if (!r.ok) throw new Error(serverMessage(res, LANG === 'HI' ? 'पंजीकरण शुरू नहीं हो सका। पुनः प्रयास करें।' : 'Could not start your registration. Please try again.'));
+      var d = (res && res.data) || res;
+      if (d && d.registrationId) {
+        registrationId = d.registrationId;
+        localStorage.setItem('pr_reg_id', registrationId);
+      }
+      regStatus = d && d.status ? d : null;
+      // A reopened application counts as ready only once its saved answers are in the form —
+      // otherwise Continue retries init (and the load) instead of autosaving blanks over them.
+      if (d && d.reopened) return loadReopenedDraft(d).then(function(){ regInitDone = true; });
+      regInitDone = true;
+    });
+  });
+}
+
+// Admin sent this submitted application back (MORE_DOCS/HOLD): load it into the form so the
+// applicant edits and resubmits the same application. Without this the empty form's autosave
+// would overwrite the saved answers with blanks.
+function loadReopenedDraft(info) {
+  return fetch(API_BASE + '/api/v1/partner-registration/draft/' + encodeURIComponent(registrationId), {
+    headers: prHeaders()
+  }).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      if (!r.ok) throw new Error(serverMessage(res, LANG === 'HI' ? 'आपका आवेदन लोड नहीं हो सका। पुनः प्रयास करें।' : 'Could not load your application. Please try again.'));
+      return catsReady.then(function(){ prefillForm(res.data || res); });
+    });
+  }).then(function(){
+    var note = info.adminNotes ? ' ' + info.adminNotes : '';
+    showMsg('step2-msg', (LANG === 'HI' ? 'हमारी टीम ने आपका आवेदन सुधार के लिए वापस भेजा है।' : 'Our team sent your application back for changes.') + note, false);
+  });
+}
+
+function prefillForm(r) {
+  function setVal(id, v) { var el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; }
+  function setCheck(id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; }
+  function pick(group, v) {
+    if (!v) return;
+    var el = document.querySelector('.sel-card[data-val="' + v + '"][onclick*="\'' + group + '\'"]');
+    if (el) el.click();
+  }
+  setVal('f-name', r.fullName); setVal('f-email', r.email); setVal('f-dob', r.dateOfBirth);
+  setVal('f-address', r.fullAddress); setVal('f-city', r.city); setVal('f-area', r.area);
+  setVal('f-state', r.state); setVal('f-pincode', r.pincode);
+  pick('gender', r.gender);
+  if (r.latitude != null && r.longitude != null) {
+    locationData = {latitude: r.latitude, longitude: r.longitude, source: r.locationSource || 'GPS'};
+    var strip = document.getElementById('gps-strip-2');
+    strip.style.display = 'flex'; strip.className = 'gps-strip success';
+    strip.innerHTML = '✅ ' + (LANG === 'HI' ? 'सेव की गई लोकेशन' : 'Saved location');
+  }
+  // categories holds both category keys and subcategory keys (see collectStepData)
+  (r.categories || []).forEach(function(k) {
+    var card = document.querySelector('.cat-card[data-val="' + k + '"]');
+    if (card) { if (selectedCats.indexOf(k) === -1) toggleCat(card, k); return; }
+    Object.keys(CAT_SUBCATS).forEach(function(catKey) {
+      if (selectedCats.indexOf(catKey) === -1) return;
+      if ((selectedSubCats[catKey] || []).indexOf(k) !== -1) return;
+      if (CAT_SUBCATS[catKey].some(function(sc){ return sc.key === k; })) {
+        selectedSubCats[catKey] = (selectedSubCats[catKey] || []).concat([k]);
+      }
+    });
+  });
+  renderSubcatPicker();
+  setVal('f-cat-other', r.categoryOther);
+  pick('exp', r.experienceYears);
+  setVal('f-prev-company', r.previousCompany);
+  setCheck('t-own-team', r.hasOwnTeam); toggleTeamSize(); setVal('f-team-size', r.teamSize);
+  setCheck('t-vehicle', r.hasOwnVehicle); setCheck('t-fulltime', r.availableFullTime); setCheck('t-emergency', r.availableEmergency);
+  pick('id-type', r.idProofType); setVal('f-pan', r.panNumber); pick('police', r.policeVerificationStatus);
+  setVal('f-bank-name', r.bankAccountName); setVal('f-acc-num', r.bankAccountNumber); setVal('f-acc-num2', r.bankAccountNumber);
+  setVal('f-ifsc', r.bankIfsc); setVal('f-bank', r.bankName); setVal('f-branch', r.bankBranch); setVal('f-upi', r.upiId);
+  setVal('f-em-name', r.emergencyName); pick('relation', r.emergencyRelation);
+  setVal('f-em-phone', r.emergencyPhone); setVal('f-em-alt', r.emergencyAltPhone);
+  // Documents already on file come back as '[uploaded]' — keep them (the server never
+  // overwrites a stored document with this marker) unless the applicant picks a new file.
+  var docKeys = {idProofFront:'id-front', idProofBack:'id-back', panCardUrl:'pan', profilePhotoUrl:'photo',
+    skillCertificateUrl:'skill-cert', policeVerificationUrl:'police', cancelledChequeUrl:'cheque'};
+  Object.keys(docKeys).forEach(function(field) {
+    if (r[field] !== '[uploaded]') return;
+    var key = docKeys[field];
+    files[key] = '[uploaded]';
+    var prev = document.getElementById('up-' + key);
+    if (prev) {
+      prev.innerHTML = '<div class="up-thumb pdf-icon">📄</div><div class="up-info"><div class="up-name">' +
+        (LANG === 'HI' ? 'पहले से अपलोड है' : 'Already uploaded') + '</div></div>';
+      prev.classList.add('show');
+    }
+  });
 }
 
 function startOtpTimer(sec) {
@@ -1077,7 +1179,7 @@ document.addEventListener('DOMContentLoaded', function() {
     })(i);
   }
   // Build category grid — from real ServiceCategory data (see loadCategories())
-  loadCategories().then(buildCatGrid);
+  catsReady = loadCategories().then(buildCatGrid);
   // AI welcome
   aiAddBubble(LANG === 'HI'
     ? 'नमस्ते! 👋 मैं Remi हूं, Remont India का AI सहायक। पार्टनर पंजीकरण में मदद के लिए यहां हूं!'
@@ -1128,9 +1230,11 @@ function verifyOtp() {
     body: JSON.stringify({phone: phone, otp: otp, name: name || 'Partner', role: 'SERVICE_VENDOR'})
   }).then(function(r){ return r.json(); }).then(function(res) {
     var d = res.data || res;
-    if (d.accessToken || (d.user && d.user.id)) {
-      if (d.accessToken) localStorage.setItem('pr_token', d.accessToken);
-      markOtpVerified();
+    if (d.accessToken) {
+      prToken = d.accessToken;
+      try { sessionStorage.setItem('pr_token', prToken); } catch (e) {}
+      // A failed init is retried from Continue (handleStep2) — the OTP is already used up.
+      return initRegistration().catch(function(){}).then(markOtpVerified);
     } else {
       showMsg('otp-verify-msg', d.message || (LANG === 'HI' ? 'गलत OTP' : 'Invalid OTP'));
     }
@@ -1144,9 +1248,15 @@ function handleStep2() {
   if (!otpVerified) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया मोबाइल नंबर सत्यापित करें।' : 'Please verify your mobile number first.'); return; }
   if (!val('f-name')) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया अपना पूरा नाम दर्ज करें।' : 'Please enter your full name.'); return; }
   if (!selections.gender) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया लिंग चुनें।' : 'Please select your gender.'); return; }
+  if (!val('f-dob')) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया जन्म तिथि दर्ज करें।' : 'Please enter your date of birth.'); return; }
   if (!val('f-city')) { showMsg('step2-msg', LANG === 'HI' ? 'कृपया शहर दर्ज करें।' : 'Please enter your city.'); return; }
   showMsg('step2-msg', '');
-  saveFilesForStep(2, function() { goStep(3); });
+  if (regInitDone && registrationId) { saveFilesForStep(2, function() { goStep(3); }); return; }
+  // init didn't complete right after verification — retry it with the verified token.
+  initRegistration().then(function() {
+    if (regStatus && (regStatus.alreadyApproved || regStatus.alreadySubmitted)) { markOtpVerified(); return; }
+    saveFilesForStep(2, function() { goStep(3); });
+  }).catch(function(e) { showMsg('step2-msg', e.message, true); });
 }
 
 function handleStep3() {
@@ -1237,12 +1347,15 @@ function submitRegistration() {
   var finalData = collectStepData(8);
   fetch(API_BASE + '/api/v1/partner-registration/save-step', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: prHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: 8, data: finalData})
-  }).then(function() {
+  }).then(function(saved) {
+    // A rejected final save (e.g. session expired, invalid document) is reported as-is
+    // rather than submitting an application without the last step's data.
+    if (!saved.ok) return saved;
     return fetch(API_BASE + '/api/v1/partner-registration/submit', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: prHeaders(),
       body: JSON.stringify({registrationId: registrationId})
     });
   }).then(function(r){
@@ -1263,6 +1376,7 @@ function submitRegistration() {
     document.getElementById('success-screen').classList.add('show');
     document.getElementById('success-reg-id').textContent = d.registrationId || registrationId;
     localStorage.removeItem('pr_reg_id');
+    try { sessionStorage.removeItem('pr_token'); } catch (e) {}
     window.scrollTo({top: 0, behavior: 'smooth'});
   }).catch(function() {
     resetButton();
@@ -1442,13 +1556,20 @@ function saveFilesForStep(step, cb) {
     'photo':'profilePhotoUrl','skill-cert':'skillCertificateUrl',
     'police':'policeVerificationUrl','cheque':'cancelledChequeUrl'
   };
-  keys.forEach(function(k) { if (files[k]) data[keyMap[k]] = files[k]; });
+  keys.forEach(function(k) { if (files[k] && files[k] !== '[uploaded]') data[keyMap[k]] = files[k]; });
   if (!Object.keys(data).length) { cb(); return; }
   fetch(API_BASE + '/api/v1/partner-registration/save-step', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: prHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: step, data: data})
-  }).then(function(){ cb(); }).catch(function(){ cb(); });
+  }).then(function(r){
+    // The server checks every document (real type, readable image, virus scan) — show its
+    // reason rather than moving on as if the files had been saved.
+    if (r.ok) { cb(); return; }
+    return r.json().catch(function(){ return {}; }).then(function(res){
+      showMsg('step' + step + '-msg', (res && res.message) || 'Could not save documents. Please try again.', true);
+    });
+  }).catch(function(){ cb(); });
 }
 
 function saveFileToBackend(key, dataUrl) {
@@ -1463,7 +1584,7 @@ function saveFileToBackend(key, dataUrl) {
   var data = {}; data[field] = dataUrl;
   fetch(API_BASE + '/api/v1/partner-registration/save-step', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: prHeaders(),
     body: JSON.stringify({registrationId: registrationId, step: currentStep, data: data})
   }).catch(function(){});
 }

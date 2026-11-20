@@ -483,7 +483,8 @@ describe('MasterOrdersService — Remont One CRM cart links', () => {
 
   it('the public checkout marks a cart-link order as a WhatsApp-channel order and passes crmRef on', async () => {
     const masterOrders: any = { checkout: jest.fn(async () => ({})) };
-    const ctrl = new PublicMasterOrderController(masterOrders);
+    const authz: any = { assertValid: jest.fn(), attachSafely: jest.fn(async (r: any) => r) };
+    const ctrl = new PublicMasterOrderController(masterOrders, authz);
     await ctrl.checkout({ name: 'Rahul', phone: '+919812345678', fullAddress: 'Arera Colony', city: 'Bhopal',
       items: [{ type: 'SERVICE', serviceId: 'fan-install' }], paymentMethod: 'ONLINE', crmRef: REF } as any);
     const [dto] = masterOrders.checkout.mock.calls[0];

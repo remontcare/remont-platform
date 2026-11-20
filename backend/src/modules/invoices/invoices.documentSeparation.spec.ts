@@ -29,7 +29,7 @@ function makeService() {
 function baseOrder(overrides: any = {}) {
   return {
     id: 'o1', customerId: 'cust-1', vendor: null,
-    invoice: null, orderNumber: 'REM-1', type: 'PRODUCT',
+    invoice: null, status: 'COMPLETED', orderNumber: 'REM-1', type: 'PRODUCT',
     subtotal: 1000, totalAmount: 1180, gstAmount: 180, serviceAmount: 0,
     remontCommission: 0, platformCharges: 0, snapshotState: 'Madhya Pradesh',
     billingTransactionType: null, couponDiscount: 0, membershipDiscount: 0, discountAllocation: null,
