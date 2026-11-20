@@ -161,6 +161,19 @@ function escapeJsAttr(s) {
     .replace(/>/g, '&gt;');
 }
 
+// An order line as recorded at order time: its snapshotted name (catalog renames never change a
+// past order) plus the options the customer picked; older lines fall back to the live name.
+function orderLineText(line, liveName) {
+  var name = (line && line.itemName) || liveName || '';
+  var o = line && line.variantOptions;
+  var variant = Array.isArray(o) ? o.filter(function (x) { return x && x.value; }).map(function (x) { return x.name + ': ' + x.value; }).join(' · ') : '';
+  return { name: name, variant: variant };
+}
+function orderLineHtml(line, liveName) {
+  var t = orderLineText(line, liveName);
+  return escape(t.name) + (t.variant ? ' <small style="color:#64748b">(' + escape(t.variant) + ')</small>' : '');
+}
+
 function badge(text, color) {
   var colors = { green:'#22c55e', blue:'#3b82f6', yellow:'#f59e0b', red:'#ef4444', gray:'#6b7280', purple:'#8b5cf6', orange:'#f97316', teal:'#14b8a6' };
   var bg = colors[color] || colors.gray;
@@ -199,9 +212,11 @@ var SIDEBAR_NAV = [
     { key:'services', label:'Service Management', icon:'🔧', href:'/admin/services.html' },
     { key:'service-pricing', label:'Service Pricing', icon:'💲', href:'/admin/service-pricing.html' },
     { key:'catalog-relations', label:'Recommendations', icon:'🔗', href:'/admin/catalog-relations.html' },
+    { key:'variant-groups', label:'Service Variants', icon:'🧬', href:'/admin/variant-groups.html?type=SERVICE' },
   ]},
   { section: '🛒 PRODUCTS', items: [
     { key:'products', label:'Products', icon:'📦', href:'/admin/products.html' },
+    { key:'variant-groups-products', label:'Product Variants', icon:'🧬', href:'/admin/variant-groups.html?type=PRODUCT' },
     { key:'inventory', label:'Inventory', icon:'🏭', href:'/admin/inventory.html' },
     { key:'brands', label:'Brands', icon:'🏷️', href:'/admin/brands.html' },
   ]},

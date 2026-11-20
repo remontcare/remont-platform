@@ -105,8 +105,9 @@ function _flattenMasterOrderItems(masterOrder) {
       var serviceAmount = Number(c.serviceAmount) || 0;
       svcLines.forEach(function(si) {
         var share = serviceAmount > 0 ? (Number(si.totalPrice) / serviceAmount) : (1 / svcLines.length);
+        var sl = orderLineText(si, (si.service && si.service.name) || 'Service');
         items.push({
-          name: (si.service && si.service.name) || 'Service',
+          name: sl.name + (sl.variant ? ' (' + sl.variant + ')' : ''),
           vendor: (c.vendor && c.vendor.user && c.vendor.user.name) || '—',
           status: c.status,
           qty: si.quantity,
@@ -120,8 +121,9 @@ function _flattenMasterOrderItems(masterOrder) {
       var productsAmount = Number(c.productsAmount) || 0;
       (c.items || []).forEach(function(it) {
         var share = productsAmount > 0 ? (Number(it.totalPrice) / productsAmount) : 0;
+        var pl = orderLineText(it, (it.product && it.product.name) || 'Product');
         items.push({
-          name: (it.product && it.product.name) || 'Product',
+          name: pl.name + (pl.variant ? ' (' + pl.variant + ')' : ''),
           vendor: (it.product && it.product.vendor && it.product.vendor.businessName) || '—',
           status: c.status,
           qty: it.quantity,

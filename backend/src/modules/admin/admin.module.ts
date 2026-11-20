@@ -43,6 +43,13 @@ function touchesAny(data: any, fields: string[]): boolean {
   return !!data && fields.some((f) => data[f] !== undefined);
 }
 
+// Variant membership changes only through the catalog-variants endpoints, which validate it;
+// the generic service/product forms must never link, unlink or re-key a variant.
+function withoutVariantFields<T extends Record<string, any>>(data: T): T {
+  const { variantGroupId, variantOptions, variantSortOrder, variantGroup, ...rest } = (data || {}) as any;
+  return rest;
+}
+
 // Validated like auth.module.ts's SendOtpDto/VerifyOtpDto — this endpoint creates a User row
 // that must be able to log in via the real OTP flow, so an invalid phone must be rejected up
 // front rather than silently creating a seller who can never log in.
@@ -1456,7 +1463,7 @@ export class AdminService {
         ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
         ...(opts.q ? { OR: [{ name: { contains: opts.q, mode: 'insensitive' } }, { description: { contains: opts.q, mode: 'insensitive' } }] } : {}),
       },
-      include: { category: { select: { name: true, key: true } }, subCategory: { select: { name: true, key: true } }, cityServices: { select: { cityId: true, isActive: true, customPrice: true } } },
+      include: { category: { select: { name: true, key: true } }, subCategory: { select: { name: true, key: true } }, cityServices: { select: { cityId: true, isActive: true, customPrice: true } }, variantGroup: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 200,
       skip: opts.offset || 0,
@@ -1465,7 +1472,7 @@ export class AdminService {
 
   async createService(data: any) {
     const slug = slugify(data.name) + '-' + Date.now();
-    const { cities, ...rest } = data;
+    const { cities, ...rest } = withoutVariantFields(data);
     assertNoNewInlineImages([rest.imageUrl, rest.images]);
     const created = await this.prisma.service.create({
       data: { ...rest, slug, requiredSkills: rest.requiredSkills || [], images: rest.images || [], seoKeywords: rest.seoKeywords || [] },
@@ -1478,7 +1485,7 @@ export class AdminService {
   async updateService(id: string, data: any) {
     const existing = await this.prisma.service.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Service not found');
-    const { cities, ...rest } = data;
+    const { cities, ...rest } = withoutVariantFields(data);
     assertNoNewInlineImages([rest.imageUrl, rest.images], [existing.imageUrl, existing.images]);
     const updated = await this.prisma.service.update({ where: { id }, data: rest, include: { category: true, subCategory: true } });
     if (touchesAny(rest, ['imageUrl', 'images'])) await this.linkMedia(MediaEntityType.SERVICE, id, updated.imageUrl, updated.images);
@@ -1770,6 +1777,7 @@ export class AdminService {
         vendor: { select: { businessName: true, status: true } },
         category: { select: { name: true, key: true } },
         _count: { select: { cityProducts: { where: { isActive: true } } } },
+        variantGroup: { select: { id: true, name: true } },
       },
       orderBy: opts.lowStock ? { stock: 'asc' } : { createdAt: 'desc' },
       take: opts.limit || 100,
@@ -1782,7 +1790,7 @@ export class AdminService {
     const sku = data.sku || 'RMNT-' + Date.now();
     // cityIds isn't a Product column — it drives CityProduct rows via the products module's
     // syncCityCoverage (same helper the seller-facing create/update endpoints use).
-    const { cityIds, ...productData } = data;
+    const { cityIds, ...productData } = withoutVariantFields(data);
     assertNoNewInlineImages(data.images);
     const product = await this.prisma.product.create({
       data: { ...productData, slug, sku, images: data.images || [], seoKeywords: data.seoKeywords || [], aiEnhancedImgs: [] },
@@ -1798,7 +1806,7 @@ export class AdminService {
   async adminUpdateProduct(id: string, data: any) {
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product not found');
-    const { cityIds, ...productData } = data;
+    const { cityIds, ...productData } = withoutVariantFields(data);
     assertNoNewInlineImages(data.images, existing.images);
     const updated = await this.prisma.product.update({ where: { id }, data: productData, include: { category: { select: { name: true } } } });
     if ((data.coverageType === 'SELECTED_CITIES' || data.coverageType === 'ZONES') && Array.isArray(cityIds)) {

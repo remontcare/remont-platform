@@ -420,9 +420,13 @@ function openDetail(orderId) {
     var catName = o.service&&o.service.category?o.service.category.name:'';
     if (o.serviceItems && o.serviceItems.length > 1) {
       var svcLines = o.serviceItems.map(function(si){
-        return escape((si.service&&si.service.name)||'Service')+' × '+(si.quantity||1)+' — '+fmtCur(si.totalPrice);
+        return orderLineHtml(si, (si.service&&si.service.name)||'Service')+' × '+(si.quantity||1)+' — '+fmtCur(si.totalPrice);
       }).join('<br>');
       document.getElementById('detail-service').innerHTML = svcLines+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');
+    } else if (o.serviceItems && o.serviceItems.length === 1) {
+      // One line: show what was booked (snapshot name + chosen options, e.g. Size: 2BHK).
+      var si1 = o.serviceItems[0];
+      document.getElementById('detail-service').innerHTML = orderLineHtml(si1, (si1.service&&si1.service.name)||(o.service&&o.service.name)||'—')+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');
     } else {
       var svcName = o.service?o.service.name:'—';
       document.getElementById('detail-service').innerHTML = escape(svcName)+(catName?'<br><small style="color:#9ca3af">'+escape(catName)+'</small>':'');

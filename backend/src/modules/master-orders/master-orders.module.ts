@@ -23,6 +23,7 @@ import { ShipmentService, LogisticsService, LogisticsModule } from '../logistics
 import { CrmOrderSyncService, CrmSyncModule } from '../crm-sync/crm-sync.module';
 import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto } from '../authorized-person/authorized-person.module';
 import { StockHoldExpiryService } from './stock-hold-expiry.service';
+import { orderLineSnapshot } from '../catalog-variants/variant-rules';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -240,6 +241,8 @@ interface PricedGroup {
     serviceId?: string; productId?: string; quantity: number; unitPrice: number; totalPrice: number;
     // Phase 8 — per-item GST snapshot for PRODUCT items, resolved via resolveProductGstLine().
     gstInclusive?: boolean; gstRatePercent?: number; taxableValue?: number; gstAmount?: number;
+    // What the customer picked (name + variant options), frozen onto the order line.
+    snapshot?: ReturnType<typeof orderLineSnapshot>;
   }[];
   // Phase 7 — resolved+summed marketplace fees for a PRODUCT group, snapshotted onto the
   // child Order's productFeeBreakdown/remontCommission at creation (see checkout() below).
@@ -361,8 +364,8 @@ export class MasterOrdersService {
     const serviceIds = Array.from(new Set(dto.items.filter((i) => i.type === 'SERVICE').map((i) => i.serviceId).filter(Boolean))) as string[];
     const productIds = Array.from(new Set(dto.items.filter((i) => i.type === 'PRODUCT').map((i) => i.productId).filter(Boolean))) as string[];
     const [services, products] = await Promise.all([
-      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } } } }),
-      this.prisma.product.findMany({ where: { id: { in: productIds } } }),
+      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } }, variantGroup: { select: { optionNames: true } } } }),
+      this.prisma.product.findMany({ where: { id: { in: productIds } }, include: { variantGroup: { select: { optionNames: true } } } }),
     ]);
     const serviceMap = new Map(services.map((s) => [s.id, s]));
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -413,7 +416,7 @@ export class MasterOrdersService {
           }
           const totalPrice = unitPrice * line.quantity;
           amount += totalPrice;
-          items.push({ serviceId: line.serviceId, quantity: line.quantity, unitPrice, totalPrice });
+          items.push({ serviceId: line.serviceId, quantity: line.quantity, unitPrice, totalPrice, snapshot: orderLineSnapshot(svc) });
         }
         // Service GST rate per line from the ONE shared source (TaxConfig/SAC or the
         // service's own override, else the 18% every checkout path already charged).
@@ -469,6 +472,7 @@ export class MasterOrdersService {
             productId: it.productId, quantity: it.quantity, unitPrice: Number(p.price), totalPrice,
             gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent,
             taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+            snapshot: orderLineSnapshot(p),
           });
         }
 
@@ -1001,10 +1005,11 @@ export class MasterOrdersService {
               ? { create: g.items.map((it) => ({
                   productId: it.productId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, vendorId: g.vendorId,
                   gstInclusive: it.gstInclusive, gstRatePercent: it.gstRatePercent, taxableValue: it.taxableValue, gstAmount: it.gstAmount,
+                  ...(it.snapshot || {}),
                 })) }
               : undefined,
             serviceItems: g.type === 'SERVICE'
-              ? { create: g.items.map((it) => ({ serviceId: it.serviceId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice })) }
+              ? { create: g.items.map((it) => ({ serviceId: it.serviceId!, quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice, ...(it.snapshot || {}) })) }
               : undefined,
           },
         });

@@ -171,11 +171,47 @@
   function addOne(id) {
     var hit = findService(id);
     if (!hit || typeof window.addToCart !== 'function') return;
-    window.addToCart({
+    var line = {
       id: hit.s.id, name: hit.s.name, price: price(hit.s), type: 'service', unit: hit.s.unit || 'per visit',
       categoryKey: hit.entry.cat.key || '', inclusions: hit.s.inclusions || [],
+    };
+    var vl = variantLabel(hit.s);
+    if (vl) { line.variant = vl; line.variantGroupId = hit.s.variantGroupId; }
+    window.addToCart(line);
+  }
+
+  // ─── Variant groups (Admin → Variants): sibling rows as one card with option chips ───
+  var CV = window.RemontCatalogVariants;
+  var vEntries = {}; // group key → entry from CV.group(), for the chips' clicks
+  function variantLabel(s) {
+    return CV && s.variantGroup && s.variantOptions ? CV.label(s.variantGroup.optionNames, s.variantOptions) : '';
+  }
+  // List → [{ kind:'one', item } | { kind:'group', … }] in list order (plain list without the helper).
+  function entriesOf(list) {
+    if (!CV) return list.map(function (s) { return { kind: 'one', item: s }; });
+    return CV.group(list, { price: price }).map(function (e) {
+      if (e.kind === 'group') vEntries[e.key] = e;
+      return e;
     });
   }
+  function variantCard(e, sel, cat) {
+    var s = e.members[sel];
+    var d = duration(s.durationMinutes);
+    var from = sel === e.sel && CV.hasPriceRange(e);
+    return '<div class="mc-card" data-svc="' + esc(s.id) + '" data-variant-card="' + esc(e.key) + '" data-sel="' + sel + '">' +
+      '<img class="mc-card-img" src="' + esc(serviceImage(s, cat, 200)) + '" alt="" width="76" height="76" loading="lazy" decoding="async">' +
+      '<div class="mc-card-main">' +
+        '<div class="mc-card-name">' + esc(e.group.name) + '</div>' +
+        '<div class="mc-card-meta">' + (from ? '<span class="mc-from">From</span>' : '') + '<span class="mc-price">' + inr(price(s)) + '</span>' +
+          (was(s) ? '<s>' + inr(was(s)) + '</s>' : '') +
+          '<span>' + esc(s.unit || '') + (d ? ' · ' + d : '') + '</span></div>' +
+        '<div class="mc-v">' + CV.chipsHtml(e, sel, 'mcv') + '</div>' +
+        '<div class="mc-card-actions"><button type="button" class="mc-link" data-details="' + esc(s.id) + '">View details</button>' +
+          '<span class="mc-card-buttons">' + cartControl(s.id) +
+          '<button type="button" class="mc-book" data-book="' + esc(s.id) + '">Book</button></span></div>' +
+      '</div></div>';
+  }
+  function entryCard(e, cat) { return e.kind === 'group' ? variantCard(e, e.sel, cat) : card(e.item, cat); }
   function removeOne(id) {
     var c = readCart();
     var line = c.filter(function (i) { return i && i.id === id; })[0];
@@ -237,7 +273,7 @@
 
     var html = '<div class="mc-banner"><img src="' + esc(categoryImage(cat)) + '" alt="" width="120" height="120" decoding="async">' +
       '<div><h3>' + esc(cat.name) + '</h3><p>' + esc(cat.description || '') + '</p>' +
-      '<span class="mc-count">' + services.length + ' services available</span></div></div>';
+      '<span class="mc-count">' + entriesOf(services).length + ' services available</span></div></div>';
     if (subs.length > 1) {
       html += '<div class="mc-chips" role="tablist">' +
         '<button type="button" class="mc-chip' + (!v.sub ? ' on' : '') + '" data-sub="">All</button>' +
@@ -260,8 +296,9 @@
       if (rest.length) groups.push({ name: 'More services', list: rest });
     }
     html += groups.filter(function (g) { return g.list.length; }).map(function (g) {
-      return '<section class="mc-sec"><h3>' + esc(g.name) + ' <span>' + g.list.length + '</span></h3>' +
-        g.list.map(function (s) { return card(s, cat); }).join('') + '</section>';
+      var entries = entriesOf(g.list);
+      return '<section class="mc-sec"><h3>' + esc(g.name) + ' <span>' + entries.length + '</span></h3>' +
+        entries.map(function (e) { return entryCard(e, cat); }).join('') + '</section>';
     }).join('') || '<p class="mc-empty">No services are bookable in this category right now.</p>';
     body.innerHTML = html;
   }
@@ -276,6 +313,17 @@
     if (!hit) { body.innerHTML = '<p class="mc-empty">This service is no longer available.</p>'; title('Service'); return; }
     var s = hit.s, cat = hit.entry.cat;
     title(cat.name);
+    // Other options of this service's variant group: chips switch the screen to that option's own row.
+    var vEntry = null, vSel = -1;
+    if (CV && s.variantGroup) {
+      entriesOf(allServices(hit.entry).filter(function (x) { return price(x) > 0; })).some(function (e) {
+        if (e.kind !== 'group') return false;
+        var i = e.members.indexOf(s);
+        if (i < 0) return false;
+        vEntry = e; vSel = i;
+        return true;
+      });
+    }
     var d = duration(s.durationMinutes);
     var faqs = Array.isArray(s.faqJson) ? s.faqJson.filter(function (f) { return f && f.q && f.a; }) : [];
     // Only the price parts this service actually has configured.
@@ -291,9 +339,11 @@
     var ownPhoto = !!(s.imageUrl || (s.images && s.images[0]));
     body.innerHTML =
       '<img class="mc-hero' + (ownPhoto ? '' : ' mc-hero-fit') + '" src="' + esc(serviceImage(s, cat, 800)) + '" alt="" width="400" height="260" decoding="async">' +
-      '<div class="mc-detail-head"><h3>' + esc(s.name) + '</h3>' +
+      '<div class="mc-detail-head"><h3>' + esc(vEntry ? vEntry.group.name : s.name) + '</h3>' +
         '<div class="mc-card-meta"><span class="mc-price">' + inr(price(s)) + '</span>' + (was(s) ? '<s>' + inr(was(s)) + '</s>' : '') +
-        '<span>' + esc(s.unit || '') + (d ? ' · ' + d : '') + '</span></div></div>' +
+        '<span>' + esc(s.unit || '') + (d ? ' · ' + d : '') + '</span></div>' +
+        (vEntry ? '<div class="mc-v mc-v-detail" data-variant-detail="' + esc(vEntry.key) + '" data-sel="' + vSel + '">' + CV.chipsHtml(vEntry, vSel, 'mcv') + '</div>' : '') +
+      '</div>' +
       (s.description ? '<section class="mc-sec"><h3>About this service</h3><p class="mc-text">' + esc(s.description) + '</p></section>' : '') +
       list("What's included", s.inclusions) +
       list("What's not included", s.exclusions) +
@@ -332,7 +382,28 @@
     push({ kind: 'svc', svcId: id });
     return true;
   }
+  function onVariantChip(chip) {
+    var host = chip.closest('[data-variant-card],[data-variant-detail]');
+    var e = host && vEntries[host.getAttribute('data-variant-card') || host.getAttribute('data-variant-detail')];
+    if (!e) return;
+    var from = parseInt(host.getAttribute('data-sel'), 10);
+    var next = CV.pick(e, isNaN(from) ? e.sel : from, chip.getAttribute('data-variant-opt'), chip.getAttribute('data-variant-val'));
+    if (next < 0 || next === from) return;
+    if (host.hasAttribute('data-variant-detail')) {
+      var top = views[views.length - 1];
+      if (top) { top.svcId = e.members[next].id; render(); }
+      return;
+    }
+    var hit = findService(e.members[next].id);
+    if (!hit) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = variantCard(e, next, hit.entry.cat);
+    host.replaceWith(tmp.firstChild);
+    refreshCartControls();
+  }
   function onScreenClick(e) {
+    var chip = e.target.closest('[data-variant-opt]');
+    if (chip && screen.contains(chip)) return onVariantChip(chip);
     var t = e.target.closest('[data-inc],[data-dec],[data-book],[data-details],[data-svc],[data-cat],[data-sub]');
     if (!t || !screen.contains(t)) return;
     if (t.hasAttribute('data-inc')) return addOne(t.getAttribute('data-inc'));

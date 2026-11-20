@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remont Admin — Variants</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+<style>
+  .vg-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:16px}
+  .vg-members{display:flex;flex-direction:column;gap:3px;font-size:12px}
+  .vg-members span.inactive{color:#94a3b8;text-decoration:line-through}
+  .vg-opt{display:inline-block;background:#f1f5f9;border-radius:6px;padding:1px 6px;margin-right:4px;font-size:11px;color:#334155}
+  .vg-sug{border:1px solid #e8edf2;border-radius:10px;padding:14px;margin:0 16px 12px}
+  .vg-sug h4{margin:0 0 4px;font-size:14px}
+  .vg-sug .meta{font-size:12px;color:#64748b;margin-bottom:8px}
+  .vg-mrow{display:grid;grid-template-columns:minmax(160px,2fr) repeat(var(--opts,1),minmax(90px,1fr)) 70px 34px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9}
+  .vg-mrow .nm{font-size:12.5px;line-height:1.3}
+  .vg-mrow .nm small{display:block;color:#64748b}
+  .vg-mhead{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.3px}
+  .vg-search{position:relative}
+  .vg-results{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.08);max-height:260px;overflow-y:auto;z-index:20;display:none}
+  .vg-results.open{display:block}
+  .vg-result{padding:9px 12px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+  .vg-result:hover{background:#f9fafb}
+  .vg-result.disabled{color:#94a3b8;cursor:not-allowed}
+  .vg-help{font-size:12px;color:#64748b;margin:4px 0 0}
+  .vg-x{border:none;background:#fee2e2;color:#dc2626;border-radius:6px;width:30px;height:30px;cursor:pointer;font-weight:700}
+  @media (max-width:700px){.vg-mrow{grid-template-columns:1fr 1fr}.vg-mhead{display:none}}
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left"><h1>Variants (Options)</h1><p>Show several services/products as one listing with selectable options — e.g. Size 1BHK / 2BHK / 3BHK. Each option stays its own item with its own price.</p></div>
+    <div class="topbar-right">
+      <span class="admin-chip">👤 <span id="admin-name"></span></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <div class="vg-toolbar">
+        <select id="vg-type" class="form-control" style="width:170px">
+          <option value="SERVICE">Services</option>
+          <option value="PRODUCT">Products</option>
+        </select>
+        <input id="vg-q" class="form-control" style="flex:1;min-width:180px" placeholder="Search listings by name…">
+        <button class="btn btn-primary" id="vg-new">+ New variant listing</button>
+      </div>
+      <div class="tab-bar" style="padding:0 16px;margin-bottom:0">
+        <button class="tab-btn active" data-tab="groups">Variant listings</button>
+        <button class="tab-btn" data-tab="suggestions">Suggested duplicates</button>
+      </div>
+      <div id="tab-groups"><div class="table-wrap"><div id="vg-table" class="loading">Loading…</div></div></div>
+      <div id="tab-suggestions" style="display:none;padding-top:14px">
+        <p class="vg-help" style="padding:0 16px 10px">Items that look like options of one listing (same category, same base name). Nothing is linked until you review and save — the items themselves are never changed or deleted.</p>
+        <div id="vg-sugs" class="loading">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="vg-editor">
+  <div class="modal modal-lg" style="width:880px">
+    <div class="modal-header"><span class="modal-title" id="vg-ed-title">Variant listing</span><button class="modal-close" onclick="closeEditor()">×</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Listing name (shown to customers)</label><input id="ed-name" class="form-control" maxlength="160" placeholder="e.g. General Pest Control"></div>
+      <div class="form-group"><label class="form-label">Options (comma-separated, up to 3)</label><input id="ed-options" class="form-control" placeholder="e.g. Size  or  Gas type, Capacity"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Description (optional)</label><input id="ed-desc" class="form-control" maxlength="1000"></div>
+    <div class="form-group"><label class="form-check"><input type="checkbox" id="ed-active" checked> Active — show these items as one listing on the website</label></div>
+
+    <div class="form-group vg-search">
+      <label class="form-label">Add an item to this listing</label>
+      <input id="ed-search" class="form-control" placeholder="Search services/products by name…" autocomplete="off">
+      <div id="ed-results" class="vg-results"></div>
+      <p class="vg-help">All items must be in the same category. Every item needs a value for every option, and no two items may have the same combination.</p>
+    </div>
+    <div id="ed-members"></div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEditor()">Cancel</button>
+      <button class="btn btn-primary" id="ed-save">Save listing</button>
+    </div>
+  </div>
+</div>
+
+<script src="./common.js"></script>
+<script>
+var params = new URLSearchParams(location.search);
+var type = params.get('type') === 'PRODUCT' ? 'PRODUCT' : 'SERVICE';
+renderSidebar(type === 'PRODUCT' ? 'variant-groups-products' : 'variant-groups');
+requireAuth();
+document.getElementById('vg-type').value = type;
+
+var groups = [];
+var suggestions = [];
+var editor = null; // { id, entityType, name, description, optionNames, isActive, members:[{id,name,price,isActive,options,categoryName}] }
+var searchTimer = null;
+
+function priceOf(row) {
+  if (row.price != null) return Number(row.price);
+  return Number(row.offerPrice != null ? row.offerPrice : row.basePrice) || 0;
+}
+function membersOf(g) { return (g.entityType === 'PRODUCT' ? g.products : g.services) || []; }
+function optText(optionNames, options) {
+  if (!options) return '';
+  return (optionNames || []).filter(function (n) { return options[n]; })
+    .map(function (n) { return '<span class="vg-opt">' + escape(n) + ': ' + escape(options[n]) + '</span>'; }).join('');
+}
+
+// ── Lists ──
+function loadGroups() {
+  var el = document.getElementById('vg-table');
+  el.innerHTML = '<div class="loading">Loading…</div>';
+  var q = document.getElementById('vg-q').value.trim();
+  api('GET', '/admin/variant-groups?entityType=' + type + (q ? '&q=' + encodeURIComponent(q) : '')).then(function (list) {
+    groups = list || [];
+    if (!groups.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">🧬</div><h3>No variant listings yet</h3><p>Create one, or check “Suggested duplicates”.</p></div>';
+      return;
+    }
+    el.innerHTML = '<table><thead><tr><th>Listing</th><th>Options</th><th>Items (each keeps its own price)</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
+      groups.map(function (g) {
+        var ms = membersOf(g);
+        return '<tr>' +
+          '<td><strong>' + escape(g.name) + '</strong>' + (g.description ? '<div style="font-size:11px;color:#64748b">' + escape(g.description) + '</div>' : '') + '</td>' +
+          '<td>' + g.optionNames.map(function (n) { return badge(n, 'purple'); }).join(' ') + '</td>' +
+          '<td><div class="vg-members">' + (ms.length ? ms.map(function (m) {
+            return '<span class="' + (m.isActive ? '' : 'inactive') + '">' + optText(g.optionNames, m.variantOptions) + escape(m.name) + ' — ' + fmtCur(priceOf(m)) + '</span>';
+          }).join('') : '<em style="color:#94a3b8">No items</em>') +
+          (ms.length === 1 ? '<span style="color:#a16207">Needs 2+ items to show as one listing</span>' : '') + '</div></td>' +
+          '<td>' + (g.isActive ? badge('Active', 'green') : badge('Disabled', 'gray')) + '</td>' +
+          '<td style="white-space:nowrap">' +
+            '<button class="btn btn-sm" data-act="edit" data-id="' + escape(g.id) + '">Edit</button> ' +
+            '<button class="btn btn-sm" data-act="toggle" data-id="' + escape(g.id) + '">' + (g.isActive ? 'Disable' : 'Enable') + '</button> ' +
+            '<button class="btn btn-sm" style="color:#dc2626" data-act="remove" data-id="' + escape(g.id) + '">Remove</button>' +
+          '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }).catch(function (e) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+function loadSuggestions() {
+  var el = document.getElementById('vg-sugs');
+  el.innerHTML = '<div class="loading">Loading…</div>';
+  api('GET', '/admin/variant-groups/suggestions?entityType=' + type).then(function (list) {
+    suggestions = list || [];
+    if (!suggestions.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h3>No likely duplicates found</h3></div>'; return; }
+    el.innerHTML = suggestions.map(function (s, i) {
+      return '<div class="vg-sug"><h4>' + escape(s.name) + '</h4>' +
+        '<div class="meta">' + escape(s.categoryName || '') + ' · ' + s.members.length + ' items · options: ' + s.optionNames.map(escape).join(', ') + '</div>' +
+        '<div class="vg-members">' + s.members.map(function (m) {
+          return '<span>' + optText(s.optionNames, m.options) + escape(m.name) + ' — ' + fmtCur(m.price) + '</span>';
+        }).join('') + '</div>' +
+        '<div style="margin-top:10px"><button class="btn btn-sm btn-primary" data-act="use-sug" data-i="' + i + '">Review &amp; create</button></div></div>';
+    }).join('');
+  }).catch(function (e) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><h3>' + escape(e.message) + '</h3></div>'; });
+}
+
+// ── Editor ──
+function openEditor(state) {
+  editor = state;
+  document.getElementById('vg-ed-title').textContent = state.id ? 'Edit variant listing' : 'New variant listing';
+  document.getElementById('ed-name').value = state.name || '';
+  document.getElementById('ed-desc').value = state.description || '';
+  document.getElementById('ed-options').value = (state.optionNames || []).join(', ');
+  document.getElementById('ed-active').checked = state.isActive !== false;
+  document.getElementById('ed-search').value = '';
+  document.getElementById('ed-results').classList.remove('open');
+  renderMembers();
+  document.getElementById('vg-editor').style.display = 'flex';
+}
+function closeEditor() { document.getElementById('vg-editor').style.display = 'none'; editor = null; }
+
+function readOptionNames() {
+  return document.getElementById('ed-options').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+}
+function renderMembers() {
+  var names = readOptionNames();
+  var el = document.getElementById('ed-members');
+  if (!editor.members.length) { el.innerHTML = '<p class="vg-help">No items yet — search above to add them.</p>'; return; }
+  var head = '<div class="vg-mrow vg-mhead" style="--opts:' + Math.max(1, names.length) + '"><span>Item</span>' +
+    (names.length ? names.map(function (n) { return '<span>' + escape(n) + '</span>'; }).join('') : '<span>(add option names above)</span>') +
+    '<span>Order</span><span></span></div>';
+  el.innerHTML = head + editor.members.map(function (m, i) {
+    return '<div class="vg-mrow" style="--opts:' + Math.max(1, names.length) + '">' +
+      '<span class="nm">' + escape(m.name) + '<small>' + fmtCur(m.price) + (m.isActive === false ? ' · inactive (hidden from customers)' : '') + '</small></span>' +
+      (names.length ? names.map(function (n) {
+        return '<input class="form-control" data-mi="' + i + '" data-opt="' + escape(n) + '" value="' + escape((m.options || {})[n] || '') + '" placeholder="' + escape(n) + '">';
+      }).join('') : '<span></span>') +
+      '<input class="form-control" type="number" min="0" data-mi="' + i + '" data-sort="1" value="' + (m.sortOrder != null ? m.sortOrder : i) + '">' +
+      '<button class="vg-x" type="button" data-act="drop" data-i="' + i + '" aria-label="Remove from listing">×</button></div>';
+  }).join('');
+}
+
+function searchItems(q) {
+  var el = document.getElementById('ed-results');
+  if (!q || q.trim().length < 2) { el.classList.remove('open'); return; }
+  var path = (editor.entityType === 'PRODUCT' ? '/admin/products?q=' : '/admin/services?q=') + encodeURIComponent(q.trim()) + '&limit=15';
+  api('GET', path).then(function (list) {
+    list = list || [];
+    if (!list.length) { el.innerHTML = '<div class="vg-result disabled">No matches</div>'; el.classList.add('open'); return; }
+    el.innerHTML = list.map(function (r) {
+      var mine = editor.members.some(function (m) { return m.id === r.id; });
+      var other = r.variantGroup && r.variantGroup.id !== editor.id;
+      var note = mine ? 'already added' : (other ? 'in “' + r.variantGroup.name + '”' : (r.category ? r.category.name : ''));
+      return '<div class="vg-result' + (mine || other ? ' disabled' : '') + '" data-add="' + escape(r.id) + '">' +
+        '<span>' + escape(r.name) + ' — ' + fmtCur(priceOf(r)) + '</span><span style="color:#64748b;font-size:11px">' + escape(note) + '</span></div>';
+    }).join('');
+    el._rows = list;
+    el.classList.add('open');
+  }).catch(function () { el.classList.remove('open'); });
+}
+
+function saveEditor() {
+  var names = readOptionNames();
+  var name = document.getElementById('ed-name').value.trim();
+  if (!name) { toast('Listing name is required', 'error'); return; }
+  if (!names.length) { toast('Add at least one option name, e.g. Size', 'error'); return; }
+  var body = {
+    name: name,
+    description: document.getElementById('ed-desc').value.trim(),
+    optionNames: names,
+    isActive: document.getElementById('ed-active').checked,
+    members: editor.members.map(function (m, i) {
+      var opts = {};
+      names.forEach(function (n) { opts[n] = ((m.options || {})[n] || '').trim(); });
+      return { id: m.id, options: opts, sortOrder: m.sortOrder != null ? Number(m.sortOrder) || 0 : i };
+    }),
+  };
+  var btn = document.getElementById('ed-save');
+  btn.disabled = true;
+  var req = editor.id ? api('PATCH', '/admin/variant-groups/' + editor.id, body)
+                      : api('POST', '/admin/variant-groups', Object.assign({ entityType: editor.entityType }, body));
+  req.then(function () {
+    toast('Variant listing saved', 'success');
+    closeEditor();
+    loadGroups();
+    if (document.getElementById('tab-suggestions').style.display !== 'none') loadSuggestions();
+  }).catch(function (e) { toast(e.message, 'error'); })
+    .then(function () { btn.disabled = false; });
+}
+
+// ── Events (delegated; no item names inside inline handlers) ──
+document.addEventListener('click', function (e) {
+  var t = e.target.closest('[data-act],[data-tab],[data-add]');
+  if (!t) {
+    if (!e.target.closest('.vg-search')) document.getElementById('ed-results').classList.remove('open');
+    return;
+  }
+  if (t.hasAttribute('data-tab')) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.toggle('active', b === t); });
+    var tab = t.getAttribute('data-tab');
+    document.getElementById('tab-groups').style.display = tab === 'groups' ? '' : 'none';
+    document.getElementById('tab-suggestions').style.display = tab === 'suggestions' ? '' : 'none';
+    if (tab === 'suggestions') loadSuggestions();
+    return;
+  }
+  if (t.hasAttribute('data-add')) {
+    if (t.classList.contains('disabled')) return;
+    var rows = document.getElementById('ed-results')._rows || [];
+    var r = rows.filter(function (x) { return x.id === t.getAttribute('data-add'); })[0];
+    if (!r) return;
+    editor.members.push({ id: r.id, name: r.name, price: priceOf(r), isActive: r.isActive, options: {}, sortOrder: editor.members.length });
+    document.getElementById('ed-results').classList.remove('open');
+    document.getElementById('ed-search').value = '';
+    renderMembers();
+    return;
+  }
+  var act = t.getAttribute('data-act');
+  var g = groups.filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
+  if (act === 'edit' && g) {
+    openEditor({
+      id: g.id, entityType: g.entityType, name: g.name, description: g.description, optionNames: g.optionNames.slice(), isActive: g.isActive,
+      members: membersOf(g).map(function (m) { return { id: m.id, name: m.name, price: priceOf(m), isActive: m.isActive, options: Object.assign({}, m.variantOptions || {}), sortOrder: m.variantSortOrder }; }),
+    });
+  } else if (act === 'toggle' && g) {
+    api('PATCH', '/admin/variant-groups/' + g.id, { isActive: !g.isActive }).then(function () {
+      toast(g.isActive ? 'Disabled — items show separately again' : 'Enabled', 'success'); loadGroups();
+    }).catch(function (err) { toast(err.message, 'error'); });
+  } else if (act === 'remove' && g) {
+    if (!confirm('Remove the listing “' + g.name + '”?\n\nIts ' + membersOf(g).length + ' items stay exactly as they are and show separately again. Nothing is deleted, and past orders are not affected.')) return;
+    api('DELETE', '/admin/variant-groups/' + g.id).then(function () { toast('Listing removed — items are standalone again', 'warning'); loadGroups(); })
+      .catch(function (err) { toast(err.message, 'error'); });
+  } else if (act === 'use-sug') {
+    var s = suggestions[Number(t.getAttribute('data-i'))];
+    if (!s) return;
+    openEditor({
+      id: null, entityType: s.entityType || type, name: s.name, description: '', optionNames: s.optionNames.slice(), isActive: true,
+      members: s.members.map(function (m, i) { return { id: m.id, name: m.name, price: m.price, isActive: true, options: Object.assign({}, m.options), sortOrder: i }; }),
+    });
+  } else if (act === 'drop') {
+    editor.members.splice(Number(t.getAttribute('data-i')), 1);
+    renderMembers();
+  }
+});
+
+document.getElementById('ed-members').addEventListener('input', function (e) {
+  var i = e.target.getAttribute('data-mi');
+  if (i == null || !editor) return;
+  var m = editor.members[Number(i)];
+  if (e.target.hasAttribute('data-sort')) m.sortOrder = e.target.value;
+  else { m.options = m.options || {}; m.options[e.target.getAttribute('data-opt')] = e.target.value; }
+});
+document.getElementById('ed-options').addEventListener('change', renderMembers);
+document.getElementById('ed-search').addEventListener('input', function (e) {
+  clearTimeout(searchTimer);
+  var q = e.target.value;
+  searchTimer = setTimeout(function () { searchItems(q); }, 250);
+});
+document.getElementById('ed-save').addEventListener('click', saveEditor);
+document.getElementById('vg-new').addEventListener('click', function () {
+  openEditor({ id: null, entityType: type, name: '', description: '', optionNames: ['Size'], isActive: true, members: [] });
+});
+document.getElementById('vg-type').addEventListener('change', function (e) {
+  location.search = '?type=' + e.target.value;
+});
+var qTimer = null;
+document.getElementById('vg-q').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(loadGroups, 300); });
+
+loadGroups();
+</script>
+</body>
+</html>

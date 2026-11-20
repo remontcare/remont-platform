@@ -28,6 +28,7 @@ import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { MediaModule } from '../media/media.module';
 import { MediaService, PublicMedia } from '../media/media.service';
 import { isInlineImage } from '../media/media.policy';
+import { orderLineSnapshot } from '../catalog-variants/variant-rules';
 import { Throttle } from '@nestjs/throttler';
 
 /** Upper bound on completion photos per job — each one is virus-scanned and uploaded. */
@@ -812,7 +813,7 @@ export class OrdersService {
     if (dto.items?.length) {
       const prodTax = await buildTaxRateResolver(this.prisma, 'PRODUCT');
       for (const item of dto.items) {
-        const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
+        const p = await this.prisma.product.findUnique({ where: { id: item.productId }, include: { variantGroup: { select: { optionNames: true } } } });
         if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
         const total = Number(p.price) * item.quantity;
         productsAmount += total;
@@ -843,6 +844,7 @@ export class OrdersService {
           productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: total,
           gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent, taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
           vendorId: p.vendorId,
+          ...orderLineSnapshot(p),
         });
       }
     }
@@ -2332,7 +2334,7 @@ export class GuestBookingService {
     const itemInputs: any[] = [];
     const prodTax = await buildTaxRateResolver(this.prisma, 'PRODUCT');
     for (const item of dto.items) {
-      const p = await this.prisma.product.findUnique({ where: { id: item.productId } });
+      const p = await this.prisma.product.findUnique({ where: { id: item.productId }, include: { variantGroup: { select: { optionNames: true } } } });
       if (!p) throw new NotFoundException(`Product not found: ${item.productId}`);
       const lineTotal = Number(p.price) * item.quantity;
       productsAmount += lineTotal;
@@ -2355,6 +2357,7 @@ export class GuestBookingService {
       itemInputs.push({
         productId: item.productId, quantity: item.quantity, unitPrice: p.price, totalPrice: lineTotal,
         gstInclusive: gstLine.inclusive, gstRatePercent: gstLine.ratePercent, taxableValue: gstLine.taxableValue, gstAmount: gstLine.gstAmount,
+        ...orderLineSnapshot(p),
       });
     }
 

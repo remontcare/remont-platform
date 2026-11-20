@@ -58,6 +58,18 @@ section.block h2{font-family:var(--ff-display);font-size:24px;font-weight:600;ma
 .pd-stock.in{color:var(--sage)}
 .pd-stock.out{color:#b91c1c}
 .pd-desc{color:var(--graphite);margin-bottom:20px;max-width:60ch}
+/* Options of this product's variant group (Admin → Variants) — each opens that option's own page */
+.pd-variants{display:flex;flex-direction:column;gap:14px;margin-bottom:20px}
+.pd-var-label{font-size:13px;font-weight:600;color:var(--graphite);margin-bottom:8px}
+.pd-var-label b{color:var(--charcoal)}
+.pd-var-opts{display:flex;flex-wrap:wrap;gap:8px}
+.pd-var-opt{display:inline-flex;flex-direction:column;align-items:center;gap:2px;min-width:64px;min-height:44px;justify-content:center;padding:8px 12px;border:1.5px solid var(--mist);border-radius:10px;background:#fff;color:var(--charcoal);font-weight:600;font-size:13px;line-height:1.2;text-decoration:none}
+.pd-var-opt small{font-weight:500;font-size:11.5px;color:var(--txt-muted)}
+.pd-var-opt:hover{border-color:var(--sienna)}
+.pd-var-opt.on{border-color:var(--sienna);box-shadow:0 0 0 1px var(--sienna);background:#fff8f2}
+.pd-var-opt.alt{border-style:dashed}
+.pd-var-opt.oos{opacity:.55}
+.pd-var-opt.oos small::after{content:' · Out of stock'}
 .pd-qty-row{display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap}
 .pd-qty-stepper{display:flex;align-items:center;border:1.5px solid var(--mist);border-radius:100px;overflow:hidden}
 .pd-qty-stepper button{width:38px;height:38px;border:none;background:var(--cream);font-size:18px;cursor:pointer;font-family:inherit}
@@ -85,6 +97,7 @@ footer.site a{color:var(--amber)}
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="stylesheet" href="/shared/app-shell.css" />
 <script src="/shared/cart-sync.js"></script>
+<script src="/shared/catalog-variants.js"></script>
 <script src="/shared/app-shell.js" defer></script>
 <script src="/shared/remont-attribution.js" defer></script>
 </head>
@@ -123,6 +136,7 @@ footer.site a{color:var(--amber)}
         <span class="pd-off" id="pd-off" style="display:none"></span>
       </div>
       <div class="pd-stock" id="pd-stock"></div>
+      <div class="pd-variants" id="pd-variants" hidden></div>
       <p class="pd-desc" id="pd-desc"></p>
       <div class="pd-qty-row">
         <div class="pd-qty-stepper">
@@ -305,11 +319,17 @@ footer.site a{color:var(--amber)}
       qty = qty + 1; qtyEl.textContent = qty;
     });
 
+    var CV = window.RemontCatalogVariants;
+    var variantLine = CV && p.variantGroup && p.variantGroup.isActive !== false && p.variantOptions
+      ? CV.label(p.variantGroup.optionNames, p.variantOptions) : '';
+
     var addBtn = document.getElementById('pd-add-btn');
     if (!inStock) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; addBtn.style.opacity = '.5'; addBtn.style.cursor = 'not-allowed'; }
     addBtn.addEventListener('click', function () {
       if (!inStock) return;
-      addToCart({ id: p.id, name: p.name, price: price, type: 'product', unit: p.unit || 'piece' }, qty);
+      var line = { id: p.id, name: p.name, price: price, type: 'product', unit: p.unit || 'piece' };
+      if (variantLine) { line.variant = variantLine; line.variantGroupId = p.variantGroupId; }
+      addToCart(line, qty);
       showToast('Added ' + qty + ' × ' + p.name + ' to cart');
       var msg = document.getElementById('pd-added-msg');
       msg.style.display = '';
@@ -317,6 +337,48 @@ footer.site a{color:var(--amber)}
     });
 
     updateCartBadge();
+    if (variantLine) renderVariants(p);
+  }
+
+  // ── Options of this product's variant group: one row per option (Size, Colour…). Each value
+  // links to the product row that has it — keeping the other current options when that exact
+  // combination exists — so every option keeps its own page, price, stock and cart line. ──
+  function renderVariants(p) {
+    var CV = window.RemontCatalogVariants;
+    var box = document.getElementById('pd-variants');
+    var base = (typeof window.API_BASE === 'string') ? window.API_BASE : '';
+    fetch(base + '/api/v1/catalog/variant-groups/' + encodeURIComponent(p.variantGroupId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        var g = json && json.data ? json.data : json;
+        if (!g || !Array.isArray(g.members)) return;
+        var members = g.members.filter(function (m) { return m.slug && CV.optionsOf(m); });
+        var cur = members.map(function (m) { return m.id; }).indexOf(p.id);
+        if (members.length < 2 || cur < 0) return;
+        var entry = { kind: 'group', key: g.id, group: { name: g.name, optionNames: g.optionNames }, members: members, sel: cur };
+        var mine = CV.optionsOf(members[cur]);
+        var stocked = function (m) { return m.stock == null || Number(m.stock) > 0; };
+        var html = g.optionNames.map(function (name) {
+          var vals = CV.values(entry, name);
+          if (vals.length < 2) return '';
+          return '<div><div class="pd-var-label">' + esc(name) + ': <b>' + esc(mine[name] || '') + '</b></div>' +
+            '<div class="pd-var-opts" role="radiogroup" aria-label="' + esc(name) + '">' + vals.map(function (v) {
+              var i = CV.pick(entry, cur, name, v);
+              if (i < 0) return '';
+              var m = members[i];
+              var on = i === cur;
+              var cls = 'pd-var-opt' + (on ? ' on' : '') + (CV.exact(entry, cur, name, v) ? '' : ' alt') + (stocked(m) ? '' : ' oos');
+              var inner = '<span>' + esc(v) + '</span><small>' + inr(m.price) + '</small>';
+              return on
+                ? '<span class="' + cls + '" role="radio" aria-checked="true">' + inner + '</span>'
+                : '<a class="' + cls + '" role="radio" aria-checked="false" href="/product/' + encodeURIComponent(m.slug) + '">' + inner + '</a>';
+            }).join('') + '</div></div>';
+        }).join('');
+        if (!html) return;
+        box.innerHTML = html;
+        box.hidden = false;
+      })
+      .catch(function () {});
   }
 
   function renderError() {

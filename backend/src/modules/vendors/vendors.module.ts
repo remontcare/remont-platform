@@ -18,6 +18,8 @@ const OFFER_ORDER_SELECT = {
   createdAt: true, slotStart: true, slotEnd: true,
   service: { select: { name: true, categoryId: true, category: { select: { key: true } } } },
   address: { select: { city: true, area: true, latitude: true, longitude: true } },
+  // What was booked per line (snapshot name + chosen options) — no customer data.
+  serviceItems: { select: { itemName: true, quantity: true, variantOptions: true, service: { select: { name: true } } } },
 } as const;
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
@@ -32,6 +34,7 @@ import { MEDIA_UPLOAD_THROTTLE } from '../media/media.policy';
 import { ReportsModule } from '../reports/reports.module';
 import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from '../reports/seller-reports';
 import { assertSafeKycDocument } from '../uploads/kyc-document';
+import { snapshotLabel } from '../catalog-variants/variant-rules';
 import { Throttle } from '@nestjs/throttler';
 import { withoutCustomerOtps } from '../../common/customer-otp';
 
@@ -904,7 +907,9 @@ export class ProductVendorsService {
       }
       byOrder.get(item.order.id).items.push({
         id: item.id,
-        productName: item.product.name,
+        // What was ordered (snapshot name + chosen options); older lines have no snapshot.
+        productName: item.itemName || item.product.name,
+        variant: snapshotLabel(item.variantOptions) || null,
         productImage: item.product.images?.[0] || null,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -954,7 +959,7 @@ export class ProductVendorsService {
     return {
       ...orderRest,
       items: myItems.map((it) => ({
-        id: it.id, productName: it.product.name, productImage: it.product.images?.[0] || null,
+        id: it.id, productName: it.itemName || it.product.name, variant: snapshotLabel(it.variantOptions) || null, productImage: it.product.images?.[0] || null,
         quantity: it.quantity, unitPrice: it.unitPrice, totalPrice: it.totalPrice,
       })),
       hasInvoice: !!invoice,

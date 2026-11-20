@@ -22,6 +22,10 @@ const INTENT_TO_CATEGORY_KEYS: Partial<Record<Intent, string[]>> = {
   CONSTRUCTION: ['CONSTRUCTION', 'construction'],
 };
 
+// The parent listing a service belongs to (see CatalogVariantGroup) — lets the website show
+// sibling rows as one card with options. Only the fields a customer page needs.
+const VARIANT_GROUP_PUBLIC = { select: { id: true, name: true, optionNames: true, isActive: true } } as const;
+
 @Injectable()
 export class ServicesService {
   constructor(private prisma: PrismaService, private cities: CitiesService) {}
@@ -53,11 +57,11 @@ export class ServicesService {
       include: {
         // Kept flat + unfiltered-by-subcategory for backward compatibility with anything
         // still reading category.services directly.
-        services: { where: { isActive: true }, orderBy: { name: 'asc' } },
+        services: { where: { isActive: true }, orderBy: { name: 'asc' }, include: { variantGroup: VARIANT_GROUP_PUBLIC } },
         subCategories: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
-          include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+          include: { services: { where: { isActive: true }, orderBy: { name: 'asc' }, include: { variantGroup: VARIANT_GROUP_PUBLIC } } },
         },
       },
     });
@@ -83,7 +87,7 @@ export class ServicesService {
   async getService(id: string, city?: string) {
     const svc = await this.prisma.service.findUnique({
       where: { id },
-      include: { category: true },
+      include: { category: true, variantGroup: VARIANT_GROUP_PUBLIC },
     });
     if (!svc) throw new NotFoundException('Service not found');
 

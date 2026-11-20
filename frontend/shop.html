@@ -170,6 +170,9 @@ nav.crumbs a:hover{text-decoration:underline}
 .deal-card .dc-add{position:absolute;right:12px;bottom:12px;width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;background:var(--sienna);color:#fff;font-size:18px;line-height:1;display:grid;place-items:center;opacity:0;transform:translateY(6px);transition:.22s;box-shadow:0 4px 14px rgba(196,96,26,.35)}
 .deal-card:hover .dc-add{opacity:1;transform:translateY(0)}
 .deal-card .dc-add:disabled{opacity:.35;cursor:not-allowed}
+.deal-card .dc-opts{width:auto;padding:0 12px;border-radius:100px;font-size:12px;font-weight:700;text-decoration:none}
+.deal-card .ap-vg{font-size:11.5px;font-weight:600;color:var(--sienna);margin:-2px 0 6px}
+.deal-card-price .from{font-size:11px;font-weight:600;color:var(--txt-muted);margin-right:-2px}
 .deal-card.ap-oos .deal-card-img{filter:grayscale(65%) opacity(.75)}
 .deal-card .dc-off-badge{position:absolute;left:12px;top:12px;background:var(--sienna);color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px;padding:4px 9px;border-radius:100px}
 .ap-oos-badge{position:absolute;left:12px;top:12px;background:#6b6b6b;color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px;padding:4px 9px;border-radius:100px}
@@ -212,6 +215,7 @@ footer.site a{color:var(--amber)}
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="stylesheet" href="/shared/app-shell.css" />
 <script src="/shared/cart-sync.js"></script>
+<script src="/shared/catalog-variants.js"></script>
 <script src="/shared/app-shell.js" defer></script>
 <script src="/shared/remont-attribution.js" defer></script>
 </head>
@@ -439,8 +443,19 @@ footer.site a{color:var(--amber)}
       rating: Number(p.rating) || 0,
       reviewCount: Number(p.reviewCount) || 0,
       inStock: p.stock == null || Number(p.stock) > 0,
-      createdAt: p.createdAt ? new Date(p.createdAt).getTime() : 0
+      createdAt: p.createdAt ? new Date(p.createdAt).getTime() : 0,
+      // Admin variant group (shared/catalog-variants.js): sizes/colours of one product → one card.
+      variantGroupId: p.variantGroupId || null,
+      variantOptions: p.variantOptions || null,
+      variantSortOrder: p.variantSortOrder || 0,
+      variantGroup: p.variantGroup || null
     };
+  }
+
+  // One card per listing, after filters/sort (so a filter matching one size shows that size).
+  function listings(list) {
+    var CV = window.RemontCatalogVariants;
+    return CV ? CV.productListings(list, { price: function (d) { return d.price; }, available: function (d) { return d.inStock; } }) : list;
   }
 
   // Cards use the 600px Cloudinary "card" variant, not the 1200px detail image products
@@ -466,19 +481,23 @@ footer.site a{color:var(--amber)}
       '<div class="deal-card' + (!d.inStock ? ' ap-oos' : '') + '" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
            '" data-ap-price="' + d.price + '" data-ap-instock="' + (d.inStock ? '1' : '0') + '">' +
         (!d.inStock ? '<span class="ap-oos-badge">Out of Stock</span>' : (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '')) +
-        '<a href="' + esc(href) + '" class="ap-card-link" aria-label="View ' + esc(d.name) + '">' +
+        '<a href="' + esc(href) + '" class="ap-card-link" aria-label="View ' + esc(d.vg ? d.vg.name : d.name) + '">' +
           imgMarkup(d) +
           '<div class="deal-card-body">' +
             (d.brand ? '<div class="ap-card-brand">' + esc(d.brand) + '</div>' : '') +
-            '<div class="deal-card-name">' + esc(d.name) + '</div>' +
+            '<div class="deal-card-name">' + esc(d.vg ? d.vg.name : d.name) + '</div>' +
+            (d.vg ? '<div class="ap-vg">' + esc(d.vg.summary) + '</div>' : '') +
             '<div class="deal-card-price">' +
+              (d.vg && d.vg.range ? '<span class="from">From</span>' : '') +
               '<span class="now">' + inr(d.price) + '</span>' +
               (d.mrp ? '<span class="was">' + inr(d.mrp) + '</span>' : '') +
               (d.off > 0 ? '<span class="off">' + d.off + '% off</span>' : '') +
             '</div>' +
           '</div>' +
         '</a>' +
-        '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>' +
+        (d.vg
+          ? '<a class="dc-add dc-opts" href="' + esc(href) + '" aria-label="Choose options">Options</a>'
+          : '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>') +
       '</div>';
   }
 
@@ -553,7 +572,7 @@ footer.site a{color:var(--amber)}
   }
 
   function renderCount() {
-    document.getElementById('ap-count').textContent = 'Showing ' + getResult().length + ' of ' + allItems.length + ' products';
+    document.getElementById('ap-count').textContent = 'Showing ' + listings(getResult()).length + ' of ' + listings(allItems).length + ' products';
   }
 
   function renderChips() {
@@ -587,7 +606,7 @@ footer.site a{color:var(--amber)}
   // filtering/sorting themselves are never paginated internally.
   function renderGrid() {
     var grid = document.getElementById('ap-grid');
-    var result = getResult();
+    var result = listings(getResult());
     var totalPages = Math.max(1, Math.ceil(result.length / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
     if (!result.length) {
@@ -881,7 +900,8 @@ footer.site a{color:var(--amber)}
         return;
       }
       if (!e.target.closest('#ap-popover') && !e.target.closest('#ap-filterbar')) closePopover();
-      var addBtn = e.target.closest('.dc-add');
+      // "Options" is a link to the product page — let it navigate.
+      var addBtn = e.target.closest('.dc-add:not(.dc-opts)');
       if (addBtn) {
         e.preventDefault();
         var card = addBtn.closest('.deal-card');

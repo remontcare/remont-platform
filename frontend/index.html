@@ -1123,6 +1123,16 @@
   .svc-cart-btn:hover { background: #e5e7eb; }
   .svc-book-btn { background: var(--sienna); color: #fff; }
   .svc-book-btn:hover { background: #a84d12; }
+  /* Variant options (shared/catalog-variants.js) on a grouped service card: 1BHK / 2BHK … */
+  .svc-from { font-size: 10px; font-weight: 600; color: var(--txt-muted); margin-right: 2px; }
+  .svv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; font-size: 10px; color: var(--txt-muted); }
+  .svv-lbl { font-weight: 600; margin-right: 2px; }
+  .svv-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .svv-chip { font: 700 10px/1.1 inherit; font-family: inherit; min-height: 24px; padding: 4px 8px; border-radius: 999px; border: 1px solid #d1d5db; background: #fff; color: #374151; cursor: pointer; }
+  .svv-chip:hover { border-color: var(--sienna); }
+  .svv-chip.on { background: var(--sienna); border-color: var(--sienna); color: #fff; }
+  .svv-chip.alt { border-style: dashed; color: #6b7280; }
+  .sdm-variant { font-size: 12px; color: var(--txt-muted); margin: -2px 0 6px; }
   /* Product info button */
   .product-info-btn {
     position: absolute; top: 8px; left: 8px; width: 22px; height: 22px;
@@ -3639,6 +3649,7 @@ window.RemontMedia = (function () {
 <link rel="stylesheet" href="/shared/app-shell.css" />
 <link rel="stylesheet" href="/shared/m-catalog.css" />
 <script src="/shared/cart-sync.js"></script>
+<script src="/shared/catalog-variants.js"></script>
 <script src="/shared/app-shell.js" defer></script>
 <script src="/shared/m-catalog.js" defer></script>
 <script src="/shared/remont-attribution.js" defer></script>
@@ -4456,6 +4467,9 @@ window.RemontMedia = (function () {
   .ap-card-brand { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--txt-muted); margin-bottom: 4px; }
   .ap-card-link { display: contents; color: inherit; }
   .deal-card .dc-add:disabled { opacity: .35; cursor: not-allowed; }
+  .deal-card .dc-opts { width: auto; padding: 0 12px; border-radius: 100px; font-size: 12px; font-weight: 700; text-decoration: none; }
+  .deal-card .ap-vg { font-size: 11.5px; font-weight: 600; color: var(--sienna); margin: -2px 0 6px; }
+  .deal-card-price .from { font-size: 11px; font-weight: 600; color: var(--txt-muted); margin-right: -2px; }
   .deal-card.ap-oos .deal-card-img { filter: grayscale(65%) opacity(.75); }
   @media (max-width: 700px) { .ap-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; } }
 </style>
@@ -4545,8 +4559,18 @@ window.RemontMedia = (function () {
       catKey: cat.key || 'OTHER',
       emoji: cat.icon || CAT_EMOJI[cat.key] || '🏠',
       brand: (p.brand || '').trim() || null,
-      inStock: p.stock == null || Number(p.stock) > 0
+      inStock: p.stock == null || Number(p.stock) > 0,
+      // Admin variant group (shared/catalog-variants.js): sizes/colours of one product → one card.
+      variantGroupId: p.variantGroupId || null,
+      variantOptions: p.variantOptions || null,
+      variantSortOrder: p.variantSortOrder || 0,
+      variantGroup: p.variantGroup || null
     };
+  }
+
+  function listings(list) {
+    var CV = window.RemontCatalogVariants;
+    return CV ? CV.productListings(list, { price: function (d) { return d.price; }, available: function (d) { return d.inStock; } }) : list;
   }
 
   function imgMarkup(d) {
@@ -4560,26 +4584,30 @@ window.RemontMedia = (function () {
       '<div class="deal-card' + (!d.inStock ? ' ap-oos' : '') + '" data-ap-id="' + esc(d.id) + '" data-ap-name="' + esc(d.name) +
            '" data-ap-price="' + d.price + '" data-ap-instock="' + (d.inStock ? '1' : '0') + '">' +
         (!d.inStock ? '<span class="ap-oos-badge">Out of Stock</span>' : (d.off > 0 ? '<span class="dc-off-badge">' + d.off + '% OFF</span>' : '')) +
-        '<a href="' + esc(href) + '" class="ap-card-link" aria-label="View ' + esc(d.name) + '">' +
+        '<a href="' + esc(href) + '" class="ap-card-link" aria-label="View ' + esc(d.vg ? d.vg.name : d.name) + '">' +
           imgMarkup(d) +
           '<div class="deal-card-body">' +
             (d.brand ? '<div class="ap-card-brand">' + esc(d.brand) + '</div>' : '') +
-            '<div class="deal-card-name">' + esc(d.name) + '</div>' +
+            '<div class="deal-card-name">' + esc(d.vg ? d.vg.name : d.name) + '</div>' +
+            (d.vg ? '<div class="ap-vg">' + esc(d.vg.summary) + '</div>' : '') +
             '<div class="deal-card-price">' +
+              (d.vg && d.vg.range ? '<span class="from">From</span>' : '') +
               '<span class="now">' + inr(d.price) + '</span>' +
               (d.mrp ? '<span class="was">' + inr(d.mrp) + '</span>' : '') +
               (d.off > 0 ? '<span class="off">' + d.off + '% off</span>' : '') +
             '</div>' +
           '</div>' +
         '</a>' +
-        '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>' +
+        (d.vg
+          ? '<a class="dc-add dc-opts" href="' + esc(href) + '" aria-label="Choose options">Options</a>'
+          : '<button type="button" class="dc-add"' + (!d.inStock ? ' disabled' : '') + ' aria-label="Add to cart">+</button>') +
       '</div>';
   }
 
   function renderGrid(items) {
     var grid = document.getElementById('ap-grid');
     if (!items.length) { grid.innerHTML = '<div class="ap-empty">Couldn\'t load products right now — please refresh.</div>'; return; }
-    grid.innerHTML = items.map(cardHTML).join('');
+    grid.innerHTML = listings(items).map(cardHTML).join('');
   }
 
   function addItemToCart(el) {
@@ -4604,7 +4632,7 @@ window.RemontMedia = (function () {
 
   function bind() {
     document.addEventListener('click', function (e) {
-      var addBtn = e.target.closest('#all-products .dc-add');
+      var addBtn = e.target.closest('#all-products .dc-add:not(.dc-opts)');
       if (addBtn) {
         e.preventDefault();
         var card = addBtn.closest('.deal-card');
@@ -6221,7 +6249,20 @@ window.RemontMedia = (function () {
   }
 
   function svcCardsHtml(services) {
-    return services.map(s => `
+    // Rows of one admin variant group (Admin → Variants) show as ONE card with option chips;
+    // every other service renders exactly as before.
+    var CV = window.RemontCatalogVariants;
+    if (!CV) return services.map(svcCardHtml).join('');
+    if (!_svcVariantEntries) _svcVariantEntries = {};
+    return CV.group(services, { price: function (s) { return s.pNum || 0; } }).map(function (e) {
+      if (e.kind === 'one') return svcCardHtml(e.item);
+      _svcVariantEntries[e.key] = e;
+      return svcVariantCardHtml(e, e.sel);
+    }).join('');
+  }
+
+  function svcCardHtml(s) {
+    return `
       <div class="sub-svc-card" ${s.id ? `data-svc-id="${s.id}"` : ''}>
         <span class="icn">${catIconHtml({ imageUrl: s.imageUrl || (s.images && s.images[0]), icon: s.ic })}</span>
         <div class="nm">${escHtml(s.n)}</div>
@@ -6232,8 +6273,62 @@ window.RemontMedia = (function () {
           <button class="svc-book-btn" onclick="bookSvcNow(event,'${s.id}','${escJs(s.n)}','${escJs(s.p)}')">⚡ Book Now</button>
         </div>
       </div>
-    `).join('');
+    `;
   }
+
+  // One grouped card: the selected member's own id/price/unit; chips switch the member.
+  var _svcVariantEntries = {};
+  function svcVariantCardHtml(e, sel) {
+    var CV = window.RemontCatalogVariants;
+    var s = e.members[sel];
+    var from = sel === e.sel && CV.hasPriceRange(e);
+    return `
+      <div class="sub-svc-card svc-var-card" data-svc-id="${escHtml(s.id)}" data-svc-name="${escHtml(s.n)}" data-variant-card="${escHtml(e.key)}" data-sel="${sel}">
+        <span class="icn">${catIconHtml({ imageUrl: s.imageUrl || (s.images && s.images[0]), icon: s.ic })}</span>
+        <div class="nm">${escHtml(e.group.name)}</div>
+        <div class="pr">${from ? '<span class="svc-from">From</span>' : ''}${s.o !== '—' ? `<small>${escHtml(s.o)}</small> ` : ''}${escHtml(s.p)} <span class="svc-unit">${escHtml(s.unit || 'per visit')}</span></div>
+        ${CV.chipsHtml(e, sel, 'svv')}
+        ${s.inclusions && s.inclusions.length ? `<div class="svc-incl">✓ ${s.inclusions.slice(0,2).map(escHtml).join(' · ')}</div>` : ''}
+        <div class="svc-card-btns">
+          <button class="svc-cart-btn" onclick="svcVariantCart(event)">+ Cart</button>
+          <button class="svc-book-btn" onclick="svcVariantBook(event)">⚡ Book Now</button>
+        </div>
+      </div>
+    `;
+  }
+  function _svcVariantSelected(el) {
+    var card = el && el.closest('.svc-var-card');
+    var e = card && _svcVariantEntries[card.getAttribute('data-variant-card')];
+    if (!e) return null;
+    var i = parseInt(card.getAttribute('data-sel'), 10);
+    return { e: e, i: isNaN(i) ? e.sel : i, s: e.members[isNaN(i) ? e.sel : i] };
+  }
+  function svcVariantCart(ev) {
+    ev.stopPropagation();
+    var v = _svcVariantSelected(ev.target);
+    if (!v) return;
+    addToCart({ id: v.s.id, name: v.s.n, price: v.s.pNum || 0, type: 'service', unit: v.s.unit || 'per visit', categoryKey: v.s.categoryKey || '', inclusions: v.s.inclusions || [],
+      variant: window.RemontCatalogVariants.memberLabel(v.e, v.i), variantGroupId: v.e.key });
+  }
+  function svcVariantBook(ev) {
+    ev.stopPropagation();
+    var v = _svcVariantSelected(ev.target);
+    if (v) bookSvcNow(ev, v.s.id, v.s.n, v.s.p);
+  }
+  // Option chip on a grouped card → show that option's own row (price, unit, ids) in place.
+  document.addEventListener('click', function (ev) {
+    var chip = ev.target.closest('.svc-var-card [data-variant-opt]');
+    if (!chip) return;
+    ev.stopPropagation();
+    var v = _svcVariantSelected(chip);
+    if (!v) return;
+    var next = window.RemontCatalogVariants.pick(v.e, v.i, chip.getAttribute('data-variant-opt'), chip.getAttribute('data-variant-val'));
+    if (next < 0 || next === v.i) return;
+    var card = chip.closest('.svc-var-card');
+    var tmp = document.createElement('div');
+    tmp.innerHTML = svcVariantCardHtml(v.e, next).trim();
+    card.replaceWith(tmp.firstChild);
+  }, true);
 
   function productsSectionHtml(d) {
     return `
@@ -8724,6 +8819,11 @@ window.RemontMedia = (function () {
         durationMinutes: s.durationMinutes || 0,
         rating: s.rating || 0,
         faqJson: s.faqJson || null,
+        // Admin variant group (see shared/catalog-variants.js) — sibling rows show as one card.
+        variantGroupId: s.variantGroupId || null,
+        variantOptions: s.variantOptions || null,
+        variantSortOrder: s.variantSortOrder || 0,
+        variantGroup: s.variantGroup || null,
       };
     }
     categories.forEach(function(cat) {
@@ -8941,8 +9041,9 @@ window.RemontMedia = (function () {
     if (!card) return;
     if (e.target.closest('.svc-cart-btn') || e.target.closest('.svc-book-btn')) return;
     var svcId = card.getAttribute('data-svc-id') || '';
-    var svcName = card.querySelector('.nm') ? card.querySelector('.nm').textContent.trim() : '';
-    var svcPrice = card.querySelector('.pr') ? card.querySelector('.pr').textContent.replace(/<[^>]*>/g,'').trim() : '';
+    // A grouped card carries its selected option's own row name (e.g. "General Pest Control (2BHK)").
+    var svcName = card.getAttribute('data-svc-name') || (card.querySelector('.nm') ? card.querySelector('.nm').textContent.trim() : '');
+    var svcPrice = card.querySelector('.pr') ? card.querySelector('.pr').textContent.replace(/<[^>]*>/g,'').replace(/^\s*From\s*/, '').trim() : '';
     // Find full data from serviceData
     var svcData = null;
     Object.keys(serviceData).forEach(function(k) {
@@ -8973,7 +9074,10 @@ window.RemontMedia = (function () {
     if (imageUrl) html += '<img class="sdm-cover" src="' + escHtml(imageUrl) + '" alt="' + escHtml(name) + '" loading="lazy">';
     else html += '<div class="sdm-icon">' + icon + '</div>';
 
+    var variantLine = (data && data.variantGroup && data.variantOptions && window.RemontCatalogVariants)
+      ? window.RemontCatalogVariants.label(data.variantGroup.optionNames, data.variantOptions) : '';
     html += '<div class="sdm-name">' + escHtml(name) + '</div>' +
+      (variantLine ? '<div class="sdm-variant">' + escHtml(variantLine) + '</div>' : '') +
       '<div class="sdm-price">' + (orig ? '<span class="sdm-orig">' + escHtml(orig) + '</span> ' : '') + escHtml(price) + '</div>' +
       '<div class="sdm-unit">Per: ' + escHtml(unit) + '</div>';
 
@@ -9014,7 +9118,10 @@ window.RemontMedia = (function () {
     }
 
     html += '<div class="sdm-btns">' +
-      '<button class="sdm-cart" onclick="addToCart({id:\'' + escJs(id) + '\',name:\'' + escJs(name) + '\',price:' + pNum + ',type:\'service\',unit:\'' + escJs(unit) + '\',categoryKey:\'' + escJs(categoryKey) + '\'});closeSvcDetail();showToast(\'Added to cart\',\'success\')">+ Add to Cart</button>' +
+      '<button class="sdm-cart" onclick="addToCart({id:\'' + escJs(id) + '\',name:\'' + escJs(name) + '\',price:' + pNum + ',type:\'service\',unit:\'' + escJs(unit) + '\',categoryKey:\'' + escJs(categoryKey) + '\'' +
+        // escHtml after escJs: the value sits in a JS string inside a double-quoted attribute (e.g. 55" screens).
+        (variantLine ? ',variant:\'' + escHtml(escJs(variantLine)) + '\',variantGroupId:\'' + escHtml(escJs(data.variantGroupId || '')) + '\'' : '') +
+        '});closeSvcDetail();showToast(\'Added to cart\',\'success\')">+ Add to Cart</button>' +
       '<button class="sdm-book" onclick="closeSvcDetail();openBookingModal(\'' + escJs(id) + '\',\'' + escJs(name) + '\',\'' + escJs(price) + '\')">⚡ Book Now</button>' +
       '</div>';
 
@@ -10181,6 +10288,7 @@ function renderCartDrawer() {
       '<div class="cart-item-img">' + icon + '</div>' +
       '<div class="cart-item-body">' +
         '<div class="cart-item-name" title="' + escHtml(item.name) + '">' + escHtml(item.name) + '</div>' +
+        (window.RemontCatalogVariants && window.RemontCatalogVariants.cartVariantLine(item) ? '<div class="cart-item-type">' + escHtml(window.RemontCatalogVariants.cartVariantLine(item)) + '</div>' : '') +
         '<div class="cart-item-type">' + (item.type === 'service' ? 'Service' : 'Product') + (item.categoryKey ? ' · ' + escHtml(item.categoryKey.replace(/_/g,' ').toLowerCase()) : '') + '</div>' +
         '<div class="cart-item-price">₹' + priceNum.toLocaleString('en-IN') + unitLabel + ' <span style="font-size:11px;color:#9ca3af;font-weight:400">× ' + qty + ' = ₹' + lineTotal.toLocaleString('en-IN') + '</span></div>' +
         '<div class="cart-qty-row">' +
@@ -11292,6 +11400,7 @@ function _coRenderItems(cart) {
     var lineTotal = (item.price || 0) * qty;
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f6">' +
       '<div><div style="font-size:14px;font-weight:500;color:#111">' + escHtml(item.name) + '</div>' +
+      (window.RemontCatalogVariants && window.RemontCatalogVariants.cartVariantLine(item) ? '<div style="font-size:12px;color:#6b7280;margin-top:2px">' + escHtml(window.RemontCatalogVariants.cartVariantLine(item)) + '</div>' : '') +
       '<div style="font-size:12px;color:#6b7280;margin-top:2px">Qty: ' + qty + ' × ₹' + Number(item.price||0).toLocaleString('en-IN') + '</div></div>' +
       '<div style="font-size:14px;font-weight:600;color:#374151">₹' + lineTotal.toLocaleString('en-IN') + '</div></div>';
   });
@@ -12351,7 +12460,7 @@ function _renderAuthorizedOrders(list) {
     list.map(function(x) {
       var o = x.order || {};
       var name = (o.serviceItems && o.serviceItems.length > 1)
-        ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+        ? o.serviceItems.map(function(si){ return si.itemName || (si.service && si.service.name) || 'Service'; }).join(' + ')
         : (o.service && o.service.name) || 'Service';
       var statusLabel = STATUS_LABELS_MO[o.status] || o.status;
       var decided = (o.extraWorkItems || []).filter(function(e){ return e.status === 'APPROVED' || e.status === 'REJECTED'; });
@@ -12461,7 +12570,7 @@ function _renderOrderCard(o) {
   // (see OrderServiceItem) — show all of them; falls back to the single o.service for
   // orders created before this feature (which have no serviceItems rows).
   var serviceName = (o.serviceItems && o.serviceItems.length > 1)
-    ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+    ? o.serviceItems.map(function(si){ return si.itemName || (si.service && si.service.name) || 'Service'; }).join(' + ')
     : (o.service && o.service.name) || (o.items && o.items.length ? o.items[0].product && o.items[0].product.name : null) || o.type || '—';
   var isCompleted = o.status === 'COMPLETED' || o.status === 'INVOICED' || o.status === 'CLOSED';
   var reviewed = _reviewedOrderIds[o.id];
@@ -12969,13 +13078,18 @@ function _renderOrderDetails(o) {
   // OrderServiceItem) — list every one; falls back to o.service for orders created before
   // this feature (which have no serviceItems rows).
   var serviceName = (o.serviceItems && o.serviceItems.length > 1)
-    ? o.serviceItems.map(function(si){ return (si.service && si.service.name) || 'Service'; }).join(' + ')
+    ? o.serviceItems.map(function(si){ return si.itemName || (si.service && si.service.name) || 'Service'; }).join(' + ')
     : (o.service && o.service.name) || (o.items && o.items.length ? (o.items[0].product && o.items[0].product.name) : null) || o.type || 'Service';
 
+  // What was booked/bought: the order-time snapshot (name + chosen options, e.g. Size: 2BHK).
+  function _ordLineHtml(line, liveName) {
+    var l = window.RemontCatalogVariants ? window.RemontCatalogVariants.orderLine(line, liveName) : { name: liveName, variant: '' };
+    return escHtml(l.name) + (l.variant ? ' <small style="color:#6b7280">(' + escHtml(l.variant) + ')</small>' : '');
+  }
   var servicesHtml = (o.serviceItems && o.serviceItems.length)
     ? o.serviceItems.map(function(si) {
         return '<div style="display:flex;justify-content:space-between;font-size:13px;color:#374151;padding:4px 0">' +
-          '<span>' + escHtml((si.service && si.service.name) || 'Service') + ' × ' + (si.quantity || 1) + '</span>' +
+          '<span>' + _ordLineHtml(si, (si.service && si.service.name) || 'Service') + ' × ' + (si.quantity || 1) + '</span>' +
           '<span>₹' + Number(si.totalPrice || 0).toLocaleString('en-IN') + '</span></div>';
       }).join('')
     : '';
@@ -12983,7 +13097,7 @@ function _renderOrderDetails(o) {
   var itemsHtml = (o.items && o.items.length)
     ? o.items.map(function(it) {
         return '<div style="display:flex;justify-content:space-between;font-size:13px;color:#374151;padding:4px 0">' +
-          '<span>' + escHtml((it.product && it.product.name) || 'Item') + ' × ' + (it.quantity || 1) + '</span>' +
+          '<span>' + _ordLineHtml(it, (it.product && it.product.name) || 'Item') + ' × ' + (it.quantity || 1) + '</span>' +
           '<span>₹' + Number(it.price || 0).toLocaleString('en-IN') + '</span></div>';
       }).join('')
     : '';

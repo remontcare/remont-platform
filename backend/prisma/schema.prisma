@@ -981,8 +981,16 @@ model Service {
   timelineMinDays     Int?
   timelineMaxDays     Int?
 
+  // Variant of a parent listing (see CatalogVariantGroup). The row stays a complete, bookable
+  // service with its own price/city price/duration; these only say which listing it belongs to
+  // and which option values it is, e.g. {"Size":"2BHK"}. Null = standalone service.
+  variantGroupId   String?
+  variantOptions   Json?
+  variantSortOrder Int     @default(0)
+
   category        ServiceCategory        @relation(fields: [categoryId], references: [id])
   subCategory     SubCategory?           @relation(fields: [subCategoryId], references: [id])
+  variantGroup    CatalogVariantGroup?   @relation(fields: [variantGroupId], references: [id], onDelete: SetNull)
   orders          Order[]
   orderServiceItems OrderServiceItem[]
   cityServices    CityService[]
@@ -995,6 +1003,7 @@ model Service {
   @@index([categoryId])
   @@index([subCategoryId])
   @@index([isActive, isPopular])
+  @@index([variantGroupId])
 }
 
 enum PricingTier {
@@ -1203,8 +1212,15 @@ model Product {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
+  // Variant of a parent listing (see CatalogVariantGroup) — same meaning as on Service.
+  // The row keeps its own SKU, price, stock and slug.
+  variantGroupId   String?
+  variantOptions   Json?
+  variantSortOrder Int     @default(0)
+
   vendor            ProductVendor?      @relation(fields: [vendorId], references: [id])
   category          ProductCategory     @relation(fields: [categoryId], references: [id])
+  variantGroup      CatalogVariantGroup? @relation(fields: [variantGroupId], references: [id], onDelete: SetNull)
   orderItems        OrderItem[]
   cityProducts      CityProduct[]
   reviews           Review[]
@@ -1219,6 +1235,7 @@ model Product {
   @@index([categoryId])
   @@index([isActive])
   @@index([coverageType])
+  @@index([variantGroupId])
 }
 
 enum AiFeatureType {
@@ -1278,6 +1295,28 @@ model AiFeatureUsage {
 enum CatalogEntityType {
   PRODUCT
   SERVICE
+}
+
+// A parent listing that shows several existing Service (or Product) rows as one item with
+// selectable options — e.g. "General Pest Control" with Size 1BHK/2BHK/3BHK. Each option is
+// still its own row (own id, price, city price, stock, SKU), so cart, checkout, invoices and
+// orders work exactly as for any single row. Deleting a group only unlinks its rows.
+model CatalogVariantGroup {
+  id          String            @id @default(cuid())
+  entityType  CatalogEntityType
+  name        String
+  description String?
+  // Option dimensions, in display order — e.g. ["Size"] or ["Gas type", "Capacity"].
+  optionNames String[]
+  isActive    Boolean           @default(true)
+  createdBy   String? // admin User.id, audit only
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  services Service[]
+  products Product[]
+
+  @@index([entityType, isActive])
 }
 
 // Priority order the read API sorts by (REQUIRED first, RELATED last) —
@@ -2225,6 +2264,12 @@ model OrderItem {
   taxableValue   Decimal? @db.Decimal(10, 2)
   gstAmount      Decimal? @db.Decimal(10, 2)
 
+  // What the customer picked, frozen at order time so later catalog edits never change a past
+  // order. Null on lines created before this existed — readers fall back to product.name.
+  itemName       String?
+  variantGroupId String?
+  variantOptions Json?
+
   order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product        Product         @relation(fields: [productId], references: [id])
   pickupLocation PickupLocation? @relation(fields: [pickupLocationId], references: [id])
@@ -2251,6 +2296,10 @@ model OrderServiceItem {
   quantity   Int     @default(1)
   unitPrice  Decimal @db.Decimal(10, 2)
   totalPrice Decimal @db.Decimal(10, 2)
+  // Snapshot of the chosen service/variant at order time (see OrderItem). Null on older lines.
+  itemName       String?
+  variantGroupId String?
+  variantOptions Json?
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id])

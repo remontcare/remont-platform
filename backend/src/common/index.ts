@@ -999,6 +999,14 @@ export function partnerOfferView(order: any, extra: { distanceKm?: number | null
     slotEnd: order.slotEnd ?? null,
     service: order.service ? { name: order.service.name ?? null, categoryId: order.service.categoryId ?? null } : null,
     address: order.address ? { city: order.address.city ?? null, area: order.address.area || null } : null,
+    // Booked lines with the customer's chosen options (e.g. Size: 2BHK); only when selected.
+    ...(Array.isArray(order.serviceItems) ? {
+      lines: order.serviceItems.map((si: any) => ({
+        name: si.itemName || si.service?.name || null,
+        quantity: si.quantity ?? 1,
+        options: Array.isArray(si.variantOptions) ? si.variantOptions : [],
+      })),
+    } : {}),
     ...('distanceKm' in extra ? { distanceKm: extra.distanceKm ?? null } : {}),
     ...('releaseAt' in extra ? { releaseAt: extra.releaseAt ?? null } : {}),
   };

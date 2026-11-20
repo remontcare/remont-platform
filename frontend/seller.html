@@ -1597,7 +1597,7 @@ function fulfillmentStageLabel(stage){
   return map[stage]||stage;
 }
 function orderCardHtml(o){
-  var itemsTxt = o.items.map(function(it){ return it.productName+' ×'+it.quantity; }).join(', ');
+  var itemsTxt = o.items.map(function(it){ return it.productName+(it.variant?' ('+it.variant+')':'')+' ×'+it.quantity; }).join(', ');
   var total = o.items.reduce(function(sum,it){ return sum + Number(it.totalPrice||0); }, 0);
   var custName = (o.customer && o.customer.name) || 'Customer';
   var bucket = orderBucket(o);
@@ -1663,7 +1663,7 @@ function openOrderDetail(orderId){
     var addr = o.address ? (o.address.fullAddress + (o.address.city ? ', '+o.address.city : '') + (o.address.pincode ? ' - '+o.address.pincode : '')) : 'No address on file';
     var itemsHtml = o.items.map(function(it){
       return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--mist);font-size:13px">' +
-        '<span>'+escHtml(it.productName)+' ×'+it.quantity+'</span><span>'+fmtMoney(it.totalPrice)+'</span></div>';
+        '<span>'+escHtml(it.productName)+(it.variant?' <small style="color:var(--txt-muted)">('+escHtml(it.variant)+')</small>':'')+' ×'+it.quantity+'</span><span>'+fmtMoney(it.totalPrice)+'</span></div>';
     }).join('');
     var paymentLabel = _PAYMENT_METHOD_LABEL[o.paymentMethod] || o.paymentMethod || '—';
     document.getElementById('order-detail-body').innerHTML =

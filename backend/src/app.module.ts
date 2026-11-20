@@ -45,6 +45,7 @@ import { MediaModule } from './modules/media/media.module';
 import { PartnerLedgerModule } from './modules/partner-ledger/partner-ledger.module';
 import { EstimatesModule } from './modules/estimates/estimates.module';
 import { CatalogRelationsModule } from './modules/catalog-relations/catalog-relations.module';
+import { CatalogVariantsModule } from './modules/catalog-variants/catalog-variants.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SupportModule } from './modules/support/support.module';
 import { AiEnrichmentModule } from './modules/ai-enrichment/ai-enrichment.module';
@@ -73,6 +74,7 @@ import { AuthorizedPersonModule } from './modules/authorized-person/authorized-p
     ProductsModule,
     EstimatesModule,
     CatalogRelationsModule,
+    CatalogVariantsModule,
 
     // Operations
     VendorsModule,

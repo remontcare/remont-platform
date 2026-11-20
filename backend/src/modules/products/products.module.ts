@@ -42,7 +42,12 @@ const SELLER_PROTECTED_PRODUCT_FIELDS = [
   'id', 'vendorId', 'slug', 'views', 'rating', 'reviewCount', 'aiGeneratedDesc', 'aiEnhancedImgs', 'createdAt', 'updatedAt',
   'vendor', 'category', 'orderItems', 'cityProducts', 'reviews', 'inventory', 'zones', 'locationInventory',
   'aiFeatureUsages', 'warrantyCases', 'productFeeRules',
+  // Variant listings are admin-managed (catalog-variants module validates them).
+  'variantGroupId', 'variantOptions', 'variantSortOrder', 'variantGroup',
 ];
+
+// The parent listing a product belongs to (see CatalogVariantGroup), for grouping on the website.
+const VARIANT_GROUP_PUBLIC = { select: { id: true, name: true, optionNames: true, isActive: true } } as const;
 function stripSellerProtectedProductFields(data: any): any {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new BadRequestException('Invalid product payload');
   const out: Record<string, any> = { ...data };
@@ -77,7 +82,7 @@ export class ProductsService {
           ],
         } : {}),
       },
-      include: { category: true, vendor: { select: { businessName: true, rating: true, city: true } } },
+      include: { category: true, vendor: { select: { businessName: true, rating: true, city: true } }, variantGroup: VARIANT_GROUP_PUBLIC },
       orderBy: { createdAt: 'desc' },
       take: opts.limit || 50,
     });
@@ -141,7 +146,7 @@ export class ProductsService {
   async listGroupedByCategories(categoryKeys: string[], limitPerCategory: number) {
     const products = await this.prisma.product.findMany({
       where: { isActive: true, category: { key: { in: categoryKeys } } },
-      include: { category: true, vendor: { select: { businessName: true, rating: true } } },
+      include: { category: true, vendor: { select: { businessName: true, rating: true } }, variantGroup: VARIANT_GROUP_PUBLIC },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -171,7 +176,7 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { slug },
       // Public route: the seller's name only, never their bank, Aadhaar or PAN fields.
-      include: { category: true, vendor: { select: { id: true, businessName: true } } },
+      include: { category: true, vendor: { select: { id: true, businessName: true } }, variantGroup: VARIANT_GROUP_PUBLIC },
     });
     if (!product) throw new NotFoundException('Product not found');
     this.prisma.product.update({ where: { id: product.id }, data: { views: { increment: 1 } } }).catch(() => undefined);
