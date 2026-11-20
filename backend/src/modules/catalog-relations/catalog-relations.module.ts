@@ -8,6 +8,10 @@ import { CatalogEntityType, CatalogRelationType, UserRole } from '@prisma/client
 
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, Public, CurrentUser, JwtPayload, Roles, RolesGuard } from '../../common';
+import { productCityReach } from '../products/products.module';
+import {
+  Anchor, Candidate, NO_SUGGESTION_STATUSES, autoProductCategories, autoServiceCategories, scoreAuto,
+} from './order-suggestions';
 
 // Sort order the read API groups/ranks by — matches the "Smart Priority" list
 // (required first, related last). Kept here (not relying on enum declaration
@@ -180,6 +184,176 @@ export class CatalogRelationsService {
     await this.prisma.catalogRelation.deleteMany({ where: { id } });
     return { deleted: true };
   }
+
+  // ─── Customer: "You may also need" for open orders ───
+
+  /**
+   * Suggestions for each of the customer's open orders (one checkout = one group) — from the
+   * moment it's bought until its invoice is issued (see order-suggestions.ts for the rules).
+   * Only active, in-stock, city-available catalog rows; never anything already in that order.
+   */
+  async suggestionsForMyOrders(customerId: string, maxGroups = 5, perGroup = 8) {
+    const svcCat = { select: { key: true, slug: true, isActive: true } };
+    const orders = await this.prisma.order.findMany({
+      where: { customerId, status: { notIn: [...NO_SUGGESTION_STATUSES] as any }, invoice: { is: null } },
+      select: {
+        id: true, orderNumber: true, masterOrderId: true,
+        masterOrder: { select: { masterOrderNumber: true } },
+        address: { select: { city: true } },
+        service: { select: { id: true, name: true, category: svcCat } },
+        serviceItems: { select: { service: { select: { id: true, name: true, category: svcCat } } } },
+        items: { select: { product: { select: { id: true, name: true, category: { select: { key: true } } } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+
+    type Group = { key: string; masterOrderNumber: string | null; orderIds: string[]; orderNumbers: string[]; city: string | null; anchors: Anchor[] };
+    const groups: Group[] = [];
+    const byKey = new Map<string, Group>();
+    const svcKey = (c: { key: string; slug: string | null } | null | undefined) => String(c?.slug || c?.key || '');
+    for (const o of orders) {
+      const key = o.masterOrderId || o.id;
+      let g = byKey.get(key);
+      if (!g) {
+        if (groups.length >= maxGroups) continue;
+        g = { key, masterOrderNumber: o.masterOrder?.masterOrderNumber || null, orderIds: [], orderNumbers: [], city: o.address?.city || null, anchors: [] };
+        byKey.set(key, g);
+        groups.push(g);
+      }
+      g.orderIds.push(o.id);
+      g.orderNumbers.push(o.orderNumber);
+      if (!g.city && o.address?.city) g.city = o.address.city;
+      const svcs = [o.service, ...o.serviceItems.map((si) => si.service)].filter(Boolean) as NonNullable<typeof o.service>[];
+      for (const s of svcs) g.anchors.push({ kind: 'SERVICE', id: s.id, name: s.name, categoryKey: svcKey(s.category) });
+      for (const it of o.items) if (it.product) g.anchors.push({ kind: 'PRODUCT', id: it.product.id, name: it.product.name, categoryKey: it.product.category?.key || '' });
+    }
+    if (!groups.length) return { groups: [] };
+
+    // Curated edges for every anchor, both directions, in one query.
+    const anchorsAll = groups.flatMap((g) => g.anchors);
+    const ids = (k: 'PRODUCT' | 'SERVICE') => [...new Set(anchorsAll.filter((a) => a.kind === k).map((a) => a.id))];
+    const ors: any[] = [];
+    for (const k of ['PRODUCT', 'SERVICE'] as const) {
+      if (!ids(k).length) continue;
+      ors.push({ fromType: k, fromId: { in: ids(k) } }, { toType: k, toId: { in: ids(k) } });
+    }
+    const edges = ors.length ? await this.prisma.catalogRelation.findMany({ where: { isActive: true, OR: ors } }) : [];
+
+    // AUTO candidate pools, restricted to the bridged categories and to what's actually sellable.
+    const prodCatKeys = new Set(autoProductCategories(anchorsAll));
+    const svcCatKeys = new Set(autoServiceCategories(anchorsAll));
+    const [prodCats, svcCats] = await Promise.all([
+      prodCatKeys.size ? this.prisma.productCategory.findMany({ where: { isActive: true }, select: { id: true, key: true } }) : Promise.resolve([] as never),
+      svcCatKeys.size ? this.prisma.serviceCategory.findMany({ where: { isActive: true }, select: { id: true, key: true, slug: true } }) : Promise.resolve([] as never),
+    ]);
+    const prodCatIds = prodCats.filter((c) => prodCatKeys.has(c.key.toLowerCase())).map((c) => c.id);
+    const svcCatIds = svcCats.filter((c) => svcCatKeys.has(svcKey(c).toLowerCase())).map((c) => c.id);
+
+    const curatedIds = (k: 'PRODUCT' | 'SERVICE') =>
+      edges.flatMap((e) => [e.fromType === k ? e.fromId : null, e.toType === k ? e.toId : null]).filter(Boolean) as string[];
+    const productWhere: any[] = [];
+    if (prodCatIds.length) productWhere.push({ categoryId: { in: prodCatIds } });
+    if (curatedIds('PRODUCT').length) productWhere.push({ id: { in: curatedIds('PRODUCT') } });
+    const serviceWhere: any[] = [];
+    if (svcCatIds.length) serviceWhere.push({ categoryId: { in: svcCatIds } });
+    if (curatedIds('SERVICE').length) serviceWhere.push({ id: { in: curatedIds('SERVICE') } });
+
+    const [products, services] = await Promise.all([
+      productWhere.length
+        ? this.prisma.product.findMany({
+            where: { isActive: true, stock: { gt: 0 }, category: { isActive: true }, OR: productWhere },
+            include: { category: { select: { key: true, name: true } }, vendor: { select: { city: true } } },
+            take: 300,
+          })
+        : Promise.resolve([] as never),
+      serviceWhere.length
+        ? this.prisma.service.findMany({
+            where: { isActive: true, category: { isActive: true }, OR: serviceWhere },
+            include: { category: { select: { key: true, slug: true, name: true } } },
+            take: 300,
+          })
+        : Promise.resolve([] as never),
+    ]);
+
+    // City availability, per distinct order city (same Product Coverage rule as the catalog).
+    const cityNames = [...new Set(groups.map((g) => g.city).filter(Boolean) as string[])];
+    const cities = cityNames.length ? await this.prisma.city.findMany({ where: { name: { in: cityNames } }, select: { id: true, name: true } }) : [];
+    const cityIds = cities.map((c) => c.id);
+    const [cityProducts, cityServices] = await Promise.all([
+      cityIds.length && products.length
+        ? this.prisma.cityProduct.findMany({ where: { cityId: { in: cityIds }, productId: { in: products.map((p) => p.id) } }, select: { cityId: true, productId: true, isActive: true } })
+        : Promise.resolve([] as never),
+      cityIds.length && services.length
+        ? this.prisma.cityService.findMany({ where: { cityId: { in: cityIds }, serviceId: { in: services.map((s) => s.id) }, isActive: false }, select: { cityId: true, serviceId: true } })
+        : Promise.resolve([] as never),
+    ]);
+    const cityIdByName = new Map(cities.map((c) => [c.name, c.id]));
+    const cpKey = new Map(cityProducts.map((r) => [`${r.cityId}:${r.productId}`, r]));
+    const csOff = new Set(cityServices.map((r) => `${r.cityId}:${r.serviceId}`));
+    const availableIn = (kind: 'PRODUCT' | 'SERVICE', id: string, cityName: string | null) => {
+      const cityId = cityName ? cityIdByName.get(cityName) : undefined;
+      if (!cityId) return true; // unresolvable/missing city — don't filter, same as the catalog list
+      if (kind === 'SERVICE') return !csOff.has(`${cityId}:${id}`);
+      const p = products.find((x) => x.id === id);
+      return !!p && productCityReach(p, cpKey.get(`${cityId}:${id}`), cityName!.trim().toLowerCase()) !== null;
+    };
+
+    const entity = new Map<string, any>();
+    for (const p of products) {
+      entity.set(`PRODUCT:${p.id}`, {
+        kind: 'PRODUCT', id: p.id, name: p.name, price: Number(p.price), unit: p.unit, imageUrl: p.images?.[0] || null,
+        categoryName: p.category?.name || null, categoryKey: p.category?.key || '', vendorId: p.vendorId || null,
+      });
+    }
+    for (const s of services) {
+      entity.set(`SERVICE:${s.id}`, {
+        kind: 'SERVICE', id: s.id, name: s.name, price: Number(s.basePrice), unit: s.unit, imageUrl: s.imageUrl || null,
+        categoryName: s.category?.name || null, categoryKey: s.category?.key || '', inclusions: s.inclusions || [],
+        _bridgeKey: svcKey(s.category),
+      });
+    }
+    const candidates: Candidate[] = [...entity.values()].map((e) => ({
+      kind: e.kind, id: e.id, name: e.name, price: e.price, categoryKey: e.kind === 'SERVICE' ? e._bridgeKey : e.categoryKey,
+    }));
+
+    const out = groups.map((g) => {
+      const inOrder = new Set(g.anchors.map((a) => `${a.kind}:${a.id}`));
+      const anchorName = new Map(g.anchors.map((a) => [`${a.kind}:${a.id}`, a.name]));
+      const picked = new Map<string, any>();
+      const names = new Set<string>(); // the same item listed by two sellers shows once (best-ranked wins)
+      const add = (kind: string, id: string, relationType: CatalogRelationType, source: 'CURATED' | 'AUTO', forName: string) => {
+        const key = `${kind}:${id}`;
+        if (picked.has(key) || inOrder.has(key) || picked.size >= perGroup) return;
+        const e = entity.get(key);
+        if (!e || !availableIn(kind as any, id, g.city)) return;
+        const nameKey = `${kind}:${String(e.name).trim().toLowerCase()}`;
+        if (names.has(nameKey)) return;
+        names.add(nameKey);
+        const { _bridgeKey, ...pub } = e;
+        picked.set(key, { ...pub, relationType, source, forName });
+      };
+
+      const curated = edges
+        .map((e) => {
+          const fwd = `${e.fromType}:${e.fromId}`, rev = `${e.toType}:${e.toId}`;
+          if (anchorName.has(fwd)) return { kind: e.toType, id: e.toId, rt: e.relationType, so: e.sortOrder, forName: anchorName.get(fwd)! };
+          if (anchorName.has(rev)) return { kind: e.fromType, id: e.fromId, rt: e.relationType, so: e.sortOrder, forName: anchorName.get(rev)! };
+          return null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .sort((a, b) => RELATION_PRIORITY.indexOf(a.rt) - RELATION_PRIORITY.indexOf(b.rt) || a.so - b.so);
+      curated.forEach((c) => add(c.kind, c.id, c.rt, 'CURATED', c.forName));
+
+      // AUTO only for what admin hasn't curated — a curated anchor keeps exactly its curated list.
+      const curatedAnchors = new Set(curated.map((c) => c.forName));
+      const autoAnchors = g.anchors.filter((a) => !curatedAnchors.has(a.name));
+      scoreAuto(autoAnchors, candidates).forEach((s) => add(s.kind, s.id, s.relationType, 'AUTO', s.forName));
+
+      return { key: g.key, masterOrderNumber: g.masterOrderNumber, orderIds: g.orderIds, orderNumbers: g.orderNumbers, items: [...picked.values()] };
+    });
+    return { groups: out.filter((g) => g.items.length) };
+  }
 }
 
 // ─── Public read controller ───
@@ -196,6 +370,21 @@ export class CatalogRelationsController {
     }
     if (!id) throw new BadRequestException('id is required');
     return this.svc.getRecommendations(type as CatalogEntityType, id);
+  }
+}
+
+// ─── Customer controller ───
+@ApiTags('Catalog Recommendations')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('catalog/suggestions')
+export class CustomerCatalogSuggestionsController {
+  constructor(private svc: CatalogRelationsService) {}
+
+  /** "You may also need" for the signed-in customer's own open (not yet invoiced) orders. */
+  @Get('my-orders')
+  mine(@CurrentUser() u: JwtPayload) {
+    return this.svc.suggestionsForMyOrders(u.sub);
   }
 }
 
@@ -229,7 +418,7 @@ export class AdminCatalogRelationsController {
 }
 
 @Module({
-  controllers: [CatalogRelationsController, AdminCatalogRelationsController],
+  controllers: [CatalogRelationsController, CustomerCatalogSuggestionsController, AdminCatalogRelationsController],
   providers: [CatalogRelationsService],
   exports: [CatalogRelationsService],
 })

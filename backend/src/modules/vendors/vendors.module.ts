@@ -9,7 +9,7 @@ import { AgencyStatus, Language, MediaEntityType, OrderStatus, UserRole, VendorS
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView } from '../../common';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, releaseProductStock, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView, ARRIVAL_RESET_DATA, vendorAllowedForOrder } from '../../common';
 
 // Columns an unclaimed job offer is read with (eligibility + partnerOfferView) — see
 // partnerOfferView() for why this is an allowlist.
@@ -33,6 +33,7 @@ import { ReportsModule } from '../reports/reports.module';
 import { SellerReportsService, parseFormat, parseSalesFilter, parseStockFilter } from '../reports/seller-reports';
 import { assertSafeKycDocument } from '../uploads/kyc-document';
 import { Throttle } from '@nestjs/throttler';
+import { withoutCustomerOtps } from '../../common/customer-otp';
 
 export class ServiceVendorRegistrationDto {
   @IsString() fullName: string;
@@ -68,6 +69,8 @@ const IMAGE_MAGIC_BYTES: Record<string, Buffer> = {
   'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
 };
 function validateDataUrl(field: string, value: string, allowedMagicBytes: Record<string, Buffer>, allowedLabel: string): void {
+  // Checked first: on a very large string the regex below can overflow the stack instead of failing.
+  if (value.length > Math.ceil(MAX_UPLOAD_BYTES * 4 / 3) + 100) throw new BadRequestException(`${field}: file must be under 5MB`);
   const match = /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value);
   if (!match) throw new BadRequestException(`${field}: invalid file — only ${allowedLabel} uploads are allowed`);
   const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
@@ -302,6 +305,9 @@ export class ServiceVendorsService {
     // any order by category, regardless of city/GPS.
     const skill = rawSkill ? normalizeSkillKey(rawSkill) : null;
     if (!skill || !vendor.skills.includes(skill)) return false;
+    // In-house jobs only for Remont's technicians; marketplace jobs only for external partners whose GST
+    // registration matches the price the customer was quoted (the category's partner GST profile).
+    if (!vendorAllowedForOrder(order, vendor)) return false;
     // Shared with DispatchService's own fallback and AdminService.listActiveVendors (manual
     // assignment) — see isVendorLocationEligible's own comment for why this must be one
     // function instead of three independently-drifting copies.
@@ -530,7 +536,8 @@ export class ServiceVendorsService {
 
     // Resolved before the transaction — reading a SiteSetting doesn't need to be part of
     // the atomic claim, only the debit itself does.
-    const leadCostAmount = await this.ledger.getLeadCostAmount();
+    // Lead cost is a partner's advance against commission — never charged to Remont's own staff.
+    const leadCostAmount = v.staffType === 'IN_HOUSE' ? 0 : await this.ledger.getLeadCostAmount();
 
     // This conditional update is the claim lock: only one concurrent request can change
     // an unassigned confirmed order to VENDOR_ASSIGNED. The Lead Cost debit rides in the
@@ -571,10 +578,12 @@ export class ServiceVendorsService {
       throw new BadRequestException('Cannot reject job in its current state');
     }
 
-    return this.prisma.order.update({
+    const released = await this.prisma.order.update({
       where: { id: orderId },
-      data: { vendorId: null, status: 'CONFIRMED' },
+      // The next partner must record their own arrival — never inherit this partner's.
+      data: { vendorId: null, status: 'CONFIRMED', ...ARRIVAL_RESET_DATA },
     });
+    return released;
   }
 
   // NOTE: job status transitions (en-route/verify-otp/complete) and extra-work items are
@@ -623,12 +632,12 @@ export class ServiceVendorsController {
   @Patch('me/attendance/check-in') checkIn(@CurrentUser() u: JwtPayload, @Body() b: VendorAttendanceDto) { return this.vs.checkIn(u.sub, b?.lat, b?.lng); }
   @Patch('me/attendance/check-out') checkOut(@CurrentUser() u: JwtPayload) { return this.vs.checkOut(u.sub); }
   @Get('me/earnings') earn(@CurrentUser() u: JwtPayload) { return this.vs.earnings(u.sub); }
-  @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s); }
-  @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub); }
-  @Get('me/upcoming-scheduled-jobs') upcomingScheduled(@CurrentUser() u: JwtPayload) { return this.vs.upcomingScheduledJobs(u.sub); }
-  @Get('me/jobs/:orderId') jobDetail(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.getJobDetail(u.sub, id); }
-  @Post('me/jobs/:orderId/accept') accept(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.acceptJob(u.sub, id); }
-  @Post('me/jobs/:orderId/reject') reject(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.rejectJob(u.sub, id); }
+  @Get('me/jobs') jobs(@CurrentUser() u: JwtPayload, @Query('status') s?: string) { return this.vs.myJobs(u.sub, s).then(withoutCustomerOtps); }
+  @Get('me/available-jobs') availJobs(@CurrentUser() u: JwtPayload) { return this.vs.availableJobs(u.sub).then(withoutCustomerOtps); }
+  @Get('me/upcoming-scheduled-jobs') upcomingScheduled(@CurrentUser() u: JwtPayload) { return this.vs.upcomingScheduledJobs(u.sub).then(withoutCustomerOtps); }
+  @Get('me/jobs/:orderId') jobDetail(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.getJobDetail(u.sub, id).then(withoutCustomerOtps); }
+  @Post('me/jobs/:orderId/accept') accept(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.acceptJob(u.sub, id).then(withoutCustomerOtps); }
+  @Post('me/jobs/:orderId/reject') reject(@CurrentUser() u: JwtPayload, @Param('orderId') id: string) { return this.vs.rejectJob(u.sub, id).then(withoutCustomerOtps); }
 }
 
 // ─── Product Vendor ───
@@ -729,6 +738,9 @@ export class ProductVendorsService {
     await writeOrderTimeline(this.prisma, { orderId, status: 'SELLER_REJECTED', note: reason, actorId: userId, actorRole: UserRole.PRODUCT_VENDOR });
 
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    // The rejected units are no longer committed to this order — back to inventory (once). If the
+    // seller rejected because the item is really out of stock, they correct the count in Inventory.
+    if (order.stockReservedAt && !order.stockReleasedAt) await this.prisma.$transaction((tx) => releaseProductStock(tx, order));
     if (['PAID', 'PARTIAL'].includes(order.paymentStatus) && Number(order.totalAmount) > 0) {
       try {
         const rr = await this.refunds.raise(order.customerId, orderId, undefined, `Seller rejected the order${reason ? `: ${reason}` : ''}`, []);

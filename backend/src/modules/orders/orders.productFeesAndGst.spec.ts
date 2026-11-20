@@ -25,7 +25,7 @@ function makeService() {
     order: { create: jest.fn(async ({ data }: any) => ({ id: 'order-1', orderNumber: 'ORD-1', ...data })) },
     orderOtpLog: { create: jest.fn(async () => ({})) },
     orderDiscountAllocation: { create: jest.fn(async () => ({})) },
-    taxConfig: { findMany: jest.fn(async () => TAX_CONFIG_ROWS) },
+    taxConfig: { findMany: jest.fn(async (args?: any) => TAX_CONFIG_ROWS.filter((r: any) => !args?.where?.appliesTo?.has || (r.appliesTo || []).includes(args.where.appliesTo.has))) }, // honours appliesTo like the real DB
     productFeeRule: { findMany: jest.fn(async () => []) }, // no fee rules configured by default — resolves to ₹0
     siteSetting: { findUnique: jest.fn(async () => null) },
     commissionRule: { findMany: jest.fn(async () => []) },

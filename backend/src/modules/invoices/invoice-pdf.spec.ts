@@ -143,5 +143,9 @@ describe('amountInWords', () => {
   it('handles lakhs and crores', () => {
     expect(amountInWords(150000)).toBe('One Lakh Fifty Thousand Rupees Only');
     expect(amountInWords(0)).toBe('Zero Rupees Only');
+    // exact-paise service documents: the paise are never rounded into the rupees
+    expect(amountInWords(23.6)).toBe('Twenty Three Rupees and Sixty Paise Only');
+    expect(amountInWords(411.82)).toBe('Four Hundred Eleven Rupees and Eighty Two Paise Only');
+    expect(amountInWords(0.5)).toBe('Fifty Paise Only');
   });
 });

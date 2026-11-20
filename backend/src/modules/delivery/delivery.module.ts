@@ -39,10 +39,15 @@ export class DeliveryService {
   constructor(private prisma: PrismaService, private shipments: ShipmentService) {}
 
   async register(userId: string, data: any) {
+    // Only what a rider states about themselves — status, rating and counters are not theirs to set.
+    const { type, vehicleType, vehicleNumber, baseCity } = data ?? {};
+    if (!Object.values(DeliveryPartnerType).includes(type)) throw new BadRequestException('Invalid delivery partner type');
+    if (typeof baseCity !== 'string' || !baseCity.trim()) throw new BadRequestException('Base city is required');
+    const fields = { type, baseCity: baseCity.trim(), vehicleType: vehicleType ?? undefined, vehicleNumber: vehicleNumber ?? undefined };
     return this.prisma.deliveryPartner.upsert({
       where: { userId },
-      create: { userId, ...data },
-      update: data,
+      create: { userId, ...fields },
+      update: fields,
     });
   }
 

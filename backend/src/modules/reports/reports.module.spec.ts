@@ -1,4 +1,5 @@
 import { ReportsService } from './reports.module';
+import { billingFindMany } from '../../common/billing-fixture.test';
 
 // xlsx files are zip archives — 'PK' magic bytes confirm exceljs actually produced a
 // real workbook rather than throwing partway through and returning garbage/empty output.
@@ -13,7 +14,7 @@ function makePrisma() {
     paymentTransaction: { findMany: jest.fn(async () => []) },
     user: { findMany: jest.fn(async () => []) },
     partnerLedgerEntry: { findMany: jest.fn(async () => []) },
-    siteSetting: { findMany: jest.fn(async () => []) }, // billing company config — falls back to defaults
+    siteSetting: { findMany: jest.fn(billingFindMany()) }, // saved billing company settings
   };
 }
 

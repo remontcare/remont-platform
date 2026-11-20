@@ -3,11 +3,13 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { AppThrottlerGuard, DEFAULT_THROTTLE_LIMIT } from './common/app-throttler.guard';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
+import { CartModule } from './modules/cart/cart.module';
 import { CitiesModule } from './modules/cities/cities.module';
 import { ServicesModule } from './modules/services/services.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -56,13 +58,14 @@ import { AuthorizedPersonModule } from './modules/authorized-person/authorized-p
     ConfigModule.forRoot({ isGlobal: true }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 200 }]),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: DEFAULT_THROTTLE_LIMIT }]),
 
     PrismaModule,
 
     // Identity & Master Data
     AuthModule,
     UsersModule,
+    CartModule,
     CitiesModule,
 
     // Catalog
@@ -120,7 +123,7 @@ import { AuthorizedPersonModule } from './modules/authorized-person/authorized-p
     ReportsModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: AppThrottlerGuard },
   ],
 })
 export class AppModule {}

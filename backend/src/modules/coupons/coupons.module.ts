@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
+import { Module, Injectable, BadRequestException, Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CouponType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
@@ -12,6 +12,7 @@ export class CouponsService {
   // account/JWT yet) can preview a coupon too — per-user usage limit simply isn't checked
   // for a not-yet-resolved guest, the same way it's skipped for a brand new account.
   async validate(code: string, userId: string | undefined, orderAmount: number) {
+    if (typeof code !== 'string' || !code.trim()) throw new BadRequestException('Enter a coupon code');
     const coupon = await this.prisma.coupon.findUnique({ where: { code: code.toUpperCase() } });
     if (!coupon) return { valid: false, reason: 'Invalid coupon code' };
     if (!coupon.isActive) return { valid: false, reason: 'Inactive' };

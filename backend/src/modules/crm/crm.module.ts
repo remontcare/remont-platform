@@ -7,6 +7,54 @@ import { LeadSource, LeadStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, Public } from '../../common';
 
+/**
+ * The PUBLIC lead-capture body (web forms, no login). Only these fields are
+ * accepted — the body used to be spread straight into prisma.lead.create, so a
+ * caller could set status / assigned agent / conversion fields or crash the
+ * request with unknown keys. Strings are trimmed and length-capped.
+ *
+ * Attribution (marketing): utmSource / utmMedium / utmCampaign go to the
+ * existing Lead columns; landingPage (a path, no query string) has no column,
+ * so it is appended to notes as "Landing page: /cities/bhopal" for the team.
+ */
+const SOURCES = Object.values(LeadSource) as string[];
+
+function str(v: unknown, max: number): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const out = v.trim().slice(0, max);
+  return out || undefined;
+}
+
+export function sanitizePublicLead(body: any) {
+  const b = body && typeof body === 'object' ? body : {};
+  const customerName = str(b.customerName, 120);
+  const customerPhone = str(b.customerPhone, 20);
+  if (!customerName || !customerPhone) {
+    throw new BadRequestException('customerName and customerPhone are required');
+  }
+  const source = SOURCES.includes(b.source) ? (b.source as LeadSource) : LeadSource.WEBSITE;
+  const value = Number(b.estimatedValue);
+  const landing = str(b.landingPage, 200);
+  const landingPage = landing && /^\/[A-Za-z0-9._~\-\/]*$/.test(landing) ? landing : undefined;
+  const notes = [str(b.notes, 2000), landingPage ? `Landing page: ${landingPage}` : undefined]
+    .filter(Boolean).join(' | ') || undefined;
+  return {
+    customerName,
+    customerPhone,
+    customerEmail: str(b.customerEmail, 160),
+    cityName: str(b.cityName, 80),
+    source,
+    serviceInterested: str(b.serviceInterested, 160),
+    estimatedValue: Number.isFinite(value) && value >= 0 && value < 1e9 ? value : undefined,
+    notes,
+    photoUrl: str(b.photoUrl, 500),
+    aiSessionId: str(b.aiSessionId, 100),
+    utmSource: str(b.utmSource, 100),
+    utmMedium: str(b.utmMedium, 100),
+    utmCampaign: str(b.utmCampaign, 100),
+  };
+}
+
 @Injectable()
 export class CrmService {
   constructor(private prisma: PrismaService) {}
@@ -180,7 +228,7 @@ export class CrmController {
 
   // ─── Public lead capture (used by AI chat, web forms, WhatsApp bots) ───
   @Public() @Post('leads/capture')
-  capture(@Body() data: any) { return this.crm.captureLead(data); }
+  capture(@Body() data: any) { return this.crm.captureLead(sanitizePublicLead(data)); }
 
   // ─── Authenticated agent endpoints ───
   @Roles(UserRole.CRM_AGENT, UserRole.ADMIN, UserRole.SUPER_ADMIN)

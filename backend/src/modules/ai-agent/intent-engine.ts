@@ -101,6 +101,11 @@ const HINGLISH_HINTS = [
   'hai', 'hain', 'nahi', 'kya', 'kaise', 'kab', 'kahan', 'mein', 'main',
   'aap', 'tum', 'mera', 'mujhe', 'humein', 'wala', 'wali', 'thoda', 'jaldi',
   'abhi', 'baad', 'pehle',
+  'haan', 'han', 'ji', 'kar', 'karo', 'karna', 'karni', 'karke', 'kardo', 'krdo', 'chahiye', 'chaiye',
+  'theek', 'thik', 'accha', 'acha', 'achha', 'bhai', 'ka', 'ki', 'ke', 'ko', 'se', 'hoga', 'hogi',
+  'raha', 'rahi', 'rahe', 'gaya', 'gayi', 'batao', 'bataiye', 'kitna', 'kitne', 'kitni', 'wahi',
+  'yeh', 'ye', 'woh', 'wo', 'aur', 'lekin', 'bhi', 'nahin', 'mai', 'apna', 'apni', 'liye', 'saath',
+  'dikhao', 'bhejo', 'dalo', 'daal', 'lagwana', 'thanda', 'kharab', 'naam',
 ];
 
 export function detectLanguage(text: string): Language {

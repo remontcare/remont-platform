@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { billingFindMany } from '../../common/billing-fixture.test';
 import { InvoicesService } from './invoices.module';
 
 /**
@@ -13,7 +14,7 @@ import { InvoicesService } from './invoices.module';
 function makeService() {
   const prisma: any = {
     order: { findUnique: jest.fn() },
-    siteSetting: { findMany: jest.fn().mockResolvedValue([]) }, // getBillingCompanyConfig() — only reached once authorization passes
+    siteSetting: { findMany: jest.fn(billingFindMany()) }, // getBillingCompanyConfig() — only reached once authorization passes
   };
   return { svc: new InvoicesService(prisma), prisma };
 }

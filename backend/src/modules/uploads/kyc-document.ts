@@ -34,6 +34,8 @@ export const UPLOADED_PLACEHOLDER = '[uploaded]';
 export async function assertSafeKycDocument(field: string, value: unknown, opts: { allowPdf?: boolean } = {}): Promise<void> {
   const allowPdf = opts.allowPdf ?? true;
   const allowedLabel = allowPdf ? 'JPG, PNG, WebP or PDF' : 'JPG, PNG or WebP';
+  // Size first: on a very large string the data-URL regex below can overflow the stack instead of failing.
+  if (typeof value === 'string' && value.length > Math.ceil((MAX_KYC_DOCUMENT_BYTES * 4) / 3) + 100) throw new BadRequestException(`${field}: file must be under 5MB`);
   const match = typeof value === 'string' ? /^data:([\w./+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(value) : null;
   if (!match) throw new BadRequestException(`${field}: invalid file — only ${allowedLabel} uploads are allowed`);
 

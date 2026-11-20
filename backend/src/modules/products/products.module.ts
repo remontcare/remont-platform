@@ -10,6 +10,27 @@ import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { assertNoNewInlineImages } from '../media/media.policy';
 
+/**
+ * Product Coverage rule for one city (see ProductsService.list()): 'CITY' = sold here
+ * specifically, 'PAN_INDIA' = sold everywhere incl. here, null = not sold in this city.
+ * Shared with the order "You may also need" suggestions so both apply the same rule.
+ */
+export function productCityReach(
+  p: { coverageType?: string | null; vendor?: { city?: string | null } | null },
+  assignment: { isActive: boolean } | undefined,
+  cityNameLower: string,
+): 'CITY' | 'PAN_INDIA' | null {
+  if (p.coverageType === 'STORE_PICKUP') {
+    return (p.vendor?.city || '').trim().toLowerCase() === cityNameLower ? 'CITY' : null; // hidden everywhere else
+  }
+  if (p.coverageType === 'SELECTED_CITIES' || p.coverageType === 'ZONES') {
+    return assignment?.isActive ? 'CITY' : null; // hidden unless explicitly assigned
+  }
+  // PAN_INDIA
+  if (assignment && !assignment.isActive) return null; // explicitly opted out for this city
+  return 'PAN_INDIA';
+}
+
 // Seller create/update bodies are passed to Prisma, so anything left in them is written.
 // System-managed counters/ids must never be seller-set (fake rating/reviewCount/views), and
 // relation keys must never get through at all: a nested write such as
@@ -86,18 +107,9 @@ export class ProductsService {
     const citySpecific: typeof products = [];
     const panIndia: typeof products = [];
     for (const p of products) {
-      const assignment = assignmentByProduct.get(p.id);
-      if (p.coverageType === 'STORE_PICKUP') {
-        if ((p.vendor?.city || '').trim().toLowerCase() === cityNameLower) citySpecific.push(p);
-        continue; // hidden everywhere else
-      }
-      if (p.coverageType === 'SELECTED_CITIES' || p.coverageType === 'ZONES') {
-        if (assignment?.isActive) citySpecific.push(p);
-        continue; // hidden unless explicitly assigned
-      }
-      // PAN_INDIA
-      if (assignment && !assignment.isActive) continue; // explicitly opted out for this city
-      panIndia.push(p);
+      const reach = productCityReach(p, assignmentByProduct.get(p.id), cityNameLower);
+      if (reach === 'CITY') citySpecific.push(p);
+      else if (reach === 'PAN_INDIA') panIndia.push(p);
     }
     return [...citySpecific, ...panIndia];
   }
@@ -158,7 +170,8 @@ export class ProductsService {
   async getBySlug(slug: string) {
     const product = await this.prisma.product.findUnique({
       where: { slug },
-      include: { category: true, vendor: true },
+      // Public route: the seller's name only, never their bank, Aadhaar or PAN fields.
+      include: { category: true, vendor: { select: { id: true, businessName: true } } },
     });
     if (!product) throw new NotFoundException('Product not found');
     this.prisma.product.update({ where: { id: product.id }, data: { views: { increment: 1 } } }).catch(() => undefined);
@@ -192,9 +205,9 @@ export class ProductsService {
       await this.media?.linkByUrls({ entityType: MediaEntityType.PRODUCT, entityId: product.id, urls: product.images, actor: { id: userId, role: UserRole.PRODUCT_VENDOR } });
     }
 
-    // Background AI enhancement
-    this.runAiEnhancement(product.id, data.name, data.brand, data.images || [])
-      .catch((e) => this.logger.error(`AI enhancement failed: ${e.message}`));
+    // No automatic description: a templated text used to be saved here for every product ("full
+    // warranty and free installation by Remont's verified technicians") — a claim that is not true
+    // for every product. The seller's own description is the only one shown.
 
     return product;
   }
@@ -237,14 +250,6 @@ export class ProductsService {
     });
   }
 
-  /** Rule-based placeholder — swap with OpenAI/Replicate for real LLM */
-  private async runAiEnhancement(productId: string, name: string, brand?: string, images?: string[]) {
-    const desc = `Discover the ${brand ? brand + ' ' : ''}${name} — engineered for everyday excellence. Premium materials, modern design, and trusted quality. Comes with full warranty and free installation by Remont's verified technicians.`;
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: { aiGeneratedDesc: desc, aiEnhancedImgs: images || [] },
-    });
-  }
 }
 
 @ApiTags('Products')

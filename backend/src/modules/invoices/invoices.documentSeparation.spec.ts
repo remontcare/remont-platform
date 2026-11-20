@@ -1,4 +1,5 @@
 import { InvoicesService } from './invoices.module';
+import { billingFindMany } from '../../common/billing-fixture.test';
 
 /**
  * Phase 5 (C-08) — Seller->Customer product tax invoice and Remont->Seller platform fee
@@ -12,12 +13,13 @@ import { InvoicesService } from './invoices.module';
 
 function makeService() {
   const prisma: any = {
+    partnerRegistration: { findFirst: jest.fn(async () => null) }, // no approved registration on file
     order: { findUnique: jest.fn(), update: jest.fn(async (args: any) => ({ id: args.where.id, ...args.data })) },
     invoice: {
       findUnique: jest.fn(async () => null),
       create: jest.fn(async (args: any) => ({ id: 'inv-1', ...args.data })),
     },
-    siteSetting: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    siteSetting: { findMany: jest.fn(billingFindMany()), findUnique: jest.fn(async () => null) },
     taxConfig: { findMany: jest.fn(async () => []) },
   };
   let seq = 0;

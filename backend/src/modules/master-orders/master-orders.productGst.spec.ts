@@ -32,7 +32,7 @@ function makeService(productIds: string[]) {
     },
     commissionRule: { findMany: jest.fn(async () => []) },
     productFeeRule: { findMany: jest.fn(async () => []) }, // no fee rules configured — resolves to ₹0, not under test here
-    taxConfig: { findMany: jest.fn(async () => TAX_CONFIG_ROWS) },
+    taxConfig: { findMany: jest.fn(async (args?: any) => TAX_CONFIG_ROWS.filter((r: any) => !args?.where?.appliesTo?.has || (r.appliesTo || []).includes(args.where.appliesTo.has))) }, // honours appliesTo like the real DB
     siteSetting: { findUnique: jest.fn(async () => null) },
     masterOrder: { count: jest.fn(async () => 0), findUnique: jest.fn() },
     paymentTransaction: { findFirst: jest.fn(async () => ({ status: 'PAID' })) },

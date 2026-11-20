@@ -72,10 +72,11 @@ export class WalletService {
   }
   async credit(
     userId: string, amount: number, reason: TransactionReason, orderId?: string, notes?: string,
-    refundRequestId?: string, approvedBy?: string,
+    refundRequestId?: string, approvedBy?: string, client?: any,
   ) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
-    return this.prisma.$transaction(async (tx) => {
+    // `client` lets a caller run the credit inside ITS transaction (e.g. with a once-only guard).
+    const run = async (tx: any) => {
       const u = await tx.user.update({
         where: { id: userId }, data: { walletBalance: { increment: amount } },
         select: { walletBalance: true },
@@ -86,7 +87,8 @@ export class WalletService {
           orderId, notes, refundRequestId, approvedBy,
         },
       });
-    });
+    };
+    return client ? run(client) : this.prisma.$transaction(run);
   }
   async debit(
     userId: string, amount: number, reason: TransactionReason, orderId?: string,

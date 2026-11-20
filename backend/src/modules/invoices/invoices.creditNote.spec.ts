@@ -9,7 +9,8 @@ import { InvoicesService } from './invoices.module';
 function makeService() {
   const prisma: any = {
     invoice: { findUnique: jest.fn(), update: jest.fn() },
-    creditNote: { create: jest.fn(async (args: any) => ({ id: 'cn-1', ...args.data })) },
+    // findMany: credit notes already issued for the refund (none yet) — the no-duplicate guard
+    creditNote: { create: jest.fn(async (args: any) => ({ id: 'cn-1', ...args.data })), findMany: jest.fn(async () => []) },
     $queryRaw: jest.fn(async () => [{ lastNumber: 1 }]),
   };
   prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));

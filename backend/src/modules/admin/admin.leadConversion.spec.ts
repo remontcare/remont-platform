@@ -14,6 +14,7 @@ function makeService() {
       create: jest.fn(async (args: any) => ({ id: 'order-1', ...args.data })),
     },
     commissionRule: { findMany: jest.fn(async () => []) },
+    taxConfig: { findMany: jest.fn(async () => []) }, // no rates configured (production today)
     siteSetting: { findUnique: jest.fn(async () => null) },
   };
   const cities: any = { getServicePrice: jest.fn(async () => null) };

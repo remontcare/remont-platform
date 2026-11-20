@@ -17,9 +17,7 @@ import { AiLimitsModule, AiLimitsService, AiRateLimitException, completeWithinBu
 // Seller-facing, wallet-gated, optional paid AI features for the Add Product form
 // (frontend/seller.html) — see plan doc "Seller-Facing Paid AI Product Enrichment".
 // Deliberately separate from the free, admin-only text AI Generate tab
-// (AdminService.generateAiContent) and from the free, automatic
-// ProductsService.runAiEnhancement() placeholder that already runs on every product save —
-// neither of those charges anything or touches AiFeatureUsage.
+// (AdminService.generateAiContent) — that one does not charge anything or touches AiFeatureUsage.
 //
 // Pricing is admin-configurable via the existing generic SiteSetting screen
 // (frontend/admin/settings.html, group 'ai') — same getSettingNumber-with-defaults idiom

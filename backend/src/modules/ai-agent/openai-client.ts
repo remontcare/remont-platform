@@ -114,9 +114,9 @@ export async function openAiChatWithTools(
   model: string,
   messages: OpenAiMessage[],
   tools: OpenAiTool[],
-  options: { maxTokens?: number; temperature?: number } & OpenAiCallControls = {},
+  options: { maxTokens?: number; temperature?: number; toolChoice?: 'auto' | 'none' } & OpenAiCallControls = {},
 ): Promise<OpenAiResponseMessage> {
-  return callChatCompletions(apiKey, model, messages, { ...options, tools, toolChoice: 'auto' });
+  return callChatCompletions(apiKey, model, messages, { ...options, tools, toolChoice: options.toolChoice || 'auto' });
 }
 
 /** Parse JSON safely from an AI response (handles markdown code blocks) */

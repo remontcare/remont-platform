@@ -302,6 +302,15 @@ export class AiLimitsService implements OnModuleDestroy {
     return this.memory.get(key);
   }
 
+  /**
+   * First caller for `key` within `ttlMs` gets true; every concurrent or repeat caller gets false.
+   * Built on the same atomic counter as the rate limits: one Redis INCR across all server instances
+   * when Redis is configured, per process otherwise (Node runs one request step at a time).
+   */
+  async claimOnce(key: string, ttlMs: number): Promise<boolean> {
+    return (await this.incr(`once:${key}`, 1, ttlMs)) === 1;
+  }
+
   /** Stable, non-reversible key for an identity — raw IPs/user ids never go into logs. */
   identityKey(id: AiIdentity): string {
     return id.userId ? `u:${hashId(id.userId)}` : `ip:${hashId(clientNetwork(id.ip))}`;

@@ -56,6 +56,9 @@ export interface BillingCalcInput {
   /** Recipient's state — who this specific document is being issued to. Not always the
    * customer: a Remont commission invoice to a seller uses the seller's state here. */
   placeOfSupply: string;
+  /** Default true (unchanged). false = keep the exact paise total — used for a SERVICE
+   * customer document so it equals the exact amount checkout charged (checkout never rounds). */
+  roundToRupee?: boolean;
 }
 
 export interface BillingCalcResult {
@@ -174,7 +177,7 @@ export function calculateInvoice(input: BillingCalcInput): BillingCalcResult {
   // UNREGISTERED document, which carries no tax at all. Rounding an unregistered
   // partner's exact ₹399.20 payout down to ₹399 would silently short them by 20 paise
   // against what the ledger actually owes them; that amount stays exact instead.
-  const total = supplyType === 'UNREGISTERED' ? preRoundTotal : Math.round(preRoundTotal);
+  const total = supplyType === 'UNREGISTERED' || input.roundToRupee === false ? preRoundTotal : Math.round(preRoundTotal);
   const roundOff = round2(total - preRoundTotal);
 
   return { lines, supplyType, taxableValue, cgst, sgst, igst, preRoundTotal, roundOff, total };

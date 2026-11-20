@@ -8,11 +8,13 @@ const TEMPLATES: Record<string, Record<string, (v: any) => string>> = {
     EN: (v) => `🔐 Your Remont OTP is ${v.otp}. Valid for 10 min. Do NOT share.`,
     HI: (v) => `🔐 आपका Remont OTP है ${v.otp}. 10 मिनट तक मान्य। शेयर न करें।`,
   },
+  // Sent to the PARTNER. Never include the start OTP: the customer gives it to the technician
+  // on arrival, and that hand-over is the proof the visit happened.
   JOB_ASSIGNED: {
     EN: (v) =>
-      `🛠️ New Job!\nOrder: #${v.orderNumber}\nCustomer: ${v.customerName}\nService: ${v.serviceName}\nTime: ${v.slot}\nAddress: ${v.address}\n📍 ${v.mapLink}\nStart OTP: ${v.startOtp}`,
+      `🛠️ New Job!\nOrder: #${v.orderNumber}\nCustomer: ${v.customerName}\nService: ${v.serviceName}\nTime: ${v.slot}\nAddress: ${v.address}\n📍 ${v.mapLink}\nAsk the customer for the start OTP when you arrive.`,
     HI: (v) =>
-      `🛠️ Naya Job!\nOrder: #${v.orderNumber}\nCustomer: ${v.customerName}\nService: ${v.serviceName}\nTime: ${v.slot}\nAddress: ${v.address}\n📍 ${v.mapLink}\nStart OTP: ${v.startOtp}`,
+      `🛠️ Naya Job!\nOrder: #${v.orderNumber}\nCustomer: ${v.customerName}\nService: ${v.serviceName}\nTime: ${v.slot}\nAddress: ${v.address}\n📍 ${v.mapLink}\nPahunchne par customer se start OTP lijiye.`,
   },
   PAYMENT_RECEIVED: {
     EN: (v) => `✅ ₹${v.amount} received for order #${v.orderNumber}. ₹${v.payout} added to wallet.`,
@@ -89,7 +91,6 @@ export class WhatsappService {
       slot: order.slotStart ? new Date(order.slotStart).toLocaleString('en-IN') : 'TBD',
       address: order.address?.fullAddress || '',
       mapLink,
-      startOtp: order.startOtp || '',
     });
     return this.send(vendor.user.phone, body, WhatsappMessageType.ORDER_ASSIGNED, {
       vendorId: vendor.id, orderId: order.id,

@@ -65,6 +65,8 @@ function makeWorld() {
   });
 
   const prisma: any = {
+    // GST rate lookup used by the extra-work bill recalculation (no configured rules here)
+    taxConfig: { findMany: jest.fn(async () => []) },
     user: { findUnique: jest.fn(async ({ where }) => db.users.find((u) => matches(u, where)) ?? null) },
     serviceVendor: { findUnique: jest.fn(async ({ where }) => db.vendors.find((v) => matches(v, where)) ?? null) },
     order: {

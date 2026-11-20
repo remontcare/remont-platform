@@ -3,10 +3,24 @@ import {
   NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { IsEmail, IsEnum, IsOptional, IsString, Length } from 'class-validator';
+import { Language, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, CurrentUser, JwtPayload, validateAddressInput } from '../../common';
 
 // ─── USERS ─────────────────────────────────────────────────────────────
+
+/**
+ * The only profile fields a user may change about themselves (website, Partner App and
+ * Customer App send name/email/language). The global ValidationPipe (whitelist: true) strips
+ * everything else — role, walletBalance, phone, isBlocked, isVerified, referralCode, otp*,
+ * nested relation writes — which `body: any` previously passed straight to Prisma.
+ */
+export class UpdateProfileDto {
+  @IsOptional() @IsString() @Length(1, 100) name?: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsEnum(Language) language?: Language;
+}
 
 @Injectable()
 export class UsersService {
@@ -22,7 +36,16 @@ export class UsersService {
     return safe;
   }
 
-  async updateProfile(userId: string, data: any) {
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    // Built field by field (not spread) so this stays safe even if called without the pipe.
+    const data: Prisma.UserUpdateInput = {};
+    if (dto?.name !== undefined) {
+      const name = String(dto.name).trim();
+      if (!name) throw new BadRequestException('Name cannot be empty');
+      data.name = name;
+    }
+    if (dto?.email !== undefined) data.email = String(dto.email).trim();
+    if (dto?.language !== undefined) data.language = dto.language;
     return this.prisma.user.update({
       where: { id: userId },
       data,
@@ -120,7 +143,7 @@ export class UsersService {
 export class UsersController {
   constructor(private users: UsersService) {}
   @Get('me') me(@CurrentUser() u: JwtPayload) { return this.users.getProfile(u.sub); }
-  @Patch('me') update(@CurrentUser() u: JwtPayload, @Body() body: any) { return this.users.updateProfile(u.sub, body); }
+  @Patch('me') update(@CurrentUser() u: JwtPayload, @Body() body: UpdateProfileDto) { return this.users.updateProfile(u.sub, body); }
   @Get('me/addresses') addresses(@CurrentUser() u: JwtPayload) { return this.users.listAddresses(u.sub); }
   @Post('me/addresses') addAddr(@CurrentUser() u: JwtPayload, @Body() body: any) { return this.users.addAddress(u.sub, body); }
   @Patch('me/addresses/:id') updateAddr(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() body: any) { return this.users.updateAddress(u.sub, id, body); }

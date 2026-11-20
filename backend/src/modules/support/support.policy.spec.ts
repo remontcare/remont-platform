@@ -192,26 +192,50 @@ describe('SupportPolicyEngine.recommend — service flows', () => {
     expect(rec).toMatchObject({ routeType: 'SUPPORT_CASE', resolutionType: 'FULL_REFUND', amount: 1500 });
   });
 
-  it('PARTNER_ON_THE_WAY cancellation deducts exactly the visit charge (worked example from the spec)', () => {
+  // Updated 2026-10-14 (confirmed business rules): cancellation charges come only from the
+  // admin-configured CANCELLATION_CHARGE rule (service/category/city) — never the hardcoded
+  // visit ₹200 / diagnosis ₹150 defaults — and are never deducted automatically.
+  it('PARTNER_ON_THE_WAY → admin review (never an automatic refund), full refund recommended', () => {
     const rec = engine.recommend({
       itemType: 'SERVICE', issueType: 'PARTNER_ON_THE_WAY',
       order: baseOrder, amountBasis: 1500, policy, warranty: noWarranty,
     });
-    expect(rec).toMatchObject({ routeType: 'AUTO_RESOLUTION', resolutionType: 'REFUND_MINUS_VISIT', amount: 1300 });
+    expect(rec).toMatchObject({ routeType: 'SUPPORT_CASE', resolutionType: 'FULL_REFUND', amount: 1500 });
   });
 
-  it('PARTNER_ARRIVED cancellation deducts both visit and diagnosis charges', () => {
+  it('PARTNER_ON_THE_WAY: the after-arrival penalty does not apply before arrival', () => {
     const rec = engine.recommend({
+      itemType: 'SERVICE', issueType: 'PARTNER_ON_THE_WAY',
+      order: baseOrder, amountBasis: 1500, policy, warranty: noWarranty, cancellationCharge: 200,
+    });
+    expect(rec).toMatchObject({ routeType: 'SUPPORT_CASE', resolutionType: 'FULL_REFUND', amount: 1500 });
+  });
+
+  it('PARTNER_ARRIVED always goes to admin review — with a configured charge it is only a recommendation', () => {
+    const withCharge = engine.recommend({
+      itemType: 'SERVICE', issueType: 'PARTNER_ARRIVED',
+      order: baseOrder, amountBasis: 1500, policy, warranty: noWarranty, cancellationCharge: 350,
+    });
+    expect(withCharge).toMatchObject({ routeType: 'SUPPORT_CASE', resolutionType: 'REFUND_MINUS_VISIT', amount: 1150 });
+    const noCharge = engine.recommend({
       itemType: 'SERVICE', issueType: 'PARTNER_ARRIVED',
       order: baseOrder, amountBasis: 1500, policy, warranty: noWarranty,
     });
-    expect(rec).toMatchObject({ routeType: 'AUTO_RESOLUTION', resolutionType: 'REFUND_MINUS_DIAGNOSIS', amount: 1150 });
+    expect(noCharge).toMatchObject({ routeType: 'SUPPORT_CASE', resolutionType: 'FULL_REFUND', amount: 1500 });
   });
 
-  it('a refund never goes negative even if charges exceed the service amount', () => {
+  it('CUSTOMER_REFUSED_SERVICE (partner report) is never auto-resolved', () => {
+    const rec = engine.recommend({
+      itemType: 'SERVICE', issueType: 'CUSTOMER_REFUSED_SERVICE' as any,
+      order: baseOrder, amountBasis: 1500, policy, warranty: noWarranty, cancellationCharge: 500,
+    });
+    expect(rec).toMatchObject({ routeType: 'SUPPORT_CASE', amount: 1000 });
+  });
+
+  it('a refund never goes negative even if the configured charge exceeds the amount paid', () => {
     const rec = engine.recommend({
       itemType: 'SERVICE', issueType: 'PARTNER_ARRIVED',
-      order: baseOrder, amountBasis: 100, policy, warranty: noWarranty,
+      order: baseOrder, amountBasis: 100, policy, warranty: noWarranty, cancellationCharge: 500,
     });
     expect(rec.amount).toBe(0);
   });

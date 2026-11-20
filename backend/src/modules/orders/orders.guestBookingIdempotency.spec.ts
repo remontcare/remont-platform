@@ -14,6 +14,7 @@ function makeService() {
     service: { findUnique: jest.fn() },
     city: { findUnique: jest.fn() },
     commissionRule: { findMany: jest.fn().mockResolvedValue([]) },
+    taxConfig: { findMany: jest.fn().mockResolvedValue([]) }, // no rates configured (production today)
     siteSetting: { findUnique: jest.fn().mockResolvedValue(null) },
     address: { create: jest.fn(async (args: any) => ({ id: 'addr-1', ...args.data })) },
     order: {

@@ -127,7 +127,7 @@
       return fetch(leadCfg.captureEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(Object.assign({
           customerName: data.name,
           customerPhone: data.phone,
           customerEmail: data.email || undefined,
@@ -135,7 +135,7 @@
           serviceInterested: data.label || undefined,
           notes: data.requirement || undefined,
           source: leadCfg.source || 'WEBSITE',
-        }),
+        }, window.RemontAttribution ? window.RemontAttribution.fields() : {})),
       }).then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
