@@ -47,6 +47,9 @@ section.block h2{font-family:var(--ff-display);font-size:24px;font-weight:600;ma
 /* 4:3 like the cards, and contain-on-white so the whole product is visible instead of
    being cropped to a square. The gradient placeholder (shown only when there is no photo)
    still fills the box, so the empty state is unchanged. */
+.pd-thumbs{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.pd-thumbs button{width:64px;height:48px;border:1.5px solid var(--mist);border-radius:8px;background:#fff center/contain no-repeat;cursor:pointer;padding:0}
+.pd-thumbs button.on{border-color:var(--sienna)}
 .pd-image{width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background-color:#fff;background-image:linear-gradient(135deg,var(--cream),var(--mist));display:grid;place-items:center;font-size:90px;background-size:contain;background-repeat:no-repeat;background-position:center}
 .pd-brand{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sienna);margin-bottom:6px}
 .pd-info h1{font-family:var(--ff-display);font-size:clamp(24px,3vw,34px);font-weight:600;line-height:1.2;margin-bottom:14px}
@@ -126,7 +129,10 @@ footer.site a{color:var(--amber)}
 
 <section class="block" id="pd-content" style="display:none;border-bottom:none;">
   <div class="wrap pd-grid">
-    <div class="pd-image" id="pd-image"></div>
+    <div>
+      <div class="pd-image" id="pd-image"></div>
+      <div class="pd-thumbs" id="pd-thumbs" hidden></div>
+    </div>
     <div class="pd-info">
       <div class="pd-brand" id="pd-brand" style="display:none"></div>
       <h1 id="pd-name"></h1>
@@ -266,9 +272,12 @@ footer.site a{color:var(--amber)}
     var hasDiscount = mrp > price;
     var cat = p.category || {};
     var emoji = cat.icon || CAT_EMOJI[cat.key] || '🏠';
-    var img = (p.images && p.images[0]) || null;
+    // A variant listing's one common gallery + description (Admin → Variants) replaces the option's own.
+    var common = window.RemontCatalogVariants ? window.RemontCatalogVariants.commonContent(p) : null;
+    var gallery = common && common.images.length ? common.images : (p.images || []).filter(Boolean).slice(0, 5);
+    var img = gallery[0] || null;
     var inStock = p.stock == null || Number(p.stock) > 0;
-    var desc = p.description || '';
+    var desc = (common && common.description) || p.description || '';
 
     document.title = (p.seoTitle || (p.name + ' | Remont India'));
     var descMeta = p.seoDesc || desc.slice(0, 155) || ('Buy ' + p.name + ' on Remont India.');
@@ -283,6 +292,19 @@ footer.site a{color:var(--amber)}
     document.getElementById('pd-crumb-current').textContent = p.name;
 
     imgMarkup(document.getElementById('pd-image'), img, emoji);
+    if (gallery.length > 1) {
+      var thumbs = document.getElementById('pd-thumbs');
+      thumbs.innerHTML = gallery.map(function (u, i) {
+        return '<button type="button" class="' + (i === 0 ? 'on' : '') + '" data-i="' + i + '" aria-label="Image ' + (i + 1) + '" style="background-image:url(\'' + esc(String(u).replace(/'/g, '%27')) + '\')"></button>';
+      }).join('');
+      thumbs.hidden = false;
+      thumbs.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-i]');
+        if (!b) return;
+        imgMarkup(document.getElementById('pd-image'), gallery[Number(b.getAttribute('data-i'))], emoji);
+        Array.prototype.forEach.call(thumbs.children, function (x) { x.classList.toggle('on', x === b); });
+      });
+    }
 
     var brandEl = document.getElementById('pd-brand');
     if (p.brand) { brandEl.textContent = p.brand; brandEl.style.display = ''; }

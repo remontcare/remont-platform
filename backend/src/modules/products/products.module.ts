@@ -47,7 +47,7 @@ const SELLER_PROTECTED_PRODUCT_FIELDS = [
 ];
 
 // The parent listing a product belongs to (see CatalogVariantGroup), for grouping on the website.
-const VARIANT_GROUP_PUBLIC = { select: { id: true, name: true, optionNames: true, isActive: true } } as const;
+const VARIANT_GROUP_PUBLIC = { select: { id: true, name: true, optionNames: true, isActive: true, description: true, images: true } } as const;
 function stripSellerProtectedProductFields(data: any): any {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new BadRequestException('Invalid product payload');
   const out: Record<string, any> = { ...data };

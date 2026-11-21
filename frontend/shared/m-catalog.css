@@ -98,6 +98,8 @@
   .mcv-chip { min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid #D0D5DD; background: #fff; color: #344054; font: 600 13px/1 var(--ff-body, system-ui, sans-serif); cursor: pointer; }
   .mcv-chip.on { background: #0F172A; border-color: #0F172A; color: #fff; }
   .mcv-chip.alt { border-style: dashed; color: #667085; }
+  .mc-gallery { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 16px 0; }
+  .mc-gallery img { width: 96px; height: 72px; flex-shrink: 0; border-radius: 10px; object-fit: cover; background: #F2F4F7; }
   .mc-card-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 8px; margin-top: 2px; }
   .mc-card-buttons { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 

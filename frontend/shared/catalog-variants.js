@@ -147,8 +147,21 @@
   function productListings(items, opts) {
     return group(items, opts).map(function (e) {
       if (e.kind === 'one') return e.item;
-      return Object.assign({}, e.members[e.sel], { vg: { name: e.group.name, summary: summary(e), range: hasPriceRange(e) } });
+      var rep = e.members[e.sel];
+      var common = commonContent(rep);
+      return Object.assign({}, rep, common && common.images.length ? { img: common.images[0] } : {},
+        { vg: { name: e.group.name, summary: summary(e), range: hasPriceRange(e) } });
     });
+  }
+
+  /* The listing's ONE common description and gallery (up to 5 images), set in Admin → Variants.
+   * Null when the row has no active listing; empty parts mean "use the row's own". */
+  function commonContent(row) {
+    var g = groupOf(row);
+    if (!g) return null;
+    var images = Array.isArray(g.images) ? g.images.filter(Boolean).slice(0, 5) : [];
+    var description = g.description && String(g.description).trim() ? String(g.description).trim() : '';
+    return (images.length || description) ? { images: images, description: description } : null;
   }
 
   // An order line as recorded at order time: snapshot name (+ chosen options); older lines → live name.
@@ -159,7 +172,7 @@
   }
 
   window.RemontCatalogVariants = {
-    orderLine: orderLine,
+    orderLine: orderLine, commonContent: commonContent,
     group: group, values: values, pick: pick, exact: exact, label: label, memberLabel: memberLabel,
     chipsHtml: chipsHtml, hasPriceRange: hasPriceRange, cartVariantLine: cartVariantLine, optionsOf: optionsOf,
     summary: summary, productListings: productListings,

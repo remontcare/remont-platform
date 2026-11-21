@@ -6282,9 +6282,11 @@ window.RemontMedia = (function () {
     var CV = window.RemontCatalogVariants;
     var s = e.members[sel];
     var from = sel === e.sel && CV.hasPriceRange(e);
+    var common = CV.commonContent(s);
+    var cardImg = (common && common.images[0]) || s.imageUrl || (s.images && s.images[0]);
     return `
       <div class="sub-svc-card svc-var-card" data-svc-id="${escHtml(s.id)}" data-svc-name="${escHtml(s.n)}" data-variant-card="${escHtml(e.key)}" data-sel="${sel}">
-        <span class="icn">${catIconHtml({ imageUrl: s.imageUrl || (s.images && s.images[0]), icon: s.ic })}</span>
+        <span class="icn">${catIconHtml({ imageUrl: cardImg, icon: s.ic })}</span>
         <div class="nm">${escHtml(e.group.name)}</div>
         <div class="pr">${from ? '<span class="svc-from">From</span>' : ''}${s.o !== '—' ? `<small>${escHtml(s.o)}</small> ` : ''}${escHtml(s.p)} <span class="svc-unit">${escHtml(s.unit || 'per visit')}</span></div>
         ${CV.chipsHtml(e, sel, 'svv')}
@@ -9109,6 +9111,12 @@ window.RemontMedia = (function () {
     var categoryKey = (data && data.categoryKey) ? data.categoryKey : '';
     var imageUrl = (data && data.imageUrl) ? data.imageUrl : '';
     var images = (data && data.images && data.images.length) ? data.images : [];
+    // A variant listing's one common description + gallery (Admin → Variants) replaces the option's own.
+    var common = (data && window.RemontCatalogVariants) ? window.RemontCatalogVariants.commonContent(data) : null;
+    if (common) {
+      if (common.description) desc = common.description;
+      if (common.images.length) { imageUrl = common.images[0]; images = common.images.slice(1); }
+    }
     var durationMinutes = (data && data.durationMinutes) ? data.durationMinutes : 0;
     var rating = (data && data.rating) ? data.rating : 0;
     var faqs = (data && data.faqJson && Array.isArray(data.faqJson)) ? data.faqJson : [];

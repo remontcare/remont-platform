@@ -118,9 +118,31 @@ d('CATALOG VARIANTS — full application over HTTP (throwaway DB)', () => {
     const cats = await api('GET', '/services/categories');
     const cat = cats.data.find((c: any) => c.id === ids.cat.id);
     const s2 = cat.services.find((s: any) => s.id === ids.s2.id);
-    expect(s2.variantGroup).toEqual({ id: ids.group.id, name: `Pest ${tag}`, optionNames: ['Size'], isActive: true });
+    expect(s2.variantGroup).toEqual({ id: ids.group.id, name: `Pest ${tag}`, optionNames: ['Size'], isActive: true, description: null, images: [] });
     expect(s2.variantOptions).toEqual({ Size: '2BHK' });
     expect(Number(s2.basePrice)).toBe(999); // each option keeps its own price
+  });
+
+  it('a listing carries ONE common description + up to 5 uploaded images, public on the catalog', async () => {
+    const imgs = (n: number) => Array.from({ length: n }, (_, i) => `https://res.cloudinary.com/demo/image/upload/v1/pest-${i}.webp`);
+    let r = await api('PATCH', `/admin/variant-groups/${ids.group.id}`, { as: ids.admin, body: { images: imgs(6) } });
+    expect(r.status).toBe(400);
+    r = await api('PATCH', `/admin/variant-groups/${ids.group.id}`, { as: ids.admin, body: { images: ['data:image/png;base64,AAAA'] } });
+    expect(r.status).toBe(400);
+    r = await api('PATCH', `/admin/variant-groups/${ids.group.id}`, { as: ids.admin, body: { images: imgs(2), description: 'Odourless gel + spray for every room.' } });
+    expect(r.status).toBe(200);
+    expect(r.data.images).toEqual(imgs(2));
+
+    const cats = await api('GET', '/services/categories');
+    const s1 = cats.data.find((c: any) => c.id === ids.cat.id).services.find((s: any) => s.id === ids.s1.id);
+    expect(s1.variantGroup).toEqual(expect.objectContaining({ description: 'Odourless gel + spray for every room.', images: imgs(2) }));
+    // members keep their own rows untouched — the common content lives on the listing only
+    expect((await prisma.service.findUniqueOrThrow({ where: { id: ids.s1.id } })).images).toEqual([]);
+    const pub = await api('GET', `/catalog/variant-groups/${ids.group.id}`);
+    expect(pub.data).toEqual(expect.objectContaining({ description: 'Odourless gel + spray for every room.', images: imgs(2) }));
+    // other fields are left alone when images/description are not sent
+    await api('PATCH', `/admin/variant-groups/${ids.group.id}`, { as: ids.admin, body: { name: `Pest ${tag}` } });
+    expect((await prisma.catalogVariantGroup.findUniqueOrThrow({ where: { id: ids.group.id } })).images).toEqual(imgs(2));
   });
 
   it('the generic service edit form cannot unlink or re-key a variant', async () => {
@@ -198,7 +220,7 @@ d('CATALOG VARIANTS — full application over HTTP (throwaway DB)', () => {
     expect(pub.data.members.every((m: any) => m.slug && m.price != null)).toBe(true);
 
     const page = await api('GET', `/products/${ids.pWhite.slug}`);
-    expect(page.data.variantGroup).toEqual({ id: pg.data.id, name: `Enamel ${tag} 1L`, optionNames: ['Colour'], isActive: true });
+    expect(page.data.variantGroup).toEqual({ id: pg.data.id, name: `Enamel ${tag} 1L`, optionNames: ['Colour'], isActive: true, description: null, images: [] });
 
     // a disabled listing is no longer public (rows show separately again)
     await api('PATCH', `/admin/variant-groups/${pg.data.id}`, { as: ids.admin, body: { isActive: false } });

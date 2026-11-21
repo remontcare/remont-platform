@@ -1,6 +1,6 @@
 import {
   normalizeOptionNames, normalizeMemberOptions, validateMembers, suggestVariantGroups, splitVariantName,
-  orderLineSnapshot, describeOptions, snapshotLabel,
+  orderLineSnapshot, describeOptions, snapshotLabel, normalizeListingImages,
 } from './variant-rules';
 
 const row = (id: string, name: string, categoryId = 'cat-pest', variantGroupId: string | null = null) => ({ id, name, categoryId, variantGroupId });
@@ -117,6 +117,21 @@ describe('orderLineSnapshot', () => {
     expect(s.itemName).toBe('AC Repair');
     expect(s.variantGroupId).toBeUndefined();
     expect(s.variantOptions).toBeUndefined();
+  });
+});
+
+describe('normalizeListingImages', () => {
+  it('keeps uploaded links, drops blanks and repeats', () => {
+    expect(normalizeListingImages(['https://res.cloudinary.com/x/a.webp', ' ', 'https://res.cloudinary.com/x/a.webp', '/api/uploads/b.webp']))
+      .toEqual(['https://res.cloudinary.com/x/a.webp', '/api/uploads/b.webp']);
+    expect(normalizeListingImages(undefined)).toEqual([]);
+  });
+  it('allows at most 5 and only uploaded image links', () => {
+    expect(() => normalizeListingImages(Array.from({ length: 6 }, (_, i) => `https://c.dev/${i}.webp`))).toThrow(/at most 5/);
+    expect(() => normalizeListingImages(['data:image/png;base64,AAAA'])).toThrow(/uploaded image link/);
+    expect(() => normalizeListingImages(['javascript:alert(1)'])).toThrow(/uploaded image link/);
+    expect(() => normalizeListingImages(['http://insecure.dev/a.png'])).toThrow(/uploaded image link/);
+    expect(() => normalizeListingImages('x' as any)).toThrow(/must be a list/);
   });
 });
 

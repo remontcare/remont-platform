@@ -198,8 +198,10 @@
     var s = e.members[sel];
     var d = duration(s.durationMinutes);
     var from = sel === e.sel && CV.hasPriceRange(e);
+    var common = CV.commonContent(s);
+    var img = common && common.images[0] ? sized(common.images[0], 200) : serviceImage(s, cat, 200);
     return '<div class="mc-card" data-svc="' + esc(s.id) + '" data-variant-card="' + esc(e.key) + '" data-sel="' + sel + '">' +
-      '<img class="mc-card-img" src="' + esc(serviceImage(s, cat, 200)) + '" alt="" width="76" height="76" loading="lazy" decoding="async">' +
+      '<img class="mc-card-img" src="' + esc(img) + '" alt="" width="76" height="76" loading="lazy" decoding="async">' +
       '<div class="mc-card-main">' +
         '<div class="mc-card-name">' + esc(e.group.name) + '</div>' +
         '<div class="mc-card-meta">' + (from ? '<span class="mc-from">From</span>' : '') + '<span class="mc-price">' + inr(price(s)) + '</span>' +
@@ -335,16 +337,24 @@
       ['Material', Number(s.materialCost) || 0],
       ['Rate per sq ft', Number(s.perSqftRate) || 0],
     ].filter(function (p) { return p[1] > 0; });
+    // A variant listing's one common description + gallery (Admin → Variants) replaces the option's own.
+    var common = CV ? CV.commonContent(s) : null;
+    var heroSrc = common && common.images[0] ? sized(common.images[0], 800) : serviceImage(s, cat, 800);
+    var aboutText = (common && common.description) || s.description;
+    var extraImgs = common && common.images.length > 1 ? common.images.slice(1) : [];
     // A service without its own photo shows its category's product image whole, not cropped.
-    var ownPhoto = !!(s.imageUrl || (s.images && s.images[0]));
+    var ownPhoto = !!((common && common.images[0]) || s.imageUrl || (s.images && s.images[0]));
     body.innerHTML =
-      '<img class="mc-hero' + (ownPhoto ? '' : ' mc-hero-fit') + '" src="' + esc(serviceImage(s, cat, 800)) + '" alt="" width="400" height="260" decoding="async">' +
+      '<img class="mc-hero' + (ownPhoto ? '' : ' mc-hero-fit') + '" src="' + esc(heroSrc) + '" alt="" width="400" height="260" decoding="async">' +
+      (extraImgs.length ? '<div class="mc-gallery">' + extraImgs.map(function (u) {
+        return '<img src="' + esc(sized(u, 300)) + '" alt="" width="96" height="72" loading="lazy" decoding="async">';
+      }).join('') + '</div>' : '') +
       '<div class="mc-detail-head"><h3>' + esc(vEntry ? vEntry.group.name : s.name) + '</h3>' +
         '<div class="mc-card-meta"><span class="mc-price">' + inr(price(s)) + '</span>' + (was(s) ? '<s>' + inr(was(s)) + '</s>' : '') +
         '<span>' + esc(s.unit || '') + (d ? ' · ' + d : '') + '</span></div>' +
         (vEntry ? '<div class="mc-v mc-v-detail" data-variant-detail="' + esc(vEntry.key) + '" data-sel="' + vSel + '">' + CV.chipsHtml(vEntry, vSel, 'mcv') + '</div>' : '') +
       '</div>' +
-      (s.description ? '<section class="mc-sec"><h3>About this service</h3><p class="mc-text">' + esc(s.description) + '</p></section>' : '') +
+      (aboutText ? '<section class="mc-sec"><h3>About this service</h3><p class="mc-text">' + esc(aboutText) + '</p></section>' : '') +
       list("What's included", s.inclusions) +
       list("What's not included", s.exclusions) +
       '<section class="mc-sec"><h3>Pricing</h3><table class="mc-price-table">' +

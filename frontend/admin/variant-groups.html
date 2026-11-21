@@ -27,6 +27,10 @@
   .vg-result.disabled{color:#94a3b8;cursor:not-allowed}
   .vg-help{font-size:12px;color:#64748b;margin:4px 0 0}
   .vg-x{border:none;background:#fee2e2;color:#dc2626;border-radius:6px;width:30px;height:30px;cursor:pointer;font-weight:700}
+  .vg-imgs{display:flex;gap:8px;flex-wrap:wrap}
+  .vg-img{position:relative;width:96px;height:72px;border-radius:8px;border:1px solid #e5e7eb;background:#f8fafc center/cover no-repeat}
+  .vg-img .x{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;border:none;background:#ef4444;color:#fff;font-weight:700;cursor:pointer;line-height:1}
+  .vg-img .cover{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;padding:1px 5px;border-radius:4px}
   @media (max-width:700px){.vg-mrow{grid-template-columns:1fr 1fr}.vg-mhead{display:none}}
 </style>
 </head>
@@ -70,7 +74,19 @@
       <div class="form-group"><label class="form-label">Listing name (shown to customers)</label><input id="ed-name" class="form-control" maxlength="160" placeholder="e.g. General Pest Control"></div>
       <div class="form-group"><label class="form-label">Options (comma-separated, up to 3)</label><input id="ed-options" class="form-control" placeholder="e.g. Size  or  Gas type, Capacity"></div>
     </div>
-    <div class="form-group"><label class="form-label">Description (optional)</label><input id="ed-desc" class="form-control" maxlength="1000"></div>
+    <div class="form-group">
+      <label class="form-label">Common description (shown for every size/option)</label>
+      <textarea id="ed-desc" class="form-control" maxlength="3000" rows="4" placeholder="One description for the whole listing. Leave empty to show each option's own description."></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Common images (up to 5, shown for every size/option)</label>
+      <div class="vg-imgs" id="ed-imgs"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <input id="ed-img-url" type="hidden">
+        <span class="vg-help" id="ed-img-count"></span>
+      </div>
+      <p class="vg-help">Leave empty to show each option's own images. The first image is the cover.</p>
+    </div>
     <div class="form-group"><label class="form-check"><input type="checkbox" id="ed-active" checked> Active — show these items as one listing on the website</label></div>
 
     <div class="form-group vg-search">
@@ -170,10 +186,35 @@ function openEditor(state) {
   document.getElementById('ed-active').checked = state.isActive !== false;
   document.getElementById('ed-search').value = '';
   document.getElementById('ed-results').classList.remove('open');
+  editor.images = (state.images || []).slice(0, 5);
+  renderImages();
   renderMembers();
   document.getElementById('vg-editor').style.display = 'flex';
 }
 function closeEditor() { document.getElementById('vg-editor').style.display = 'none'; editor = null; }
+
+// ── Common images (max 5) — uploaded through the normal media pipeline ──
+var MAX_IMAGES = 5;
+function renderImages() {
+  var el = document.getElementById('ed-imgs');
+  el.innerHTML = editor.images.map(function (u, i) {
+    return '<div class="vg-img" style="background-image:url(\'' + escape(String(u).replace(/'/g, '%27')) + '\')">' +
+      (i === 0 ? '<span class="cover">Cover</span>' : '') +
+      '<button type="button" class="x" data-act="img-del" data-i="' + i + '" aria-label="Remove image">×</button></div>';
+  }).join('');
+  document.getElementById('ed-img-count').textContent = editor.images.length + ' / ' + MAX_IMAGES;
+  var up = document.querySelector('#ed-img-url ~ button, #ed-img-url + button');
+  if (up) up.disabled = editor.images.length >= MAX_IMAGES;
+}
+attachGalleryUpload('ed-img-url', function () {
+  var input = document.getElementById('ed-img-url');
+  var url = input.value.trim();
+  input.value = '';
+  if (!editor || !url) return;
+  if (editor.images.length >= MAX_IMAGES) { toast('Up to ' + MAX_IMAGES + ' images', 'error'); return; }
+  if (editor.images.indexOf(url) === -1) editor.images.push(url);
+  renderImages();
+}, { variant: 'full' });
 
 function readOptionNames() {
   return document.getElementById('ed-options').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -223,6 +264,7 @@ function saveEditor() {
   var body = {
     name: name,
     description: document.getElementById('ed-desc').value.trim(),
+    images: (editor.images || []).slice(0, 5),
     optionNames: names,
     isActive: document.getElementById('ed-active').checked,
     members: editor.members.map(function (m, i) {
@@ -274,7 +316,7 @@ document.addEventListener('click', function (e) {
   var g = groups.filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
   if (act === 'edit' && g) {
     openEditor({
-      id: g.id, entityType: g.entityType, name: g.name, description: g.description, optionNames: g.optionNames.slice(), isActive: g.isActive,
+      id: g.id, entityType: g.entityType, name: g.name, description: g.description, images: (g.images || []).slice(), optionNames: g.optionNames.slice(), isActive: g.isActive,
       members: membersOf(g).map(function (m) { return { id: m.id, name: m.name, price: priceOf(m), isActive: m.isActive, options: Object.assign({}, m.variantOptions || {}), sortOrder: m.variantSortOrder }; }),
     });
   } else if (act === 'toggle' && g) {
@@ -292,6 +334,9 @@ document.addEventListener('click', function (e) {
       id: null, entityType: s.entityType || type, name: s.name, description: '', optionNames: s.optionNames.slice(), isActive: true,
       members: s.members.map(function (m, i) { return { id: m.id, name: m.name, price: m.price, isActive: true, options: Object.assign({}, m.options), sortOrder: i }; }),
     });
+  } else if (act === 'img-del') {
+    editor.images.splice(Number(t.getAttribute('data-i')), 1);
+    renderImages();
   } else if (act === 'drop') {
     editor.members.splice(Number(t.getAttribute('data-i')), 1);
     renderMembers();

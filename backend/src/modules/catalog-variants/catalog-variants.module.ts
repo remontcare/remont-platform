@@ -10,7 +10,7 @@ import { CatalogEntityType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, Public, CurrentUser, JwtPayload, Roles, RolesGuard } from '../../common';
 import {
-  normalizeOptionNames, validateMembers, suggestVariantGroups, describeOptions, MemberInput,
+  normalizeOptionNames, validateMembers, suggestVariantGroups, describeOptions, MemberInput, normalizeListingImages,
 } from './variant-rules';
 
 class VariantMemberDto {
@@ -23,16 +23,18 @@ class VariantMemberDto {
 class CreateVariantGroupDto {
   @IsIn(['PRODUCT', 'SERVICE']) entityType: CatalogEntityType;
   @IsString() @MaxLength(160) name: string;
-  @IsOptional() @IsString() @MaxLength(1000) description?: string;
+  @IsOptional() @IsString() @MaxLength(3000) description?: string;
   @IsArray() optionNames: string[];
+  @IsOptional() @IsArray() images?: string[];
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VariantMemberDto) members?: VariantMemberDto[];
 }
 
 class UpdateVariantGroupDto {
   @IsOptional() @IsString() @MaxLength(160) name?: string;
-  @IsOptional() @IsString() @MaxLength(1000) description?: string;
+  @IsOptional() @IsString() @MaxLength(3000) description?: string;
   @IsOptional() @IsArray() optionNames?: string[];
+  @IsOptional() @IsArray() images?: string[];
   @IsOptional() @IsBoolean() isActive?: boolean;
   // When given, replaces the member list (rows left out are unlinked, never deleted).
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VariantMemberDto) members?: VariantMemberDto[];
@@ -72,6 +74,10 @@ export class CatalogVariantsService {
 
   private names(raw: unknown): string[] {
     try { return normalizeOptionNames(raw); } catch (e: any) { throw new BadRequestException(e.message); }
+  }
+
+  private images(raw: unknown): string[] {
+    try { return normalizeListingImages(raw); } catch (e: any) { throw new BadRequestException(e.message); }
   }
 
   /** Writes the member list in one transaction: listed rows get their options, others are unlinked. */
@@ -115,6 +121,7 @@ export class CatalogVariantsService {
 
   async create(dto: CreateVariantGroupDto, adminId: string) {
     const optionNames = this.names(dto.optionNames);
+    const images = this.images(dto.images);
     const name = String(dto.name || '').trim();
     if (!name) throw new BadRequestException('Name is required');
     const members = dto.members || [];
@@ -122,7 +129,7 @@ export class CatalogVariantsService {
     const assigned = this.validate(null, optionNames, members, rows);
     return this.prisma.$transaction(async (tx) => {
       const g = await tx.catalogVariantGroup.create({
-        data: { entityType: dto.entityType, name, description: dto.description?.trim() || null, optionNames, isActive: dto.isActive ?? true, createdBy: adminId },
+        data: { entityType: dto.entityType, name, description: dto.description?.trim() || null, optionNames, images, isActive: dto.isActive ?? true, createdBy: adminId },
       });
       if (assigned.length) await this.writeMembers(tx, dto.entityType, g.id, assigned);
       return g;
@@ -133,6 +140,7 @@ export class CatalogVariantsService {
     const g = await this.prisma.catalogVariantGroup.findUnique({ where: { id } });
     if (!g) throw new NotFoundException('Variant group not found');
     const optionNames = dto.optionNames !== undefined ? this.names(dto.optionNames) : g.optionNames;
+    const images = dto.images !== undefined ? this.images(dto.images) : undefined;
     let assigned: ReturnType<CatalogVariantsService['validate']> | null = null;
     if (dto.members !== undefined) {
       const rows = await this.loadRows(g.entityType, dto.members.map((m) => m.id));
@@ -150,6 +158,7 @@ export class CatalogVariantsService {
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
           ...(dto.description !== undefined ? { description: dto.description.trim() || null } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(images !== undefined ? { images } : {}),
           optionNames,
         },
       });
@@ -211,7 +220,7 @@ export class CatalogVariantsService {
     if (!g) throw new NotFoundException('Variant group not found');
     const members = g.entityType === 'SERVICE' ? g.services : g.products;
     return {
-      id: g.id, entityType: g.entityType, name: g.name, description: g.description, optionNames: g.optionNames,
+      id: g.id, entityType: g.entityType, name: g.name, description: g.description, images: g.images, optionNames: g.optionNames,
       members: members.map((m: any) => ({ ...m, variantLabel: describeOptions(g.optionNames, m.variantOptions) })),
     };
   }

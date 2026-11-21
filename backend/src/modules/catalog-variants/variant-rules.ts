@@ -3,6 +3,22 @@
 // option stays its own row (own id, price, city price, stock), so nothing here touches pricing.
 
 export const MAX_OPTION_DIMENSIONS = 3;
+export const MAX_LISTING_IMAGES = 5;
+
+/** The listing's common gallery: uploaded image URLs only (no inline/base64), max 5, no repeats. */
+export function normalizeListingImages(images: unknown): string[] {
+  if (images == null) return [];
+  if (!Array.isArray(images)) throw new Error('images must be a list');
+  const out: string[] = [];
+  for (const raw of images) {
+    const u = String(raw ?? '').trim();
+    if (!u) continue;
+    if (u.length > 1000 || !/^(https:\/\/|\/api\/uploads\/)[^\s"'<>]+$/i.test(u)) throw new Error('Each image must be an uploaded image link');
+    if (!out.includes(u)) out.push(u);
+  }
+  if (out.length > MAX_LISTING_IMAGES) throw new Error(`A listing can have at most ${MAX_LISTING_IMAGES} images`);
+  return out;
+}
 const MAX_OPTION_NAME = 40;
 const MAX_OPTION_VALUE = 60;
 

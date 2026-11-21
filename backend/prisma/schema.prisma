@@ -1308,6 +1308,9 @@ model CatalogVariantGroup {
   description String?
   // Option dimensions, in display order — e.g. ["Size"] or ["Gas type", "Capacity"].
   optionNames String[]
+  // One common gallery (max 5) for the whole listing; `description` above is its one common
+  // text. Empty → each option shows its own row's images/description, as before.
+  images      String[]          @default([])
   isActive    Boolean           @default(true)
   createdBy   String? // admin User.id, audit only
   createdAt   DateTime          @default(now())
