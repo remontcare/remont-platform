@@ -21,6 +21,9 @@ const OFFER_ORDER_SELECT = {
   // What was booked per line (snapshot name + chosen options) — no customer data.
   serviceItems: { select: { itemName: true, quantity: true, variantOptions: true, service: { select: { name: true } } } },
 } as const;
+// Same booked-lines view for an assigned job (list/detail/accept) — names, quantities and the
+// customer's chosen options only (e.g. Size: 2BHK), no line prices.
+const PARTNER_JOB_LINES = { select: { itemName: true, quantity: true, variantOptions: true, service: { select: { name: true } } } } as const;
 import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PartnerRegistrationService, PartnerRegistrationModule } from '../partner-registration/partner-registration.module';
 import { PartnerLedgerService, PartnerLedgerModule } from '../partner-ledger/partner-ledger.module';
@@ -408,6 +411,7 @@ export class ServiceVendorsService {
       include: {
         customer: { select: { name: true, phone: true } },
         service: true, address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT },
+        serviceItems: PARTNER_JOB_LINES,
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -561,7 +565,7 @@ export class ServiceVendorsService {
     });
     const updated = await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId },
-      include: { customer: true, address: true, service: true },
+      include: { customer: true, address: true, service: true, serviceItems: PARTNER_JOB_LINES },
     });
     await writeOrderTimeline(this.prisma, { orderId, status: 'VENDOR_ASSIGNED', actorId: v.id, actorRole: UserRole.SERVICE_VENDOR });
     await this.wa.sendJobAssigned(v.userId, updated);
@@ -604,6 +608,7 @@ export class ServiceVendorsService {
       include: {
         customer: { select: { name: true, phone: true } },
         service: true, address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT },
+        serviceItems: PARTNER_JOB_LINES,
       },
     });
     if (!order) throw new NotFoundException();
