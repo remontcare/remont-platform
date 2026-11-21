@@ -368,17 +368,21 @@ d('ORDER & PAYMENT FLOW — full application over HTTP (throwaway DB, fake gatew
 
   // ── 7: OTP limits; admin override controls ──
   it('7. wrong start OTPs are locked out after 5 attempts (even when sent in parallel); admin cannot force completion/refund states', async () => {
+    // Its own partner: the verify-otp throttle counts per user, and earlier tests already used pB's.
+    const pC = await mkPartner(ids.pB.vendor.skills[0]);
     const cust = await mkUser('CUSTOMER');
     const co = await api('POST', '/master-orders/public/checkout', { body: cartBody([{ type: 'SERVICE', serviceId: ids.svcB.id }], { phone: cust.phone, paymentMethod: 'COD' }) });
     const child = await prisma.order.findFirstOrThrow({ where: { masterOrderId: co.data.masterOrderId } });
     await until(() => order(child.id), (o) => o.dispatchAttempts >= 1, 'dispatch');
-    await api('POST', `/vendors/service/me/jobs/${child.id}/accept`, { as: ids.pB.user });
-    await api('PATCH', `/orders/${child.id}/en-route`, { as: ids.pB.user });
+    expect((await api('POST', `/vendors/service/me/jobs/${child.id}/accept`, { as: pC.user })).status).toBeLessThan(300);
+    await api('PATCH', `/orders/${child.id}/en-route`, { as: pC.user });
     const real = (await order(child.id)).startOtp!;
-    const wrong = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999'].filter((x) => x !== real);
-    await Promise.all(wrong.map((otp) => api('POST', `/orders/${child.id}/verify-otp`, { as: ids.pB.user, body: { otp } })));
+    // 9 wrong + the right one = 10 requests: inside the verify-otp throttle (10/min), so the
+    // app-level lockout (400) is what refuses the right code — an 11th request would be a 429.
+    const wrong = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999'].filter((x) => x !== real).slice(0, 9);
+    await Promise.all(wrong.map((otp) => api('POST', `/orders/${child.id}/verify-otp`, { as: pC.user, body: { otp } })));
     expect((await order(child.id)).startOtpFailedAttempts).toBe(5);
-    const right = await api('POST', `/orders/${child.id}/verify-otp`, { as: ids.pB.user, body: { otp: real } });
+    const right = await api('POST', `/orders/${child.id}/verify-otp`, { as: pC.user, body: { otp: real } });
     expect(right.status).toBe(400); // locked until a new code is sent to the customer
     expect((await order(child.id)).status).toBe('VENDOR_EN_ROUTE');
 
