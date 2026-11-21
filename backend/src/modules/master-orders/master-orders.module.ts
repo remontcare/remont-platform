@@ -1155,10 +1155,11 @@ export class MasterOrdersService {
 
     let verifiedGatewayOrderId: string;
     if (gatewayOrderId && signature) {
-      if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
-      const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(`${gatewayOrderId}|${paymentId}`).digest('hex');
-      if (expected !== signature) throw new BadRequestException('Invalid payment signature');
-      const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId: masterOrderId } });
+      if (!this.payments.verifyPaymentSignature(gatewayOrderId, paymentId, signature)) throw new BadRequestException('Invalid payment signature');
+      // A lost PaymentTransaction is rebuilt from the Razorpay order's own notes (only when they
+      // name THIS cart and its owner) instead of leaving a paid cart unconfirmable.
+      const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId: masterOrderId } })
+        ?? await this.payments.recoverTransactionFromGateway(gatewayOrderId, masterOrderId);
       if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
       verifiedGatewayOrderId = gatewayOrderId;
     } else {

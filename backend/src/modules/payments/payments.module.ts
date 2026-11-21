@@ -23,6 +23,12 @@ export function gatewayFeeFromPayment(payment: any): { gatewayFee?: number; gate
 }
 import { PaymentNotificationsService, PaymentNotificationsModule } from '../payment-notifications/payment-notifications.module';
 
+/** Constant-time check of a hex HMAC digest (a plain !== leaks how many leading characters matched). */
+export function hmacMatches(expectedHex: string, given: unknown): boolean {
+  if (typeof given !== 'string' || given.length !== expectedHex.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expectedHex, 'utf8'), Buffer.from(given, 'utf8'));
+}
+
 interface PhonePeConfig {
   merchantId: string;
   saltKey: string;
@@ -208,13 +214,24 @@ export class PaymentsService implements OnModuleInit {
     }
   }
 
+  /**
+   * Checks a Razorpay checkout signature with the key secret this service actually runs on (the
+   * admin-saved DB key, else the env var) — callers must not read process.env directly: production
+   * keeps the live keys in the DB, so an env-only check rejected every real browser callback.
+   */
+  verifyPaymentSignature(gatewayOrderId: string, paymentId: string, signature: unknown): boolean {
+    if (!this.razorpayKeySecret) throw new BadRequestException('Payment gateway not configured');
+    const expected = crypto.createHmac('sha256', this.razorpayKeySecret).update(`${gatewayOrderId}|${paymentId}`).digest('hex');
+    return hmacMatches(expected, signature);
+  }
+
   async verifyAndMarkPaid(gatewayOrderId: string, paymentId: string, signature: string): Promise<boolean> {
     if (!this.razorpayKeySecret) throw new BadRequestException('Razorpay not configured');
     const expected = crypto
       .createHmac('sha256', this.razorpayKeySecret)
       .update(`${gatewayOrderId}|${paymentId}`)
       .digest('hex');
-    if (expected !== signature) return false;
+    if (!hmacMatches(expected, signature)) return false;
     const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId } });
     if (tx && tx.status !== 'PAID') {
       await this.prisma.paymentTransaction.update({
@@ -281,6 +298,47 @@ export class PaymentsService implements OnModuleInit {
       this.logger.warn(`Razorpay order payments fetch failed for ${gatewayOrderId}: ${e.message}`);
       return true;
     }
+  }
+
+  /**
+   * The PaymentTransaction for a Razorpay order that has none in our database (its create step
+   * failed or was lost), rebuilt from the Razorpay order itself: createRazorpayOrder() writes
+   * notes { orderId, userId } on every order, and only this server can create orders with our
+   * key. Recovered only when that order/cart exists, belongs to the user in the notes and, when
+   * the caller names one, is that exact order. The row is created PENDING — it becomes PAID only
+   * through the normal verified paths (signed webhook / signed callback + the captured amount
+   * re-read from Razorpay against the order total). Wallet top-ups and AMC are never recovered
+   * here. Null when nothing can be recovered.
+   */
+  async recoverTransactionFromGateway(gatewayOrderId: string, expectedOrderId?: string) {
+    if (!this.razorpay || !gatewayOrderId) return null;
+    let rzpOrder: any;
+    try {
+      rzpOrder = await this.razorpay.orders.fetch(gatewayOrderId);
+    } catch (e) {
+      this.logger.warn(`Razorpay order fetch failed while recovering ${gatewayOrderId}: ${e.message}`);
+      return null;
+    }
+    const notes = rzpOrder?.notes || {};
+    const orderId = typeof notes.orderId === 'string' ? notes.orderId : '';
+    const userId = typeof notes.userId === 'string' ? notes.userId : '';
+    if (!orderId || !userId || orderId === 'WALLET_TOPUP' || orderId === VENDOR_WALLET_TOPUP_MARKER || notes.amcSubscriptionId) return null;
+    if (expectedOrderId && orderId !== expectedOrderId) return null;
+    const [o, mo] = await Promise.all([
+      this.prisma.order.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+      this.prisma.masterOrder.findUnique({ where: { id: orderId }, select: { customerId: true } }),
+    ]);
+    if ((o?.customerId ?? mo?.customerId) !== userId) return null;
+    const amount = Number(rzpOrder.amount) / 100;
+    if (!(amount > 0)) return null;
+    // Another delivery/callback may have recovered it a moment ago.
+    const existing = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId } });
+    if (existing) return existing;
+    const tx = await this.prisma.paymentTransaction.create({
+      data: { orderId, masterOrderId: mo ? orderId : undefined, userId, amount, status: 'PENDING', gateway: 'RAZORPAY', gatewayOrderId },
+    });
+    this.logger.warn(`Recovered missing PaymentTransaction ${tx.id} for Razorpay order ${gatewayOrderId} (order ${orderId})`);
+    return tx;
   }
 
   async getVerifiedCapturedAmount(gatewayOrderId: string, paymentId: string): Promise<number> {
@@ -511,7 +569,7 @@ export class PaymentsService implements OnModuleInit {
     const secret = this.razorpayWebhookSecret;
     if (!secret) throw new BadRequestException('Webhook secret not configured');
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    if (expected !== signature) throw new BadRequestException('Invalid webhook signature');
+    if (!hmacMatches(expected, signature)) throw new BadRequestException('Invalid webhook signature');
 
     const event = JSON.parse(rawBody);
     this.logger.log(`Webhook: ${event.event}`);
@@ -532,12 +590,15 @@ export class PaymentsService implements OnModuleInit {
         }
       }
     }
-    await this.handleWebhookEvent(event, signature);
-    if (eventId) await this.prisma.paymentWebhookEvent.update({ where: { eventId }, data: { processedAt: new Date() } }).catch(() => {});
+    const handled = await this.handleWebhookEvent(event, signature);
+    // An event we could not apply (captured payment with no recoverable transaction) stays
+    // unprocessed, so Razorpay's retry gets another chance once the cause is fixed.
+    if (eventId && handled) await this.prisma.paymentWebhookEvent.update({ where: { eventId }, data: { processedAt: new Date() } }).catch(() => {});
     return { received: true };
   }
 
-  private async handleWebhookEvent(event: any, signature: string) {
+  /** False only when a captured payment could not be matched to any order (left for retry + alert). */
+  private async handleWebhookEvent(event: any, signature: string): Promise<boolean> {
     // Refund lifecycle → the refund workflow (RefundsService) — never marked complete on acceptance.
     if (typeof event.event === 'string' && event.event.startsWith('refund.')) {
       const refund = event.payload?.refund?.entity;
@@ -547,12 +608,22 @@ export class PaymentsService implements OnModuleInit {
           status: refund.status, amount: refund.amount, receipt: refund.receipt, internalRefundId: refund.notes?.internal_refund_id,
         });
       }
-      return;
+      return true;
     }
 
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity;
-      const tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId: payment.order_id } });
+      let tx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId: payment.order_id } });
+      // Money captured but no local record (the create step failed) — rebuild it from the
+      // Razorpay order rather than leaving a paid order stuck unpaid (and later auto-cancelled).
+      if (!tx) tx = await this.recoverTransactionFromGateway(payment.order_id);
+      if (!tx) {
+        this.logger.error(
+          `CRITICAL: payment ${payment.id} captured (₹${Number(payment.amount) / 100}) on Razorpay order ${payment.order_id} ` +
+          'but no PaymentTransaction exists and none could be recovered — reconcile manually.',
+        );
+        return false;
+      }
       if (tx) {
         await this.prisma.paymentTransaction.update({
           where: { id: tx.id },
@@ -608,6 +679,7 @@ export class PaymentsService implements OnModuleInit {
         }
       }
     }
+    return true;
   }
 
   private async notifyPaymentFailed(userId: string, orderId: string, reason?: string) {

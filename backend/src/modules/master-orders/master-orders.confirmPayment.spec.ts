@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MasterOrdersService } from './master-orders.module';
+import { hmacMatches } from '../payments/payments.module';
 
 /**
  * PAYMENT SECURITY FIX — same underpayment-bypass regression coverage as
@@ -26,7 +27,17 @@ function makeService() {
   const coupons: any = {};
   const memberships: any = {};
   const cities: any = {};
-  const payments: any = { getVerifiedCapturedAmount: jest.fn() };
+  // recoverTransactionFromGateway: nothing recoverable unless a test says otherwise.
+  // verifyPaymentSignature: the real HMAC check against the secret the test configures.
+  const payments: any = {
+    getVerifiedCapturedAmount: jest.fn(),
+    recoverTransactionFromGateway: jest.fn().mockResolvedValue(null),
+    verifyPaymentSignature: jest.fn((g: string, p: string, s: unknown) => {
+      const secret = process.env.RAZORPAY_KEY_SECRET;
+      if (!secret) throw new BadRequestException('Payment gateway not configured');
+      return hmacMatches(crypto.createHmac('sha256', secret).update(`${g}|${p}`).digest('hex'), s);
+    }),
+  };
   const dispatch: any = { dispatch: jest.fn(async () => []) };
   const routing: any = { route: jest.fn(async () => {}) };
   const paymentNotify: any = { paymentSuccess: jest.fn(async () => {}) };

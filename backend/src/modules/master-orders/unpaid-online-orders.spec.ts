@@ -6,6 +6,7 @@ import { BadRequestException } from '@nestjs/common';
 import { AuthMasterCheckoutDto, MasterOrdersService } from './master-orders.module';
 import { GuestBookingDto, RoutingService, DispatchService, OrdersService } from '../orders/orders.module';
 import { AdminService } from '../admin/admin.module';
+import { hmacMatches } from '../payments/payments.module';
 
 /**
  * A cancelled, failed or pending online payment must never become a confirmed or
@@ -100,6 +101,13 @@ describe('Unpaid online attempts are not shown as orders to the customer', () =>
 describe('Duplicate / concurrent payment callbacks confirm exactly once', () => {
   const SECRET = 'test-razorpay-secret';
   beforeEach(() => { process.env.RAZORPAY_KEY_SECRET = SECRET; });
+  // PaymentsService stand-in: the real HMAC check against the configured secret.
+  const paymentsMock = () => ({
+    getVerifiedCapturedAmount: jest.fn(async () => 1000),
+    recoverTransactionFromGateway: jest.fn(async () => null),
+    verifyPaymentSignature: (g: string, p: string, s: unknown) =>
+      hmacMatches(crypto.createHmac('sha256', SECRET).update(`${g}|${p}`).digest('hex'), s),
+  }) as any;
 
   it('browser callback and webhook-driven confirm at the same moment → one confirmation, one dispatch', async () => {
     const master: any = { id: 'mo1', masterOrderNumber: 'MREM-1', customerId: 'c1', totalAmount: 1000, walletUsed: 0, status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', childOrders: [{ id: 'ch1', serviceId: 's1', bundleDispatchDeferred: false, type: 'SERVICE' }] };
@@ -114,7 +122,7 @@ describe('Duplicate / concurrent payment callbacks confirm exactly once', () => 
       })),
     };
     const routing: any = { route: jest.fn(async () => undefined) };
-    const svc = new MasterOrdersService(prisma, {} as any, {} as any, {} as any, { getVerifiedCapturedAmount: jest.fn(async () => 1000) } as any, { dispatch: jest.fn() } as any, routing, { paymentSuccess: jest.fn(async () => undefined) } as any, {} as any, {} as any, { notify: jest.fn() } as any);
+    const svc = new MasterOrdersService(prisma, {} as any, {} as any, {} as any, paymentsMock(), { dispatch: jest.fn() } as any, routing, { paymentSuccess: jest.fn(async () => undefined) } as any, {} as any, {} as any, { notify: jest.fn() } as any);
     const sig = crypto.createHmac('sha256', SECRET).update('order_1|pay_1').digest('hex');
     await Promise.allSettled([
       svc.confirmPayment('mo1', 'pay_1', 'order_1', sig),
@@ -125,7 +133,7 @@ describe('Duplicate / concurrent payment callbacks confirm exactly once', () => 
 
   it('a forged or missing signature never confirms', async () => {
     const prisma: any = { masterOrder: { findUnique: jest.fn(async () => ({ id: 'mo1', customerId: 'c1', totalAmount: 1000, status: 'PENDING_PAYMENT', paymentStatus: 'PENDING', childOrders: [] })) }, paymentTransaction: { findFirst: jest.fn(async () => null) } };
-    const svc = new MasterOrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const svc = new MasterOrdersService(prisma, {} as any, {} as any, {} as any, paymentsMock(), {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
     await expect(svc.confirmPayment('mo1', 'pay_1', 'order_1', 'forged')).rejects.toBeInstanceOf(BadRequestException);
     await expect(svc.confirmPayment('mo1', 'pay_1')).rejects.toBeInstanceOf(BadRequestException);
   });

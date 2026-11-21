@@ -1135,18 +1135,14 @@ export class OrdersService {
 
     let verifiedGatewayOrderId: string;
     if (gatewayOrderId && signature) {
-      // Re-verify HMAC on every confirm call — cannot be faked without RAZORPAY_KEY_SECRET
-      if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
-      const expected = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-        .update(`${gatewayOrderId}|${paymentId}`)
-        .digest('hex');
-      if (expected !== signature) throw new BadRequestException('Invalid payment signature');
+      // Re-verify HMAC on every confirm call — cannot be faked without the gateway key secret
+      if (!this.payments.verifyPaymentSignature(gatewayOrderId, paymentId, signature)) throw new BadRequestException('Invalid payment signature');
 
-      // Ensure this gatewayOrderId is actually linked to this DB order (prevents reusing another order's payment)
+      // Ensure this gatewayOrderId is actually linked to this DB order (prevents reusing another order's payment);
+      // a lost link is rebuilt only from the Razorpay order's own notes naming THIS order and its owner.
       const linkedTx = await this.prisma.paymentTransaction.findFirst({
         where: { gatewayOrderId, orderId },
-      });
+      }) ?? await this.payments.recoverTransactionFromGateway(gatewayOrderId, orderId);
       if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
       verifiedGatewayOrderId = gatewayOrderId;
     } else {
@@ -1513,14 +1509,10 @@ export class OrdersService {
    * gateway signature AND the amount Razorpay actually captured.
    */
   async confirmBalancePayment(orderId: string, paymentId: string, gatewayOrderId: string, signature: string) {
-    if (!process.env.RAZORPAY_KEY_SECRET) throw new BadRequestException('Payment gateway not configured');
-    const expected = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${gatewayOrderId}|${paymentId}`)
-      .digest('hex');
-    if (expected !== signature) throw new BadRequestException('Invalid payment signature');
+    if (!this.payments.verifyPaymentSignature(gatewayOrderId, paymentId, signature)) throw new BadRequestException('Invalid payment signature');
 
-    const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId } });
+    const linkedTx = await this.prisma.paymentTransaction.findFirst({ where: { gatewayOrderId, orderId } })
+      ?? await this.payments.recoverTransactionFromGateway(gatewayOrderId, orderId);
     if (!linkedTx) throw new BadRequestException('Payment does not belong to this order');
     const captured = await this.payments.getVerifiedCapturedAmount(gatewayOrderId, paymentId);
     if (captured + 0.01 < Number(linkedTx.amount)) throw new BadRequestException('Payment amount does not cover the balance. Please contact support.');

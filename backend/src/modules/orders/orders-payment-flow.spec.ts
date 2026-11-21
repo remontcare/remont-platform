@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { OrdersService, RoutingService } from './orders.module';
+import { hmacMatches } from '../payments/payments.module';
 
 function makeService() {
   const orderPatch: Record<string, any> = {};
@@ -37,6 +38,14 @@ function makeService() {
     initiatePayment: jest.fn(async () => ({ gateway: 'RAZORPAY', gatewayOrderId: 'rzp_order_1', keyId: 'rzp_test_key', txId: 'tx-1' })),
     createPaymentLink: jest.fn(async () => null),
     getVerifiedCapturedAmount: jest.fn(),
+    // nothing recoverable from the gateway unless a test says otherwise
+    recoverTransactionFromGateway: jest.fn(async () => null),
+    // the real HMAC check against the secret the test configures
+    verifyPaymentSignature: jest.fn((g: string, p: string, s: unknown) => {
+      const secret = process.env.RAZORPAY_KEY_SECRET;
+      if (!secret) throw new BadRequestException('Payment gateway not configured');
+      return hmacMatches(require('crypto').createHmac('sha256', secret).update(`${g}|${p}`).digest('hex'), s);
+    }),
   };
   const dispatch: any = { dispatch: jest.fn(async () => {}) };
   const routing: any = { route: jest.fn(async () => {}) };
