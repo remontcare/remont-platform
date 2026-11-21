@@ -8769,10 +8769,13 @@ window.RemontMedia = (function () {
 
     // Also update CITY_SERVICES map from API data
     activeCities.forEach(function(c) {
-      CITY_SERVICES[c.name] = (c.activeServiceKeys || []).map(function(k){ return k.toLowerCase().replace(/_service$/,'').replace(/_/g,'-'); });
-      // Map API keys (AC_SERVICE) to frontend keys (ac)
-      var keyMap = { 'ac_service':'ac','plumbing':'plumbing','electrical':'electrical','appliance':'appliance','cleaning':'cleaning','interior':'interior','renovation':'renovation','construction':'construction' };
-      CITY_SERVICES[c.name] = (c.activeServiceKeys || []).map(function(k){ return keyMap[k.toLowerCase()] || k.toLowerCase(); });
+      // Same key → catalog key mapping as buildServicePanel(); without the "_" → "-" fallback a
+      // category like PEST_CONTROL (catalog key pest-control) was shown as unavailable in its city.
+      var keyMap = { 'AC_SERVICE':'ac','PLUMBING':'plumbing','ELECTRICAL':'electrical','APPLIANCE':'appliance','CLEANING':'cleaning','INTERIOR':'interior','RENOVATION':'renovation','CONSTRUCTION':'construction','PEST_CONTROL':'pest-control','FALSE_CEILING':'false-ceiling','FALSE-CEILING':'false-ceiling' };
+      CITY_SERVICES[c.name] = (c.activeServiceKeys || []).map(function(k){
+        k = String(k);
+        return keyMap[k] || keyMap[k.toUpperCase()] || k.toLowerCase().replace(/_/g, '-');
+      });
     });
 
     // Re-apply filter for current city
@@ -8898,6 +8901,46 @@ window.RemontMedia = (function () {
     var firstKey = categories[0] ? (keyMap[categories[0].key] || categories[0].key.toLowerCase().replace(/_/g,'-')) : null;
     if (firstKey && serviceData[firstKey]) renderService(firstKey);
     applyCityFilter();
+    applyCategoryDeepLink();
+  }
+
+  // ── ?cat=<key> deep link (e.g. /?cat=plumbing from the /services/<slug> pages) ──
+  // Opens that category's sub-category list exactly as tapping its chip in the top nav
+  // does (desktop: #shop panel; mobile: the catalog overlay). Runs once, only after the
+  // API categories are in serviceData, and goes through the same city-availability check.
+  var _catDeepLinkDone = false;
+  function applyCategoryDeepLink() {
+    if (_catDeepLinkDone) return;
+    var params = new URLSearchParams(window.location.search);
+    var raw = (params.get('cat') || '').trim().toLowerCase();
+    if (!raw) return;
+    _catDeepLinkDone = true;
+    params.delete('cat');
+    var qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    // /services/<slug> page slugs → homepage category keys
+    var alias = { 'ac-repair':'ac', 'ac-service':'ac', 'electrical-work':'electrical', 'appliance-repair':'appliance',
+                  'home-cleaning':'cleaning', 'interior-design':'interior', 'pest_control':'pest-control' };
+    var fkey = alias[raw] || raw.replace(/_/g, '-');
+    if (fkey === 'interior') { window.location.href = '/interior'; return; }
+    var isMobileView = window.matchMedia('(max-width: 768px)').matches;
+    if (!serviceData[fkey]) { // ?cat=all or an unknown key → the full category list
+      if (isMobileView) { if (typeof window.openMobileCatalogPicker === 'function') window.openMobileCatalogPicker(); return; }
+      var shopEl = document.getElementById('shop');
+      if (shopEl) setTimeout(function() { shopEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+      return;
+    }
+    if (isMobileView) {
+      if (typeof window.openMobileCatalog === 'function') window.openMobileCatalog(fkey);
+      return;
+    }
+    var chip = null;
+    document.querySelectorAll('.cat-nav-inner .cat-link').forEach(function(a) {
+      if (!chip && (a.getAttribute('onclick') || '').indexOf("'" + fkey + "'") !== -1) chip = a;
+    });
+    selectCategoryChip(chip, fkey);
+    var shop = document.getElementById('shop');
+    if (shop) setTimeout(function() { shop.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
   }
 
   // ── Load top products for ALL service categories in ONE batched call ──
