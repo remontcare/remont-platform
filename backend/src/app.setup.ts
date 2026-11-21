@@ -16,6 +16,16 @@ export function configureHttpApp(app: INestApplication) {
   if (proxyHops > 0) (app.getHttpAdapter().getInstance() as any).set('trust proxy', proxyHops);
   new Logger('Bootstrap').log(`trust proxy hops: ${proxyHops}`);
 
+  // Security headers on every API response, uploaded files included (no extra dependency).
+  (app.getHttpAdapter().getInstance() as any).disable?.('x-powered-by');
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+  });
+
   // Base64 image uploads can exceed the default 100kb body limit.
   // `verify` keeps the exact raw bytes on req.rawBody: this parser runs before Nest's own
   // (rawBody: true) parser and consumes the stream, so without it req.rawBody was never set and

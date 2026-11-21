@@ -20,3 +20,7 @@ graphify-out/
 # so keep it out of git — one `git add .` would otherwise commit live credentials.
 .claude/settings.json
 .claude/settings.local.json
+
+# Database dumps / local backups never belong in the repo
+*.dump
+*.sql.gz

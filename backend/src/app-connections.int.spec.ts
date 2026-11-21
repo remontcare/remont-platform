@@ -141,20 +141,20 @@ d('app connections', () => {
     expect(others.every((s) => s < 300)).toBe(true);
   });
 
-  // HELD: the production DEV_OTP_OVERRIDE refusal is an OTP change and OTP/MSG91 is out of scope
-  // this phase (production logins may depend on it until MSG91 is verified). Re-enable with it.
-  it.skip('the fixed test code does not sign in on production unless deliberately allowed', async () => {
+  // The fixed test code is never a universal login on production: only for DEV_OTP_ALLOWED_PHONES.
+  it('the fixed test code signs in on production only for allowlisted numbers', async () => {
     const phone = ph();
     Object.assign(process.env, { DEV_OTP_OVERRIDE: '424242', NODE_ENV: 'production' });
     try {
       expect((await api('POST', '/auth/send-otp', null, { phone })).status).toBeLessThan(300);
       expect((await api('POST', '/auth/verify-otp', null, { phone, otp: '424242' })).status).toBe(401);
-      process.env.ALLOW_DEV_OTP_IN_PRODUCTION = 'true';
+      process.env.DEV_OTP_ALLOWED_PHONES = `+910000000000, ${phone}`;
+      expect((await api('POST', '/auth/send-otp', null, { phone: ph() })).status).toBeLessThan(300);
       expect((await api('POST', '/auth/verify-otp', null, { phone, otp: '424242' })).status).toBeLessThan(300);
     } finally {
       process.env.NODE_ENV = 'test';
       delete process.env.DEV_OTP_OVERRIDE;
-      delete process.env.ALLOW_DEV_OTP_IN_PRODUCTION;
+      delete process.env.DEV_OTP_ALLOWED_PHONES;
     }
   });
 
@@ -168,7 +168,8 @@ d('app connections', () => {
     };
     const capped = await mk({ dispatchAttempts: 24 });
     const past = await mk({ dispatchAttempts: 1, slotStart: new Date(Date.now() - 3 * 86400_000) });
-    const live = await mk({ dispatchAttempts: 1, slotStart: new Date(Date.now() + 86400_000) });
+    // within the dispatch release window (a slot days ahead is held by design until its release time)
+    const live = await mk({ dispatchAttempts: 1, slotStart: new Date(Date.now() + 3600_000) });
     await sweep.sweep();
     const get = (o: any) => prisma.order.findUniqueOrThrow({ where: { id: o.id } });
     expect((await get(capped)).dispatchAttempts).toBe(24);

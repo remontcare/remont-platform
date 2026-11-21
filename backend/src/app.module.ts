@@ -5,6 +5,9 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AppThrottlerGuard, DEFAULT_THROTTLE_LIMIT } from './common/app-throttler.guard';
+import { throttlerStorageFromEnv } from './common/resilient-throttler-storage';
+
+const throttlerStorage = throttlerStorageFromEnv();
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -59,7 +62,10 @@ import { AuthorizedPersonModule } from './modules/authorized-person/authorized-p
     ConfigModule.forRoot({ isGlobal: true }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: DEFAULT_THROTTLE_LIMIT }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: DEFAULT_THROTTLE_LIMIT }],
+      ...(throttlerStorage ? { storage: throttlerStorage } : {}),
+    }),
 
     PrismaModule,
 

@@ -20,6 +20,20 @@ import { WhatsappService, WhatsappModule } from '../whatsapp/whatsapp.module';
 // only be granted by a SUPER_ADMIN via PATCH admin/users/:id/role — closes
 // the self-provisioning hole this endpoint previously had.
 const SELF_SIGNUP_ROLES: UserRole[] = [UserRole.CUSTOMER, UserRole.SERVICE_VENDOR, UserRole.PRODUCT_VENDOR];
+/**
+ * Whether the shared test login code (DEV_OTP_OVERRIDE) may be used for this phone. In production
+ * only for the numbers in DEV_OTP_ALLOWED_PHONES (comma-separated; compared on the last 10 digits)
+ * and off when that list is empty — never a universal login to every account. Outside production
+ * it works for any number (local development).
+ */
+export function devOtpAllowedFor(phone: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (!env.DEV_OTP_OVERRIDE) return false;
+  if (env.NODE_ENV !== 'production') return true;
+  const last10 = (p: string) => String(p || '').replace(/\D/g, '').slice(-10);
+  const allowed = String(env.DEV_OTP_ALLOWED_PHONES || '').split(',').map(last10).filter((p) => p.length === 10);
+  return allowed.includes(last10(phone));
+}
+
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
 const OTP_MAX_ATTEMPTS = 5;
 
@@ -159,9 +173,10 @@ export class AuthService {
     // fixed test code can be enabled via DEV_OTP_OVERRIDE env var. Still requires a prior
     // send-otp call (the check above), and still runs the real role-elevation logic below —
     // unlike the old frontend-only "1234 always works" shortcuts this replaces, which skipped
-    // the backend (and role elevation) entirely. Unset the env var to disable.
+    // the backend (and role elevation) entirely. Unset the env var to disable. In production it
+    // only works for the numbers in DEV_OTP_ALLOWED_PHONES (see devOtpAllowedFor).
     const devOtp = process.env.DEV_OTP_OVERRIDE;
-    const isDevOtp = !!devOtp && dto.otp === devOtp;
+    const isDevOtp = !!devOtp && dto.otp === devOtp && devOtpAllowedFor(dto.phone);
     if (!isDevOtp) {
       if (user.otpAttempts >= OTP_MAX_ATTEMPTS) {
         await logFailure(user.id, user.role, 'Too many attempts');
