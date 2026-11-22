@@ -1024,7 +1024,6 @@ footer.site a{color:var(--amber)}
 
   // Real, standalone subpages for each category — same map used by the
   // homepage's own _activateSearchResult() for its category-level results.
-  var SVC_SUBPAGES = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/interior', renovation:'/services/renovation', construction:'/services/construction' };
 
   var SYNONYM_MAP = [
     { key:'ac', name:'AC Service & Repair', icon:'❄️', terms:['ac','air condition','airconditioner','aircon','cooling','split ac','inverter ac','ac gas','ac filter','ac not cooling','ac not working','thandi hawa nahi','thanda nahi','gas leak','gas leakage'] },
@@ -1283,7 +1282,8 @@ footer.site a{color:var(--amber)}
       // Never jumps straight into booking (same principle as products never adding
       // straight to cart) — navigates to that service's real section/page instead,
       // matching the homepage's own _activateSearchResult behaviour exactly.
-      window.location.href = SVC_SUBPAGES[entry.categoryKey] || '/';
+      // /services/<key> is resolved to the real category by the backend's service discovery.
+      window.location.href = '/services/' + encodeURIComponent(entry.categoryKey || '') + (entry.id ? '?service=' + encodeURIComponent(entry.id) : '');
     } else if (entry.type === 'product') {
       // Never adds to cart — only the catalog's own +/Add to Cart button does that.
       window.location.href = '/product/' + encodeURIComponent(entry.slug);

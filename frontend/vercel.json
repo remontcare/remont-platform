@@ -6,6 +6,7 @@
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://remont-platform-production.up.railway.app/api/:path*" },
     { "source": "/product/:slug", "destination": "/product" },
+    { "source": "/services/:slug", "destination": "/services/category" },
     { "source": "/policy/:slug", "destination": "/policy" },
     { "source": "/admin/settings/legal-policies", "destination": "/admin/legal-policies" },
     { "source": "/admin/settings/legal-policies/:slug", "destination": "/admin/legal-policies" },

@@ -1,0 +1,66 @@
+/* Live category services (shared/category-live.js) — used by /services/<slug> and the static
+   service landing pages. Self-contained: falls back to its own colours when the page has none. */
+.cl-root,.cl-cartbar,.cl-toast{--cl-accent:var(--sienna,#C4601A);--cl-ink:var(--charcoal,#1A1A1A);--cl-muted:var(--txt-muted,#6E6860);--cl-line:var(--mist,#E8E3DA);--cl-soft:var(--cream,#F5F0E8);--cl-ok:var(--sage,#6B7C5E);font-family:inherit;color:var(--cl-ink)}
+.cl-root *{box-sizing:border-box}
+.cl-hero{display:grid;grid-template-columns:1fr;gap:18px;padding:28px 0 20px;border-bottom:1px solid var(--cl-line)}
+.cl-hero.has-img{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);align-items:center}
+@media(max-width:720px){.cl-hero.has-img{grid-template-columns:1fr}}
+.cl-eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--cl-accent);margin-bottom:8px}
+.cl-hero h1{font-family:var(--ff-display,Georgia,serif);font-size:clamp(28px,4vw,42px);font-weight:600;line-height:1.15;margin:0 0 10px}
+.cl-hero p{color:var(--cl-muted);font-size:15.5px;max-width:68ch;margin:0}
+.cl-hero-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.cl-pill{background:var(--cl-soft);border:1px solid var(--cl-line);border-radius:100px;padding:5px 12px;font-size:12.5px;font-weight:600;color:var(--cl-ink)}
+.cl-hero-img{width:100%;aspect-ratio:4/3;border-radius:16px;background:var(--cl-soft) center/cover no-repeat}
+.cl-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:22px 0 12px}
+.cl-head h2{font-family:var(--ff-display,Georgia,serif);font-size:26px;font-weight:600;margin:0}
+.cl-head span{font-size:13px;color:var(--cl-muted)}
+.cl-note{border-radius:12px;padding:12px 14px;font-size:14px;margin:12px 0;background:#fff7ed;border:1px solid #fed7aa;color:#7c2d12}
+.cl-note a{color:var(--cl-accent);font-weight:700;text-decoration:underline}
+.cl-subs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin:0 0 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.cl-subs::-webkit-scrollbar{display:none}
+.cl-sub{flex:0 0 auto;border:1.5px solid var(--cl-line);background:#fff;border-radius:100px;padding:8px 14px;font:inherit;font-size:13px;font-weight:600;color:var(--cl-ink);cursor:pointer;min-height:40px}
+.cl-sub.on{border-color:var(--cl-accent);background:#fff8f2;color:var(--cl-accent)}
+.cl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+@media(max-width:600px){.cl-grid{grid-template-columns:1fr}}
+.cl-card{background:#fff;border:1px solid var(--cl-line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;scroll-margin-top:90px;transition:box-shadow .2s,border-color .2s}
+.cl-card.hl{border-color:var(--cl-accent);box-shadow:0 0 0 2px rgba(196,96,26,.25)}
+.cl-img{aspect-ratio:16/10;background:var(--cl-soft) center/cover no-repeat;display:grid;place-items:center;font-size:44px}
+.cl-thumbs{display:flex;gap:6px;padding:8px 14px 0}
+.cl-thumbs button{width:44px;height:34px;border-radius:6px;border:1.5px solid var(--cl-line);background:#fff center/cover no-repeat;cursor:pointer;padding:0}
+.cl-thumbs button.on{border-color:var(--cl-accent)}
+.cl-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1}
+.cl-body h3{font-size:16px;font-weight:700;line-height:1.35;margin:0}
+.cl-price{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cl-price b{font-size:19px}
+.cl-price s{font-size:13px;color:var(--cl-muted)}
+.cl-price .cl-off{font-size:12px;font-weight:700;color:var(--cl-ok)}
+.cl-from{font-size:12px;font-weight:600;color:var(--cl-muted);margin-right:-4px}
+.cl-unit{font-size:12px;color:var(--cl-muted)}
+.cl-desc{font-size:13.5px;color:var(--graphite,#2D2D2D);margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.cl-desc.open{display:block}
+.cl-more{background:none;border:none;padding:0;font:inherit;font-size:12.5px;font-weight:700;color:var(--cl-accent);cursor:pointer;align-self:flex-start}
+.cl-incl{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--cl-muted)}
+.cl-incl li::before{content:'✓ ';color:var(--cl-ok);font-weight:700}
+.clv-row{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.clv-lbl{font-weight:600;color:var(--cl-muted);font-size:12px}
+.clv-chips{display:flex;flex-wrap:wrap;gap:6px}
+.clv-chip{border:1.5px solid var(--cl-line);background:#fff;border-radius:10px;padding:7px 12px;min-height:38px;font:inherit;font-size:13px;font-weight:600;color:var(--cl-ink);cursor:pointer}
+.clv-chip.on{border-color:var(--cl-accent);background:#fff8f2;box-shadow:0 0 0 1px var(--cl-accent)}
+.clv-chip.alt{border-style:dashed;color:var(--cl-muted)}
+.cl-actions{display:flex;align-items:center;gap:10px;margin-top:auto;padding-top:6px;flex-wrap:wrap}
+.cl-add{background:var(--cl-accent);color:#fff;border:none;border-radius:100px;padding:11px 20px;min-height:44px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.cl-add[disabled]{background:#d6d3cf;cursor:not-allowed}
+.cl-quote{border:1.5px solid var(--cl-ink);color:var(--cl-ink);background:#fff;border-radius:100px;padding:10px 18px;min-height:44px;font-size:14px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center}
+.cl-incart{font-size:12.5px;font-weight:700;color:var(--cl-ok)}
+.cl-empty,.cl-loading,.cl-error{padding:40px 16px;text-align:center;color:var(--cl-muted);font-size:15px}
+.cl-error button,.cl-empty a{margin-top:12px}
+.cl-cartbar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:120;max-width:640px;margin:0 auto;background:var(--cl-ink);color:#fff;border-radius:16px;padding:12px 14px 12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+/* The mobile app shell already shows its own "N items · View cart" pill — no second bar there. */
+body.cl-has-bar{padding-bottom:84px}
+@media(max-width:768px){body.as-has-nav .cl-cartbar{display:none}body.as-has-nav.cl-has-bar{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}}
+.cl-cartbar[hidden]{display:none}
+.cl-cartbar a{background:var(--cl-accent);color:#fff;border-radius:100px;padding:10px 16px;font-weight:700;font-size:14px;text-decoration:none;white-space:nowrap}
+.cl-toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:var(--cl-ink);color:#fff;border-radius:100px;padding:10px 18px;font-size:13.5px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .25s;z-index:130}
+.cl-toast.show{opacity:1}
+.cl-choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.cl-choices a{border:1.5px solid var(--cl-line);border-radius:100px;padding:8px 14px;font-weight:600;font-size:14px;color:var(--cl-accent);background:#fff}

@@ -8009,6 +8009,28 @@ window.RemontMedia = (function () {
     if (typeof cartCheckout === 'function') cartCheckout();
   }
 
+  // A category from the server — only same-site /services/<slug> links are followed.
+  function _remiSafeCategory(p) {
+    var url = p && String(p.url || '');
+    if (!p || !p.name || !/^\/services\/[a-z0-9_-]{1,80}$/i.test(url)) return null;
+    return { key: String(p.key || ''), name: String(p.name), url: url };
+  }
+  // In-chat card with the category link(s) — the customer can always tap it, even if the
+  // automatic open is interrupted.
+  function remiRenderCategoryCard(cats, title) {
+    var msgs = document.getElementById('remi-messages');
+    if (!msgs) return;
+    var card = document.createElement('div');
+    card.className = 'remi-cat-card';
+    card.style.cssText = 'align-self:flex-start;max-width:88%;background:#fff;border:1.5px solid #f0ac6b;border-radius:14px;padding:12px 14px;font-size:13px;color:#111;box-shadow:0 1px 6px rgba(0,0,0,.08)';
+    card.innerHTML = '<div style="font-weight:700;margin-bottom:8px">' + escHtml(title) + '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px">' + cats.map(function (c) {
+        return '<a href="' + escHtml(c.url) + '" style="padding:8px 14px;border-radius:20px;background:#c4601a;color:#fff;font-size:12.5px;font-weight:600;text-decoration:none">' + escHtml(c.name) + ' →</a>';
+      }).join('') + '</div>';
+    msgs.appendChild(card);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
   function remiHandleActions(actions) {
     if (!actions || !actions.length) return;
     var cartChanged = false;
@@ -8030,6 +8052,19 @@ window.RemontMedia = (function () {
         } else if (a.type === 'OPEN_WHATSAPP') {
           var num = (a.payload && a.payload.number) || '919232071064';
           window.open('https://wa.me/' + num, '_blank', 'noopener');
+        } else if (a.type === 'OPEN_CATEGORY' && a.payload) {
+          // REMI found the category — open it for the customer (same discovery as search/voice).
+          var cat = _remiSafeCategory(a.payload);
+          if (!cat) return;
+          remiRenderCategoryCard([cat], 'Opening ' + cat.name + ' for you');
+          setTimeout(function () {
+            if (window.matchMedia('(max-width: 768px)').matches && typeof closeRemiChat === 'function') closeRemiChat();
+            if (typeof window.openCategoryInPage === 'function') window.openCategoryInPage(cat.key, cat.url);
+            else window.location.href = cat.url;
+          }, 900);
+        } else if (a.type === 'CATEGORY_CHOICES' && a.payload && Array.isArray(a.payload.choices)) {
+          var choices = a.payload.choices.map(_remiSafeCategory).filter(Boolean).slice(0, 4);
+          if (choices.length) remiRenderCategoryCard(choices, 'Which one do you need?');
         }
       } catch (e) { console.error('Remi action failed:', a, e); }
     });
@@ -8560,7 +8595,8 @@ window.RemontMedia = (function () {
   function _resultItemHtml(entry, idx) {
     var badge = '<span class="sd-badge ' + entry.type + '">' + TYPE_LABELS[entry.type] + '</span>';
     var icon = TYPE_ICONS[entry.type];
-    if (entry.type === 'service') icon = (SYNONYM_MAP.filter(function(s){ return s.key === entry.categoryKey; })[0] || {}).icon || CAT_ICONS.DEFAULT;
+    if (entry._icon) icon = escHtml(entry._icon);
+    else if (entry.type === 'service') icon = (SYNONYM_MAP.filter(function(s){ return s.key === entry.categoryKey; })[0] || {}).icon || CAT_ICONS.DEFAULT;
     var meta = entry.category || '';
     var priceHtml = '';
     if (entry.type === 'service' && entry.priceLabel) priceHtml = '<div class="sd-price">' + entry.priceLabel + '</div>';
@@ -8598,14 +8634,12 @@ window.RemontMedia = (function () {
     var entry = _searchLastResults[idx];
     if (!entry) return;
     closeSearchDrop();
+    if (entry._url) { window.location.href = entry._url; return; }
     if (entry.type === 'service') {
       // Clicking a search result must never jump straight into booking (same principle
-      // as products never adding straight to cart) — navigate to that service's real
-      // section/page instead, whether the match was the category itself or one specific
-      // line item (e.g. "Gas Refill") within it. Booking itself stays a deliberate,
-      // separate action the customer takes from that page/section.
-      var svcSubpages = { ac:'/services/ac-repair', plumbing:'/services/plumbing', electrical:'/services/electrical-work', appliance:'/services/appliance-repair', cleaning:'/services/home-cleaning', interior:'/interior', renovation:'/services/renovation', construction:'/services/construction' };
-      window.location.href = svcSubpages[entry.categoryKey] || '/';
+      // as products never adding straight to cart) — it opens the category's page
+      // (/services/<key>, resolved by the backend's service discovery) on that service.
+      window.location.href = '/services/' + encodeURIComponent(entry.categoryKey || '') + (entry.id ? '?service=' + encodeURIComponent(entry.id) : '');
     } else if (entry.type === 'product') {
       // Clicking a search result must never add to cart (only the +/Add to Cart button
       // does that) — navigate to the real Product Detail page instead. Legacy hardcoded
@@ -8639,6 +8673,52 @@ window.RemontMedia = (function () {
     if (headerInput) headerInput.setAttribute('aria-expanded', 'true');
   }
 
+  // ── Service discovery (backend) — the same resolver REMI, voice and the app use ──────
+  // English / Hindi / Hinglish / typos → the real category + its matching services. Results
+  // are cached per query; a slow answer for an old query never overwrites a newer one.
+  var _discoverCache = {};
+  function _discover(query) {
+    var q = (query || '').trim().toLowerCase().slice(0, 200);
+    if (!q) return Promise.resolve(null);
+    if (_discoverCache[q]) return _discoverCache[q];
+    var p = apiGet('/api/v1/services/discover?q=' + encodeURIComponent(q)).then(function(res) {
+      var d = res && res.data && !res.categories ? res.data : res;
+      return d && Array.isArray(d.categories) ? d : null;
+    }).catch(function() { delete _discoverCache[q]; return null; });
+    _discoverCache[q] = p;
+    return p;
+  }
+  function _discoveryEntries(d) {
+    if (!d) return [];
+    var out = [];
+    var catEntry = function(c, label) {
+      return { type: 'service', name: c.name, category: label + ' · ' + c.serviceCount + ' service' + (c.serviceCount === 1 ? '' : 's'),
+        _icon: c.icon || '🛠️', _url: c.url, priceLabel: null };
+    };
+    if (d.best) {
+      out.push(catEntry(d.best, 'Best match'));
+      (d.services || []).slice(0, 3).forEach(function(s) {
+        var price = Number(s.basePrice) || 0;
+        out.push({ type: 'service', name: s.name, category: d.best.name, _icon: d.best.icon || '🛠️',
+          _url: d.best.url + '?service=' + encodeURIComponent(s.id), priceLabel: price > 0 ? '₹' + price.toLocaleString('en-IN') : null });
+      });
+      (d.categories || []).slice(1, 2).forEach(function(c) { if (c.confidence >= 0.2) out.push(catEntry(c, 'Also')); });
+    } else if (d.ambiguous) {
+      (d.categories || []).slice(0, 4).forEach(function(c) { out.push(catEntry(c, 'Did you mean')); });
+    }
+    return out;
+  }
+  // Puts the discovery matches first and drops the older client-side service guesses.
+  function _mergeDiscovery(result, d) {
+    var extra = _discoveryEntries(d);
+    if (!extra.length) return result;
+    var grouped = [{ type: 'service', label: d.best ? 'Best match' : 'Choose a category', items: extra }]
+      .concat(result.grouped.filter(function(g) { return g.type !== 'service'; }));
+    var flat = [];
+    grouped.forEach(function(g) { flat = flat.concat(g.items); });
+    return { grouped: grouped, flat: flat };
+  }
+
   function runSearch(query) {
     _fetchProductsForSearch(); // voice search and links can search without focusing the input
     query = (query || '').trim();
@@ -8646,6 +8726,21 @@ window.RemontMedia = (function () {
     var result = _runUnifiedSearch(query);
     renderSearchResults(result, query);
     _searchActiveIdx = -1;
+    if (_searchScope === 'product') return;
+    _discover(query).then(function(d) {
+      // Still the query on screen? (typing moved on → a newer runSearch owns the dropdown)
+      if (!d || !headerInput || headerInput.value.trim() !== query) return;
+      var merged = _mergeDiscovery(_runUnifiedSearch(query), d);
+      if (merged.flat.length) { renderSearchResults(merged, query); _searchActiveIdx = -1; }
+    });
+  }
+
+  // Enter / voice: a clear match opens its category page straight away ("I need a plumber").
+  function _searchGo(query, onNoMatch) {
+    _discover(query).then(function(d) {
+      if (d && d.best && d.best.url) { closeSearchDrop(); window.location.href = d.best.url; return; }
+      onNoMatch();
+    });
   }
 
   function _moveSearchActive(delta) {
@@ -8683,7 +8778,8 @@ window.RemontMedia = (function () {
       else if (e.key === 'Enter') {
         clearTimeout(searchTimer);
         if (_searchActiveIdx >= 0 && _searchLastResults[_searchActiveIdx]) window._activateSearchResult(_searchActiveIdx);
-        else runSearch(headerInput.value);
+        else if (_searchScope === 'product') runSearch(headerInput.value);
+        else { var q = headerInput.value; _searchGo(q, function() { runSearch(q); }); }
       } else if (e.key === 'Escape') closeSearchDrop();
     });
   }
@@ -8705,13 +8801,15 @@ window.RemontMedia = (function () {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { micBtn.title = 'Voice search not supported in this browser'; return; }
     var recognition = new SR();
-    recognition.lang = 'en-IN';
+    recognition.lang = 'en-IN'; // en-IN transcribes English and Hinglish ("mujhe plumber chahiye")
     recognition.continuous = false;
     recognition.interimResults = false;
     var listening = false;
     micBtn.onclick = function() {
       if (listening) { recognition.stop(); return; }
-      recognition.start();
+      // Hindi site language → Hindi recognition (Devanagari is understood by the same discovery).
+      recognition.lang = (typeof siteLang !== 'undefined' && siteLang === 'HI') ? 'hi-IN' : 'en-IN';
+      try { recognition.start(); } catch (e) { /* already starting */ }
     };
     recognition.onstart = function() {
       listening = true;
@@ -8722,9 +8820,17 @@ window.RemontMedia = (function () {
     };
     recognition.onresult = function(e) {
       var transcript = e.results[0][0].transcript;
-      if (headerInput) { headerInput.value = transcript; runSearch(transcript); }
+      if (!headerInput) return;
+      headerInput.value = transcript;
+      // Same backend discovery as typing: a clear match opens its category, otherwise the
+      // results (or the choices for an ambiguous request) stay open to pick from.
+      _searchGo(transcript, function() { runSearch(transcript); });
     };
-    recognition.onerror = function() { recognition.stop(); };
+    recognition.onerror = function(ev) {
+      try { recognition.stop(); } catch (e) {}
+      if (ev && (ev.error === 'not-allowed' || ev.error === 'service-not-allowed')) micBtn.title = 'Allow microphone access to search by voice';
+      else if (ev && ev.error === 'network') micBtn.title = 'Voice search needs an internet connection';
+    };
     recognition.onend = function() {
       listening = false;
       micBtn.style.background = '';
@@ -8920,11 +9026,21 @@ window.RemontMedia = (function () {
     params.delete('cat');
     var qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
-    // /services/<slug> page slugs → homepage category keys
-    var alias = { 'ac-repair':'ac', 'ac-service':'ac', 'electrical-work':'electrical', 'appliance-repair':'appliance',
+    openCategoryInPage(raw);
+  }
+
+  // Opens a category's services on this page (desktop: #shop panel; mobile: the catalog overlay),
+  // from a homepage key, a /services/<slug> page slug or a DB key (AC_SERVICE). `fallbackUrl` is
+  // used when this page has no such category loaded — e.g. REMI's OPEN_CATEGORY action.
+  window.openCategoryInPage = openCategoryInPage;
+  function openCategoryInPage(raw, fallbackUrl) {
+    raw = String(raw || '').trim().toLowerCase();
+    // /services/<slug> page slugs and DB keys → homepage category keys
+    var alias = { 'ac-repair':'ac', 'ac-service':'ac', 'ac-service-repair':'ac', 'electrical-work':'electrical', 'appliance-repair':'appliance',
                   'home-cleaning':'cleaning', 'interior-design':'interior', 'pest_control':'pest-control' };
-    var fkey = alias[raw] || raw.replace(/_/g, '-');
+    var fkey = alias[raw] || alias[raw.replace(/_/g, '-')] || raw.replace(/_/g, '-');
     if (fkey === 'interior') { window.location.href = '/interior'; return; }
+    if (fallbackUrl && !serviceData[fkey]) { window.location.href = fallbackUrl; return; }
     var isMobileView = window.matchMedia('(max-width: 768px)').matches;
     if (!serviceData[fkey]) { // ?cat=all or an unknown key → the full category list
       if (isMobileView) { if (typeof window.openMobileCatalogPicker === 'function') window.openMobileCatalogPicker(); return; }
