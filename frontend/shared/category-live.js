@@ -20,6 +20,8 @@
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function cssUrl(u) { return "url('" + String(u).replace(/['"\\()\s]/g, encodeURIComponent) + "')"; }
+  // Small drawn icons (inline/.svg) are shown whole and centred, photos fill the box.
+  function isIcon(u) { return /^data:image\/svg|\.svg(\?|$)/i.test(String(u || '')); }
   function inr(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
   function unwrap(j) { return j && j.data !== undefined && j.category === undefined && !Array.isArray(j) ? j.data : j; }
@@ -64,7 +66,12 @@
       var off = orig > price && price > 0 ? Math.round((1 - price / orig) * 100) : 0;
       var waText = encodeURIComponent('Hi Remont, I want a quote for ' + (grouped ? e.group.name : s.name) + (grouped ? ' (' + CV.memberLabel(e, sel) + ')' : ''));
       return '<article class="cl-card" id="svc-' + esc(s.id) + '" data-entry="' + idx + '" data-sel="' + sel + '">' +
-        '<div class="cl-img"' + (images[0] ? ' style="background-image:' + cssUrl(images[0]) + '" role="img" aria-label="' + esc(grouped ? e.group.name : s.name) + '"' : '') + '>' + (images[0] ? '' : esc(state.page.category.icon || '🛠️')) + '</div>' +
+        // A real <img> (inline SVG icons are not valid CSS backgrounds); the category emoji shows
+        // when there is no image or it fails to load.
+        '<div class="cl-img">' + (images[0]
+          ? '<img src="' + esc(images[0]) + '" alt="' + esc(grouped ? e.group.name : s.name) + '" loading="lazy" decoding="async" class="' + (isIcon(images[0]) ? 'icon' : '') + '" onerror="this.hidden=true;this.nextElementSibling.hidden=false">' +
+            '<span hidden>' + esc(state.page.category.icon || '🛠️') + '</span>'
+          : '<span>' + esc(state.page.category.icon || '🛠️') + '</span>') + '</div>' +
         (images.length > 1 ? '<div class="cl-thumbs">' + images.map(function (u, i) {
           return '<button type="button" class="' + (i ? '' : 'on') + '" data-img="' + esc(u) + '" aria-label="Photo ' + (i + 1) + '" style="background-image:' + cssUrl(u) + '"></button>';
         }).join('') + '</div>' : '') +
@@ -185,7 +192,8 @@
       if (t.closest('.cl-more')) { var d = card.querySelector('.cl-desc'); d.classList.toggle('open'); t.textContent = d.classList.contains('open') ? 'Show less' : 'Read more'; return; }
       var thumb = t.closest('.cl-thumbs button');
       if (thumb) {
-        card.querySelector('.cl-img').style.backgroundImage = cssUrl(thumb.getAttribute('data-img'));
+        var big = card.querySelector('.cl-img img'), src = thumb.getAttribute('data-img');
+        if (big) { big.hidden = false; big.nextElementSibling.hidden = true; big.className = isIcon(src) ? 'icon' : ''; big.src = src; }
         Array.prototype.forEach.call(thumb.parentNode.children, function (b) { b.classList.toggle('on', b === thumb); });
         return;
       }
