@@ -42,6 +42,8 @@ export interface FrontendAction {
     | 'ADD_SERVICE_TO_CART'
     | 'ADD_PRODUCT_TO_CART'
     | 'OPEN_CART'
+    | 'OPEN_CATEGORY'
+    | 'CATEGORY_CHOICES'
     | 'CONTINUE_PARTNER_REGISTRATION'
     | 'CONTINUE_SELLER_REGISTRATION'
     | 'OPEN_WHATSAPP';
@@ -138,7 +140,7 @@ export const AI_CHAT_TOOLS: OpenAiTool[] = [
     function: {
       name: 'search_services',
       description:
-        "Search Remont India's real service catalog. The match is a literal substring match on the service's real name, so short, plain keyword phrases work best (e.g. 'AC Repair', 'Plumbing', 'Modular Kitchen') — long natural-language phrases like 'AC service and cooling issue' often match nothing even when a relevant service exists. If a query returns no results, call this again with a shorter or different keyword (e.g. just the category word) before telling the customer nothing was found. Returns real services with their real id, name, category, current basePrice, and unit — use this before quoting any price or recommending a specific service, never guess or remember a price.",
+        "Find the right service category and services in Remont India's real catalog. Understands English, Hindi and Hinglish requests and typos ('Mujhe plumber chahiye', 'AC servicing karwani hai', 'ghar mein paani leak ho raha hai') — pass the customer's need in their own words. Returns { category, services } when one category fits (that category's page is opened for the customer automatically), { choices, services } when several fit (ask which one), or a plain list of services. Services carry their real id, name, category, current basePrice and unit — use this before quoting any price or recommending a specific service, never guess or remember a price. If nothing is found, try once more with a simpler keyword before telling the customer.",
       parameters: {
         type: 'object',
         properties: {
@@ -357,7 +359,7 @@ export class AiToolExecutor {
     try {
       switch (toolName) {
         case 'search_services':
-          return { result: await this.searchServices(args.query) };
+          return await this.searchServices(args.query);
         case 'search_products':
           return { result: await this.searchProducts(args.query, ctx.city) };
         case 'check_city_availability':
@@ -389,13 +391,32 @@ export class AiToolExecutor {
     }
   }
 
-  private async searchServices(query: string) {
-    const rows = await this.servicesSvc.search(query || '');
-    return rows.slice(0, 8).map((s: any) => ({
+  // Same discovery as the website search and voice: the matched real category (which the browser
+  // then opens — REMI navigates, it doesn't just talk), the choices when the request is ambiguous,
+  // and the real services with their catalogue prices.
+  private async searchServices(query: string): Promise<ToolResult> {
+    const d: any = await this.servicesSvc.discover(query || '');
+    const rows: any[] = d.services.length ? d.services : await this.servicesSvc.search(query || '');
+    const services = rows.slice(0, 8).map((s: any) => ({
       id: s.id, name: s.name, categoryKey: s.category?.key, categoryName: s.category?.name,
       basePrice: Number(s.basePrice), originalPrice: s.originalPrice ? Number(s.originalPrice) : null,
       unit: s.unit, durationMinutes: s.durationMinutes,
     }));
+    const cat = (c: any) => ({ key: c.key, name: c.name, url: c.url, services: c.serviceCount });
+    if (d.best) {
+      return {
+        result: { category: cat(d.best), services, note: `The ${d.best.name} page is being opened for the customer.` },
+        action: { type: 'OPEN_CATEGORY', payload: { key: d.best.key, name: d.best.name, url: d.best.url } },
+      };
+    }
+    if (d.ambiguous && d.categories.length) {
+      const choices = d.categories.slice(0, 4).map(cat);
+      return {
+        result: { choices, services, note: 'More than one category fits — ask the customer which one they mean (the choices are shown to them).' },
+        action: { type: 'CATEGORY_CHOICES', payload: { choices: choices.map((c: any) => ({ key: c.key, name: c.name, url: c.url })) } },
+      };
+    }
+    return { result: services };
   }
 
   private async searchProducts(query: string, city?: string) {

@@ -5,6 +5,7 @@ function makeDeps() {
   return {
     servicesSvc: {
       search: jest.fn(async (): Promise<any> => []),
+      discover: jest.fn(async (): Promise<any> => ({ best: null, ambiguous: false, categories: [], services: [] })),
       getService: jest.fn(async (id: string): Promise<any> => {
         if (id === 'svc-1') return { id: 'svc-1', name: 'AC Service', basePrice: 499, unit: 'per visit', isActive: true, category: { key: 'ac' } };
         if (id === 'svc-off') return { id: 'svc-off', name: 'Old Service', basePrice: 100, isActive: false, category: { key: 'x' } };
@@ -36,9 +37,36 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
       { id: 'svc-1', name: 'AC Service & Repair', category: { key: 'ac', name: 'AC' }, basePrice: 499, originalPrice: 699, unit: 'per visit', durationMinutes: 60 },
     ]);
     const { exec } = makeExecutor(deps);
-    const { result } = await exec.execute('search_services', { query: 'AC cooling' }, {});
+    const { result, action } = await exec.execute('search_services', { query: 'AC cooling' }, {});
+    expect(deps.servicesSvc.discover).toHaveBeenCalledWith('AC cooling');
     expect(deps.servicesSvc.search).toHaveBeenCalledWith('AC cooling');
     expect(result).toEqual([{ id: 'svc-1', name: 'AC Service & Repair', categoryKey: 'ac', categoryName: 'AC', basePrice: 499, originalPrice: 699, unit: 'per visit', durationMinutes: 60 }]);
+    expect(action).toBeUndefined();
+  });
+
+  it('search_services on a clear request ("Mujhe plumber chahiye") opens the real category — REMI navigates', async () => {
+    const deps = makeDeps();
+    deps.servicesSvc.discover = jest.fn(async () => ({
+      best: { key: 'PLUMBING', name: 'Plumbing', url: '/services/plumbing', serviceCount: 48 }, ambiguous: false,
+      categories: [{ key: 'PLUMBING', name: 'Plumbing', url: '/services/plumbing', serviceCount: 48 }],
+      services: [{ id: 'p-1', name: 'Tap Repair', category: { key: 'PLUMBING', name: 'Plumbing' }, basePrice: 199, unit: 'per tap', durationMinutes: 30 }],
+    }) as any);
+    const { exec } = makeExecutor(deps);
+    const { result, action } = await exec.execute('search_services', { query: 'Mujhe plumber chahiye' }, {});
+    expect(action).toEqual({ type: 'OPEN_CATEGORY', payload: { key: 'PLUMBING', name: 'Plumbing', url: '/services/plumbing' } });
+    expect(result).toMatchObject({ category: { key: 'PLUMBING', url: '/services/plumbing', services: 48 }, services: [{ id: 'p-1', basePrice: 199 }] });
+    expect(deps.servicesSvc.search).not.toHaveBeenCalled();
+  });
+
+  it('search_services on an ambiguous request offers the real choices instead of guessing', async () => {
+    const deps = makeDeps();
+    const c = (key: string, name: string) => ({ key, name, url: '/services/' + key.toLowerCase(), serviceCount: 3 });
+    deps.servicesSvc.discover = jest.fn(async () => ({ best: null, ambiguous: true, categories: [c('FALSE-CEILING', 'False Ceiling'), c('ELECTRICAL', 'Electrical')], services: [] }) as any);
+    const { exec } = makeExecutor(deps);
+    const { result, action } = await exec.execute('search_services', { query: 'false ceiling' }, {});
+    expect(action).toEqual({ type: 'CATEGORY_CHOICES', payload: { choices: [
+      { key: 'FALSE-CEILING', name: 'False Ceiling', url: '/services/false-ceiling' }, { key: 'ELECTRICAL', name: 'Electrical', url: '/services/electrical' }] } });
+    expect((result as any).choices).toHaveLength(2);
   });
 
   it('search_products calls the real product catalog with the customer city', async () => {
@@ -244,7 +272,7 @@ describe('AiToolExecutor — every tool reuses a real existing service, never in
 
   it('a tool that throws internally is caught — execute() never propagates or leaks the internal error', async () => {
     const deps = makeDeps();
-    deps.servicesSvc.search = jest.fn(async () => { throw new Error('DB unreachable'); });
+    deps.servicesSvc.discover = jest.fn(async () => { throw new Error('DB unreachable'); });
     const { exec } = makeExecutor(deps);
     const { result } = await exec.execute('search_services', { query: 'AC' }, {});
     expect((result as any).error).not.toContain('DB unreachable');
