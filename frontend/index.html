@@ -3488,6 +3488,12 @@
 .sub-svc-card .svc-cart-btn,.sub-svc-card .svc-book-btn{height:40px!important;font-size:14px!important;font-weight:700!important;border-radius:10px!important;width:100%!important}
 .sub-svc-card .svc-cart-btn{background:#fff!important;border:1.5px solid #c2410c!important;color:#c2410c!important}
 
+/* Quick Repair category filter */
+.qr-pills{display:flex;gap:8px;overflow-x:auto;padding:4px 0 14px;scrollbar-width:none}
+.qr-pills::-webkit-scrollbar{display:none}
+.qr-pill{flex:0 0 auto;border:1.5px solid #ece6dc;background:#fff;border-radius:100px;padding:7px 14px;font:inherit;font-size:13px;font-weight:600;color:#1f2937;cursor:pointer}
+.qr-pill.on{border-color:#c2410c;color:#c2410c;background:#fff8f2}
+
 /* Search → dashboard: the searched service's card, outlined for a moment */
 .sub-svc-card.search-hl{outline:3px solid #c2410c;outline-offset:2px;animation:searchHlPulse 1.2s ease-out 2}
 @keyframes searchHlPulse{0%{box-shadow:0 0 0 0 rgba(194,65,12,.45)}100%{box-shadow:0 0 0 14px rgba(194,65,12,0)}}
@@ -4143,7 +4149,7 @@ window.RemontMedia = (function () {
         <div class="section-label" data-en="Services + Products" data-hi="सेवाएं + प्रोडक्ट्स">Services + Products</div>
         <h2 data-en="Pick a Service, &lt;strong&gt;Shop Related Products&lt;/strong&gt;" data-hi="सेवा चुनें, &lt;strong&gt;संबंधित प्रोडक्ट्स खरीदें&lt;/strong&gt;">Pick a Service, <strong>Shop Related Products</strong></h2>
       </div>
-      <a href="/services" class="btn-outline" data-en="Browse All →" data-hi="सभी देखें →">Browse All →</a>
+      <a href="/services" class="btn-outline" onclick="openBrowseAll(event)" data-en="Browse All →" data-hi="सभी देखें →">Browse All →</a>
     </div>
 
     <div class="shop-grid reveal">
@@ -4362,8 +4368,10 @@ window.RemontMedia = (function () {
     if (p.isActive === false) return null;
     if (p.stock != null && Number(p.stock) <= 0) return null;
     var cat = p.category || {};
+    if (!p.slug) return null;   // a deal must open its real product page
     return {
       id:      p.id,
+      slug:    p.slug,
       name:    p.name || 'Product',
       price:   price,
       mrp:     mrp,
@@ -4384,7 +4392,7 @@ window.RemontMedia = (function () {
 
   function cardHTML(d) {
     return '' +
-      '<div class="deal-card" data-deal-id="' + esc(d.id) + '" data-deal-name="' + esc(d.name) +
+      '<div class="deal-card" data-deal-id="' + esc(d.id) + '" data-deal-slug="' + esc(d.slug) + '" data-deal-name="' + esc(d.name) +
            '" data-deal-price="' + d.price + '">' +
         '<span class="dc-off-badge">' + d.off + '% OFF</span>' +
         imgMarkup(d) +
@@ -4406,7 +4414,7 @@ window.RemontMedia = (function () {
       ? ('इस डील पर ' + inr(d.saving) + ' की बचत — प्रमाणित Remont वेंडर्स द्वारा इंस्टॉलेशन उपलब्ध।')
       : ('Save ' + inr(d.saving) + ' on this deal — installation available through certified Remont vendors.');
     return '' +
-      '<div class="deal-feature" data-deal-id="' + esc(d.id) + '" data-deal-name="' + esc(d.name) +
+      '<div class="deal-feature" data-deal-id="' + esc(d.id) + '" data-deal-slug="' + esc(d.slug) + '" data-deal-name="' + esc(d.name) +
            '" data-deal-price="' + d.price + '">' +
         '<div class="df-tag">' + (isHi() ? 'सबसे बड़ी बचत' : 'Biggest Saving') + ' · ' + d.off + '% OFF</div>' +
         '<h3>' + esc(d.name.length > 52 ? d.name.slice(0, 52) + '…' : d.name) + '</h3>' +
@@ -4449,7 +4457,9 @@ window.RemontMedia = (function () {
         deals.sort(function (a, b) { return b.off - a.off; });
         render(deals.slice(0, DEALS_LIMIT + 1));
       })
-      .catch(function () { render(fallback()); });
+      // No live data → no section (the old sample deals weren't real products and could not
+      // be bought).
+      .catch(function () { render([]); });
   }
 
   /* ── Interactions ─────────────────────────────────────────────────────── */
@@ -4476,7 +4486,11 @@ window.RemontMedia = (function () {
       var host = e.target.closest('#deals .deal-card, #deals .deal-feature');
       if (!host) return;
       e.preventDefault();
-      addDealToCart(host);
+      // Only the "+" button adds to the cart (with a toast); the card and "Shop Now" open the
+      // product page, like the All Products cards.
+      if (e.target.closest('.dc-add')) { addDealToCart(host); return; }
+      var slug = host.getAttribute('data-deal-slug');
+      if (slug) window.location.href = '/product/' + encodeURIComponent(slug);
     });
   }
 
@@ -6377,13 +6391,21 @@ window.RemontMedia = (function () {
     card.replaceWith(tmp.firstChild);
   }, true);
 
+  // Bundle Offer + Related Products — only real catalogue products linked to this service
+  // category (GET /products/by-categories, which uses the service↔product category links).
+  // A category with none shows nothing at all: no banner, no title, no "View All", and never
+  // the illustrative sample products. Wrapped so it can be filled in place once products load.
   function productsSectionHtml(d) {
+    var inner = d && d._fromApi && d.products && d.products.length ? productsSectionInner(d) : '';
+    return '<div class="dp-products" data-cat="' + escHtml((d && d.key) || '') + '">' + inner + '</div>';
+  }
+  function productsSectionInner(d) {
     return `
       <div class="panel-promo">
         <div class="pp-text">
           <div class="pp-tag">Bundle Offer</div>
           <div class="pp-title">Book Service + Buy Product</div>
-          <div class="pp-sub">Save ${BUNDLE_DISCOUNT_PERCENT_DISPLAY}% on this service when you add any related product below to your cart too — applied automatically at checkout.</div>
+          <div class="pp-sub">Save ${BUNDLE_DISCOUNT_PERCENT_DISPLAY}% on this ${escHtml(d.title)} service when you also buy one of these related products — applied automatically at checkout.</div>
         </div>
         <button type="button" class="pp-btn" onclick="_scrollToBundleProducts()">Claim Bundle →</button>
       </div>
@@ -6428,8 +6450,16 @@ window.RemontMedia = (function () {
     // auto-select) funnels through here, so intercepting once covers them all.
     if (key === 'interior') { window.location.href = '/interior'; return; }
     targetId = targetId || 'displayPanel';
+    // A hidden/unknown category never leaves the previous one on screen: open the first visible one.
+    if (!serviceData[key] || (window._visibleCatKeys && window.isCategoryVisible && !window.isCategoryVisible(key))) {
+      var firstVisible = (window._visibleCatKeys || []).find(function (k) { return k !== 'interior' && serviceData[k]; });
+      if (!firstVisible || firstVisible === key) return;
+      key = firstVisible;
+      document.querySelectorAll('.svc-item').forEach(function (i) { i.classList.toggle('active', i.getAttribute('data-svc') === key); });
+    }
     const d = serviceData[key];
     if (!d) return;
+    window._dashMode = 'category';
     const hasSubCats = d.subCategories && d.subCategories.length > 0;
     const html = `
       <div class="panel-head">
@@ -6604,6 +6634,94 @@ window.RemontMedia = (function () {
 
   // Category chips in the top nav (Plumbing/Electrical/etc.) — select the matching
   // category in the #shop panel instead of just anchoring to the same generic section.
+  // ── Quick Repair: fast fixes at fixed prices, across every visible category ─────────────
+  // The most-booked services (GET /services/popular), topped up with each category's quickest
+  // fixed-price services. "Quick" is decided by the data (priced, ≤ ₹5,000, ≤ 3 hours), never by
+  // category name. Cards are the normal service cards (+ Cart / Book Now unchanged).
+  var QUICK_MAX_PRICE = 5000, QUICK_MAX_MINUTES = 180, QUICK_LIMIT = 12, QUICK_PER_CATEGORY = 2;
+  var _quickPopular = null;
+  function _quickServices() {
+    var visible = (window._visibleCatKeys || Object.keys(serviceData)).filter(function (k) { return serviceData[k] && serviceData[k]._fromApi; });
+    var byId = {};
+    visible.forEach(function (k) { (serviceData[k].subServices || []).forEach(function (s) { byId[s.id] = { s: s, k: k }; }); });
+    var quick = function (s) { return s.pNum > 0 && s.pNum <= QUICK_MAX_PRICE && (!s.durationMinutes || s.durationMinutes <= QUICK_MAX_MINUTES); };
+    var out = [], seen = {}, perCat = {};
+    var take = function (hit) {
+      if (!hit || seen[hit.s.id] || !quick(hit.s) || out.length >= QUICK_LIMIT) return;
+      if ((perCat[hit.k] || 0) >= QUICK_PER_CATEGORY + 1) return;
+      seen[hit.s.id] = 1; perCat[hit.k] = (perCat[hit.k] || 0) + 1; out.push(hit);
+    };
+    (_quickPopular || []).forEach(function (p) { take(byId[p.id]); });
+    if (out.length < 8) {
+      visible.forEach(function (k) {
+        (serviceData[k].subServices || []).filter(quick)
+          .sort(function (a, b) { return a.pNum - b.pNum || (a.durationMinutes || 0) - (b.durationMinutes || 0); })
+          .slice(0, QUICK_PER_CATEGORY).forEach(function (s) { take({ s: s, k: k }); });
+      });
+    }
+    return out;
+  }
+  function _renderQuickRepair(filterKey) {
+    var panel = document.getElementById('displayPanel');
+    if (!panel) return;
+    var all = _quickServices();
+    var cats = [];
+    all.forEach(function (h) { if (cats.indexOf(h.k) === -1) cats.push(h.k); });
+    var list = filterKey ? all.filter(function (h) { return h.k === filterKey; }) : all;
+    panel.innerHTML =
+      '<div class="panel-head"><div><h3>Quick Repair — fast fixes, fixed prices</h3>' +
+      '<p>Most-booked quick services across categories · verified professionals</p></div>' +
+      '<div class="panel-head-right"><span class="panel-pill green">3-Click Book</span></div></div>' +
+      (cats.length > 1 ? '<div class="qr-pills" role="tablist" aria-label="Filter quick repairs">' +
+        ['<button type="button" class="qr-pill' + (!filterKey ? ' on' : '') + '" data-qr="">All</button>'].concat(cats.map(function (k) {
+          return '<button type="button" class="qr-pill' + (filterKey === k ? ' on' : '') + '" data-qr="' + escHtml(k) + '">' + escHtml(serviceData[k].title) + '</button>';
+        })).join('') + '</div>' : '') +
+      (list.length
+        ? '<div class="sub-svc-grid">' + svcCardsHtml(list.map(function (h) { return h.s; })) + '</div>'
+        : '<div class="sub-row-title">Quick repairs are loading…</div>');
+  }
+  window.openQuickRepair = function (chipEl) {
+    document.querySelectorAll('.cat-nav-inner .cat-link').forEach(function (a) { a.classList.remove('active'); });
+    if (chipEl) chipEl.classList.add('active');
+    document.querySelectorAll('.svc-item').forEach(function (i) { i.classList.remove('active'); }); // no category is selected
+    window._dashMode = 'quick';
+    _renderQuickRepair('');
+    var shop = document.getElementById('shop');
+    if (shop) shop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!_quickPopular) {
+      apiGet('/api/v1/services/popular').then(function (res) {
+        _quickPopular = Array.isArray(res) ? res : ((res && res.data) || []);
+        if (window._dashMode === 'quick') _renderQuickRepair('');
+      }).catch(function () { _quickPopular = []; });
+    }
+  };
+  document.addEventListener('click', function (ev) {
+    var pill = ev.target.closest('#displayPanel .qr-pill');
+    if (pill) _renderQuickRepair(pill.getAttribute('data-qr') || '');
+  });
+
+  // ── "Browse All →": every visible category as tiles, right here on the dashboard ─────────
+  window.openBrowseAll = function (ev) {
+    if (ev) ev.preventDefault();
+    var panel = document.getElementById('displayPanel');
+    var keys = (window._visibleCatKeys || []).filter(function (k) { return serviceData[k] || k === 'interior'; });
+    if (!panel || !keys.length) { if (ev && ev.currentTarget && ev.currentTarget.href) window.location.href = ev.currentTarget.href; return; }
+    document.querySelectorAll('.svc-item').forEach(function (i) { i.classList.remove('active'); });
+    window._dashMode = 'all';
+    panel.innerHTML =
+      '<div class="panel-head"><div><h3>All services</h3><p>Choose a category to see its services and prices</p></div></div>' +
+      '<div class="subcat-tile-grid">' + keys.map(function (k) {
+        var d = serviceData[k] || { title: 'Interior Design', icon: '🏠' };
+        var n = d.subServices ? d.subServices.length : 0;
+        return '<div class="subcat-tile" onclick="selectCategoryChip(null,\'' + escJs(k) + '\')">' +
+          '<span class="icn">' + catIconHtml({ logoUrl: d.logoUrl, icon: d.icon }) + '</span>' +
+          '<div class="nm">' + escHtml(d.title) + '</div>' +
+          '<span class="tile-cta">' + (n ? n + ' services →' : 'View →') + '</span></div>';
+      }).join('') + '</div>';
+    var shop = document.getElementById('shop');
+    if (shop) shop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   function selectCategoryChip(chipEl, fkey) {
     document.querySelectorAll('.cat-nav-inner .cat-link').forEach(function(a){ a.classList.remove('active'); });
     if (chipEl) chipEl.classList.add('active');
@@ -8959,6 +9077,17 @@ window.RemontMedia = (function () {
   }
 
   // ── Service categories — load from API ────────────────────────────
+  // Active services in a category from /services/categories: its flat list, or the sub-categories'.
+  function categoryServiceCount(cat) {
+    var flat = (cat.services || []).length;
+    var nested = (cat.subCategories || []).reduce(function (n, sc) { return n + (sc.services || []).length; }, 0);
+    return Math.max(flat, nested);
+  }
+  function isCategoryVisible(key) {
+    return key === 'interior' || (!!window._visibleCatKeys && window._visibleCatKeys.indexOf(key) !== -1 && !!serviceData[key]);
+  }
+  window.isCategoryVisible = isCategoryVisible;
+
   function buildServicePanel(categories) {
     if (!categories || categories.length === 0) return;
 
@@ -8977,7 +9106,14 @@ window.RemontMedia = (function () {
     Object.keys(seen).forEach(function(k){ deduped.push(seen[k]); });
     // ?? not ||: a sortOrder of 0 is the admin's first position.
     deduped.sort(function(a,b){ return (a.sortOrder ?? 99)-(b.sortOrder ?? 99); });
-    categories = deduped;
+    // Only categories with at least one active service are shown anywhere (chips, sidebar,
+    // mobile catalog, search). Interior keeps its own page and always stays. Nothing is listed
+    // by hand: a category appears on the next load once an admin adds its first service.
+    categories = deduped.filter(function(cat) {
+      var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-');
+      return fkey === 'interior' || categoryServiceCount(cat) > 0;
+    });
+    window._visibleCatKeys = categories.map(function(cat) { return keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g, '-'); });
 
     // Update serviceData from API categories
     function mapSvc(s, cat) {
@@ -9034,6 +9170,9 @@ window.RemontMedia = (function () {
         _fromApi: true,
       };
     });
+    // The built-in sample categories (shown only until the API answers) must not linger in
+    // search or the panel once the real catalogue is here.
+    Object.keys(serviceData).forEach(function (k) { if (!serviceData[k]._fromApi && k !== 'interior') delete serviceData[k]; });
     _indexServicesFromData();
 
     // The mobile catalog (shared/m-catalog.js) renders from the same list. It may load after
@@ -9063,7 +9202,7 @@ window.RemontMedia = (function () {
     // panel (was: every chip pointed at the same generic href="#shop" with no filtering).
     var catNav = document.querySelector('.cat-nav-inner');
     if (catNav) {
-      var navLinks = ['<a href="#shop" class="cat-link active" onclick="selectCategoryChip(this,\'ac\')"><span class="ic">⚡</span> Quick Repair</a>'];
+      var navLinks = ['<a href="#shop" class="cat-link" onclick="event.preventDefault();openQuickRepair(this)"><span class="ic">⚡</span> Quick Repair</a>'];
       categories.forEach(function(cat){
         var fkey = keyMap[cat.key] || cat.key.toLowerCase().replace(/_/g,'-');
         navLinks.push('<a href="#shop" class="cat-link'+(cat.isPremium?' premium-link':'')+'" onclick="selectCategoryChip(this,\''+fkey+'\')"><span class="ic">'+catIconHtml(cat)+'</span> '+cat.name+'</a>');
@@ -9230,8 +9369,8 @@ window.RemontMedia = (function () {
       Object.keys(grouped).forEach(function(catKey) {
         var fkey = keyMap[catKey] || catKey.toLowerCase().replace(/_/g,'-');
         var products = grouped[catKey] || [];
-        // "View All" opens /shop on this category, or the whole shop when it has no products
-        if (serviceData[fkey]) serviceData[fkey].productCatKey = products.length ? catKey : '';
+        // "View All" opens /shop on the linked PRODUCT category of these products
+        if (serviceData[fkey]) serviceData[fkey].productCatKey = products.length ? ((products[0].category && products[0].category.key) || '') : '';
         if (!products.length || !serviceData[fkey]) return;
         serviceData[fkey].products = products.map(function(p){
           return {
@@ -9250,6 +9389,10 @@ window.RemontMedia = (function () {
             id: p.id,
             slug: p.slug,
           };
+        });
+        // Fill the block in any panel already showing this category (no re-render of the panel).
+        document.querySelectorAll('.dp-products[data-cat="' + catKey + '"]').forEach(function (el) {
+          el.innerHTML = productsSectionInner(serviceData[fkey]);
         });
       });
     }).catch(function(){});
@@ -9281,7 +9424,29 @@ window.RemontMedia = (function () {
     localStorage.setItem('remont_cart', JSON.stringify(c));
     cart = c;
     updateCartBadge();
-    showToast('Added to cart: ' + item.name, 'success');
+    showCartToast(item.name);
+  }
+
+  // "Added to cart · View cart" — every add-to-cart on the page goes through addToCart(), so
+  // service cards, deals, All Products and suggestions all confirm the same way.
+  function showCartToast(name) {
+    var old = document.getElementById('cart-toast');
+    if (old) old.remove();
+    var t = document.createElement('div');
+    t.id = 'cart-toast';
+    t.setAttribute('role', 'status');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);padding:12px 14px 12px 20px;border-radius:12px;background:#1f2937;color:#fff;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;';
+    var msg = document.createElement('span');
+    msg.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0';
+    msg.textContent = '✓ Added to cart' + (name ? ' · ' + name : '');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'View cart';
+    btn.style.cssText = 'flex:0 0 auto;border:0;border-radius:8px;background:#c2410c;color:#fff;font:inherit;font-weight:700;padding:8px 12px;cursor:pointer';
+    btn.onclick = function () { t.remove(); if (typeof openCart === 'function') openCart(); };
+    t.appendChild(msg); t.appendChild(btn);
+    document.body.appendChild(t);
+    setTimeout(function () { t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 300); }, 3500);
   }
 
   // Add a service to cart (called from service card buttons)
@@ -10854,7 +11019,7 @@ function cartCheckout() {
           <span>Coupon discount</span><span id="co-coupon-line-amt">−₹0</span>
         </div>
         <div id="co-bundle-line" style="display:none;justify-content:space-between;font-size:13px;color:#15803d;margin-bottom:6px">
-          <span>🎁 Bundle offer (<span id="co-bundle-line-pct">10</span>% off service)</span><span id="co-bundle-line-amt">−₹0</span>
+          <span>🎁 Bundle discount (<span id="co-bundle-line-pct">10</span>% off service)<span id="co-bundle-line-what" style="color:#4b5563;font-weight:400"></span></span><span id="co-bundle-line-amt">−₹0</span>
         </div>
         <div id="co-charges"></div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:6px">
@@ -11843,8 +12008,9 @@ function recalcTotals() {
     if (item.type === 'service') { serviceSubtotal += lineTotal; hasService = true; }
     else { hasProduct = true; }
   });
-  var isBundleCart = hasService && hasProduct;
-  var bundleDiscount = isBundleCart ? Math.round(serviceSubtotal * _coBundleDiscountPercent / 100 * 100) / 100 : 0;
+  // The bundle offer only applies to a service bought with a RELATED product, which only the
+  // server knows — so no client-side guess; it appears once the server quote arrives.
+  var bundleDiscount = 0;
 
   var couponDiscount = _coCoupon ? Math.min(_coCoupon.discountAmount, subtotal - bundleDiscount) : 0;
   var discounted = Math.max(0, subtotal - couponDiscount - bundleDiscount);
@@ -11860,6 +12026,7 @@ function recalcTotals() {
   if (_coQuote && _coQuoteFor === quoteKey) {
     subtotal = _coQuote.subtotal;
     bundleDiscount = _coQuote.bundleDiscount || 0;
+    if (_coQuote.bundleDiscountPercent) _coBundleDiscountPercent = _coQuote.bundleDiscountPercent;
     couponDiscount = (_coQuote.couponDiscount || 0) + (_coQuote.membershipDiscount || 0);
     gst = _coQuote.gstAmount;
     _coDeliveryCharge = _coQuote.deliveryCharge || 0;
@@ -11890,6 +12057,8 @@ function recalcTotals() {
   if (bundleDiscount > 0) {
     bundleLine.style.display = 'flex';
     document.getElementById('co-bundle-line-pct').textContent = _coBundleDiscountPercent;
+    var lbl = document.getElementById('co-bundle-line-what');
+    if (lbl) lbl.textContent = (_coQuote && _coQuote.bundleLabel) ? ' · ' + _coQuote.bundleLabel : '';
     document.getElementById('co-bundle-line-amt').textContent = '−₹' + bundleDiscount.toLocaleString('en-IN');
   } else {
     bundleLine.style.display = 'none';

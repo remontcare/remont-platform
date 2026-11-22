@@ -239,3 +239,11 @@ footer :focus-visible, header.site :focus-visible, .top-strip :focus-visible, .a
   .chip a { display: inline-flex; align-items: center; min-height: 44px; }
   .faq-item p, footer.site { font-size: 16px; }
 }
+
+/* Notices (e.g. "A new version of Remont is ready") must stay clickable above the location
+ * banner (#loc-banner, z-index 8000) — it used to cover the Update button. On desktop the
+ * update notice also lifts clear of that banner while it is showing. */
+.as-notice { z-index: 8100 !important; }
+@media (min-width: 769px) {
+  #loc-banner.show ~ .as-notice.as-update { bottom: 96px; }
+}

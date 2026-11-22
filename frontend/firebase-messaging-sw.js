@@ -44,6 +44,8 @@ self.addEventListener('activate', function (event) {
 // A new version waits until the user taps "Update", so nobody is interrupted during checkout.
 self.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  // The page compares the waiting and the active worker's build before offering an update.
+  if (event.data && event.data.type === 'GET_VERSION' && event.ports && event.ports[0]) event.ports[0].postMessage({ version: CACHE_VERSION });
 });
 
 function trimPages(cache) {

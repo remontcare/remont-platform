@@ -1,0 +1,11 @@
+{
+  "name": "remont-e2e",
+  "private": true,
+  "description": "Browser tests for the website. See playwright.config.js.",
+  "scripts": {
+    "test:homepage": "playwright test homepage.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

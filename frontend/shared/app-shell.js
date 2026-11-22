@@ -409,6 +409,19 @@
       isVisible(document.getElementById('checkout-modal')) ||
       isVisible(document.getElementById('bm-service'));
   }
+  // The build a worker runs (frontend/stamp-sw.js stamps one per deploy). Null if it can't say
+  // (a worker from before this check existed, or no answer within 1.5s).
+  function workerVersion(worker) {
+    return new Promise(function (resolve) {
+      if (!worker || typeof MessageChannel === 'undefined') return resolve(null);
+      var ch = new MessageChannel();
+      var timer = setTimeout(function () { resolve(null); }, 1500);
+      ch.port1.onmessage = function (e) { clearTimeout(timer); resolve((e.data && e.data.version) || null); };
+      try { worker.postMessage({ type: 'GET_VERSION' }, [ch.port2]); } catch (err) { clearTimeout(timer); resolve(null); }
+    });
+  }
+  var DISMISSED_KEY = 'remont_update_later';
+  function store(fn) { try { return fn(window.sessionStorage); } catch (e) { return null; } }
   function offerUpdate(worker) {
     if (!worker) return;
     if (isCheckoutInProgress()) {
@@ -416,19 +429,32 @@
       return;
     }
     if (document.querySelector('.as-update')) return;
-    notice('<strong>A new version of Remont is ready</strong>', [
-      { label: 'Later' },
-      { label: 'Update', primary: true, run: function () {
-        window.__remontUpdateRequested = true;
-        worker.postMessage({ type: 'SKIP_WAITING' });
-      } },
-    ], 'as-update');
+    var active = navigator.serviceWorker.controller;
+    Promise.all([workerVersion(worker), workerVersion(active)]).then(function (v) {
+      var waitingVersion = v[0] || 'unknown';
+      // Same build as the one already running → nothing new to offer.
+      if (v[0] && v[1] && v[0] === v[1]) return;
+      // "Later" on this build already → not again this session.
+      if (store(function (s) { return s.getItem(DISMISSED_KEY); }) === waitingVersion) return;
+      if (document.querySelector('.as-update')) return;
+      notice('<strong>A new version of Remont is ready</strong>', [
+        { label: 'Later', run: function () { store(function (s) { s.setItem(DISMISSED_KEY, waitingVersion); }); } },
+        { label: 'Update', primary: true, run: function () {
+          window.__remontUpdateRequested = true;
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        } },
+      ], 'as-update');
+    });
   }
   function setupServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
+    var reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      // Only after the user chose to update; a first install also changes the controller.
-      if (window.__remontUpdateRequested) window.location.reload();
+      // Only after the user chose to update (a first install also changes the controller), and
+      // only once — never a reload loop.
+      if (!window.__remontUpdateRequested || reloading) return;
+      reloading = true;
+      window.location.reload();
     });
     navigator.serviceWorker.register('/firebase-messaging-sw.js', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);

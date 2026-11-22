@@ -24,3 +24,8 @@ graphify-out/
 # Database dumps / local backups never belong in the repo
 *.dump
 *.sql.gz
+
+# Browser tests: local harness output (holds a local test admin token) and Playwright results
+tests/harness/info.json
+tests/test-results/
+tests/playwright-report/
