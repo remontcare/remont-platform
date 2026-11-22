@@ -182,7 +182,12 @@ export class ServicesService {
     const subName = new Map<string, string>();
     for (const c of cat.categories) for (const sc of c.subCategories) subName.set(sc.id, sc.name);
     return {
-      categories: cat.categories.map((c) => ({ id: c.id, key: c.key, slug: c.slug, name: c.name, serviceCount: counts.get(c.id) || 0 })),
+      // Only categories with at least one active service exist for customers (search, voice,
+      // REMI choices, /services/<slug>, the app). A category appears by itself as soon as an
+      // admin adds its first service — nothing is listed by hand.
+      categories: cat.categories
+        .map((c) => ({ id: c.id, key: c.key, slug: c.slug, name: c.name, serviceCount: counts.get(c.id) || 0 }))
+        .filter((c) => c.serviceCount > 0),
       services: cat.services.map((s) => ({ id: s.id, name: s.name, categoryId: s.categoryId, subCategoryName: s.subCategoryId ? subName.get(s.subCategoryId) : null, isPopular: s.isPopular })),
     };
   }

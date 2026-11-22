@@ -6,6 +6,8 @@ const CATS = [
   { id: 'c-pl', key: 'PLUMBING', slug: 'plumbing', name: 'Plumbing', icon: '🔧', subCategories: [{ id: 'sc-tap', name: 'Tap & Faucet', sortOrder: 0 }] },
   { id: 'c-ca', key: 'CARPENTRY', slug: 'carpentry-woodwork', name: 'Carpentry & Woodwork', icon: '🪚', subCategories: [] },
   { id: 'c-in', key: 'interior', slug: null, name: 'Interior Design', icon: '🏠', subCategories: [] },
+  // No active service yet — must not exist for customers.
+  { id: 'c-fc', key: 'FALSE-CEILING', slug: 'false-ceiling', name: 'False Ceiling', icon: '🏠', subCategories: [] },
 ];
 const SVCS = [
   { id: 's1', name: 'AC Servicing (Split)', categoryId: 'c-ac', subCategoryId: null, isPopular: true, basePrice: 499 },
@@ -13,6 +15,7 @@ const SVCS = [
   { id: 's3', name: 'Tap Repair (Leak/Drip Fix)', categoryId: 'c-pl', subCategoryId: 'sc-tap', isPopular: false, basePrice: 199 },
   { id: 's4', name: 'Emergency Plumber Visit', categoryId: 'c-pl', subCategoryId: null, isPopular: true, basePrice: 299 },
   { id: 's5', name: 'Door Lock Repair', categoryId: 'c-ca', subCategoryId: null, isPopular: false, basePrice: 249 },
+  { id: 's6', name: 'Full Home Interior Design', categoryId: 'c-in', subCategoryId: null, isPopular: false, basePrice: 0 },
 ];
 
 function makePrisma(literal: any[] = [], fallback: any[] = []) {
@@ -85,6 +88,13 @@ describe('ServicesService.categoryPage() — /services/<slug>', () => {
   it('a category without a slug gets its key as the canonical slug', async () => {
     const page: any = await new ServicesService(makePrisma() as any, {} as any).categoryPage('interior');
     expect(page.canonicalSlug).toBe('interior');
+  });
+
+  it('a category with no active service is hidden: 404 page, never a search result', async () => {
+    const svc = new ServicesService(makePrisma() as any, {} as any);
+    await expect(svc.categoryPage('false-ceiling')).rejects.toThrow('Category not found');
+    const d: any = await svc.discover('false ceiling');
+    expect(d.categories.map((c: any) => c.key)).not.toContain('FALSE-CEILING');
   });
 
   it('unknown slug → 404', async () => {

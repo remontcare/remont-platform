@@ -66,6 +66,28 @@ export function autoProductCategories(anchors: Anchor[]): string[] {
   return [...out];
 }
 
+/**
+ * Bundle offer eligibility — which services in a cart have a RELATED product in that same cart.
+ * Related = an active admin CatalogRelation between the two (either direction, any type), or
+ * the service's category bridges to the product's category above. Pest control + plywood is
+ * not a bundle; plumbing service + a plumbing product is.
+ */
+export function bundleRelatedServiceIds(
+  services: { id: string; categoryKeys: (string | null | undefined)[] }[],
+  products: { id: string; categoryKey?: string | null }[],
+  curatedPairs: { serviceId: string; productId: string }[],
+): Set<string> {
+  const out = new Set<string>();
+  const productIds = new Set(products.map((p) => p.id));
+  for (const e of curatedPairs) if (productIds.has(e.productId)) out.add(e.serviceId);
+  const productCats = new Set(products.map((p) => String(p.categoryKey || '').toLowerCase()).filter(Boolean));
+  for (const s of services) {
+    const bridged = s.categoryKeys.flatMap((k) => SERVICE_TO_PRODUCT_CATEGORIES[String(k || '').toLowerCase()] || []);
+    if (bridged.some((c) => productCats.has(c))) out.add(s.id);
+  }
+  return out;
+}
+
 /** Service categories the AUTO source may draw from (services that go with bought products). */
 export function autoServiceCategories(anchors: Anchor[]): string[] {
   const out = new Set<string>();

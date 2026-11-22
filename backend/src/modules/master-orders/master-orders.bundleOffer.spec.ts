@@ -10,20 +10,27 @@ import { MasterOrdersService } from './master-orders.module';
  * PRODUCT child has been delivered.
  */
 
-const SERVICE_ELECTRICAL = { id: 'fan-install', categoryId: 'cat-electrical', basePrice: 1000, isActive: true, paymentMode: 'ANY' };
+const SERVICE_ELECTRICAL = { id: 'fan-install', categoryId: 'cat-electrical', basePrice: 1000, isActive: true, paymentMode: 'ANY', category: { slug: 'electrical', key: 'ELECTRICAL' } };
+// Pest control has no related product category — it must never get the bundle offer by itself.
+const SERVICE_PEST = { id: 'ant-control', categoryId: 'cat-pest', basePrice: 600, isActive: true, paymentMode: 'ANY', category: { slug: 'pest-control', key: 'PEST_CONTROL' } };
+const SERVICES = [SERVICE_ELECTRICAL, SERVICE_PEST];
 const PRODUCT_EXCL: Record<string, any> = {
-  'excl-product': { id: 'excl-product', categoryId: 'cat-1', vendorId: 'seller-a', price: 1000, hsnSac: 'HSN-EXCL', gstOverridePercent: null, gstInclusive: null, isActive: true },
+  'excl-product': { id: 'excl-product', categoryId: 'cat-1', vendorId: 'seller-a', price: 1000, hsnSac: 'HSN-EXCL', gstOverridePercent: null, gstInclusive: null, isActive: true, category: { key: 'ELECTRICAL' } },
 };
 const TAX_CONFIG_ROWS = [
   { rate: 12, hsnCode: 'HSN-EXCL', appliesTo: ['PRODUCT'], priceType: 'GST_EXCLUSIVE', gstApplicable: true, isActive: true, createdAt: new Date('2026-01-01') },
 ];
 
-function makeService(bundlePercentSetting: string | null = null) {
+function makeService(bundlePercentSetting: string | null = null, relations: { fromType: string; fromId: string; toType: string; toId: string }[] = []) {
   const createdOrders: any[] = [];
   const createdMasterOrders: any[] = [];
   const prisma: any = {
     user: { findUnique: jest.fn(), create: jest.fn() },
-    service: { findMany: jest.fn(async () => [SERVICE_ELECTRICAL]) },
+    service: { findMany: jest.fn(async (args: any) => SERVICES.filter((x) => args.where.id.in.includes(x.id))) },
+    catalogRelation: {
+      findMany: jest.fn(async ({ where }: any) => relations.filter((r) => where.OR.some((c: any) =>
+        r.fromType === c.fromType && r.toType === c.toType && c.fromId.in.includes(r.fromId) && c.toId.in.includes(r.toId)))),
+    },
     product: { findMany: jest.fn(async (args: any) => Object.values(PRODUCT_EXCL).filter((p) => args.where.id.in.includes(p.id))) },
     address: {
       findUnique: jest.fn(async () => ({ id: 'addr-1', fullAddress: '123 MG Road', city: 'Bhopal', state: 'MP', pincode: '462001', latitude: 0, longitude: 0 })),
@@ -212,5 +219,70 @@ describe('MasterOrdersService — Bundle offer defers service dispatch until pro
     const serviceChild = createdOrders[0];
     expect(serviceChild.bundleDispatchDeferred).toBe(false);
     expect(routing.route).toHaveBeenCalledWith(serviceChild.id);
+  });
+});
+
+describe('MasterOrdersService — Bundle offer only for RELATED service + product', () => {
+  const pestPlusProduct = {
+    items: [
+      { type: 'SERVICE', serviceId: 'ant-control', quantity: 1 },
+      { type: 'PRODUCT', productId: 'excl-product', quantity: 1 },
+    ],
+    addressId: 'addr-1', city: 'Bhopal',
+  } as any;
+
+  it('pest control + an unrelated product: no bundle discount, service dispatches immediately', async () => {
+    const { svc, createdOrders, routing } = makeService(null);
+    const result = await svc.checkout(pestPlusProduct, { customerId: 'cust-1', paymentMethod: 'COD' });
+    const serviceChild = createdOrders.find((o) => o.type === 'SERVICE');
+    expect((result as any).isBundleOrder).toBe(false);
+    expect((result as any).bundleDiscount).toBe(0);
+    expect(Number(serviceChild.bundleDiscountAmount)).toBe(0);
+    expect(serviceChild.bundleDiscountPercent).toBeFalsy();
+    expect(Number(serviceChild.totalAmount)).toBe(708); // 600 + 18% GST, no discount
+    expect(serviceChild.bundleDispatchDeferred).toBe(false);
+    expect(routing.route).toHaveBeenCalledWith(serviceChild.id);
+  });
+
+  it('an admin-curated relation (Admin → Recommendations) makes the same pair a bundle', async () => {
+    const { svc, createdOrders } = makeService(null, [{ fromType: 'SERVICE', fromId: 'ant-control', toType: 'PRODUCT', toId: 'excl-product' }]);
+    const result = await svc.checkout(pestPlusProduct, { customerId: 'cust-1', paymentMethod: 'COD' });
+    const serviceChild = createdOrders.find((o) => o.type === 'SERVICE');
+    expect((result as any).isBundleOrder).toBe(true);
+    expect(Number(serviceChild.bundleDiscountAmount)).toBe(60);
+  });
+
+  it('a curated relation in the reverse direction (product → service) counts too', async () => {
+    const { svc, createdOrders } = makeService(null, [{ fromType: 'PRODUCT', fromId: 'excl-product', toType: 'SERVICE', toId: 'ant-control' }]);
+    await svc.checkout(pestPlusProduct, { customerId: 'cust-1', paymentMethod: 'COD' });
+    expect(Number(createdOrders.find((o) => o.type === 'SERVICE').bundleDiscountAmount)).toBe(60);
+  });
+
+  it('mixed cart: only the related service gets the discount; the unrelated one is untouched and not deferred', async () => {
+    const { svc, createdOrders, routing } = makeService(null);
+    const result = await svc.checkout({
+      items: [
+        { type: 'SERVICE', serviceId: 'fan-install', quantity: 1 },
+        { type: 'SERVICE', serviceId: 'ant-control', quantity: 1 },
+        { type: 'PRODUCT', productId: 'excl-product', quantity: 1 },
+      ],
+      addressId: 'addr-1', city: 'Bhopal',
+    } as any, { customerId: 'cust-1', paymentMethod: 'COD' });
+    const fan = createdOrders.find((o) => o.serviceId === 'fan-install');
+    const pest = createdOrders.find((o) => o.serviceId === 'ant-control');
+    expect((result as any).bundleDiscount).toBe(100);
+    expect(Number(fan.bundleDiscountAmount)).toBe(100);
+    expect(Number(pest.bundleDiscountAmount)).toBe(0);
+    expect(Number(pest.totalAmount)).toBe(708);
+    expect(fan.bundleDispatchDeferred).toBe(true);
+    expect(pest.bundleDispatchDeferred).toBe(false);
+    expect(routing.route).toHaveBeenCalledWith(pest.id);
+    expect(routing.route).not.toHaveBeenCalledWith(fan.id);
+  });
+
+  it('quote() shows the same: no bundle line for an unrelated pair', async () => {
+    const { svc } = makeService(null);
+    const q: any = await svc.quote(pestPlusProduct, {});
+    expect(q.bundleDiscount).toBe(0);
   });
 });

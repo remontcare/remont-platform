@@ -24,6 +24,7 @@ import { CrmOrderSyncService, CrmSyncModule } from '../crm-sync/crm-sync.module'
 import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto } from '../authorized-person/authorized-person.module';
 import { StockHoldExpiryService } from './stock-hold-expiry.service';
 import { orderLineSnapshot } from '../catalog-variants/variant-rules';
+import { bundleRelatedServiceIds, SERVICE_TO_PRODUCT_CATEGORIES } from '../catalog-relations/order-suggestions';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -94,6 +95,25 @@ export function allocateAcrossGroups(groupAmounts: number[], subtotal: number, t
   const remainder = Math.round((total - allocatedSum) * 100) / 100;
   allocations[allocations.length - 1] = Math.round((allocations[allocations.length - 1] + remainder) * 100) / 100;
   return allocations;
+}
+
+/** "<related product> + <service(s)>" for the bundle discount line; products from the same bridged category first. */
+export function bundleLabel(services: any[], products: any[], bundleServiceIds: Set<string>): string {
+  const svc = services.filter((s) => bundleServiceIds.has(s.id));
+  const cats = new Set(svc.flatMap((s) => [s.category?.slug, s.category?.key].flatMap((k) => SERVICE_TO_PRODUCT_CATEGORIES[String(k || '').toLowerCase()] || [])));
+  const prod = products.find((p) => cats.has(String(p.category?.key || '').toLowerCase())) || products[0];
+  const names = svc.map((s) => s.name).slice(0, 2).join(', ') + (svc.length > 2 ? ' …' : '');
+  return [prod?.name, names].filter(Boolean).join(' + ');
+}
+
+/** Bundle discount per group (index-aligned with `groups`): only groups with a bundle-eligible amount get a share. */
+export function allocateBundleDiscount(groups: { bundleEligibleAmount?: number }[], bundleDiscount: number): number[] {
+  const out = groups.map(() => 0);
+  const idx = groups.map((_, i) => i).filter((i) => (groups[i].bundleEligibleAmount || 0) > 0);
+  if (!idx.length || bundleDiscount <= 0) return out;
+  const weights = idx.map((i) => groups[i].bundleEligibleAmount!);
+  allocateAcrossGroups(weights, weights.reduce((s, w) => s + w, 0), bundleDiscount).forEach((a, k) => { out[idx[k]] = a; });
+  return out;
 }
 
 // Payment Mode business rules — Service.paymentMode is ANY (Online + COD), ONLINE_ONLY, or
@@ -276,6 +296,9 @@ interface PricedGroup {
   lineAmounts?: number[];
   // the pricing engine's confirmed calculation for this booking (stored on the child order)
   snapshot?: any;
+  // SERVICE groups — the part of `amount` whose services have a related product in this same
+  // cart (bundleRelatedServiceIds); only this part gets the bundle offer.
+  bundleEligibleAmount?: number;
 }
 
 // ─── Service ───
@@ -347,6 +370,26 @@ export class MasterOrdersService {
     throw new ConflictException('Could not allocate an order number — please retry');
   }
 
+  /** Services in this cart that have a related product in it (see bundleRelatedServiceIds). */
+  private async bundleRelatedServices(services: any[], products: any[]): Promise<Set<string>> {
+    const sIds = services.map((s) => s.id), pIds = products.map((p) => p.id);
+    const edges = await this.prisma.catalogRelation.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { fromType: 'SERVICE', fromId: { in: sIds }, toType: 'PRODUCT', toId: { in: pIds } },
+          { fromType: 'PRODUCT', fromId: { in: pIds }, toType: 'SERVICE', toId: { in: sIds } },
+        ],
+      },
+      select: { fromType: true, fromId: true, toId: true },
+    });
+    return bundleRelatedServiceIds(
+      services.map((s) => ({ id: s.id, categoryKeys: [s.category?.slug, s.category?.key] })),
+      products.map((p) => ({ id: p.id, categoryKey: p.category?.key })),
+      edges.map((e) => (e.fromType === 'SERVICE' ? { serviceId: e.fromId, productId: e.toId } : { serviceId: e.toId, productId: e.fromId })),
+    );
+  }
+
   private async priceCart(dto: CreateMasterOrderDto, customerId: string | undefined, persist: { persistInlineAddress: boolean; verifiedCustomer?: boolean }) {
     let orderCityId: string | null = null;
     if (dto.city) {
@@ -364,8 +407,8 @@ export class MasterOrdersService {
     const serviceIds = Array.from(new Set(dto.items.filter((i) => i.type === 'SERVICE').map((i) => i.serviceId).filter(Boolean))) as string[];
     const productIds = Array.from(new Set(dto.items.filter((i) => i.type === 'PRODUCT').map((i) => i.productId).filter(Boolean))) as string[];
     const [services, products] = await Promise.all([
-      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true } }, variantGroup: { select: { optionNames: true } } } }),
-      this.prisma.product.findMany({ where: { id: { in: productIds } }, include: { variantGroup: { select: { optionNames: true } } } }),
+      this.prisma.service.findMany({ where: { id: { in: serviceIds } }, include: { category: { select: { serviceModel: true, gstSection95Status: true, partnerGstProfile: true, slug: true, key: true } }, variantGroup: { select: { optionNames: true } } } }),
+      this.prisma.product.findMany({ where: { id: { in: productIds } }, include: { category: { select: { key: true } }, variantGroup: { select: { optionNames: true } } } }),
     ]);
     const serviceMap = new Map(services.map((s) => [s.id, s]));
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -589,14 +632,24 @@ export class MasterOrdersService {
     const subtotal = grossServiceAmount + grossProductAmount;
     if (subtotal <= 0) throw new BadRequestException('Order total must be greater than zero');
 
-    // Bundle offer — auto-applies whenever this single checkout mixes at least one SERVICE
-    // group with at least one PRODUCT group; reduces only the service side, never products.
-    // Percent is admin-configurable (SiteSetting 'bundle_discount_percent', see
-    // getBundleDiscountPercent()) and gets frozen onto each affected child Order below, so a
-    // later admin change never retroactively alters an already-placed order's total.
-    const isBundleOrder = grossServiceAmount > 0 && grossProductAmount > 0;
+    // Bundle offer — applies only to a service bought together with a RELATED product in this
+    // same checkout (admin CatalogRelation, or the service↔product category bridge — see
+    // bundleRelatedServiceIds()); an unrelated mix (pest control + plywood) gets nothing. Reduces
+    // only those services, never products. Percent is admin-configurable (SiteSetting
+    // 'bundle_discount_percent', see getBundleDiscountPercent()) and gets frozen onto each
+    // affected child Order below, so a later admin change never retroactively alters an
+    // already-placed order's total.
+    const bundleServiceIds = grossServiceAmount > 0 && grossProductAmount > 0
+      ? await this.bundleRelatedServices(services, products)
+      : new Set<string>();
+    for (const g of pricedGroups) {
+      if (g.type !== 'SERVICE') continue;
+      g.bundleEligibleAmount = Math.round(g.items.reduce((s, it, k) => s + (bundleServiceIds.has(it.serviceId!) ? (g.lineAmounts?.[k] ?? it.totalPrice) : 0), 0) * 100) / 100;
+    }
+    const bundleEligibleServiceAmount = pricedGroups.reduce((s, g) => s + (g.bundleEligibleAmount || 0), 0);
+    const isBundleOrder = bundleEligibleServiceAmount > 0;
     const bundleDiscountPercent = isBundleOrder ? await getBundleDiscountPercent(this.prisma) : 0;
-    const bundleDiscount = isBundleOrder ? Math.round(((grossServiceAmount * bundleDiscountPercent) / 100) * 100) / 100 : 0;
+    const bundleDiscount = isBundleOrder ? Math.round(((bundleEligibleServiceAmount * bundleDiscountPercent) / 100) * 100) / 100 : 0;
 
     // A membership belongs to a verified account: a guest checkout (customer matched only by a
     // typed phone number) never gets another account's membership discount.
@@ -648,11 +701,11 @@ export class MasterOrdersService {
     if (svcGroupsForRate.some((g) => g.serviceModel) && (await pricingEngineEnabled(this.prisma))) {
       const discounts = allocateAcrossGroups(pricedGroups.map((g) => g.amount), subtotal, membershipDiscount + couponDiscount);
       const svcIdx = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
-      const bundles = bundleDiscount > 0 ? allocateAcrossGroups(svcIdx.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount) : [];
+      const bundles = allocateBundleDiscount(pricedGroups, bundleDiscount);
       serviceGstAmount = 0;
-      for (const [k, i] of svcIdx.entries()) {
+      for (const i of svcIdx) {
         const g = pricedGroups[i];
-        const discount = (discounts[i] || 0) + (bundles[k] || 0);
+        const discount = (discounts[i] || 0) + bundles[i];
         const first = serviceMap.get(g.items[0].serviceId!) as any;
         const snap = await priceServiceBookingSnapshot(this.prisma, {
           lines: g.items.map((it, n) => ({ service: serviceMap.get(it.serviceId!) as any, amount: g.lineAmounts?.[n] ?? it.totalPrice })),
@@ -680,7 +733,7 @@ export class MasterOrdersService {
       orderCityId, services, products, groups, pricedGroups, commissionByService, resolvedAddressId, resolvedAddress,
       groupDelivery, deliveryCharge, grossServiceAmount, grossProductAmount, subtotal, isBundleOrder, bundleDiscountPercent,
       bundleDiscount, membershipDiscount, couponDiscount, couponId, couponFundedBy, discountedSubtotal, serviceGstAmount,
-      productGstOnTop, gstAmount, walletUsed, totalAmount, serviceFeesTotal,
+      productGstOnTop, gstAmount, walletUsed, totalAmount, serviceFeesTotal, bundleServiceIds,
     };
   }
 
@@ -719,6 +772,9 @@ export class MasterOrdersService {
       subtotal: round2(p.subtotal),
       minimumChargeAdjustment,
       bundleDiscount: p.bundleDiscount,
+      bundleDiscountPercent: p.bundleDiscountPercent,
+      // e.g. "Split AC 1.5 Ton + AC Installation" — what the bundle discount is for (cart line label).
+      bundleLabel: p.bundleDiscount > 0 ? bundleLabel(p.services, p.products, p.bundleServiceIds) : null,
       membershipDiscount: p.membershipDiscount,
       couponDiscount: p.couponDiscount,
       serviceGstAmount: p.serviceGstAmount,
@@ -847,11 +903,18 @@ export class MasterOrdersService {
     // side flat-18% pool still needs pro-rata splitting, and only among SERVICE groups
     // (denominator = grossServiceAmount, not the combined subtotal — isolated now that
     // products are no longer part of this pool).
+    // Bundle discount split across the bundle-eligible SERVICE groups only, proportional to
+    // each one's eligible amount. Zero for every PRODUCT group and for any service that has no
+    // related product in this cart.
+    const groupBundleDiscount = allocateBundleDiscount(pricedGroups, bundleDiscount);
+    // GST pool split on each booking's amount after its OWN bundle discount, so a service that
+    // got no bundle discount keeps its full GST (identical to before whenever no bundle applies).
     const serviceGroupIndices = pricedGroups.map((_, i) => i).filter((i) => pricedGroups[i].type === 'SERVICE');
     const svcGroupRates = serviceGroupIndices.map((i) => pricedGroups[i].serviceGstRatePercent ?? SERVICE_GST_FALLBACK_RATE);
+    const gstBase = (i: number) => Math.max(0, pricedGroups[i].amount - groupBundleDiscount[i]);
     const gstWeights = svcGroupRates.every((r) => r === svcGroupRates[0])
-      ? serviceGroupIndices.map((i) => pricedGroups[i].amount)
-      : serviceGroupIndices.map((i, k) => pricedGroups[i].amount * svcGroupRates[k]);
+      ? serviceGroupIndices.map((i) => gstBase(i))
+      : serviceGroupIndices.map((i, k) => gstBase(i) * svcGroupRates[k]);
     const serviceGstShares = allocateAcrossGroups(gstWeights, gstWeights.reduce((sum, w) => sum + w, 0), serviceGstAmount);
     const groupGst = pricedGroups.map((g, i) => {
       if (g.type === 'PRODUCT') return g.productGstOnTop || 0;
@@ -859,16 +922,6 @@ export class MasterOrdersService {
       return serviceGstShares[serviceGroupIndices.indexOf(i)] || 0;
     });
 
-    // Bundle discount split across SERVICE groups only, proportional to each one's own
-    // amount share of grossServiceAmount — mirrors serviceGstShares just above. Zero for
-    // every PRODUCT group and a no-op array of zeros whenever this isn't a bundle checkout.
-    const bundleDiscountShares = bundleDiscount > 0
-      ? allocateAcrossGroups(serviceGroupIndices.map((i) => pricedGroups[i].amount), grossServiceAmount, bundleDiscount)
-      : [];
-    const groupBundleDiscount = pricedGroups.map((g, i) => {
-      if (g.type === 'PRODUCT') return 0;
-      return bundleDiscountShares[serviceGroupIndices.indexOf(i)] || 0;
-    });
     const groupWallet = allocateAcrossGroups(groupAmounts, subtotal, walletUsed);
 
     const masterOrderNumber = await this.generateMasterOrderNumber();
@@ -928,7 +981,9 @@ export class MasterOrdersService {
         // which skip RoutingService.route() for it, and ShipmentService.onShipmentDelivered()
         // (logistics.module.ts), which actually triggers it once every sibling PRODUCT child
         // in this same MasterOrder reaches COMPLETED.
-        const deferDispatchForBundle = isBundleOrder && g.type === 'SERVICE';
+        // Only a service actually in the bundle waits — an unrelated service in the same cart
+        // dispatches normally.
+        const deferDispatchForBundle = g.type === 'SERVICE' && (g.bundleEligibleAmount || 0) > 0;
 
         // A SERVICE group can now hold several services from the same category (Smart
         // Order Grouping) — sum each line's own commission for the order-level total, and

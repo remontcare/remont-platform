@@ -9,6 +9,7 @@ import { JwtAuthGuard, RolesGuard, Roles, Public, CurrentUser, JwtPayload, slugi
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 import { assertNoNewInlineImages } from '../media/media.policy';
+import { SERVICE_TO_PRODUCT_CATEGORIES } from '../catalog-relations/order-suggestions';
 
 /**
  * Product Coverage rule for one city (see ProductsService.list()): 'CITY' = sold here
@@ -144,19 +145,33 @@ export class ProductsService {
    * request per category (was firing 20+ parallel /products?category= calls on page load).
    */
   async listGroupedByCategories(categoryKeys: string[], limitPerCategory: number) {
-    const products = await this.prisma.product.findMany({
-      where: { isActive: true, category: { key: { in: categoryKeys } } },
+    // The keys are SERVICE category keys (the homepage asks "products for Plumbing / AC …").
+    // Each one gets only products from the product categories linked to it — same key, or the
+    // service↔product category bridge (SERVICE_TO_PRODUCT_CATEGORIES, also used for suggestions
+    // and the bundle offer). A service category with no linked products gets an empty list,
+    // never random products.
+    const lc = (k: unknown) => String(k || '').toLowerCase();
+    const [svcCats, prodCats] = await Promise.all([
+      this.prisma.serviceCategory.findMany({ where: { key: { in: categoryKeys } }, select: { key: true, slug: true } }),
+      this.prisma.productCategory.findMany({ where: { isActive: true }, select: { id: true, key: true } }),
+    ]);
+    const linked = new Map<string, Set<string>>();
+    for (const key of categoryKeys) {
+      const slug = svcCats.find((c) => c.key === key)?.slug;
+      const names = new Set([lc(key), ...(SERVICE_TO_PRODUCT_CATEGORIES[lc(slug)] || []), ...(SERVICE_TO_PRODUCT_CATEGORIES[lc(key)] || [])]);
+      linked.set(key, new Set(prodCats.filter((pc) => names.has(lc(pc.key))).map((pc) => pc.id)));
+    }
+    const allIds = Array.from(new Set(Array.from(linked.values()).flatMap((s) => Array.from(s))));
+    const products = allIds.length ? await this.prisma.product.findMany({
+      where: { isActive: true, categoryId: { in: allIds } },
       include: { category: true, vendor: { select: { businessName: true, rating: true } }, variantGroup: VARIANT_GROUP_PUBLIC },
       orderBy: { createdAt: 'desc' },
-    });
+    }) : [];
 
     const grouped: Record<string, typeof products> = {};
-    for (const key of categoryKeys) grouped[key] = [];
-    for (const p of products) {
-      const key = p.category?.key;
-      if (key && grouped[key] && grouped[key].length < limitPerCategory) {
-        grouped[key].push(p);
-      }
+    for (const key of categoryKeys) {
+      const ids = linked.get(key)!;
+      grouped[key] = products.filter((p) => ids.has(p.categoryId)).slice(0, limitPerCategory);
     }
     return grouped;
   }
