@@ -126,7 +126,11 @@ footer.site a{color:var(--amber)}
     var prices = page.services.map(function (s) { return Number(s.basePrice) || 0; }).filter(function (x) { return x > 0; });
     var desc = c.seoDesc || c.description ||
       ('Book ' + c.name + ' with verified professionals on Remont India — ' + page.services.length + ' services' + (prices.length ? ' from ₹' + Math.min.apply(null, prices).toLocaleString('en-IN') : '') + ', transparent prices and instant booking.');
-    desc = String(desc).slice(0, 300);
+    // Admin SEO text may carry a {city} placeholder (e.g. "AC Service & Repair in {city}").
+    var city = ''; try { city = localStorage.getItem('remont_city') || ''; } catch (e) {}
+    var fill = function (t) { return String(t).replace(/{city}/gi, city || 'India'); };
+    title = fill(title);
+    desc = fill(desc).slice(0, 300);
     document.title = title;
     document.getElementById('cpCrumb').textContent = c.name;
     setMeta('pageDesc', 'content', desc);
