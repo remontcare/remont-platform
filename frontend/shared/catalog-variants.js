@@ -16,6 +16,36 @@
   }
   function same(a, b) { return String(a == null ? '' : a).trim().toLowerCase() === String(b == null ? '' : b).trim().toLowerCase(); }
 
+  // Members of each listing seen by group() on this page, so a detail view of one option can
+  // still find its siblings' photos (listingImage).
+  var membersByGroup = {};
+  function ownImages(r) {
+    var out = [];
+    if (!r) return out;
+    [r.imageUrl, r.img].concat(Array.isArray(r.images) ? r.images : []).forEach(function (u) {
+      if (typeof u === 'string' && u.trim() && out.indexOf(u) === -1) out.push(u);
+    });
+    return out;
+  }
+  function isIcon(u) { return /^data:image\/svg|\.svg(\?|$)/i.test(String(u || '')); }
+  /* The picture for one option of a listing — never blank while ANY option has one: the listing's
+   * common image (Admin → Variants), else this option's own photo, else a sibling option's photo
+   * (2 BHK with no photo shows the 1 BHK one), else an icon. Real photos win over drawn icons.
+   * '' when nothing at all has an image. Works for any row (no listing → its own image). */
+  function listingImage(row, members) {
+    var common = commonContent(row);
+    if (common && common.images.length) return common.images[0];
+    var g = groupOf(row);
+    var siblings = (members || (g && membersByGroup[row.variantGroupId]) || []).filter(function (m) { return m !== row; });
+    var pools = [ownImages(row)].concat(siblings.map(ownImages));
+    for (var pass = 0; pass < 2; pass++) {
+      for (var i = 0; i < pools.length; i++) {
+        for (var j = 0; j < pools[i].length; j++) if (pass === 1 || !isIcon(pools[i][j])) return pools[i][j];
+      }
+    }
+    return '';
+  }
+
   /* rows → entries, list order kept (a group sits where its first member was):
    *   { kind: 'one', item }
    *   { kind: 'group', key, group, members: [row…], sel }   only for 2+ members of an active group
@@ -39,6 +69,7 @@
       var list = members.slice().sort(function (a, b) {
         return (Number(a.variantSortOrder) || 0) - (Number(b.variantSortOrder) || 0) || priceOf(a) - priceOf(b);
       });
+      membersByGroup[r.variantGroupId] = list;
       var sel = -1;
       list.forEach(function (m, i) {
         var p = priceOf(m);
@@ -148,8 +179,8 @@
     return group(items, opts).map(function (e) {
       if (e.kind === 'one') return e.item;
       var rep = e.members[e.sel];
-      var common = commonContent(rep);
-      return Object.assign({}, rep, common && common.images.length ? { img: common.images[0] } : {},
+      var pic = listingImage(rep, e.members);
+      return Object.assign({}, rep, pic && ownImages(rep)[0] !== pic ? { img: pic } : {},
         { vg: { name: e.group.name, summary: summary(e), range: hasPriceRange(e) } });
     });
   }
@@ -172,7 +203,7 @@
   }
 
   window.RemontCatalogVariants = {
-    orderLine: orderLine, commonContent: commonContent,
+    orderLine: orderLine, commonContent: commonContent, listingImage: listingImage,
     group: group, values: values, pick: pick, exact: exact, label: label, memberLabel: memberLabel,
     chipsHtml: chipsHtml, hasPriceRange: hasPriceRange, cartVariantLine: cartVariantLine, optionsOf: optionsOf,
     summary: summary, productListings: productListings,

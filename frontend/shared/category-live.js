@@ -58,6 +58,8 @@
       var common = CV ? CV.commonContent(s) : null;
       var images = (common && common.images.length ? common.images : [s.imageUrl].concat(s.images || [])).filter(Boolean);
       images = images.filter(function (u, i) { return images.indexOf(u) === i; }).slice(0, 5);
+      // No picture of its own → its listing's (a sibling option's) photo, never a blank box.
+      if (!images.length && CV) { var pic = CV.listingImage(s, grouped ? e.members : null); if (pic) images = [pic]; }
       var desc = (common && common.description) || s.description || '';
       var price = priceOf(s), orig = num(s.originalPrice);
       var from = grouped && sel === e.sel && CV.hasPriceRange(e);

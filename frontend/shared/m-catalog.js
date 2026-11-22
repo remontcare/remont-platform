@@ -198,8 +198,9 @@
     var s = e.members[sel];
     var d = duration(s.durationMinutes);
     var from = sel === e.sel && CV.hasPriceRange(e);
-    var common = CV.commonContent(s);
-    var img = common && common.images[0] ? sized(common.images[0], 200) : serviceImage(s, cat, 200);
+    // Never blank while any option of the listing has a picture (2 BHK shows the 1 BHK photo).
+    var pic = CV.listingImage(s, e.members);
+    var img = pic ? sized(pic, 200) : serviceImage(s, cat, 200);
     return '<div class="mc-card" data-svc="' + esc(s.id) + '" data-variant-card="' + esc(e.key) + '" data-sel="' + sel + '">' +
       '<img class="mc-card-img" src="' + esc(img) + '" alt="" width="76" height="76" loading="lazy" decoding="async">' +
       '<div class="mc-card-main">' +
@@ -339,11 +340,12 @@
     ].filter(function (p) { return p[1] > 0; });
     // A variant listing's one common description + gallery (Admin → Variants) replaces the option's own.
     var common = CV ? CV.commonContent(s) : null;
-    var heroSrc = common && common.images[0] ? sized(common.images[0], 800) : serviceImage(s, cat, 800);
+    var heroPic = CV ? CV.listingImage(s) : ''; // common image, own photo, or a sibling option's photo
+    var heroSrc = heroPic ? sized(heroPic, 800) : serviceImage(s, cat, 800);
     var aboutText = (common && common.description) || s.description;
     var extraImgs = common && common.images.length > 1 ? common.images.slice(1) : [];
     // A service without its own photo shows its category's product image whole, not cropped.
-    var ownPhoto = !!((common && common.images[0]) || s.imageUrl || (s.images && s.images[0]));
+    var ownPhoto = !!heroPic;
     body.innerHTML =
       '<img class="mc-hero' + (ownPhoto ? '' : ' mc-hero-fit') + '" src="' + esc(heroSrc) + '" alt="" width="400" height="260" decoding="async">' +
       (extraImgs.length ? '<div class="mc-gallery">' + extraImgs.map(function (u) {
