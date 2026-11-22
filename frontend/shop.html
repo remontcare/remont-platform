@@ -1282,8 +1282,10 @@ footer.site a{color:var(--amber)}
       // Never jumps straight into booking (same principle as products never adding
       // straight to cart) — navigates to that service's real section/page instead,
       // matching the homepage's own _activateSearchResult behaviour exactly.
-      // /services/<key> is resolved to the real category by the backend's service discovery.
-      window.location.href = '/services/' + encodeURIComponent(entry.categoryKey || '') + (entry.id ? '?service=' + encodeURIComponent(entry.id) : '');
+      // Opens it on the homepage dashboard (/?cat=…#shop). This page's search index carries
+      // placeholder ids ("svc-ac-install"), so only a real catalogue id is passed as service=.
+      var realId = entry.id && !/^svc-/.test(entry.id) ? entry.id : '';
+      window.location.href = '/?cat=' + encodeURIComponent(entry.categoryKey || '') + (realId ? '&service=' + encodeURIComponent(realId) : '') + '#shop';
     } else if (entry.type === 'product') {
       // Never adds to cart — only the catalog's own +/Add to Cart button does that.
       window.location.href = '/product/' + encodeURIComponent(entry.slug);

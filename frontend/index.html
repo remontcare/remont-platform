@@ -3488,6 +3488,11 @@
 .sub-svc-card .svc-cart-btn,.sub-svc-card .svc-book-btn{height:40px!important;font-size:14px!important;font-weight:700!important;border-radius:10px!important;width:100%!important}
 .sub-svc-card .svc-cart-btn{background:#fff!important;border:1.5px solid #c2410c!important;color:#c2410c!important}
 
+/* Search → dashboard: the searched service's card, outlined for a moment */
+.sub-svc-card.search-hl{outline:3px solid #c2410c;outline-offset:2px;animation:searchHlPulse 1.2s ease-out 2}
+@keyframes searchHlPulse{0%{box-shadow:0 0 0 0 rgba(194,65,12,.45)}100%{box-shadow:0 0 0 14px rgba(194,65,12,0)}}
+@media (prefers-reduced-motion: reduce){.sub-svc-card.search-hl{animation:none}}
+
 /* ===== Mobile ===== */
 @media(max-width:600px){
   .subcat-tile-grid,.sub-svc-grid{grid-template-columns:repeat(2,1fr)!important;gap:10px!important}
@@ -8675,12 +8680,17 @@ window.RemontMedia = (function () {
     var entry = _searchLastResults[idx];
     if (!entry) return;
     closeSearchDrop();
-    if (entry._url) { window.location.href = entry._url; return; }
     if (entry.type === 'service') {
       // Clicking a search result must never jump straight into booking (same principle
-      // as products never adding straight to cart) — it opens the category's page
-      // (/services/<key>, resolved by the backend's service discovery) on that service.
+      // as products never adding straight to cart). It opens the category — and the service's
+      // card, highlighted — on this page's dashboard; /services/<slug> only if that can't.
+      var ref = entry._catRef || _refFromServicesUrl(entry._url) || { key: entry.categoryKey, slug: entry.categoryKey };
+      var svcId = entry._svcId || entry.id || _serviceIdFromUrl(entry._url) || null;
+      if (typeof window.openServiceOnDashboard === 'function' && window.openServiceOnDashboard(ref, svcId)) return;
+      if (entry._url) { window.location.href = entry._url; return; }
       window.location.href = '/services/' + encodeURIComponent(entry.categoryKey || '') + (entry.id ? '?service=' + encodeURIComponent(entry.id) : '');
+    } else if (entry._url) {
+      window.location.href = entry._url;
     } else if (entry.type === 'product') {
       // Clicking a search result must never add to cart (only the +/Add to Cart button
       // does that) — navigate to the real Product Detail page instead. Legacy hardcoded
@@ -8734,14 +8744,15 @@ window.RemontMedia = (function () {
     var out = [];
     var catEntry = function(c, label) {
       return { type: 'service', name: c.name, category: label + ' · ' + c.serviceCount + ' service' + (c.serviceCount === 1 ? '' : 's'),
-        _icon: c.icon || '🛠️', _url: c.url, priceLabel: null };
+        _icon: c.icon || '🛠️', _url: c.url, _catRef: { id: c.id, key: c.key, slug: c.slug }, priceLabel: null };
     };
     if (d.best) {
       out.push(catEntry(d.best, 'Best match'));
       (d.services || []).slice(0, 3).forEach(function(s) {
         var price = Number(s.basePrice) || 0;
         out.push({ type: 'service', name: s.name, category: d.best.name, _icon: d.best.icon || '🛠️',
-          _url: d.best.url + '?service=' + encodeURIComponent(s.id), priceLabel: price > 0 ? '₹' + price.toLocaleString('en-IN') : null });
+          _url: d.best.url + '?service=' + encodeURIComponent(s.id), _catRef: { id: d.best.id, key: d.best.key, slug: d.best.slug }, _svcId: s.id,
+          priceLabel: price > 0 ? '₹' + price.toLocaleString('en-IN') : null });
       });
       (d.categories || []).slice(1, 2).forEach(function(c) { if (c.confidence >= 0.2) out.push(catEntry(c, 'Also')); });
     } else if (d.ambiguous) {
@@ -8779,9 +8790,25 @@ window.RemontMedia = (function () {
   // Enter / voice: a clear match opens its category page straight away ("I need a plumber").
   function _searchGo(query, onNoMatch) {
     _discover(query).then(function(d) {
-      if (d && d.best && d.best.url) { closeSearchDrop(); window.location.href = d.best.url; return; }
+      if (d && d.best && d.best.url) {
+        closeSearchDrop();
+        // Stay on the homepage dashboard; the /services/<slug> page only when it can't be shown here.
+        var open = window.openServiceOnDashboard;
+        if (/^\/services\//.test(d.best.url) && typeof open === 'function' && open({ id: d.best.id, key: d.best.key, slug: d.best.slug })) return;
+        window.location.href = d.best.url;
+        return;
+      }
       onNoMatch();
     });
+  }
+  // '/services/ac-service-repair?service=x' → { slug } / 'x'
+  function _refFromServicesUrl(url) {
+    var m = /^\/services\/([a-z0-9_-]+)/i.exec(String(url || ''));
+    return m ? { slug: m[1].toLowerCase(), key: m[1] } : null;
+  }
+  function _serviceIdFromUrl(url) {
+    var m = /[?&]service=([^&#]+)/.exec(String(url || ''));
+    return m ? decodeURIComponent(m[1]) : null;
   }
 
   function _moveSearchActive(delta) {
@@ -8986,6 +9013,7 @@ window.RemontMedia = (function () {
       serviceData[fkey] = {
         id: cat.id,
         key: cat.key,
+        slug: cat.slug || null,
         title: cat.name,
         subtitle: cat.description || 'Professional ' + cat.name + ' services',
         icon: cat.icon || '🔧',
@@ -9064,10 +9092,97 @@ window.RemontMedia = (function () {
     var raw = (params.get('cat') || '').trim().toLowerCase();
     if (!raw) return;
     _catDeepLinkDone = true;
+    // ?service=<id> (header search on other pages) opens that service's card on the dashboard.
+    var svcId = (params.get('service') || '').trim();
     params.delete('cat');
+    params.delete('service');
     var qs = params.toString();
-    window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    var hash = window.location.hash === '#shop' ? '' : window.location.hash;
+    window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + hash);
+    if (svcId && openServiceOnDashboard({ slug: raw, key: raw }, svcId)) return;
     openCategoryInPage(raw);
+  }
+
+  // ── Search → the service on THIS page's dashboard (#shop → #displayPanel) ──────────────────
+  // Header search, Enter and voice open the category (and the searched service's sub-category,
+  // with its card highlighted) right here instead of leaving for /services/<slug>, which stays
+  // as the SEO landing page. Never adds to cart or opens booking. `ref` = { id, key, slug }
+  // in any combination (DB id / DB key / slug / homepage key). False when this page can't show it.
+  function _slugify(t) { return String(t || '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+  function _dashKeyFor(ref, svcId) {
+    ref = ref || {};
+    var keys = Object.keys(serviceData);
+    var id = ref.id, dbKey = String(ref.key || ''), slug = String(ref.slug || '').toLowerCase();
+    var hit = keys.find(function (k) { var d = serviceData[k]; return d && d._fromApi && id && d.id === id; }) ||
+      keys.find(function (k) { var d = serviceData[k]; return d && dbKey && (d.key === dbKey || k === dbKey.toLowerCase().replace(/_/g, '-')); }) ||
+      keys.find(function (k) { var d = serviceData[k]; return d && slug && (k === slug || (d.slug || '').toLowerCase() === slug || _slugify(d.title) === slug); });
+    if (!hit && svcId) { // last resort: whichever category holds that service
+      hit = keys.find(function (k) { var d = serviceData[k]; return d && (d.subServices || []).some(function (s) { return s.id === svcId; }); });
+    }
+    if (!hit && slug) { // page slugs like "ac-repair" / "home-cleaning" (same aliases as openCategoryInPage)
+      var alias = { 'ac-repair':'ac', 'ac-service':'ac', 'ac-service-repair':'ac', 'electrical-work':'electrical', 'appliance-repair':'appliance', 'home-cleaning':'cleaning', 'interior-design':'interior' };
+      if (serviceData[alias[slug]]) hit = alias[slug];
+    }
+    return hit || null;
+  }
+  // Brings the searched service's card into view and outlines it for a moment. A variant listing
+  // card shows one option at a time, so the searched option is selected first.
+  function _highlightServiceCard(panel, svcId) {
+    var esc = window.CSS && CSS.escape ? CSS.escape(svcId) : String(svcId).replace(/"/g, '\\"');
+    var card = panel.querySelector('.sub-svc-card[data-svc-id="' + esc + '"]');
+    if (!card && typeof _svcVariantEntries !== 'undefined' && _svcVariantEntries) {
+      panel.querySelectorAll('.svc-var-card').forEach(function (c) {
+        if (card) return;
+        var e = _svcVariantEntries[c.getAttribute('data-variant-card')];
+        var i = e ? e.members.findIndex(function (m) { return m.id === svcId; }) : -1;
+        if (i < 0) return;
+        var tmp = document.createElement('div');
+        tmp.innerHTML = svcVariantCardHtml(e, i).trim();
+        c.replaceWith(tmp.firstChild);
+        card = tmp.firstChild && panel.querySelector('.sub-svc-card[data-svc-id="' + esc + '"]');
+      });
+    }
+    if (!card) return false;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('search-hl'); void card.offsetWidth; card.classList.add('search-hl');
+    setTimeout(function () { card.classList.remove('search-hl'); }, 2600);
+    return true;
+  }
+  window.openServiceOnDashboard = openServiceOnDashboard;
+  function openServiceOnDashboard(ref, svcId) {
+    if (typeof ref === 'string') ref = { slug: ref, key: ref };
+    var panel = document.getElementById('displayPanel');
+    if (!panel || typeof serviceData === 'undefined') return false;
+    var key = _dashKeyFor(ref, svcId);
+    if (!key || !serviceData[key]) return false;
+    if (key === 'interior') { window.location.href = '/interior'; return true; } // its own page
+    var d = serviceData[key];
+    // Same city gate as tapping the category in the sidebar.
+    if (typeof _cityAvailabilityReason === 'function') {
+      var avail = _cityAvailabilityReason(key);
+      if (avail !== true) { if (typeof _showCityUnavailablePopup === 'function') _showCityUnavailablePopup(d.title, avail); return true; }
+    }
+    var sc = svcId ? (d.subCategories || []).find(function (x) { return (x.services || []).some(function (s) { return s.id === svcId; }); }) : null;
+    // Mobile: the mobile catalog (shared/m-catalog.js) — the service's own screen, or the category.
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      if (svcId && window.RemontCatalog && window.RemontCatalog.openService && window.RemontCatalog.openService(svcId)) return true;
+      if (typeof window.openMobileCatalog === 'function' && window.openMobileCatalog(key)) {
+        var mp = document.getElementById('mobileCatalogPanel'); // fallback overlay (same render functions)
+        if (sc && mp && mp.offsetParent) { renderSubCategoryServices(key, sc.key, 'mobileCatalogPanel'); setTimeout(function () { _highlightServiceCard(mp, svcId); }, 120); }
+        return true;
+      }
+      return false;
+    }
+    document.querySelectorAll('.svc-item').forEach(function (i) { i.classList.toggle('active', i.getAttribute('data-svc') === key); });
+    document.querySelectorAll('.cat-nav-inner .cat-link').forEach(function (a) {
+      a.classList.toggle('active', (a.getAttribute('onclick') || '').indexOf("'" + key + "'") !== -1);
+    });
+    renderService(key, 'displayPanel');
+    if (sc) renderSubCategoryServices(key, sc.key, 'displayPanel');
+    var shop = document.getElementById('shop');
+    if (shop) shop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (svcId) setTimeout(function () { _highlightServiceCard(panel, svcId); }, 650);
+    return true;
   }
 
   // Opens a category's services on this page (desktop: #shop panel; mobile: the catalog overlay),
