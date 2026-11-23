@@ -27,12 +27,15 @@ import { InvoicesService, InvoicesModule } from '../invoices/invoices.module';
 import { ReturnsService, ReturnsModule } from '../returns/returns.module';
 import { MediaModule } from '../media/media.module';
 import { MediaService, PublicMedia } from '../media/media.service';
-import { isInlineImage } from '../media/media.policy';
+import { isInlineImage, MEDIA_UPLOAD_THROTTLE } from '../media/media.policy';
 import { orderLineSnapshot } from '../catalog-variants/variant-rules';
 import { Throttle } from '@nestjs/throttler';
+import { CUSTOMER_PARTNER_SELECT } from '../../common/order-view';
 
 /** Upper bound on completion photos per job — each one is virus-scanned and uploaded. */
 const MAX_COMPLETION_PHOTOS = 20;
+/** Before-work evidence photos per job (append-only — see OrdersService.addBeforePhotos). */
+const MAX_BEFORE_PHOTOS = 10;
 
 /** Start/completion/extra-work codes are 4 digits, so the global 200/min limit would allow
  *  brute-forcing one in under an hour; a technician only ever needs a few tries. */
@@ -1805,7 +1808,7 @@ export class OrdersService {
    * photo is rejected, the ones already stored are removed and the completion fails with the
    * pipeline's error (e.g. a virus-scan rejection), so the partner can retry.
    */
-  private async storeCompletionPhotos(photos: unknown, actor: { id: string; role: UserRole }): Promise<{ urls: string[]; ingested: PublicMedia[] }> {
+  private async storeCompletionPhotos(photos: unknown, actor: { id: string; role: UserRole }, namePrefix = 'job-photo'): Promise<{ urls: string[]; ingested: PublicMedia[] }> {
     if (photos === undefined || photos === null) return { urls: [], ingested: [] };
     if (!Array.isArray(photos) || photos.some((p) => typeof p !== 'string')) throw new BadRequestException('photosAfter must be a list of images');
     if (photos.length > MAX_COMPLETION_PHOTOS) throw new BadRequestException(`At most ${MAX_COMPLETION_PHOTOS} completion photos are allowed`);
@@ -1817,7 +1820,7 @@ export class OrdersService {
     try {
       for (const [i, p] of (photos as string[]).entries()) {
         if (!isInlineImage(p)) { urls.push(p); continue; }
-        const m = await this.media.ingestDataUrl(p, { originalName: `job-photo-${i + 1}`, entityType: MediaEntityType.PROJECT, actor });
+        const m = await this.media.ingestDataUrl(p, { originalName: `${namePrefix}-${i + 1}`, entityType: MediaEntityType.PROJECT, actor });
         ingested.push(m);
         urls.push(m.variants?.full ?? m.deliveryUrl!);
       }
@@ -1826,6 +1829,41 @@ export class OrdersService {
       throw e;
     }
     return { urls, ingested };
+  }
+
+  /**
+   * "Before" evidence — photos of the problem the assigned partner takes right after the start
+   * OTP. Append-only: a partner can add photos while the job is running but never replace or
+   * remove one already on record, so the record can be trusted in a dispute. Only fresh camera
+   * images (data: URIs) are accepted — never a URL, which could point at someone else's photo.
+   * Visible to the partner and Remont's team only (see common/order-view.ts), never the customer.
+   */
+  async addBeforePhotos(vendorUserId: string, orderId: string, photos: unknown) {
+    const v = await this.prisma.serviceVendor.findUnique({ where: { userId: vendorUserId } });
+    if (!v) throw new ForbiddenException();
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { id: true, vendorId: true, status: true, photosBefore: true } });
+    if (!order || order.vendorId !== v.id) throw new ForbiddenException();
+    if (!['STARTED', 'IN_PROGRESS', 'EXTRA_WORK_ADDED'].includes(order.status)) {
+      throw new BadRequestException('Before photos can be added only while the job is in progress');
+    }
+    if (!Array.isArray(photos) || photos.length === 0 || photos.some((p) => typeof p !== 'string' || !isInlineImage(p))) {
+      throw new BadRequestException('Add at least one new photo taken with the camera');
+    }
+    if (order.photosBefore.length + photos.length > MAX_BEFORE_PHOTOS) {
+      throw new BadRequestException(`At most ${MAX_BEFORE_PHOTOS} before photos are allowed`);
+    }
+    const actor = { id: vendorUserId, role: UserRole.SERVICE_VENDOR };
+    const stored = await this.storeCompletionPhotos(photos, actor, 'before-photo');
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { photosBefore: { push: stored.urls } },
+      select: { id: true, photosBefore: true },
+    }).catch(async (e) => {
+      await Promise.all(stored.ingested.map((m) => this.media?.remove(m.id, actor).catch(() => undefined)));
+      throw e;
+    });
+    await this.media?.linkByUrls({ entityType: MediaEntityType.PROJECT, entityId: orderId, urls: stored.urls, actor });
+    return updated;
   }
 
   private async notifyWorkCompleted(order:{ id: string; customerId: string; guestPhone: string | null; orderNumber: string }) {
@@ -1925,7 +1963,7 @@ export class OrdersService {
       include: {
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { select: { id: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: CUSTOMER_PARTNER_SELECT },
         address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT }, delivery: true,
         // Phase 3 — demo/mock shipment tracking (backend/src/modules/logistics). Shows the
         // last-persisted status immediately; the frontend separately calls
@@ -1946,7 +1984,7 @@ export class OrdersService {
         customer: { select: { name: true, phone: true, email: true } },
         service: true, items: { include: { product: true } },
         serviceItems: { include: { service: true } },
-        vendor: { select: { id: true, userId: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: { ...CUSTOMER_PARTNER_SELECT, userId: true } },
         address: true, extraWorkItems: { select: EXTRA_WORK_ITEM_PUBLIC_SELECT }, invoice: true, delivery: true,
         timeline: { orderBy: { createdAt: 'asc' } },
       },
@@ -2491,7 +2529,7 @@ export class GuestBookingService {
       where: { orderNumber },
       include: {
         service: { select: { name: true, imageUrl: true } },
-        vendor: { select: { id: true, fullName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+        vendor: { select: CUSTOMER_PARTNER_SELECT },
         address: { select: { city: true, fullAddress: true } },
         extraWorkItems: { where: { status: 'PENDING' } },
         customer: { select: { phone: true } },
@@ -2573,6 +2611,11 @@ export class OrdersController {
   @Throttle(OTP_VERIFY_THROTTLE)
   // collection (optional): { mode: CASH|UPI|CARD } — cash taken on this visit, confirmed by the
   // same customer completion OTP. Older clients that omit it are unaffected.
+  // Partner: before-work evidence photos (append-only; never shown to the customer).
+  @Throttle(MEDIA_UPLOAD_THROTTLE)
+  @Post(':id/before-photos') beforePhotos(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { photos: string[] }) {
+    return this.orders.addBeforePhotos(u.sub, id, b?.photos);
+  }
   @Post(':id/complete') complete(@CurrentUser() u: JwtPayload, @Param('id') id: string, @Body() b: { otp: string; photosAfter: string[]; videoUrl?: string; collection?: { mode?: PaymentCollectionMode; collectedLocation?: string } }) {
     return this.orders.complete(u.sub, id, b.otp, b.photosAfter, b.videoUrl, b.collection).then(withoutCustomerOtps);
   }

@@ -142,6 +142,8 @@
       <div class="detail-box"><label>Commission</label><div class="val" id="detail-commission">—</div></div>
     </div>
     <div id="detail-cash" style="margin-bottom:14px"></div>
+    <!-- Job evidence: the partner's before/after photos. Team-only — never shown to the customer. -->
+    <div id="detail-evidence" style="margin-bottom:14px;display:none"></div>
 
     <!-- Vendor Assignment — Service Partners only; a product-only order has no service to
          assign a Service Partner to, so this whole section is hidden for it (see openDetail). -->
@@ -359,6 +361,28 @@ function load() {
 
 // Cash/UPI/card a partner reported collecting stays PENDING until confirmed (by the customer's
 // completion OTP, the customer, or here by an admin with written evidence).
+// Job evidence — before/after photos the partner took on site (team-only; the API never sends
+// them to customers). Click a photo to open it full size in a new tab.
+function renderEvidence(o) {
+  var el = document.getElementById('detail-evidence');
+  var before = Array.isArray(o.photosBefore) ? o.photosBefore : [];
+  var after = Array.isArray(o.photosAfter) ? o.photosAfter : [];
+  if (!o.serviceId || (!before.length && !after.length)) { el.style.display = 'none'; el.textContent = ''; return; }
+  function strip(label, urls) {
+    var thumbs = urls.length
+      ? urls.map(function(u) {
+          var safe = u.indexOf('https://') === 0 || u.indexOf('http://') === 0 ? escape(u) : '';
+          return safe ? '<a href="' + safe + '" target="_blank" rel="noopener"><img src="' + safe + '" alt="' + label + ' photo" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"></a>' : '';
+        }).join('')
+      : '<span style="color:#9ca3af;font-size:12px">No photos on record</span>';
+    return '<div style="font-size:12px;font-weight:600;color:#374151;margin:6px 0 4px">' + label + ' (' + urls.length + ')</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + thumbs + '</div>';
+  }
+  el.innerHTML = '<div class="detail-box"><label>Job evidence photos <small style="color:#9ca3af;font-weight:400">· not shown to customer</small></label>' +
+    strip('Before work', before) + strip('After work', after) + '</div>';
+  el.style.display = '';
+}
+
 function renderCashCollections(o) {
   var el = document.getElementById('detail-cash');
   var rows = o.cashCollections || [];
@@ -440,7 +464,10 @@ function openDetail(orderId) {
     var routingText = o.routingDecision
       ? 'Routed to: ' + (routingLabels[o.routingDecision] || o.routingDecision) + ((o.routingDecision === 'IN_HOUSE' || o.routingDecision === 'PARTNER') && o.vendor ? ' — ' + escape((o.vendor.user && o.vendor.user.name) || o.vendor.fullName || '') : '')
       : (o.needsAdminReview ? 'Awaiting admin review' : 'Not yet routed');
-    document.getElementById('detail-routing').innerHTML = routingText + (o.needsAdminReview ? ' ' + badge('Needs Admin Review', 'yellow') : '');
+    document.getElementById('detail-routing').innerHTML = routingText + (o.needsAdminReview ? ' ' + badge('Needs Admin Review', 'yellow') : '') +
+      (o.vendor && o.vendor.partnerCode ? '<br><small style="color:#6b7280;font-family:monospace">Partner ID: ' + escape(o.vendor.partnerCode) + '</small>' : '');
+
+    renderEvidence(o);
 
     // Commission (Task 9) — snapshotted at confirmation time, so this always reflects
     // what the order was ACTUALLY charged against, even if the rule has since changed.

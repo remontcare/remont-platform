@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { OtpGuardInterceptor } from './common';
+import { OrderViewInterceptor } from './common/order-view';
 import { resolveTrustProxyHops } from './common/trust-proxy';
 
 /**
@@ -64,5 +65,5 @@ export function configureHttpApp(app: INestApplication) {
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new TransformInterceptor(), new OtpGuardInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor(), new OtpGuardInterceptor(), new OrderViewInterceptor());
 }

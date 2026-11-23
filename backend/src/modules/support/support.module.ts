@@ -116,6 +116,10 @@ export class PartnerRefusalDto {
   @IsOptional() @IsNumber() longitude?: number;
   @IsOptional() @IsNumber() @Min(0) accuracyM?: number;
   @IsOptional() @IsString() @MaxLength(200) locationError?: string;
+  // Same evidence fields as PartnerArrivalDto — recordPartnerArrival() reads them to flag a
+  // mocked (fake-GPS) or stale fix; undeclared, the whitelist pipe silently dropped them.
+  @IsOptional() @IsBoolean() isMocked?: boolean;
+  @IsOptional() @IsNumber() @Min(0) fixAgeMs?: number;
 }
 export class CustomerStatementDto {
   @IsString() @MaxLength(1000) statement: string;

@@ -25,6 +25,7 @@ import { AuthorizedPersonModule, AuthorizedPersonService, AuthorizedPersonDto } 
 import { StockHoldExpiryService } from './stock-hold-expiry.service';
 import { orderLineSnapshot } from '../catalog-variants/variant-rules';
 import { bundleRelatedServiceIds, SERVICE_TO_PRODUCT_CATEGORIES } from '../catalog-relations/order-suggestions';
+import { CUSTOMER_PARTNER_SELECT } from '../../common/order-view';
 
 // ─── Pure functions (no DB) — unit-tested directly, see master-orders.split.spec.ts ───
 
@@ -1405,7 +1406,7 @@ export class MasterOrdersService {
         customer: { select: { phone: true } },
         childOrders: {
           include: {
-            service: true, vendor: { select: { id: true, fullName: true, businessName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+            service: true, vendor: { select: { ...CUSTOMER_PARTNER_SELECT, businessName: true } },
             items: { include: { product: true } },
             serviceItems: { include: { service: true } },
           },
@@ -1457,7 +1458,7 @@ export class MasterOrdersService {
         customer: { select: { name: true, phone: true } },
         childOrders: {
           include: {
-            service: true, vendor: { select: { id: true, fullName: true, businessName: true, photoUrl: true, rating: true, user: { select: { name: true, phone: true } } } },
+            service: true, vendor: { select: { ...CUSTOMER_PARTNER_SELECT, businessName: true } },
             items: { include: { product: { include: { vendor: { select: { businessName: true } } } } } },
             serviceItems: { include: { service: true } },
             invoice: true, delivery: true,

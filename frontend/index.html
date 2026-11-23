@@ -14543,24 +14543,26 @@ window.ppShareIdCard = function() {
 
 // ── Customer: Assigned Partner View ──────────────────────────────
 window.showAssignedPartner = function(vendorData) {
+  // Only real values from the partner's record (GET /orders/mine selects them) — a missing
+  // value shows as "New" / "—", never an invented rating, experience or job count.
   var p = vendorData || {};
-  var name = p.fullName || p.name || 'Partner';
-  var role = (p.serviceCategories && p.serviceCategories[0]) || p.expertise || 'Home Service Expert';
-  var rating = p.rating || 4.8;
-  var exp = p.yearsExperience || p.experience || 0;
-  var jobs = p.completedJobs || p.jobsCompleted || 0;
-  var about = p.bio || p.about || ('Skilled professional verified by Remont. Specializes in ' + role + ' with ' + exp + '+ years of hands-on experience.');
+  var name = p.fullName || (p.user && p.user.name) || p.name || 'Partner';
+  var skills = Array.isArray(p.skills) ? p.skills.filter(Boolean) : [];
+  var role = skills.length ? skills.slice(0, 2).join(' · ') : 'Home Service Expert';
+  var rating = Number(p.rating) || 0;
+  var exp = p.experienceYears ? String(p.experienceYears) : '';
+  var jobs = Number(p.completedJobs) || 0;
+  var about = 'Background-verified ' + (skills.length ? skills[0] + ' ' : '') + 'partner of Remont. Check the Partner ID on their ID card when they arrive.';
 
   // Populate
   var setTxt = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
   setTxt('cpa-name', name);
   setTxt('cpa-role', role);
-  setTxt('cpa-exp-val', (exp || '3') + '+ Years');
-  setTxt('cpa-jobs-val', (jobs || '50') + '+');
+  setTxt('cpa-exp-val', exp || '—');
+  setTxt('cpa-jobs-val', String(jobs));
   setTxt('cpa-about-txt', about);
-  // Real Partner ID from the backend record — never fabricated. p.id is the actual
-  // ServiceVendor.id, now selected by the order APIs that feed this modal.
-  setTxt('cpa-id', p.id ? ('Partner ID: ' + p.id) : '');
+  // The partner's public ID, computed by the backend — the same ID on the partner's ID card.
+  setTxt('cpa-id', p.partnerCode ? ('Partner ID: ' + p.partnerCode) : '');
 
   // Stars
   var starsEl = document.getElementById('cpa-rating-val');
@@ -14568,7 +14570,7 @@ window.showAssignedPartner = function(vendorData) {
     var full = Math.floor(rating);
     var stars = '';
     for (var i = 0; i < 5; i++) stars += i < full ? '★' : (i < rating ? '½' : '☆');
-    starsEl.innerHTML = '<span style="color:#f59e0b;font-size:16px">' + rating.toFixed(1) + '</span> <span class="cpa-stars">' + stars + '</span> <span style="color:#9ca3af;font-size:12px">(' + (p.reviewCount || 24) + ')</span>';
+    starsEl.innerHTML = rating > 0 ? '<span style="color:#f59e0b;font-size:16px">' + rating.toFixed(1) + '</span> <span class="cpa-stars">' + stars + '</span>' : '<span style="color:#6b7280">New partner</span>';
   }
 
   // Photo
@@ -14576,12 +14578,17 @@ window.showAssignedPartner = function(vendorData) {
   if (photoEl) {
     // ServiceVendor's real field is photoUrl — profilePhoto/avatar never existed on this
     // model, so the photo never rendered even when one had been uploaded.
-    if (p.photoUrl || p.profilePhoto || p.avatar) {
-      photoEl.innerHTML = '<img src="' + (p.photoUrl || p.profilePhoto || p.avatar) + '" alt="photo">';
+    if (p.photoUrl) {
+      var img = document.createElement('img');
+      img.src = p.photoUrl;
+      img.alt = name;
+      photoEl.textContent = '';
+      photoEl.appendChild(img);
     } else {
       photoEl.textContent = name.charAt(0).toUpperCase();
     }
-    document.getElementById('cpa-initial').textContent = name.charAt(0).toUpperCase();
+    var initialEl = document.getElementById('cpa-initial');
+    if (initialEl) initialEl.textContent = name.charAt(0).toUpperCase();
   }
 
   // Open

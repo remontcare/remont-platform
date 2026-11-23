@@ -784,7 +784,7 @@ function renderProfileDetails(){
   if (vendorProfile.photoUrl) { img.src = vendorProfile.photoUrl; img.style.display='block'; emoji.style.display='none'; }
   else { img.style.display='none'; emoji.style.display='block'; }
   document.getElementById('profile-photo-btn-label').textContent = vendorProfile.photoUrl ? 'Change Photo' : 'Add Photo';
-  document.getElementById('prof-id').textContent = vendorProfile.id || '—';
+  document.getElementById('prof-id').textContent = vendorProfile.partnerCode || vendorProfile.id || '—';
   document.getElementById('prof-city').textContent = vendorProfile.baseCity || '—';
   document.getElementById('prof-skills').textContent = (vendorProfile.skills && vendorProfile.skills.length) ? vendorProfile.skills.join(', ') : '—';
   document.getElementById('prof-experience').textContent = vendorProfile.experienceYears ? (vendorProfile.experienceYears + ' yrs') : '—';
@@ -1150,6 +1150,10 @@ function startJobFlow(order, isMock){
   if(order){
     var stepMap={VENDOR_ASSIGNED:1, VENDOR_EN_ROUTE:3, STARTED:5, IN_PROGRESS:5, EXTRA_WORK_ADDED:5};
     jfState.step = stepMap[order.status] || 1;
+    // Before photos already saved on the job are kept; a started job with none goes back to
+    // the photo step first — evidence is never skipped.
+    jfState.photosBefore = Array.isArray(order.photosBefore) ? order.photosBefore.slice() : [];
+    if (jfState.step === 5 && !jfState.photosBefore.length) jfState.step = 4;
   }
   buildProgress();
   renderJfStep();
@@ -1242,10 +1246,10 @@ function renderJfStep(){
   }
   else if(s===4){
     html = `<div class="jf-step-tag">Step 4 of 9 — Before Photos</div><div class="jf-title">Upload Before Photos</div>
-      <div class="jf-sub">Take 1–3 photos of the site before starting work.${jfState.mock ? '' : ' (Stored on this device only for now — cloud photo storage is not built yet.)'}</div>
+      <div class="jf-sub">Take 1–3 photos of the site before starting work.${jfState.mock ? '' : ' They are saved on this job as your evidence — only you and the Remont team can see them, never the customer.'}</div>
       <div class="photo-grid" id="photo-grid-before"></div>
       <div class="upload-area"><input type="file" accept="image/*" onchange="addPhoto(this,'photosBefore','photo-grid-before')"><div style="font-size:26px">📷</div><div style="font-size:13px;font-weight:600">Tap to add photo</div></div>`;
-    foot = `<button class="btn-primary" id="before-next-btn" onclick="jfNext()" disabled>Continue →</button>`;
+    foot = `<button class="btn-primary" id="before-next-btn" onclick="saveBeforePhotos()" disabled>Continue →</button>`;
     setTimeout(function(){ renderPhotoGrid('photosBefore','photo-grid-before'); },0);
   }
   else if(s===5){
@@ -1415,14 +1419,46 @@ function jfStartOtpCooldown(type, btn, seconds){
     else btn.textContent = 'Resend in ' + remaining + 's';
   }, 1000);
 }
+var JF_MAX_PHOTOS = 6;
+// Camera photos are resized (max 1600 px, JPEG 70%) before upload, like the partner app — a raw
+// phone photo can be several MB and would push the request past the server's size limit.
+function shrinkPhoto(dataUrl, done){
+  var img=new Image();
+  img.onload=function(){
+    var scale=Math.min(1, 1600/Math.max(img.width, img.height));
+    var c=document.createElement('canvas'); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    done(c.toDataURL('image/jpeg',0.7));
+  };
+  img.onerror=function(){ done(null); };
+  img.src=dataUrl;
+}
 function addPhoto(input,arrName,gridId){
   if(!input.files||!input.files[0])return;
+  if(jfState[arrName].length>=JF_MAX_PHOTOS){ alert('You can add up to '+JF_MAX_PHOTOS+' photos.'); input.value=''; return; }
   var reader=new FileReader();
   reader.onload=function(e){
-    jfState[arrName].push(e.target.result);
-    renderPhotoGrid(arrName,gridId);
+    shrinkPhoto(e.target.result, function(small){
+      if(!small){ alert('Could not read this photo. Please take it again.'); return; }
+      jfState[arrName].push(small);
+      renderPhotoGrid(arrName,gridId);
+    });
   };
   reader.readAsDataURL(input.files[0]);
+  input.value='';
+}
+// Saves new before photos on the job (append-only evidence), then continues. Photos already on
+// record are skipped; on failure nothing is lost and the partner can retry.
+function saveBeforePhotos(){
+  var pending=jfState.photosBefore.filter(function(p){ return String(p).indexOf('data:')===0; });
+  if(jfState.mock || !pending.length){ jfNext(); return; }
+  var btn=document.getElementById('before-next-btn'); if(btn){ btn.disabled=true; btn.textContent='Saving photos…'; }
+  apiFetch('/orders/'+jfState.orderId+'/before-photos', {method:'POST', body: JSON.stringify({photos: pending})})
+    .then(function(res){ jfState.photosBefore=(res&&res.photosBefore)||jfState.photosBefore; jfNext(); })
+    .catch(function(e){
+      alert('Could not save the before photos: '+e.message+'. Check your internet and try again.');
+      if(btn){ btn.disabled=false; btn.textContent='Continue →'; }
+    });
 }
 function renderPhotoGrid(arrName,gridId){
   var grid=document.getElementById(gridId); if(!grid)return;
@@ -1430,10 +1466,13 @@ function renderPhotoGrid(arrName,gridId){
   jfState[arrName].forEach(function(src,i){
     var thumb=document.createElement('div'); thumb.className='photo-thumb';
     var image=document.createElement('img'); image.src=String(src); image.alt='Uploaded job photo';
-    var remove=document.createElement('div'); remove.className='pt-x'; remove.textContent='✕';
-    remove.addEventListener('click', function(){ removePhoto(arrName, gridId, i); });
     thumb.appendChild(image);
-    thumb.appendChild(remove);
+    // A photo already saved on the job is evidence and can't be removed.
+    if(String(src).indexOf('data:')===0){
+      var remove=document.createElement('div'); remove.className='pt-x'; remove.textContent='✕';
+      remove.addEventListener('click', function(){ removePhoto(arrName, gridId, i); });
+      thumb.appendChild(remove);
+    }
     grid.appendChild(thumb);
   });
   var btnId = arrName==='photosBefore' ? 'before-next-btn' : 'after-next-btn';

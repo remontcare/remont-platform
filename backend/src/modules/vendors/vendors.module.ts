@@ -10,6 +10,7 @@ import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.module';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, JwtPayload, releaseProductStock, isVendorLocationEligible, normalizeSkillKey, writeOrderTimeline, VENDOR_DISPATCHABLE_FULFILLMENT_TYPES, EXTRA_WORK_ITEM_PUBLIC_SELECT, haversineKm, isValidIndiaCoords, LOCATION_STALE_AFTER_MS, isScheduledForLater, loadScheduledDispatchConfig, scheduledReleaseAt, ROUTING_DECISION_SCHEDULED, partnerOfferView, ARRIVAL_RESET_DATA, vendorAllowedForOrder } from '../../common';
+import { partnerCodeOf } from '../../common/order-view';
 
 // Columns an unclaimed job offer is read with (eligibility + partnerOfferView) — see
 // partnerOfferView() for why this is an allowlist.
@@ -209,7 +210,7 @@ export class ServiceVendorsService {
       },
     });
     if (!v) throw new NotFoundException('Vendor profile not found');
-    return v;
+    return { ...v, partnerCode: partnerCodeOf(v.id) };
   }
 
   // The request contract stays `{ photoBase64 }` (the partner web portal and app both send
